@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>○ — Silk Web Tree · SDF Engine</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;
+  font-family:'Courier New',monospace;user-select:none;cursor:grab}
+body.dragging{cursor:grabbing}
+canvas{position:fixed;inset:0}
+#ui{position:fixed;inset:0;pointer-events:none}
+
+/* ── HUD top-left ── */
+#hud{position:absolute;top:22px;left:26px}
+.hs{font-size:38px;line-height:1;color:rgba(255,255,255,.9);
+  text-shadow:0 0 22px rgba(255,175,55,.55),0 0 45px rgba(255,90,0,.22)}
+.ht{font-size:8px;letter-spacing:.3em;text-transform:uppercase;
+  color:rgba(255,255,255,.16);margin-top:5px}
+.hv{font-size:19px;color:rgba(255,255,255,.58);letter-spacing:-.02em;margin-top:3px}
+.hx{font-size:7px;letter-spacing:.14em;color:rgba(255,255,255,.13);text-transform:uppercase;margin-top:1px}
+
+/* ── stats top-right ── */
+#stats{position:absolute;top:22px;right:26px;display:flex;flex-direction:column;gap:8px}
+.sr{display:flex;align-items:center;gap:8px}
+.sl{font-size:7px;letter-spacing:.14em;color:rgba(255,255,255,.15);width:24px;text-align:right}
+.st{width:60px;height:1px;background:rgba(255,255,255,.05)}
+.sf{height:100%;transition:width .85s ease}
+.sv{font-size:7px;color:rgba(255,255,255,.15);width:28px}
+
+/* ── filter bar bottom ── */
+#filterbar{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);
+  display:flex;gap:6px;pointer-events:all}
+.fb{padding:5px 13px;border:1px solid rgba(255,255,255,.08);
+  background:rgba(0,0,0,.6);color:rgba(255,255,255,.26);
+  font-family:inherit;font-size:8px;letter-spacing:.15em;text-transform:uppercase;
+  cursor:pointer;transition:all .16s;backdrop-filter:blur(10px)}
+.fb:hover{color:rgba(255,255,255,.58);border-color:rgba(255,255,255,.16)}
+.fb.on{color:hsl(35,86%,57%);border-color:rgba(255,105,0,.34);
+  background:rgba(255,70,0,.06);box-shadow:0 0 8px rgba(255,70,0,.1)}
+
+/* ── legend bottom-left ── */
+#legend{position:absolute;bottom:26px;left:26px;display:flex;flex-direction:column;gap:5px}
+.lg{display:flex;align-items:center;gap:6px}
+.lgd{width:5px;height:5px;border-radius:50%}
+.lgl{font-size:7px;letter-spacing:.08em;color:rgba(255,255,255,.16);text-transform:uppercase}
+
+/* ── tooltip ── */
+#tip{position:absolute;display:none;background:rgba(2,3,8,.94);
+  border:1px solid rgba(255,255,255,.08);padding:12px 14px;
+  backdrop-filter:blur(16px);min-width:200px;max-width:245px;pointer-events:none}
+.tg{font-size:28px;line-height:1;margin-bottom:6px}
+.tn{font-size:9px;color:rgba(255,255,255,.74);margin-bottom:2px;line-height:1.4}
+.tcp{font-size:8px;letter-spacing:.1em;color:hsl(35,76%,53%);margin-bottom:5px}
+.td{font-size:8px;color:rgba(255,255,255,.29);line-height:1.72;white-space:pre-line}
+.te{display:flex;flex-wrap:wrap;gap:3px;margin-top:7px}
+.tt{font-size:7px;padding:2px 5px;border:1px solid rgba(255,255,255,.09);
+  color:rgba(255,255,255,.26);letter-spacing:.07em}
+
+/* ── signal log bottom-right ── */
+#siglog{position:absolute;bottom:68px;right:26px;
+  display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.slr{font-size:7px;letter-spacing:.06em;color:rgba(255,255,255,.17);
+  display:flex;align-items:center;gap:5px;animation:slin .18s ease}
+.sld{width:3px;height:3px;border-radius:50%;flex-shrink:0}
+@keyframes slin{from{opacity:0;transform:translateX(4px)}to{opacity:1}}
+
+/* ── WS indicator ── */
+#wsbar{position:absolute;top:22px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:6px}
+.wsdot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.12)}
+.wsdot.connected{background:hsl(142,60%,44%);box-shadow:0 0 6px hsl(142,60%,44%)}
+.wstxt{font-size:7px;letter-spacing:.14em;color:rgba(255,255,255,.15);text-transform:uppercase}
+
+/* ── controls hint ── */
+#hint{position:absolute;bottom:68px;left:50%;transform:translateX(-50%);
+  font-size:7px;letter-spacing:.12em;color:rgba(255,255,255,.12);
+  text-transform:uppercase;white-space:nowrap;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="ui">
+
+  <div id="hud">
+    <div class="hs">○</div>
+    <div class="ht">Silk Web Tree · SDF Isometric</div>
+    <div class="hv" id="hnc">0 <span style="font-size:11px;opacity:.4">nodes</span></div>
+    <div class="hx" id="hinfo">0 silk · 0 sig · ☀ 00:00</div>
+  </div>
+
+  <div id="stats">
+    <div class="sr"><div class="sl">QR</div><div class="st"><div class="sf" id="bqr" style="background:hsl(142,58%,43%)"></div></div><div class="sv" id="vqr">0</div></div>
+    <div class="sr"><div class="sl">ΔΨ</div><div class="st"><div class="sf" id="bdn" style="background:hsl(210,58%,53%)"></div></div><div class="sv" id="vdn">0</div></div>
+    <div class="sr"><div class="sl">SIG</div><div class="st"><div class="sf" id="bsig" style="background:hsl(35,78%,53%)"></div></div><div class="sv" id="vsig">0</div></div>
+    <div class="sr"><div class="sl">☀</div><div class="st"><div class="sf" id="bday" style="background:hsl(48,76%,52%)"></div></div><div class="sv" id="vday">—</div></div>
+  </div>
+
+  <div id="wsbar">
+    <div class="wsdot" id="wsdot"></div>
+    <div class="wstxt" id="wstxt">ws · waiting</div>
+  </div>
+
+  <div id="filterbar">
+    <button class="fb on" id="fall"    onclick="setF('all')">ALL</button>
+    <button class="fb" id="fscripts"   onclick="setF('scripts')">SCRIPTS</button>
+    <button class="fb" id="fmath"      onclick="setF('math')">MATH ∑</button>
+    <button class="fb" id="femoji"     onclick="setF('emoji')">EMOJI</button>
+    <button class="fb" id="folang"     onclick="setF('olang')">OLANG ○</button>
+    <button class="fb on" id="fsilk"   onclick="toggleSilk()">SILK ≡</button>
+    <button class="fb" id="fray"       onclick="toggleRay()">RAYCAST 👁</button>
+  </div>
+
+  <div id="legend">
+    <div class="lg"><div class="lgd" style="background:hsl(212,58%,56%)"></div><div class="lgl">Scripts · Language</div></div>
+    <div class="lg"><div class="lgd" style="background:hsl(36,78%,55%)"></div><div class="lgl">Math · Geometry</div></div>
+    <div class="lg"><div class="lgd" style="background:hsl(144,54%,48%)"></div><div class="lgl">Emoji · Symbol</div></div>
+    <div class="lg"><div class="lgd" style="background:hsl(15,72%,53%)"></div><div class="lgl">Olang · opTable</div></div>
+    <div class="lg"><div class="lgd" style="background:hsl(278,48%,56%)"></div><div class="lgl">Music · Notation</div></div>
+  </div>
+
+  <div id="tip">
+    <div class="tg" id="tg"></div>
+    <div class="tn" id="tn"></div>
+    <div class="tcp" id="tcp"></div>
+    <div class="td" id="td"></div>
+    <div class="te" id="te"></div>
+  </div>
+
+  <div id="siglog"></div>
+  <div id="hint">left-drag · rotate &nbsp;·&nbsp; right-drag · pan &nbsp;·&nbsp; scroll · zoom &nbsp;·&nbsp; hover · inspect</div>
+</div>
+
+<script>
+'use strict'
+// ═══════════════════════════════════════════════════════════════════
+//  ○ SILK WEB TREE — SDF ISOMETRIC ENGINE
+//
+//  Engine components (từ HomeOS-DNA.html):
+//    𝔻 opTable    — 48 operators (SDF, physics, bio, system)
+//    toScreen()   — isometric projection (wx,wy,wz → sx,sy)
+//    𝔻['👁']      — rayMarch 256 bước sphere-trace
+//    𝔻['∇']       — surface normal via finite difference
+//    𝔻['·']       — dot(normal, lightDir) = diffuse shade
+//    𝔻['☀']       — SunLight(t) orbital spline
+//    splineEval() — Catmull-Rom keyframe interpolation
+//    WebSocket    — onmessage → updateWorld(snapshot)
+//
+//  Nodes: SDF spheres, radius ∝ layer, shaded by sunLight
+//  Motion: Catmull-Rom spline keyframes per node
+//  Signals: particles travel silk edges, activate nodes
+// ═══════════════════════════════════════════════════════════════════
+
+const cv  = document.getElementById('cv')
+const ctx = cv.getContext('2d')
+let W = 0, H = 0
+const resize = () => { W = cv.width = innerWidth; H = cv.height = innerHeight }
+resize(); window.addEventListener('resize', resize)
+
+const TAU = Math.PI * 2
+const PHI = (1 + Math.sqrt(5)) / 2
+
+// ─────────────────────────────────────────────────────────────────
+//  𝔻 opTable — trích từ HomeOS-DNA.html
+//  Đây là "vật lý học" của hệ thống
+// ─────────────────────────────────────────────────────────────────
+const 𝔻 = {
+
+  // ━━━ SDF PRIMITIVES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  // ● SDFSphere: khoảng cách từ P đến mặt cầu tâm C bán kính R
+  '●': (px,py,pz, cx,cy,cz, r) =>
+    Math.hypot(px-cx, py-cy, pz-cz) - r,
+
+  // ⌀ SDFCapsule: capsule từ A đến B bán kính r
+  '⌀': (px,py,pz, ax,ay,az, bx,by,bz, r) => {
+    const [dx,dy,dz] = [px-ax, py-ay, pz-az]
+    const [ex,ey,ez] = [bx-ax, by-ay, bz-az]
+    const h = Math.max(0, Math.min(1, (dx*ex+dy*ey+dz*ez)/(ex*ex+ey*ey+ez*ez)))
+    return Math.hypot(dx-ex*h, dy-ey*h, dz-ez*h) - r
+  },
+
+  // □ SDFBox: axis-aligned box
+  '□': (px,py,pz, bx,by,bz) => {
+    const qx=Math.abs(px)-bx, qy=Math.abs(py)-by, qz=Math.abs(pz)-bz
+    return Math.hypot(Math.max(qx,0),Math.max(qy,0),Math.max(qz,0))
+         + Math.min(Math.max(qx,qy,qz), 0)
+  },
+
+  // ◌ void — vô hạn tiềm năng
+  '◌': () => Infinity,
+
+  // ━━━ SDF OPERATIONS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  // ∪ SmoothUnion — blend hai SDF với hệ số k
+  '∪': (d1,d2,k=0.3) => {
+    const h = Math.max(k - Math.abs(d1-d2), 0) / k
+    return Math.min(d1,d2) - h*h*k*0.25
+  },
+
+  // ━━━ PHYSICS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  // ∇ surface normal — finite difference gradient
+  // Dùng: DefaultNormal(p) = normalize(∇f(p))
+  '∇': (x,y,z, sdf, e=0.05) => {
+    const nx = sdf(x+e,y,z) - sdf(x-e,y,z)
+    const ny = sdf(x,y+e,z) - sdf(x,y-e,z)
+    const nz = sdf(x,y,z+e) - sdf(x,y,z-e)
+    const l = Math.hypot(nx,ny,nz) || 1
+    return [nx/l, ny/l, nz/l]
+  },
+
+  // · dot product — diffuse lighting
+  '·': (nx,ny,nz, lx,ly,lz) => nx*lx + ny*ly + nz*lz,
+
+  // ☀ SunLight(t) — ánh sáng mặt trời quỹ đạo spline
+  // t ∈ [0,24] giờ trong ngày
+  '☀': t => {
+    const a = (t - 6) / 24 * TAU
+    const lx = -Math.cos(a) * 0.6
+    const ly =  Math.sin(a) * 0.5 + 0.5
+    const lz = -0.4
+    const len = Math.hypot(lx, ly, lz)
+    return {
+      x: lx/len, y: ly/len, z: lz/len,
+      i: Math.max(0, Math.sin((t-6)/12*Math.PI)),  // intensity 0..1
+      a: 0.25,                                       // ambient
+      t
+    }
+  },
+
+  // 👁 rayMarch — 256-step sphere tracing
+  // Trả về hit distance, -1 nếu miss
+  '👁': (ox,oy,oz, dx,dy,dz, sdf) => {
+    let t = 0
+    for (let i = 0; i < 256; i++) {
+      const d = sdf(ox+dx*t, oy+dy*t, oz+dz*t)
+      if (d < 0.0005) return t
+      t += d
+      if (t > 500) break
+    }
+    return -1
+  },
+
+  // ♫ spline oscillator
+  '♫': (freq, amp, t) => Math.sin(t * freq * TAU) * amp,
+
+  // ∫ FBM terrain (dùng cho background nếu cần)
+  '∫': (x,z,oct,seed) => {
+    let v=0, amp=0.5, freq=1
+    for (let i=0; i<oct; i++) {
+      const nx=x*0.08*freq+seed, nz=z*0.08*freq+seed
+      const ix=Math.floor(nx), iz=Math.floor(nz)
+      const fx=nx-ix, fz=nz-iz
+      const ux=fx*fx*(3-2*fx), uz=fz*fz*(3-2*fz)
+      const h=(a,b)=>{const s=Math.sin(a*127.1+b*311.7+seed*419.3)*43758.5453;return s-Math.floor(s)}
+      v+=(h(ix,iz)+(h(ix+1,iz)-h(ix,iz))*ux+(h(ix,iz+1)-h(ix,iz))*uz
+         +(h(ix+1,iz+1)-h(ix+1,iz)-h(ix,iz+1)+h(ix,iz))*ux*uz)*amp
+      amp*=0.5; freq*=2.1
+    }
+    return v
+  },
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SPLINE — Catmull-Rom keyframe interpolation
+//  Mọi node chuyển động theo spline orbit riêng
+//  Thay discrete animation = spline liên tục
+// ─────────────────────────────────────────────────────────────────
+function splineEval(kf, t) {
+  // kf = [{x,y,z}, ...] 4 control points, t ∈ [0,1) periodic
+  if (!kf || kf.length < 4) return kf[0] || {x:0,y:0,z:0}
+  t = ((t % 1) + 1) % 1
+  const n   = kf.length
+  const seg = t * n
+  const i   = Math.floor(seg)
+  const f   = seg - i
+  const p0  = kf[(i-1+n)%n], p1=kf[i%n], p2=kf[(i+1)%n], p3=kf[(i+2)%n]
+  const cr  = (a,b,c,d,u) => {
+    const u2=u*u, u3=u2*u
+    return 0.5*((-a+3*b-3*c+d)*u3 + (2*a-5*b+4*c-d)*u2 + (-a+c)*u + 2*b)
+  }
+  return {
+    x: cr(p0.x,p1.x,p2.x,p3.x,f),
+    y: cr(p0.y,p1.y,p2.y,p3.y,f),
+    z: cr(p0.z,p1.z,p2.z,p3.z,f),
+  }
+}
+
+// Tạo spline orbit keyframes quanh base position
+function makeOrbitSpline(bx,by,bz, amp, phaseOffset) {
+  const kf = []
+  for (let k = 0; k < 4; k++) {
+    const a = (k/4)*TAU + phaseOffset
+    kf.push({
+      x: bx + amp * Math.cos(a),
+      y: by + amp * 0.4 * Math.sin(a * 1.3 + 0.5),
+      z: bz + amp * Math.sin(a),
+    })
+  }
+  return kf
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  isometric toScreen — từ HomeOS-DNA.html
+//  Thêm orbit rotation để có thể xoay toàn bộ cảnh
+// ─────────────────────────────────────────────────────────────────
+const ISO = { TW: 38, TH: 19, HS: 30 }
+
+// Orbit camera
+let camTheta  = Math.PI / 5     // azimuth (xoay trái/phải)
+let camPhi    = Math.PI / 8     // elevation (nghiêng)
+let camDist   = 640
+let tTheta    = camTheta
+let tPhi      = camPhi
+let tDist     = camDist
+let camPanX   = 0, camPanY = 0
+let autoSpin  = true
+
+// Áp dụng orbit rotation lên world point rồi chiếu isometric
+function toScreen(wx, wy, wz) {
+  // 1. Orbit rotation quanh Y
+  const ct = Math.cos(camTheta), st = Math.sin(camTheta)
+  const rx =  wx*ct + wz*st
+  const rz = -wx*st + wz*ct
+
+  // 2. Tilt quanh X
+  const cp = Math.cos(camPhi), sp = Math.sin(camPhi)
+  const ry =  wy*cp - rz*sp
+  const rz2=  wy*sp + rz*cp
+
+  // 3. Isometric projection (từ HomeOS-DNA.html) + perspective scaling
+  const scale = camDist / (camDist + rz2*55) * (camDist/640)
+  return {
+    sx: W/2 + camPanX + (rx - rz2) * ISO.TW * 0.5 * scale,
+    sy: H/2 + camPanY + (rx + rz2) * ISO.TH * 0.5 * scale - ry * ISO.HS * scale,
+    depth: rz2,
+    scale,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SDF SCENE — world-space SDF cho raycast
+//  Tất cả nodes là spheres, union lại = scene SDF
+// ─────────────────────────────────────────────────────────────────
+let NODES = {}  // built sau
+
+function sceneSDF(px, py, pz) {
+  let d = Infinity
+  for (const n of Object.values(NODES)) {
+    if (!visF(n)) continue
+    const r = nodeR(n) * 0.8
+    const nd = 𝔻['●'](px,py,pz, n.x,n.y,n.z, r)
+    d = 𝔻['∪'](d, nd, 0.1)
+  }
+  return d
+}
+
+// Raycast một điểm màn hình → world position (dùng cho hover chính xác)
+function raycastScreen(sx, sy) {
+  // Ray direction từ screen point (isometric = parallel ray gần đúng)
+  // Simplified: dùng 𝔻['👁'] với direction thẳng từ camera
+  const dirX = (sx - W/2) * 0.001
+  const dirY = -(sy - H/2) * 0.001
+  // approximate camera position
+  const camPos = { x: 0, y: 0, z: -camDist * 0.2 }
+  return 𝔻['👁'](camPos.x, camPos.y, camPos.z, dirX, dirY, 1, sceneSDF)
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  NODE COLOUR PALETTE
+// ─────────────────────────────────────────────────────────────────
+const CAT_H = {
+  origin:  42, scripts: 212, math: 36, geo: 56,
+  music: 278,  emoji: 144,   olang: 16, numbers: 186,
+}
+function catHSL(cat) {
+  const h = CAT_H[cat] || 36
+  return { h, s: 60, l: 56 }
+}
+function cc(cat, a=1) {
+  const c = catHSL(cat)
+  return `hsla(${c.h},${c.s}%,${c.l}%,${a})`
+}
+const OPC = {
+  '∈':'212,50%,52%', '≡':'36,75%,52%',
+  '♫':'278,50%,57%', '∘':'144,50%,46%', '≈':'186,50%,50%',
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  NODE + EDGE DATABASE
+// ─────────────────────────────────────────────────────────────────
+const ND = [
+  // ── LAYER 0 ──
+  {id:'O',  g:'○', n:'○ Origin',          cat:'origin',  L:0, cp:'U+25CB',     d:'Root · ○(x)==x · ○(∅)==○\nMọi thứ là instance của ○'},
+  // ── LAYER 1 : Script super-groups ──
+  {id:'EU', g:'Aa',n:'European Scripts',   cat:'scripts', L:1, cp:'U+0000–2C7F',d:'Latin · Greek · Cyrillic\nGothic · Runic · IPA · 30+ scripts'},
+  {id:'AS', g:'ع', n:'West Asian Scripts', cat:'scripts', L:1, cp:'U+0600–10FFF',d:'Arabic · Hebrew · Syriac\nCuneiform · Avestan · Aramaic'},
+  {id:'SA', g:'अ', n:'South Asian',        cat:'scripts', L:1, cp:'U+0900–11FFF',d:'Devanagari · Tamil · Bengali\nTelugu · Kannada · Brahmi family'},
+  {id:'EA', g:'字', n:'East Asian',         cat:'scripts', L:1, cp:'U+3000–9FFF', d:'CJK 43 000+ · Hangul 11 172\nHiragana · Katakana · Yi'},
+  {id:'SE', g:'ก', n:'SE Asian',            cat:'scripts', L:1, cp:'U+0E00–1AFF', d:'Thai · Khmer · Myanmar\nLao · Tai Tham · Cham'},
+  {id:'AF', g:'ሀ', n:'African Scripts',     cat:'scripts', L:1, cp:'U+1200–16AFF',d:'Ethiopic · Coptic · Hieroglyphs\nTifinagh · Vai · N\'Ko'},
+  // ── LAYER 1 : Symbol super-groups ──
+  {id:'MT', g:'∑', n:'Mathematical',        cat:'math',    L:1, cp:'U+2200–2AFF', d:'1 500+ operators · Arrows\nSets · Logic · Analysis'},
+  {id:'GEO',g:'●', n:'Geometric Shapes',    cat:'geo',     L:1, cp:'U+25A0–1F7FF',d:'SDF primitives ●□○△◌⌀\nBox Drawing · Block Elements'},
+  {id:'MUS',g:'♩', n:'Music Notation',      cat:'music',   L:1, cp:'U+1D000–1D1FF',d:'Byzantine · Ancient Greek\nModern · Znamenny · 256 sym'},
+  {id:'EM', g:'🌍',n:'Emoji',               cat:'emoji',   L:1, cp:'U+1F300–1FAFF',d:'4 000+ emoji · Flags\nTransport · Objects · Nature'},
+  {id:'NUM',g:'١', n:'Numbers',             cat:'numbers', L:1, cp:'Multi-block',  d:'Arabic · Mayan · Cuneiform\nRoman · Devanagari · Kaktovik'},
+  {id:'OLP',g:'⌀', n:'Olang opTable',       cat:'olang',   L:1, cp:'Mixed Unicode',d:'48 operators · SDF · Physics\nBio · System · Custom Olang'},
+  {id:'POS',g:'꜈', n:'Olang POS Tags',      cat:'olang',   L:1, cp:'U+A700–A71F', d:'16 part-of-speech markers\nModifier Tone Letters block'},
+  // ── LAYER 2 : Script families ──
+  {id:'LAT', g:'A', n:'Latin',        cat:'scripts',L:2,p:'EU', cp:'U+0041',d:'52 base · 700+ extended\nMost widely used script'},
+  {id:'GRK', g:'α', n:'Greek',        cat:'scripts',L:2,p:'EU', cp:'U+0391',d:'24 letters · science · math\nOldest European alphabet'},
+  {id:'CYR', g:'Я', n:'Cyrillic',     cat:'scripts',L:2,p:'EU', cp:'U+0400',d:'33+ letters · 50+ languages\nRussian · Bulgarian · Serbian'},
+  {id:'IPA', g:'ə', n:'IPA',          cat:'scripts',L:2,p:'EU', cp:'U+0250',d:'Universal phonetic bridge\nLinks ALL scripts by sound /a/'},
+  {id:'ARA', g:'ع', n:'Arabic',       cat:'scripts',L:2,p:'AS', cp:'U+0600',d:'RTL abjad · 28 base letters\n420M speakers'},
+  {id:'DEV', g:'अ', n:'Devanagari',   cat:'scripts',L:2,p:'SA', cp:'U+0900',d:'Hindi · Sanskrit · Marathi\n600M+ speakers'},
+  {id:'CJK', g:'字', n:'CJK Han',     cat:'scripts',L:2,p:'EA', cp:'U+4E00',d:'20 902 base · logographic\nChinese · Japanese · Korean'},
+  {id:'KANA',g:'あ', n:'Kana',        cat:'scripts',L:2,p:'EA', cp:'U+3040',d:'Hiragana 96 + Katakana 96\nJapanese syllabaries'},
+  {id:'THAI',g:'ก', n:'Thai',         cat:'scripts',L:2,p:'SE', cp:'U+0E00',d:'44 consonants · tonal · 69M'},
+  {id:'OPS', g:'∈', n:'Math Ops',     cat:'math',   L:2,p:'MT', cp:'U+2200',d:'∀∃∈∉∩∪⊂⊃∧∨¬\nSet · Logic · Relations'},
+  {id:'PHYS',g:'∇', n:'Physics',      cat:'math',   L:2,p:'MT', cp:'U+2207',d:'∇∫∬∭∮ gradient · curl\ndivergence · field operators'},
+  {id:'SDF', g:'⌀', n:'SDF Prims',    cat:'geo',    L:2,p:'GEO',cp:'U+25A0',d:'●□○△◌⌀⌇⬭\nOlang 8 SDF primitives'},
+  // ── LAYER 3 : Character leaf nodes ──
+  {id:'cA',  g:'A', n:'LATIN CAPITAL LETTER A', cat:'scripts',L:3,p:'LAT', cp:'U+0041',d:'≡ Greek α · Cyrillic а · あ\nsilk ♫ → IPA /a/ — universal'},
+  {id:'ca',  g:'α', n:'GREEK SMALL LETTER ALPHA',cat:'scripts',L:3,p:'GRK', cp:'U+03B1',d:'≡ Latin A · Cyrillic а\nα-particle · α-helix · ♫/a/'},
+  {id:'cya', g:'а', n:'CYRILLIC SMALL LETTER A', cat:'scripts',L:3,p:'CYR', cp:'U+0430',d:'≡ Latin A · Greek α\n1st letter · same /a/ sound'},
+  {id:'chi', g:'あ', n:'HIRAGANA LETTER A',       cat:'scripts',L:3,p:'KANA',cp:'U+3042',d:'≡ Katakana ア · IPA /a/\nMost common Japanese mora'},
+  {id:'cone',g:'一', n:'CJK IDEOGRAPH 一 (one)',   cat:'scripts',L:3,p:'CJK', cp:'U+4E00',d:'≡ 1 one un один یک\nISL[K][Num][Card][1]'},
+  {id:'cren',g:'人', n:'CJK IDEOGRAPH 人 (person)',cat:'scripts',L:3,p:'CJK', cp:'U+4EBA',d:'≡ person human homo\nRadical #9 · 2500 compounds'},
+  {id:'csum',g:'∑', n:'N-ARY SUMMATION',          cat:'math',   L:3,p:'OPS', cp:'U+2211',d:'opTable ∑ Aggregate\nΣ = sum of all inputs'},
+  {id:'cun', g:'∪', n:'UNION',                    cat:'math',   L:3,p:'OPS', cp:'U+222A',d:'opTable ∪ SmoothUnion(d1,d2,k)\nCore SDF blend operation'},
+  {id:'cint',g:'∫', n:'INTEGRAL',                 cat:'math',   L:3,p:'PHYS',cp:'U+222B',d:'opTable ∫ FBM terrain\n∫(fbm, oct:6, h:3.0) in DNA'},
+  {id:'cgrd',g:'∇', n:'NABLA / GRADIENT',         cat:'math',   L:3,p:'PHYS',cp:'U+2207',d:'opTable ∇ Normal vector\nDefaultNormal: 𝔻[∇](f,p,ε)'},
+  {id:'csph',g:'●', n:'BLACK CIRCLE — SDFSphere',  cat:'geo',    L:3,p:'SDF', cp:'U+25CF',d:'opTable ● SDFSphere(p,c,r)\nPrimary SDF primitive'},
+  {id:'cbox',g:'□', n:'WHITE SQUARE — SDFBox',     cat:'geo',    L:3,p:'SDF', cp:'U+25A1',d:'opTable □ SDFBox(p,b)\nAxis-aligned bounding box'},
+  {id:'ccap',g:'⌀', n:'DIAMETER — SDFCapsule',     cat:'geo',    L:3,p:'SDF', cp:'U+2300',d:'opTable ⌀ SDFCapsule(a,b,r)\nRounded capsule · limbs'},
+  {id:'csun',g:'☀', n:'BLACK SUN — SunLight',      cat:'geo',    L:3,p:'SDF', cp:'U+2600',d:'opTable ☀ SunLight(t)\nOrbital spline · day/night'},
+  {id:'cear',g:'🌍',n:'EARTH GLOBE — WorldRoot',   cat:'emoji',  L:3,p:'EM',  cp:'U+1F30D',d:'opTable 🌍 WorldRoot seed\nDNA: 🌍(seed:888) → World'},
+  {id:'cdna',g:'🧬',n:'DNA DOUBLE HELIX',          cat:'emoji',  L:3,p:'EM',  cp:'U+1F9EC',d:'opTable 🧬 GeneRegistry\nEvery Gene has a DNA() string'},
+  {id:'cshd',g:'🛡', n:'SHIELD — SecurityGate',    cat:'olang',  L:3,p:'OLP', cp:'U+1F6E1',d:'Leader-DNA Rule 1: bất biến\n∄ harm_human — absolute'},
+  {id:'chrt',g:'❤', n:'HEAVY BLACK HEART',         cat:'emoji',  L:3,p:'EM',  cp:'U+2764', d:'≡ 💓💗 愛 love liebe amour\nSemantic node: concept LOVE'},
+  {id:'c1',  g:'1', n:'DIGIT ONE',                 cat:'numbers',L:3,p:'NUM', cp:'U+0031', d:'≡ 一 ١ १ ① Ⅰ ein uno\nISL[K][Num][Card][1]'},
+  {id:'cnu', g:'꜈', n:'NOUN MARKER',               cat:'olang',  L:3,p:'POS', cp:'U+A708', d:'Olang POS: Noun\n"đèn" → ꜈ → light → HAa1'},
+  {id:'cvb', g:'꜉', n:'VERB MARKER',               cat:'olang',  L:3,p:'POS', cp:'U+A709', d:'Olang POS: Verb\n"tắt" → ꜉ → OFF → 0x00'},
+]
+
+const ED = [
+  // O → L1
+  ['O','EU','∈'], ['O','AS','∈'], ['O','SA','∈'], ['O','EA','∈'],
+  ['O','SE','∈'], ['O','AF','∈'], ['O','MT','∈'], ['O','GEO','∈'],
+  ['O','MUS','∈'],['O','EM','∈'], ['O','NUM','∈'],['O','OLP','∈'],['O','POS','∈'],
+  // L1 → L2
+  ['EU','LAT','∈'], ['EU','GRK','∈'],  ['EU','CYR','∈'],  ['EU','IPA','∈'],
+  ['AS','ARA','∈'], ['SA','DEV','∈'],
+  ['EA','CJK','∈'], ['EA','KANA','∈'],
+  ['SE','THAI','∈'],
+  ['MT','OPS','∈'], ['MT','PHYS','∈'], ['GEO','SDF','∈'],
+  // L2 → L3
+  ['LAT','cA','∈'],   ['GRK','ca','∈'],   ['CYR','cya','∈'],   ['KANA','chi','∈'],
+  ['CJK','cone','∈'], ['CJK','cren','∈'],
+  ['OPS','csum','∈'], ['OPS','cun','∈'],
+  ['PHYS','cint','∈'],['PHYS','cgrd','∈'],
+  ['SDF','csph','∈'], ['SDF','cbox','∈'],  ['SDF','ccap','∈'],  ['SDF','csun','∈'],
+  ['EM','cear','∈'],  ['EM','cdna','∈'],   ['EM','chrt','∈'],
+  ['OLP','cshd','∈'],
+  ['NUM','c1','∈'],
+  ['POS','cnu','∈'],  ['POS','cvb','∈'],
+  // ≡ semantic equivalence
+  ['cA','ca','≡'],  ['cA','cya','≡'],  ['cA','chi','≡'],  ['ca','cya','≡'],
+  ['cone','c1','≡'],
+  ['csun','cear','≡'],  // ☀ orbit ≡ 🌍 orbit
+  // ♫ phonetic bridges qua IPA
+  ['cA','IPA','♫'],  ['ca','IPA','♫'],  ['cya','IPA','♫'],  ['chi','IPA','♫'],
+  // ∘ composition: math ops → olang ops
+  ['MT','OLP','∘'],  ['GEO','OLP','∘'],  ['EM','OLP','∘'],
+  ['cun','csph','∘'],   // ∪(●,●,k) = SmoothUnion of spheres
+  ['cint','cear','∘'],  // ∫ fbm → terrain in 🌍
+  // ≈ similarity
+  ['MUS','MT','≈'],
+  ['csum','cint','≈'],  // Σ ≈ ∫ both aggregate
+  ['cgrd','cun','≈'],   // ∇ ≈ ∪ both field ops
+]
+
+// ─────────────────────────────────────────────────────────────────
+//  BUILD 3D POSITIONS — fibonacci sphere per layer
+// ─────────────────────────────────────────────────────────────────
+const LR = [0, 7.5, 12.8, 17.2]  // world-unit sphere radii
+
+function buildNodes() {
+  const map = {}
+  const l1    = ND.filter(n => n.L === 1)
+  const l2g   = {}, l3g = {}
+  ND.filter(n=>n.L===2).forEach(n=>{(l2g[n.p]||(l2g[n.p]=[])).push(n)})
+  ND.filter(n=>n.L===3).forEach(n=>{(l3g[n.p]||(l3g[n.p]=[])).push(n)})
+
+  function place(n, bx, by, bz) {
+    const phase  = n.id.charCodeAt(0) * 0.37 + n.id.length * 0.13
+    const orbitAmp = LR[n.L] * 0.038
+    const kf = makeOrbitSpline(bx, by, bz, orbitAmp, phase)
+    map[n.id] = { ...n, bx, by, bz, x:bx, y:by, z:bz, kf, glow:0, sig:0 }
+  }
+
+  // L0 origin — stationary, no spline
+  const orig = ND.find(n => n.L === 0)
+  map[orig.id] = { ...orig, bx:0,by:0,bz:0, x:0,y:0,z:0,
+    kf: [{x:0,y:0,z:0},{x:0,y:0,z:0},{x:0,y:0,z:0},{x:0,y:0,z:0}], glow:0, sig:0 }
+
+  // L1 — fibonacci sphere
+  l1.forEach((n, i) => {
+    const th = Math.acos(1 - 2*(i+0.5)/l1.length)
+    const ph = TAU * i / PHI
+    const r  = LR[1]
+    place(n, r*Math.sin(th)*Math.cos(ph), r*Math.sin(th)*Math.sin(ph), r*Math.cos(th))
+  })
+
+  // L2 — orbit L1 parent
+  Object.entries(l2g).forEach(([pid, kids]) => {
+    const par = map[pid]; if (!par) return
+    const pl  = Math.hypot(par.bx, par.by, par.bz) || 1
+    // tangent plane to sphere at parent position
+    const ux=-par.by/pl, uy=par.bx/pl, uz=0
+    const vx=(par.bz*uy)/pl, vy=(-par.bz*ux)/pl, vz=(par.bx*uy-par.by*ux)/pl
+    kids.forEach((n, i) => {
+      const a = (i / kids.length) * TAU
+      const r = LR[2] - LR[1] + 0.8
+      place(n,
+        par.bx + r*(Math.cos(a)*ux + Math.sin(a)*vx),
+        par.by + r*(Math.cos(a)*uy + Math.sin(a)*vy),
+        par.bz + r*(Math.cos(a)*uz + Math.sin(a)*vz))
+    })
+  })
+
+  // L3 — orbit L2 parent
+  Object.entries(l3g).forEach(([pid, kids]) => {
+    const par = map[pid]; if (!par) return
+    const pl  = Math.hypot(par.bx, par.by, par.bz) || 1
+    const ux=-par.by/pl, uy=par.bx/pl, uz=0
+    const vx=(par.bz*uy)/pl, vy=(-par.bz*ux)/pl, vz=(par.bx*uy-par.by*ux)/pl
+    kids.forEach((n, i) => {
+      const a = (i / kids.length) * TAU
+      const r = LR[3] - LR[2] + 0.5
+      place(n,
+        par.bx + r*(Math.cos(a)*ux + Math.sin(a)*vx),
+        par.by + r*(Math.cos(a)*uy + Math.sin(a)*vy),
+        par.bz + r*(Math.cos(a)*uz + Math.sin(a)*vz))
+    })
+  })
+  return map
+}
+
+NODES = buildNodes()
+
+// ─────────────────────────────────────────────────────────────────
+//  SERVER CONNECT — SSE (EventSource) + REST API fetch
+//  HomeOS Go server: http://localhost:8080
+//  /ws/sse        → WorldSnapshot 20fps (EventSource)
+//  /api/tree      → []node  (fetch once on load)
+//  /api/edges     → []edge  (fetch once on load)
+// ─────────────────────────────────────────────────────────────────
+const API_BASE = (window.HOMEOS_API || 'http://localhost:8080')
+let sseSource    = null
+let sseConnected = false
+
+// ── SSE connect (thay WebSocket) ──────────────────────────────
+function sseConnect() {
+  try {
+    if (sseSource) { sseSource.close(); sseSource = null }
+    sseSource = new EventSource(API_BASE + '/ws/sse')
+
+    sseSource.onopen = () => {
+      sseConnected = true
+      document.getElementById('wsdot').classList.add('connected')
+      document.getElementById('wstxt').textContent = 'sse · live'
+    }
+    sseSource.onerror = () => {
+      sseConnected = false
+      document.getElementById('wsdot').classList.remove('connected')
+      document.getElementById('wstxt').textContent = 'sse · no server'
+      sseSource.close(); sseSource = null
+      setTimeout(sseConnect, 3000)
+    }
+    sseSource.onmessage = (evt) => {
+      try { updateWorld(JSON.parse(evt.data)) } catch(e) {}
+    }
+  } catch(e) {
+    document.getElementById('wstxt').textContent = 'sse · offline'
+    setTimeout(sseConnect, 3000)
+  }
+}
+
+// ── Fetch live nodes/edges từ Go, merge vào NODES/EDGES ───────
+async function fetchLiveData() {
+  try {
+    // Fetch tree (nodes)
+    const treeResp = await fetch(API_BASE + '/api/tree')
+    if (treeResp.ok) {
+      const liveNodes = await treeResp.json()
+      let added = 0
+      for (const n of liveNodes) {
+        const id = n.id || n.name
+        if (!id) continue
+        if (!NODES[id]) {
+          // Node mới từ server — thêm vào NODES với default position
+          // buildNodes() sẽ không biết về node này, nên cần add thủ công
+          const phase = id.split('').reduce((a,c,i2)=>a+c.charCodeAt(0)*(0.37+i2*.13),0)
+          const amp   = [0,.38,.24,.15,0][Math.min(n.layer||3,4)]
+          NODES[id] = {
+            id, g: n.glyph||'○', n: n.name||id,
+            cat: n.cat||'origin', L: n.layer||3,
+            bx:0, by:0, bz:0, glow:0, sig:0, deg:0,
+            kf: makeOrbitSpline(0, 0, 0, amp, phase)
+          }
+          added++
+        } else {
+          // Update metadata của node đã có
+          if (n.glyph) NODES[id].g  = n.glyph
+          if (n.cat)   NODES[id].cat = n.cat
+        }
+      }
+      if (added > 0) console.log(`🌐 Merged ${added} live nodes from server`)
+    }
+  } catch(e) { /* server offline — dùng hardcoded ND[] */ }
+
+  try {
+    // Fetch edges
+    const edgeResp = await fetch(API_BASE + '/api/edges')
+    if (edgeResp.ok) {
+      const liveEdges = await edgeResp.json()
+      let added = 0
+      for (const e of liveEdges) {
+        const from = e.from || e.from_id
+        const to   = e.to   || e.to_id
+        const op   = e.op   || '∈'
+        // Tránh duplicate
+        const exists = EDGES.some(ex => ex[0]===from && ex[1]===to && ex[2]===op)
+        if (!exists && NODES[from] && NODES[to]) {
+          EDGES.push([from, to, op])
+          added++
+        }
+      }
+      if (added > 0) console.log(`🌐 Merged ${added} live edges from server`)
+    }
+  } catch(e) { /* offline ok */ }
+}
+
+// ── updateWorld — nhận WorldSnapshot từ HomeOS backend ────────
+// Format: { time, nodes:[{id,glow,sig,x?,y?,z?}], signals:[{from,to,p}], stats:{qr,dn,nt} }
+function updateWorld(snap) {
+  if (snap.time !== undefined) worldTime = snap.time
+  if (snap.nodes) {
+    for (const ns of snap.nodes) {
+      if (NODES[ns.id]) {
+        if (ns.glow !== undefined) NODES[ns.id].glow = ns.glow
+        if (ns.sig  !== undefined) NODES[ns.id].sig  = ns.sig
+        if (ns.x    !== undefined) {
+          NODES[ns.id].bx = ns.x
+          NODES[ns.id].by = ns.y
+          NODES[ns.id].bz = ns.z
+        }
+      }
+    }
+  }
+  if (snap.signals) {
+    for (const ss of snap.signals) {
+      const fid = ss.from, tid = ss.to
+      const existing = SIGS.find(s => s.fid===fid && s.tid===tid)
+      if (!existing && NODES[fid] && NODES[tid]) spawn(fid, tid)
+    }
+  }
+  if (snap.stats) {
+    const el = document.getElementById('wstxt')
+    if (el && sseConnected) {
+      el.textContent = `sse · QR:${snap.stats.qr} ΔΨ:${snap.stats.dn}`
+    }
+  }
+}
+
+// ── Khởi động: fetch data rồi connect SSE ─────────────────────
+fetchLiveData().then(() => sseConnect())
+
+// ─────────────────────────────────────────────────────────────────
+//  MOUSE / TOUCH INTERACTION
+// ─────────────────────────────────────────────────────────────────
+let md = false, mRight = false, mlx = 0, mly = 0
+let hov = null
+let showSilk = true
+let showRay  = false
+let filt     = 'all'
+let pcache   = {}
+
+cv.addEventListener('mousedown', e => {
+  md = true; mRight = e.button === 2
+  mlx = e.clientX; mly = e.clientY
+  document.body.classList.add('dragging')
+  autoSpin = false
+})
+window.addEventListener('mouseup', () => {
+  md = false; document.body.classList.remove('dragging')
+})
+window.addEventListener('mousemove', e => {
+  if (md) {
+    const dx = e.clientX - mlx, dy = e.clientY - mly
+    if (mRight) {
+      // right drag = pan
+      camPanX += dx * 0.85
+      camPanY += dy * 0.85
+    } else {
+      // left drag = orbit
+      tTheta += dx * 0.006
+      tPhi   += dy * 0.004
+      tPhi    = Math.max(-1.1, Math.min(1.1, tPhi))
+    }
+    mlx = e.clientX; mly = e.clientY
+  }
+  doHover(e.clientX, e.clientY)
+})
+window.addEventListener('wheel', e => {
+  tDist = Math.max(280, Math.min(1400, tDist + e.deltaY * 0.55))
+  e.preventDefault()
+}, { passive: false })
+cv.addEventListener('contextmenu', e => e.preventDefault())
+
+// Touch
+let touches = []
+cv.addEventListener('touchstart', e => {
+  autoSpin = false
+  touches = [...e.touches]
+  mlx = e.touches[0].clientX; mly = e.touches[0].clientY
+}, { passive: true })
+cv.addEventListener('touchmove', e => {
+  if (e.touches.length === 2) {
+    // Pinch zoom
+    const d0 = Math.hypot(touches[0].clientX-touches[1].clientX, touches[0].clientY-touches[1].clientY)
+    const d1 = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY)
+    tDist = Math.max(280, Math.min(1400, tDist - (d1-d0) * 1.5))
+    touches = [...e.touches]
+  } else {
+    tTheta += (e.touches[0].clientX - mlx) * 0.006
+    tPhi   += (e.touches[0].clientY - mly) * 0.004
+    tPhi    = Math.max(-1.1, Math.min(1.1, tPhi))
+    mlx = e.touches[0].clientX; mly = e.touches[0].clientY
+  }
+}, { passive: true })
+
+// Double-click to reset view
+cv.addEventListener('dblclick', () => {
+  tTheta = Math.PI/5; tPhi = Math.PI/8; tDist = 640
+  camPanX = 0; camPanY = 0; autoSpin = true
+})
+
+function setF(f) {
+  filt = f
+  document.querySelectorAll('.fb').forEach(b => b.classList.remove('on'))
+  ;(document.getElementById('f'+f) || document.getElementById('fall')).classList.add('on')
+}
+function toggleSilk() {
+  showSilk = !showSilk
+  document.getElementById('fsilk').classList.toggle('on', showSilk)
+}
+function toggleRay() {
+  showRay = !showRay
+  document.getElementById('fray').classList.toggle('on', showRay)
+}
+
+const FMAP = {
+  all:     () => true,
+  scripts: n => n.cat==='scripts' || n.L===0,
+  math:    n => n.cat==='math' || n.cat==='geo' || n.cat==='numbers' || n.L===0,
+  emoji:   n => n.cat==='emoji' || n.L===0,
+  olang:   n => n.cat==='olang' || n.L<=1,
+}
+const visF = n => (FMAP[filt]||FMAP.all)(n)
+
+// ── Tooltip ──────────────────────────────────────────────────────
+function doHover(mx, my) {
+  let best = null, bd = 18
+  for (const [id, p] of Object.entries(pcache)) {
+    const d = Math.hypot(p.sx-mx, p.sy-my)
+    if (d < bd) { bd=d; best=id }
+  }
+  if (best !== hov) {
+    hov = best
+    const el = document.getElementById('tip')
+    if (!best) { el.style.display='none'; return }
+    const n = NODES[best]
+    document.getElementById('tg').textContent  = n.g || ''
+    document.getElementById('tn').textContent  = n.n
+    document.getElementById('tcp').textContent = n.cp
+    document.getElementById('td').textContent  = n.d || ''
+    const te = document.getElementById('te'); te.innerHTML = ''
+    ED.filter(e=>e[0]===best||e[1]===best).slice(0,8).forEach(e=>{
+      const oid = e[0]===best ? e[1] : e[0]
+      const oth = NODES[oid]; if (!oth) return
+      const sp = document.createElement('span'); sp.className='tt'
+      sp.textContent = `${e[2]} ${oth.g||oid}`; te.appendChild(sp)
+    })
+    el.style.display = 'block'
+    NODES[best].glow = 1
+    // Burst signals from hovered node
+    ED.filter(e=>e[0]===best).forEach(e => { if (Math.random()<0.7) spawn(e[0],e[1]) })
+  }
+  if (hov) {
+    const p = pcache[hov]; if (!p) return
+    const el = document.getElementById('tip')
+    let tx=p.sx+16, ty=p.sy-14
+    if (tx+252 > W) tx = p.sx-258
+    if (ty+170 > H) ty = p.sy-170
+    el.style.left=tx+'px'; el.style.top=ty+'px'
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SIGNALS — particles flow along silk edges
+// ─────────────────────────────────────────────────────────────────
+const SIGS = []
+let sigAct = 0, sigTick = 0
+
+function spawn(fid, tid) {
+  const f=NODES[fid], t=NODES[tid]; if (!f||!t) return
+  const op = (ED.find(e=>e[0]===fid&&e[1]===tid) || ['','','∈'])[2]
+  SIGS.push({ fid, tid, p:0, sp: 0.006+Math.random()*0.008, op,
+    col: `hsl(${OPC[op]||'212,48%,52%'})` })
+  sigAct = Math.min(1, sigAct + 0.09)
+}
+
+function fireRand() {
+  const e = ED[Math.floor(Math.random()*ED.length)]
+  spawn(e[0], e[1])
+  // Cascade with 25% chance
+  if (Math.random() < 0.25) {
+    const nxt = ED.filter(x => x[0]===e[1])
+    if (nxt.length) { const ne=nxt[Math.floor(Math.random()*nxt.length)]; spawn(ne[0],ne[1]) }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  NODE RADIUS — SDF sphere size ∝ layer + children count
+// ─────────────────────────────────────────────────────────────────
+function nodeR(n) {
+  const base = [1.5, 0.58, 0.36, 0.26][n.L] || 0.26
+  // L1 nodes scale slightly with edge count
+  if (n.L===1) {
+    const deg = ED.filter(e=>e[0]===n.id||e[1]===n.id).length
+    return base + Math.min(deg * 0.025, 0.25)
+  }
+  return base
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SIGNAL LOG
+// ─────────────────────────────────────────────────────────────────
+const LOGS = [
+  ['ΔΨ← LATIN A ≡ GREEK α · silk ≡ created','scripts'],
+  ['QR[14] ← ∑ opTable committed · ED25519','math'],
+  ['silk ♫ /a/ → {A α а あ ا} · 5 nodes','scripts'],
+  ['ΔΨ← CJK 一 → ISL[K][Num][Card][1]','scripts'],
+  ['QR[17] ← 🌍 WorldRoot · seed:888 signed','emoji'],
+  ['N×T cycle 54 · T micro: ΔΨ lọc → anchor','olang'],
+  ['𝔻[∇](f,p,ε) · DefaultNormal active','math'],
+  ['silk ≡ ❤ → {love liebe 愛 amour yêu}','emoji'],
+  ['QR[21] ← ꜈꜉ POS tags · append-only','olang'],
+  ['Dream: kiểm chứng ĐN[44] · pass → QR','olang'],
+  ['ΔΨ← ● SDFSphere → ISL[Geo][Sphere]','math'],
+  ['silk ∘ ∪(●,●,k) → SmoothUnion flow','math'],
+  ['QR[25] ← 🛡 SecurityGate Rule1 verified','olang'],
+  ['𝔻[👁] rayMarch 256 · hit in 12 steps','math'],
+  ['☀(t=14.3) · shade=0.82 · shadow pass','math'],
+]
+let logI=0
+function pushLog() {
+  const [msg, cat] = LOGS[logI++ % LOGS.length]
+  const el = document.getElementById('siglog')
+  const r  = document.createElement('div'); r.className='slr'
+  r.innerHTML = `<div class="sld" style="background:${cc(cat,.85)}"></div><span>${msg}</span>`
+  el.appendChild(r)
+  while (el.children.length > 9) el.removeChild(el.firstChild)
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  MAIN LOOP
+// ─────────────────────────────────────────────────────────────────
+let T = 0, worldTime = 10.0
+let sunLight = 𝔻['☀'](worldTime)
+let qr = 0, nt = 0, fc = 0
+
+function draw() {
+  T += 0.003; fc++
+
+  // Smooth camera
+  if (autoSpin) tTheta += 0.0007
+  camTheta += (tTheta - camTheta) * 0.055
+  camPhi   += (tPhi   - camPhi  ) * 0.055
+  camDist  += (tDist  - camDist ) * 0.062
+
+  // Advance world time → sun position
+  worldTime = (worldTime + 0.004) % 24
+  sunLight  = 𝔻['☀'](worldTime)
+
+  // Sky colour from sun intensity
+  const dayF = Math.max(0, Math.sin((worldTime-6)/12*Math.PI))
+  const sr=Math.floor(2+dayF*7), sg=Math.floor(3+dayF*9), sb=Math.floor(8+dayF*20)
+  ctx.fillStyle = `rgb(${sr},${sg},${sb})`
+  ctx.fillRect(0, 0, W, H)
+
+  // Stars (fade with dawn)
+  const starA = (1-dayF) * 0.045
+  if (starA > 0.005) {
+    for (let i=0; i<200; i++) {
+      const bx=(i*317+i*i*9)%W, by=(i*211+i*i*13)%H
+      ctx.fillStyle = `rgba(255,255,255,${starA+0.012*Math.sin(T*1.4+i)})`
+      ctx.fillRect(bx, by, 0.35+0.2*(i%3), 0.35+0.2*(i%3))
+    }
+  }
+
+  // ── Animate nodes via Catmull-Rom spline ──────────────────────
+  for (const n of Object.values(NODES)) {
+    // spline phase: each node has unique period
+    const phase = n.id.charCodeAt(0)*0.00042 + n.id.length*0.00031
+    const s = splineEval(n.kf, T*0.06 + phase)
+    n.x = s.x; n.y = s.y; n.z = s.z
+    if (n.glow > 0) n.glow -= 0.014
+    if (n.sig  > 0) n.sig  -= 0.018
+  }
+
+  // ── Project all nodes ─────────────────────────────────────────
+  pcache = {}
+  const dl = Object.values(NODES)
+    .filter(visF)
+    .map(n => { const p=toScreen(n.x,n.y,n.z); pcache[n.id]=p; return {n,p} })
+    .sort((a,b) => a.p.depth - b.p.depth)
+
+  // ── RAYCAST VISUALISATION (toggle with RAYCAST 👁 button) ──────
+  if (showRay) {
+    // Cast a few rays from "camera" through front nodes → visualise hit
+    const frontNodes = dl.slice(dl.length-5)  // front 5 by depth sort
+    for (const {n, p} of frontNodes) {
+      const hitDist = 𝔻['👁'](
+        0, 0, -camDist*0.15,         // ray origin (approx camera)
+        (p.sx-W/2)/W*0.3,            // ray dir X
+        -(p.sy-H/2)/H*0.3,           // ray dir Y
+        1,                            // ray dir Z
+        (rx,ry,rz) => 𝔻['●'](rx,ry,rz, n.x,n.y,n.z, nodeR(n)*0.9)
+      )
+      if (hitDist > 0) {
+        // Draw ray line from a point above to node
+        ctx.save()
+        ctx.beginPath()
+        ctx.moveTo(p.sx, p.sy - 60)
+        ctx.lineTo(p.sx, p.sy)
+        ctx.strokeStyle = cc(n.cat, 0.18)
+        ctx.lineWidth = 0.4
+        ctx.setLineDash([2, 5])
+        ctx.stroke()
+        ctx.setLineDash([])
+        // Hit marker
+        ctx.beginPath(); ctx.arc(p.sx, p.sy, 2.5, 0, TAU)
+        ctx.fillStyle = cc(n.cat, 0.5); ctx.fill()
+        ctx.restore()
+      }
+    }
+  }
+
+  // ── SILK EDGES ────────────────────────────────────────────────
+  if (showSilk) {
+    ctx.save()
+    for (const [aid, bid, op] of ED) {
+      const pa=pcache[aid], pb=pcache[bid]; if (!pa||!pb) continue
+      if (!visF(NODES[aid])||!visF(NODES[bid])) continue
+      const fog   = Math.max(0.004, 0.11 - Math.max(pa.depth,pb.depth)*0.000085)
+      const act   = NODES[aid].glow>0 || NODES[bid].glow>0
+      const ih    = aid===hov || bid===hov
+      const alpha = ih ? fog*7 : act ? fog*4 : fog
+      ctx.beginPath()
+      ctx.moveTo(pa.sx, pa.sy)
+      const mx = (pa.sx+pb.sx)/2 + (pb.sy-pa.sy)*0.09
+      const my = (pa.sy+pb.sy)/2 - (pb.sx-pa.sx)*0.09
+      ctx.quadraticCurveTo(mx, my, pb.sx, pb.sy)
+      ctx.strokeStyle = `hsla(${OPC[op]||'212,44%,50%'},${alpha})`
+      ctx.lineWidth   = ih ? 1.4 : act ? 0.9 : 0.38
+      ctx.setLineDash(op==='∈'?[]:op==='≡'?[4,5]:op==='♫'?[2,4]:op==='∘'?[6,3]:[3,6])
+      ctx.stroke(); ctx.setLineDash([])
+    }
+    ctx.restore()
+  }
+
+  // ── SIGNAL PARTICLES — đi theo đúng đường cong silk ─────────
+  for (let i=SIGS.length-1; i>=0; i--) {
+    const s  = SIGS[i]
+    s.p = Math.min(1, s.p + s.sp)
+    const fn = NODES[s.fid], tn = NODES[s.tid]
+    if (!fn||!tn) { SIGS.splice(i,1); continue }
+
+    // Lấy screen position của 2 đầu silk edge
+    const pa = toScreen(fn.x, fn.y, fn.z)
+    const pb = toScreen(tn.x, tn.y, tn.z)
+
+    // Cùng control point như khi vẽ silk edge (quadratic Bezier)
+    const cpx = (pa.sx+pb.sx)/2 + (pb.sy-pa.sy)*0.09
+    const cpy = (pa.sy+pb.sy)/2 - (pb.sx-pa.sx)*0.09
+
+    // Quadratic Bezier eval tại t=s.p
+    const t1 = s.p, t0 = 1-t1
+    const bx = t0*t0*pa.sx + 2*t0*t1*cpx + t1*t1*pb.sx
+    const by = t0*t0*pa.sy + 2*t0*t1*cpy + t1*t1*pb.sy
+    // Depth interpolation cho scale
+    const depth = pa.depth + (pb.depth-pa.depth)*s.p
+    const sc    = pa.scale  + (pb.scale -pa.scale )*s.p
+    const pr = Math.max(0.5, 3.2 * sc)
+    // Trail — cũng đi theo Bezier
+    ctx.save()
+    for (let tr=5; tr>=0; tr--) {
+      const tp  = Math.max(0, s.p - tr*0.022)
+      const tp0 = 1-tp
+      const trx = tp0*tp0*pa.sx + 2*tp0*tp*cpx + tp*tp*pb.sx
+      const try2= tp0*tp0*pa.sy + 2*tp0*tp*cpy + tp*tp*pb.sy
+      const trsc= pa.scale + (pb.scale-pa.scale)*tp
+      const trr = Math.max(0.3, pr*(1-tr*0.14))
+      ctx.globalAlpha = (6-tr) * 0.028
+      ctx.beginPath(); ctx.arc(trx, try2, trr, 0, TAU)
+      ctx.fillStyle = s.col; ctx.fill()
+    }
+    ctx.globalAlpha = 1
+    ctx.shadowColor = s.col; ctx.shadowBlur = 14
+    ctx.beginPath(); ctx.arc(bx, by, pr, 0, TAU)
+    ctx.fillStyle = s.col; ctx.fill()
+    ctx.restore()
+
+    if (s.p >= 1) {
+      if (NODES[s.tid]) { NODES[s.tid].glow=1; NODES[s.tid].sig=1 }
+      SIGS.splice(i, 1)
+    }
+  }
+
+  // ── SDF SPHERE NODES — shaded by 𝔻['∇'] · 𝔻['·'] · 𝔻['☀'] ──
+  for (const {n, p} of dl) {
+    const ih  = n.id === hov
+    const nr  = nodeR(n)
+    const sr2 = Math.max(0.5, nr * p.scale * (camDist/120) * (1 + n.glow*0.52))
+
+    // ── SHADING: normal · sunLight ────────────────────────────────
+    // 𝔻['∇'] computes surface normal of this sphere at viewpoint offset
+    const viewOffX = 0.4, viewOffY = 0.3  // approximate view direction
+    const normal = 𝔻['∇'](
+      n.x + nr*viewOffX, n.y + nr*viewOffY, n.z,
+      (px,py,pz) => 𝔻['●'](px,py,pz, n.x,n.y,n.z, nr),
+      nr * 0.35
+    )
+    const rawDiffuse = 𝔻['·'](normal[0],normal[1],normal[2], sunLight.x,sunLight.y,sunLight.z)
+    const shade      = sunLight.a + Math.max(0, rawDiffuse) * sunLight.i
+
+    // Base colour
+    const c = catHSL(n.cat)
+    // Apply shade to lightness (Lambertian approximation)
+    const litL = Math.floor(c.l * (0.38 + shade * 0.72))
+    const litS = Math.floor(c.s * (0.65 + shade * 0.38))
+
+    ctx.save()
+    ctx.shadowColor = cc(n.cat, 0.55 + n.glow*0.38)
+    ctx.shadowBlur  = n.L===0 ? 52 : 18 + n.glow*28 + (ih?20:0)
+
+    // Concentric rings for origin & L1
+    if (n.L <= 1) {
+      const rings = n.L===0 ? [1.85, 2.7, 3.9] : [1.75, 2.5]
+      rings.forEach((m, mi) => {
+        const rr = Math.max(0.5, sr2*m)
+        ctx.beginPath(); ctx.arc(p.sx, p.sy, rr, 0, TAU)
+        ctx.strokeStyle = cc(n.cat, 0.032 + n.glow*0.024 + 0.012*Math.sin(T*1.1+mi))
+        ctx.lineWidth = 0.55; ctx.stroke()
+      })
+    }
+
+    // SDF sphere fill — radial gradient with sun shading
+    const grd = ctx.createRadialGradient(
+      p.sx - sr2*0.28, p.sy - sr2*0.32, 0,  // highlight (sun direction)
+      p.sx, p.sy, Math.max(0.5, sr2)
+    )
+    grd.addColorStop(0,  `hsla(${c.h},${litS}%,${Math.min(94, litL+36)}%,${0.84+n.glow*0.14})`)
+    grd.addColorStop(0.45,`hsla(${c.h},${litS}%,${litL}%,${0.74+n.glow*0.18})`)
+    grd.addColorStop(1,  `hsla(${c.h},${litS}%,${Math.max(4,litL-32)}%,0.05)`)
+    ctx.beginPath(); ctx.arc(p.sx, p.sy, Math.max(0.5, sr2), 0, TAU)
+    ctx.fillStyle = grd; ctx.fill()
+
+    // Specular highlight (Phong)
+    if (n.L <= 2) {
+      const specR = Math.max(0.5, sr2*.75)
+      const sg = ctx.createRadialGradient(p.sx-sr2*.32,p.sy-sr2*.36,0, p.sx,p.sy,specR)
+      sg.addColorStop(0, `rgba(255,255,255,${0.16 + shade*0.14 + n.glow*0.08})`)
+      sg.addColorStop(1, 'rgba(255,255,255,0)')
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, specR, 0, TAU)
+      ctx.fillStyle = sg; ctx.fill()
+    }
+
+    // Rim border
+    ctx.strokeStyle = cc(n.cat, 0.28 + n.glow*0.44 + (ih?0.22:0))
+    ctx.lineWidth   = n.L===0 ? 1.8 : n.L===1 ? 1.0 : 0.55
+    ctx.stroke()
+    ctx.restore()
+
+    // Glyph label
+    if (p.scale > 0.40) {
+      const fs = n.L===0 ? sr2*0.88 : n.L<=2 ? sr2*0.75 : sr2*1.02
+      ctx.save()
+      ctx.shadowColor = cc(n.cat, 0.92); ctx.shadowBlur = n.glow>0 ? 9 : 0
+      ctx.font = `${Math.max(7, fs)}px monospace`
+      ctx.textAlign='center'; ctx.textBaseline='middle'
+      ctx.fillStyle = `rgba(255,255,255,${0.5+n.glow*0.38+shade*0.14})`
+      ctx.fillText(n.g||'○', p.sx, p.sy)
+      ctx.restore()
+    }
+
+    // CP badge for leaf nodes
+    if (n.L===3 && p.scale > 0.68) {
+      ctx.font='6px monospace'; ctx.textAlign='center'
+      ctx.fillStyle = cc(n.cat, 0.44)
+      ctx.fillText(n.cp.split(' ')[0], p.sx, p.sy+sr2+8)
+    }
+  }
+
+  // ── SPAWN SIGNALS ─────────────────────────────────────────────
+  sigTick++; sigAct *= 0.975
+  if (sigTick % 50  === 0) fireRand()
+  if (sigTick % 165 === 0) pushLog()
+
+  // ── HUD UPDATE ────────────────────────────────────────────────
+  qr = Math.min(100, qr + 0.032)
+  nt = (nt + 0.10) % 100
+  const dnV = 36 + 24*Math.sin(T*0.21)
+  const hh  = Math.floor(worldTime)
+  const mm  = Math.floor((worldTime-hh)*60)
+  const timeStr = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`
+  const dayPct  = Math.max(0, Math.sin((worldTime-6)/12*Math.PI)) * 100
+
+  ;['bqr','bdn','bsig','bday'].forEach((id,i) => {
+    document.getElementById(id).style.width =
+      [qr, dnV, sigAct*100, dayPct][i] + '%'
+  })
+  ;['vqr','vdn','vsig','vday'].forEach((id,i) => {
+    document.getElementById(id).textContent =
+      [Math.floor(qr*0.24), Math.floor(dnV*0.42), SIGS.length, timeStr][i]
+  })
+  if (fc % 24 === 0) {
+    document.getElementById('hnc').innerHTML =
+      `${dl.length} <span style="font-size:11px;opacity:.4">nodes</span>`
+    document.getElementById('hinfo').textContent =
+      `${ED.filter(([a,b])=>pcache[a]&&pcache[b]).length} silk · ${SIGS.length} sig · ☀ ${timeStr}`
+  }
+
+  requestAnimationFrame(draw)
+}
+
+// ── INIT ──────────────────────────────────────────────────────────
+draw()
+// Initial signal burst
+setTimeout(() => {
+  for (let i=0; i<14; i++)
+    setTimeout(() => { fireRand(); if(i%3===0) pushLog() }, i*80)
+}, 200)
+</script>
+</body>
+</html>
