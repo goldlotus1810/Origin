@@ -96,12 +96,24 @@ Tất cả: Silent by default · Wake on ISL · Xử lý → sleep
 
 ### LeoAI — Bộ não:
 ```
-Skills:
+7 Bản năng bẩm sinh (innate instincts — L0, KHÔNG học):
+  ① Analogy       — A:B :: C:? → delta 5D, áp lên C
+  ② Abstraction   — N chains → LCA → variance → concrete/categorical/abstract
+  ③ Causality     — temporal + co-activation + Relation::Causes → nhân quả
+  ④ Contradiction — valence opposition + Orthogonal → phát hiện mâu thuẫn
+  ⑤ Curiosity     — 1 - nearest_similarity → novelty score
+  ⑥ Reflection    — qr_ratio + connectivity → knowledge quality
+  ⑦ Honesty       — confidence → Fact(≥0.90)/Opinion(≥0.70)/Hypothesis(≥0.40)/Silence(<0.40)
+
+  Thứ tự ưu tiên: Honesty → Contradiction → Causality → Abstraction → Analogy → Curiosity → Reflection
+  Honesty LUÔN chạy trước: không đủ evidence → im lặng, không cần kiểm tra gì thêm.
+
+Skills bổ trợ:
   Nhận:    IngestSkill · ModalityFusion
   Hiểu:    ClusterSkill · SimilaritySkill · DeltaSkill
   Sắp xếp: CuratorSkill · MergeSkill · PruneSkill
   Học:     HebbianSkill · DreamSkill
-  Đề xuất: ProposalSkill · HonestySkill
+  Đề xuất: ProposalSkill
 ```
 
 ### Worker profiles:
@@ -323,7 +335,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 | **olang** | Core: Molecule, LCA, Registry, VM, Compiler | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs`, `clone.rs` | `cargo test -p olang` |
 | **silk** | Hebbian learning, emotion edges, walk | `edge.rs`, `hebbian.rs`, `walk.rs`, `graph.rs` | `cargo test -p silk` |
 | **context** | Emotion V/A/D/I, ConversationCurve, Intent | `emotion.rs`, `curve.rs`, `intent.rs`, `fusion.rs` | `cargo test -p context` |
-| **agents** | Encoder, Learning, Gate, Skill, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
+| **agents** | Encoder, Learning, Gate, Skill, Instinct, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `instinct.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
 | **memory** | STM, Dream, Proposals, AAM | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
 | **runtime** | HomeRuntime entry point, ○{} Parser | `origin.rs`, `parser.rs`, `response_template.rs` | `cargo test -p runtime` |
 | **isl** | Inter-system messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs`, `queue.rs` | `cargo test -p isl` |
@@ -345,7 +357,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (707 tests)
+# Test toàn bộ (728 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
@@ -377,6 +389,13 @@ INPUT: "tôi buồn vì mất việc"
    ├─ context:     ConversationCurve.push(emotion)
    ├─ memory:      STM.push(chain, emotion, ts)
    └─ silk:        co_activate("buồn"↔"mất việc", weight=0.8)
+7b.agents/instinct.rs: LeoAI.run_instincts()
+   ├─ Honesty:       confidence < 0.40 → Silence? No, đủ data
+   ├─ Contradiction: valence consistent → no conflict
+   ├─ Causality:     "mất việc" → "buồn" (temporal + Causes → causal)
+   ├─ Abstraction:   LCA(buồn, mất việc) → "mất mát" (categorical)
+   ├─ Curiosity:     nearest_sim=0.3 → novelty=0.7 → high curiosity
+   └─ Reflection:    knowledge quality check
 8. context/curve.rs: f'(t) < -0.15 → tone = Supportive
 9. runtime/response_template.rs: render(Supportive, V=-0.75)
    → "Cảm giác nặng nề và mệt mỏi — bạn muốn kể thêm không?"

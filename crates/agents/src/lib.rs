@@ -21,3 +21,4 @@ pub mod skill;
 pub mod worker;
 pub mod chief;
 pub mod leo;
+pub mod instinct;

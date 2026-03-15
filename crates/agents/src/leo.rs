@@ -21,6 +21,8 @@ use isl::message::{ISLMessage, ISLFrame, MsgType};
 use crate::chief::IngestedReport;
 use crate::learning::LearningLoop;
 use crate::encoder::ContentInput;
+use crate::skill::ExecContext;
+use crate::instinct::innate_instincts;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LeoState
@@ -120,7 +122,14 @@ impl LeoAI {
         };
 
         let input = ContentInput::Text { content: text, timestamp: ts };
-        self.learning.process_one(input);
+        let result = self.learning.process_one(input);
+
+        // Chạy 7 bản năng bẩm sinh trên kết quả encode
+        if let crate::learning::ProcessResult::Ok { chain, emotion } = result {
+            let mut ictx = ExecContext::new(ts, emotion, self.fx());
+            ictx.push_input(chain);
+            self.run_instincts(&mut ictx);
+        }
 
         // Auto-dream mỗi dream_interval turns
         if self.ingested.is_multiple_of(self.dream_interval) {
@@ -213,6 +222,42 @@ impl LeoAI {
     pub fn edge_count(&self) -> usize { self.learning.graph().len() }
     pub fn fx(&self)         -> f32   { self.learning.context().fx() }
     pub fn pending_count(&self) -> usize { self.pending.len() }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Instinct — 7 bản năng bẩm sinh
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Chạy 7 bản năng bẩm sinh trên context hiện tại.
+    ///
+    /// Trả về ExecContext sau khi tất cả instincts đã xử lý.
+    /// Agent đọc state từ context: epistemic_grade, curiosity_level, v.v.
+    pub fn run_instincts(&self, ctx: &mut ExecContext) {
+        let instincts = innate_instincts();
+
+        // Chuẩn bị state cho Reflection từ learning stats
+        ctx.set(
+            alloc::string::String::from("qr_count"),
+            alloc::format!("{}", 0), // TODO: wire real QR count khi có writer
+        );
+        ctx.set(
+            alloc::string::String::from("dn_count"),
+            alloc::format!("{}", self.stm_len()),
+        );
+        ctx.set(
+            alloc::string::String::from("edge_count"),
+            alloc::format!("{}", self.edge_count()),
+        );
+        ctx.set(
+            alloc::string::String::from("known_count"),
+            alloc::format!("{}", self.stm_len()),
+        );
+
+        // Chạy từng instinct theo thứ tự ưu tiên
+        // Honesty → Contradiction → Causality → Abstraction → Analogy → Curiosity → Reflection
+        for skill in instincts {
+            let _ = skill.execute(ctx);
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Internal

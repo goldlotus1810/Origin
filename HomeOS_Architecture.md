@@ -192,6 +192,58 @@ WorkerPackage binary:
 
 ---
 
+## 7 Bản năng siêu trí tuệ (instinct.rs)
+
+Bản năng từ khi sinh ra là cách phân biệt cấp bậc sinh vật.
+Con thú sinh ra biết: sợ, đói, trốn.
+**Sinh vật siêu trí tuệ sinh ra biết: suy luận, trừu tượng, nhân quả, mâu thuẫn, tò mò, tự phản chiếu, trung thực.**
+
+Mỗi bản năng là 1 Skill (QT4) — stateless, isolated, dùng TRỰC TIẾP 5D Unicode space.
+
+```
+Thứ tự ưu tiên xử lý (Honesty trước, Reflection sau):
+
+  ⑦ Honesty       — confidence → Fact/Opinion/Hypothesis/Silence
+                     ≥0.90: nói thẳng. ≥0.70: "[Chưa chắc chắn]". ≥0.40: "[Giả thuyết]". <0.40: im lặng.
+  ④ Contradiction — valence opposition + Orthogonal + emotional conflict → score
+                     "Hai điều này không thể cùng đúng"
+  ③ Causality     — temporal_order + coactivation_count + Relation::Causes
+                     Cần ≥2/3 evidence. Co-activation ≠ nhân quả.
+  ② Abstraction   — N chains → LCA → variance
+                     var<0.15=concrete, <0.40=categorical, else=abstract
+  ① Analogy       — A:B :: C:? = C + (B-A) trong 5D
+                     Delta trong mỗi chiều, clamp to valid range
+  ⑤ Curiosity     — novelty = 1 - nearest_similarity
+                     >0.7=extreme, >0.4=high, >0.2=moderate, else=low
+  ⑥ Reflection    — quality = 0.6×proven_ratio + 0.4×connectivity
+                     >0.7=strong, >0.4=developing, else=fragile
+
+LeoAI.run_instincts(ctx):
+  Chạy 7 instincts theo thứ tự trên trên MỖI ingest.
+  State kết quả: epistemic_grade, curiosity_level, abstraction_type, v.v.
+  → Dùng để điều hướng response tone và learning priority.
+```
+
+### Tại sao 7 — không phải 3 hay 50?
+
+```
+Sinh vật cấp thấp: SỢ + ĐÓI + TRỐN = 3 bản năng → tồn tại, không phát triển
+Sinh vật siêu trí tuệ: 7 bản năng cognitive → có thể TỰ PHÁT TRIỂN
+
+7 instincts map trực tiếp vào cơ sở hạ tầng 5D đã có:
+  Analogy       → LCA + delta arithmetic
+  Abstraction   → LCA + variance
+  Causality     → RelationBase::Causes + temporal
+  Contradiction → EmotionDim opposition + RelationBase::Orthogonal
+  Curiosity     → similarity() distance
+  Reflection    → Silk edge_count + QR ratio
+  Honesty       → EpistemicFirewall (gate.rs) nâng cấp
+
+Không thêm, không bớt — mỗi cái dùng 1 aspect khác nhau của 5D space.
+```
+
+---
+
 ## Kiến trúc Neuron
 
 HomeOS mô phỏng neuron sinh học:
@@ -565,6 +617,8 @@ Tier 3: ESP32 (520KB SRAM)
 | Cross-modal fusion | ✅ Done | ↑ (context) | Audio/Image/Bio → EmotionTag |
 | SelfModel | ✅ Done | ↑ (olang) | ○{stats} tự mô tả |
 | Skill trait + ExecContext | ✅ Done | ↑ (agents) | QT4①-⑤: stateless, isolated, via ExecContext |
+| 7 Instinct Skills | ✅ Done | ↑ (agents) | Analogy, Abstraction, Causality, Contradiction, Curiosity, Reflection, Honesty |
+| LeoAI × Instincts | ✅ Done | ↑ (agents) | run_instincts() chạy 7 bản năng trên mỗi ingest |
 | SkillProposal | ⬜ Planned | — | **Chưa implement** — DreamProposal có, SkillProposal chưa |
 | LCA variance | ⬜ Planned | — | Thêm variance output cho LCA |
 | Window variance | ⬜ Planned | — | ConversationCurve instability detection |
@@ -573,7 +627,7 @@ Tier 3: ESP32 (520KB SRAM)
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |
 
-**Tổng: 707 tests, 0 clippy warnings, 12 crates**
+**Tổng: 728 tests, 0 clippy warnings, 12 crates**
 
 ---
 
@@ -657,4 +711,4 @@ Design lock: KHÔNG — design có thể evolve nếu có bằng chứng mới
 ---
 
 *Bản vẽ này là la bàn. Code là hành trình.*
-*2026-03-15 · HomeOS v3 · 707 tests · 0 warnings*
+*2026-03-15 · HomeOS v3 · 728 tests · 0 warnings*
