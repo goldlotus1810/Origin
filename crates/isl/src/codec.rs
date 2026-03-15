@@ -9,8 +9,7 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use crate::message::{ISLMessage, ISLFrame, MsgType};
-use crate::address::ISLAddress;
+use crate::message::{ISLMessage, ISLFrame};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ISLError
@@ -39,6 +38,7 @@ pub enum ISLError {
 #[allow(missing_docs)]
 pub struct ISLCodec {
     /// AES-256 key (32 bytes). Hiện không dùng — placeholder cho future.
+    #[allow(dead_code)]
     key:  [u8; 32],
     /// Dùng checksum XOR đơn giản để verify integrity.
     pub use_checksum: bool,
@@ -127,6 +127,8 @@ fn checksum(data: &[u8]) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::address::ISLAddress;
+    use crate::message::MsgType;
 
     fn addr(l: u8, g: u8, s: u8, i: u8) -> ISLAddress { ISLAddress::new(l, g, s, i) }
 

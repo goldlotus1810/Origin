@@ -174,7 +174,7 @@ impl LeoAI {
     ///
     /// AAM chỉ approve/reject — không đụng KnowledgeTree.
     /// LeoAI nhận approved → promote QR trong LearningLoop.
-    pub fn receive_aam_decision(&mut self, msg: ISLMessage, ts: i64) {
+    pub fn receive_aam_decision(&mut self, msg: ISLMessage, _ts: i64) {
         match msg.msg_type {
             MsgType::Approved => {
                 // payload[0] = proposal index (đơn giản)

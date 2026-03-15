@@ -834,7 +834,7 @@ pub fn bootstrap_affect(text: &str) -> EmotionTag {
 
 pub fn sentence_affect(text: &str) -> EmotionTag {
     use olang::ling::apply_modifiers;
-    use crate::infer::{detect_tense, Tense};
+    use crate::infer::detect_tense;
     let words: alloc::vec::Vec<&str> = text.split_whitespace().collect();
     let base = sentence_base_affect(&words);
     let (mod_v, _) = apply_modifiers(&words, base.valence, base.arousal);

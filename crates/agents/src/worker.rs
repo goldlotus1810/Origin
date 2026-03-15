@@ -16,12 +16,10 @@
 //!   Network   — packet → detect → alert
 
 extern crate alloc;
-use alloc::string::String;
 use alloc::vec::Vec;
 use isl::address::ISLAddress;
 use isl::message::{ISLMessage, ISLFrame, MsgType};
 use silk::edge::EmotionTag;
-use olang::molecular::MolecularChain;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WorkerKind
@@ -186,7 +184,7 @@ impl Worker {
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    fn process_sensor(&mut self, reading: SensorReading, ts: i64) {
+    fn process_sensor(&mut self, reading: SensorReading, _ts: i64) {
         // Encode reading → payload bytes (không raw float — encode thành 3B)
         let payload = encode_sensor_payload(&reading);
         let emotion = sensor_emotion(&reading);
@@ -201,7 +199,7 @@ impl Worker {
         self.outbox.push(WorkerReport { frame, emotion });
     }
 
-    fn process_command(&mut self, cmd: ISLMessage, ts: i64) {
+    fn process_command(&mut self, cmd: ISLMessage, _ts: i64) {
         // Nhận ActuatorCmd → thực thi → gửi ACK
         if cmd.msg_type == MsgType::ActuatorCmd {
             let ack = ISLMessage::ack(self.addr, cmd.from, MsgType::ActuatorCmd);

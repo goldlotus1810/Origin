@@ -196,6 +196,11 @@ impl SilkGraph {
     // ── Stats ────────────────────────────────────────────────────────────────
 
     /// Tổng số edges.
+    /// Iterator qua tất cả edges.
+    pub fn all_edges(&self) -> impl Iterator<Item = &SilkEdge> {
+        self.edges.iter()
+    }
+
     pub fn len(&self) -> usize { self.edges.len() }
 
     /// Graph có rỗng không.

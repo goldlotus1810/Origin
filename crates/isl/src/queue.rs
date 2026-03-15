@@ -7,7 +7,7 @@
 
 extern crate alloc;
 use alloc::collections::VecDeque;
-use crate::message::{ISLMessage, MsgType};
+use crate::message::ISLMessage;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ISLQueue
@@ -65,6 +65,7 @@ impl ISLQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::MsgType;
     use crate::address::ISLAddress;
 
     fn addr(i: u8) -> ISLAddress { ISLAddress::new(0, 0, 0, i) }

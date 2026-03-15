@@ -22,7 +22,6 @@ use isl::address::ISLAddress;
 use isl::message::{ISLMessage, ISLFrame, MsgType};
 use isl::queue::ISLQueue;
 use silk::edge::EmotionTag;
-use olang::molecular::MolecularChain;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ChiefKind

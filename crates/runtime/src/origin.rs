@@ -546,6 +546,58 @@ impl HomeRuntime {
         }
     }
 
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Persistence — save/load origin.olang
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Serialize trạng thái học được thành bytes để append vào origin.olang.
+    ///
+    /// QT8: append-only — không xóa, không overwrite.
+    /// Ghi: Silk EdgeAssoc edges + STM observations đủ điều kiện QR.
+    ///
+    /// Caller chịu trách nhiệm ghi bytes vào file:
+    ///   `std::fs::OpenOptions::new().append(true).open("origin.olang")?.write_all(&bytes)?`
+    pub fn serialize_learned(&self, ts: i64) -> alloc::vec::Vec<u8> {
+        use olang::writer::OlangWriter;
+
+        // Bắt đầu từ rỗng — chỉ serialize phần mới (delta)
+        let mut writer = OlangWriter::new(ts);
+
+        // 1. Silk EdgeAssoc edges đủ mạnh (weight >= 0.3 → đáng lưu)
+        let graph = self.learning.graph();
+        for edge in graph.all_edges() {
+            if edge.kind.is_associative() && edge.weight >= 0.30 {
+                writer.append_edge(
+                    edge.from_hash,
+                    edge.to_hash,
+                    edge.kind.as_byte(),
+                    edge.updated_at,
+                );
+            }
+        }
+
+        // 2. STM observations có fire_count >= 3 → ĐN sẵn sàng QR
+        //    (Dream sẽ promote QR — đây chỉ là persist ĐN để không mất)
+        for obs in self.learning.stm().all() {
+            let hash      = obs.chain.chain_hash();
+            let fire_count = graph.edges_from(hash).len() as u32;
+            if fire_count >= 3 {
+                let _ = writer.append_node(&obs.chain, 2, false, obs.timestamp);
+                // layer=2 (ĐN), is_qr=false
+            }
+        }
+
+        writer.into_bytes()
+    }
+
+    /// Số Silk edges sẽ được lưu (preview trước khi serialize).
+    pub fn saveable_edges(&self) -> usize {
+        self.learning.graph().all_edges()
+            .filter(|e| e.kind.is_associative() && e.weight >= 0.30)
+            .count()
+    }
+
     // ── Accessors ─────────────────────────────────────────────────────────────
 
     pub fn turn_count(&self) -> u64 { self.turn_count }
@@ -851,5 +903,51 @@ impl HomeRuntime {
 
         // Update self-model
         self.self_model.update(&self.registry, ts);
+    }
+}
+
+#[cfg(test)]
+mod persist_tests {
+    use super::*;
+
+    #[test]
+    fn serialize_empty_session() {
+        let rt = HomeRuntime::new(0xABCD);
+        let bytes = rt.serialize_learned(1000);
+        // Empty session: chỉ có writer header
+        // Không có edges đủ mạnh → bytes rất nhỏ
+        assert!(bytes.len() < 100, "Empty session nhỏ: {} bytes", bytes.len());
+    }
+
+    #[test]
+    fn serialize_after_learning() {
+        let mut rt = HomeRuntime::new(0xBEEF);
+        // Feed nhiều câu → Silk edges tích lũy
+        for i in 0..12 {
+            let text = alloc::format!("câu văn số {} với từ buồn vui đau khổ", i);
+            rt.process_text(&text, i as i64 * 1000);
+        }
+        let edges_saveable = rt.saveable_edges();
+        let bytes = rt.serialize_learned(20000);
+        // Sau 12 turns: phải có edges đáng lưu
+        // (hoặc ít nhất bytes có writer header)
+        assert!(!bytes.is_empty(), "Serialize không rỗng");
+        if edges_saveable > 0 {
+            assert!(bytes.len() > 20,
+                "{} edges → {} bytes", edges_saveable, bytes.len());
+        }
+    }
+
+    #[test]
+    fn saveable_edges_threshold() {
+        let mut rt = HomeRuntime::new(0xCAFE);
+        // Chưa học → 0 edges đủ mạnh
+        assert_eq!(rt.saveable_edges(), 0);
+        // Sau learning → có thể có edges
+        for i in 0..8 {
+            rt.process_text("natasha andrei pierre tolstoy chiến tranh hòa bình", i * 1000);
+        }
+        // saveable_edges() không panic
+        let _ = rt.saveable_edges();
     }
 }

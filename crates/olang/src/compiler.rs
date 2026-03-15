@@ -15,7 +15,7 @@
 
 #![allow(missing_docs)]
 extern crate alloc;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::format;
 
@@ -120,7 +120,7 @@ fn emit_c(prog: &OlangProgram) -> Result<String, CompileError> {
     Ok(out)
 }
 
-fn c_op(op: &Op, idx: usize) -> Result<String, CompileError> {
+fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
     Ok(match op {
         Op::Push(chain) =>
             format!("push(&s, 0x{:016X}ULL); /* chain */", chain.chain_hash()),
