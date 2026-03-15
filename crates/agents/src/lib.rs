@@ -13,3 +13,5 @@ pub mod learning;
 pub mod book;
 pub mod gate;
 pub mod worker;
+pub mod chief;
+pub mod leo;
