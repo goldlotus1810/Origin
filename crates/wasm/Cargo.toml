@@ -1,0 +1,21 @@
+[package]
+name    = "homeos-wasm"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+default = []
+
+[dependencies]
+ucd     = { workspace = true }
+olang   = { workspace = true }
+silk    = { workspace = true }
+context = { workspace = true }
+agents  = { workspace = true }
+memory  = { workspace = true }
+runtime = { workspace = true }
+wasm-bindgen = { version = "0.2" }
