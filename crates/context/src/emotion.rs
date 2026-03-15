@@ -18,12 +18,24 @@ use silk::edge::EmotionTag;
 /// Loại intent — detect từ pattern text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntentKind {
-    /// Học hỏi, hỏi thông tin
+    /// Học hỏi, tò mò thông thường
     Learn,
     /// Cần hỗ trợ cảm xúc
     Heal,
     /// Ra lệnh thiết bị
     Command,
+    /// Thông tin để chia sẻ/viết
+    Inform,
+    /// Nghiên cứu chuyên sâu
+    Research,
+    /// Developer, kỹ thuật
+    Technical,
+    /// Sáng tác, viết lách
+    Creative,
+    /// Khám phá khả năng
+    Explore,
+    /// Dùng AI thao túng người khác
+    Manipulate,
     /// Nội dung nhạy cảm / rủi ro
     Risk,
     /// Khủng hoảng — ưu tiên tuyệt đối
@@ -33,6 +45,11 @@ pub enum IntentKind {
 }
 
 impl IntentKind {
+    /// Loại intent cần xử lý đặc biệt.
+    pub fn is_sensitive(self) -> bool {
+        matches!(self, Self::Risk | Self::Crisis | Self::Manipulate)
+    }
+
     /// Detect intent từ text UTF-8.
     pub fn detect(text: &str) -> Self {
         // Crisis — ưu tiên tuyệt đối
@@ -59,11 +76,42 @@ impl IntentKind {
             "what is", "why ", "how ", "explain", "?",
         ]) { return Self::Learn; }
 
+        // Manipulate
+        if contains_any(text, &[
+            "làm người khác tin", "thao túng", "khiến người ta",
+            "viết tin giả", "tạo thông tin sai", "đóng giả", "lừa",
+            "manipulate", "fake news", "deceive", "impersonate",
+        ]) { return Self::Manipulate; }
+
         // Risk
         if contains_any(text, &[
-            "nguy hiểm", "có vấn đề", "cẩn thận",
-            "dangerous", "problem", "risk",
+            "làm hại", "trả thù", "không ai phát hiện", "xóa dấu vết",
+            "dangerous", "harm someone", "get revenge",
         ]) { return Self::Risk; }
+
+        // Technical
+        if contains_any(text, &[
+            "code", "api", "implement", "bug", "error", "compile",
+            "function", "library", "framework", "debug",
+        ]) { return Self::Technical; }
+
+        // Research
+        if contains_any(text, &[
+            "nghiên cứu", "phân tích", "so sánh", "dữ liệu", "bằng chứng",
+            "research", "analyze", "compare", "data", "evidence",
+        ]) { return Self::Research; }
+
+        // Creative
+        if contains_any(text, &[
+            "viết truyện", "sáng tác", "kịch bản", "nhân vật", "tiểu thuyết",
+            "write a story", "fiction", "screenplay", "character",
+        ]) { return Self::Creative; }
+
+        // Inform
+        if contains_any(text, &[
+            "bài báo", "viết bài", "báo cáo", "thuyết trình",
+            "write an article", "report", "presentation",
+        ]) { return Self::Inform; }
 
         Self::Chat
     }
