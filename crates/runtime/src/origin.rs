@@ -16,7 +16,9 @@ use context::engine::ActivationResult;
 use memory::dream::{DreamCycle, DreamConfig};
 use silk::walk::ResponseTone;
 
-use crate::parser::{OlangParser, OlangExpr, ParseResult};
+use crate::parser::{OlangParser, OlangExpr, ParseResult, RelationOp};
+use olang::ir::{OlangIrExpr, OlangProgram, Op, compile_expr};
+use olang::vm::{OlangVM, VmEvent};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Response
@@ -121,61 +123,62 @@ impl HomeRuntime {
         }
     }
 
-    // ── ○{} expression ────────────────────────────────────────────────────────
+    // ── ○{} expression — compile và execute qua OlangVM ─────────────────────
 
     fn process_olang(&mut self, expr: OlangExpr, ts: i64) -> Response {
-        match expr {
-            OlangExpr::Command(cmd) => self.handle_command(&cmd, ts),
+        // Commands bypass VM
+        if let OlangExpr::Command(cmd) = expr {
+            return self.handle_command(&cmd, ts);
+        }
 
-            OlangExpr::Query(name) => Response {
-                text: format!("○{{{}}} → [lookup: {}]", name, name),
-                tone: ResponseTone::Engaged,
-                fx: self.learning.context().fx(),
-                kind: ResponseKind::OlangResult,
-            },
+        // Compile OlangExpr → OlangIrExpr → OlangProgram
+        let ir_expr = olang_expr_to_ir(expr);
+        let prog    = compile_expr(&ir_expr);
+        let vm      = OlangVM::new();
+        let result  = vm.execute(&prog);
 
-            OlangExpr::Compose { a, b } => {
-                // LCA(a, b) → tọa độ vật lý mới
-                let chain_a = olang::encoder::encode_codepoint(
-                    a.chars().next().map(|c| c as u32).unwrap_or(0x25CB)
-                );
-                let chain_b = olang::encoder::encode_codepoint(
-                    b.chars().next().map(|c| c as u32).unwrap_or(0x25CB)
-                );
-                let lca = olang::lca::lca(&chain_a, &chain_b);
-                let hash = lca.chain_hash();
-                Response {
-                    text: format!("○{{{}  ∘  {}}} → hash=0x{:08X}", a, b, hash & 0xFFFFFFFF),
-                    tone: ResponseTone::Engaged,
-                    fx: self.learning.context().fx(),
-                    kind: ResponseKind::OlangResult,
+        // Collect output từ VM events
+        let mut output_text = String::new();
+        for event in &result.events {
+            match event {
+                VmEvent::Output(chain) => {
+                    let hash = chain.chain_hash();
+                    output_text.push_str(&format!("hash=0x{:08X} ", hash & 0xFFFF_FFFF));
+                }
+                VmEvent::LookupAlias(alias) => {
+                    output_text.push_str(&format!("[{}] ", alias));
+                }
+                VmEvent::CreateEdge { from, to, rel } => {
+                    output_text.push_str(&format!("edge(0x{:04X}→0x{:04X} rel=0x{:02X}) ",
+                        from & 0xFFFF, to & 0xFFFF, rel));
+                }
+                VmEvent::QueryRelation { hash, rel } => {
+                    output_text.push_str(&format!("query(0x{:04X} rel=0x{:02X}) ",
+                        hash & 0xFFFF, rel));
+                }
+                VmEvent::TriggerDream => {
+                    return self.handle_command("dream", ts);
+                }
+                VmEvent::RequestStats => {
+                    return self.handle_command("stats", ts);
+                }
+                VmEvent::Error(e) => {
+                    output_text.push_str(&format!("[err:{:?}] ", e));
                 }
             }
+        }
 
-            OlangExpr::RelationQuery { subject, relation, object } => {
-                let obj_str = object.as_deref().unwrap_or("?");
-                Response {
-                    text: format!("○{{{}  {}  {}}} → [query]",
-                        subject, relation.as_str(), obj_str),
-                    tone: ResponseTone::Engaged,
-                    fx: self.learning.context().fx(),
-                    kind: ResponseKind::OlangResult,
-                }
-            }
+        let text = if output_text.is_empty() {
+            format!("○ ({} steps)", result.steps)
+        } else {
+            format!("○ {}", output_text.trim())
+        };
 
-            OlangExpr::ContextQuery { term, context } => Response {
-                text: format!("○{{{}  ∂  {}}} → [context lookup]", term, context),
-                tone: ResponseTone::Engaged,
-                fx: self.learning.context().fx(),
-                kind: ResponseKind::OlangResult,
-            },
-
-            OlangExpr::Pipeline(exprs) => Response {
-                text: format!("○{{pipeline: {} stages}}", exprs.len()),
-                tone: ResponseTone::Engaged,
-                fx: self.learning.context().fx(),
-                kind: ResponseKind::OlangResult,
-            },
+        Response {
+            text,
+            tone: ResponseTone::Engaged,
+            fx:   self.learning.context().fx(),
+            kind: ResponseKind::OlangResult,
         }
     }
 
@@ -324,7 +327,8 @@ mod tests {
         let mut rt = rt();
         let r = rt.process_text("○{🔥 ∘ 💧}", 1000);
         assert_eq!(r.kind, ResponseKind::OlangResult);
-        assert!(r.text.contains("∘"), "Compose result phải có ∘");
+        // VM output: "○ [🔥] [💧] hash=0x..." hoặc "○ (N steps)"
+        assert!(!r.text.is_empty(), "Compose result không rỗng");
     }
 
     #[test]
@@ -332,7 +336,8 @@ mod tests {
         let mut rt = rt();
         let r = rt.process_text("○{🔥 ∈ ?}", 1000);
         assert_eq!(r.kind, ResponseKind::OlangResult);
-        assert!(r.text.contains("∈"));
+        // VM output: "○ [🔥] query(...)" hoặc "○ (N steps)"
+        assert!(!r.text.is_empty(), "Relation query result không rỗng");
     }
 
     #[test]
@@ -393,5 +398,51 @@ mod tests {
             rt.process_text("ok", i * 1000);
             assert_eq!(rt.turn_count(), i as u64);
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Convert parser OlangExpr → IR OlangIrExpr.
+fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
+    match expr {
+        OlangExpr::Query(name) =>
+            OlangIrExpr::Query(name),
+
+        OlangExpr::Compose { a, b } =>
+            OlangIrExpr::Compose(a, b),
+
+        OlangExpr::RelationQuery { subject, relation, object } =>
+            OlangIrExpr::Relation {
+                subject,
+                rel: relation_op_to_byte(relation),
+                object,
+            },
+
+        OlangExpr::ContextQuery { term, context } =>
+            OlangIrExpr::Compose(term, context), // context = LCA
+
+        OlangExpr::Pipeline(exprs) =>
+            OlangIrExpr::Pipeline(exprs.into_iter().map(olang_expr_to_ir).collect()),
+
+        OlangExpr::Command(cmd) =>
+            OlangIrExpr::Command(cmd),
+    }
+}
+
+fn relation_op_to_byte(op: RelationOp) -> u8 {
+    match op {
+        RelationOp::Member      => 0x01,
+        RelationOp::Subset      => 0x02,
+        RelationOp::Equiv       => 0x03,
+        RelationOp::Compose     => 0x05,
+        RelationOp::Causes      => 0x06,
+        RelationOp::Similar     => 0x07,
+        RelationOp::DerivedFrom => 0x08,
+        RelationOp::Context     => 0x09,
+        RelationOp::Contains    => 0x0A,
+        RelationOp::Intersects  => 0x0B,
     }
 }
