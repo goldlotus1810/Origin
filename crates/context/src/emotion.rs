@@ -799,6 +799,59 @@ pub fn contains_any(text: &str, needles: &[&str]) -> bool {
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Text → EmotionTag (public entry point cho T2 pipeline).
+///
+/// Kết hợp: word_affect → linguistic modifiers → bootstrap fallback.
+/// Pattern-based emotion khi word lexicon không đủ.
+///
+/// Mỗi group pattern → (v, a, d). Average các groups match.
+pub fn bootstrap_affect(text: &str) -> EmotionTag {
+    static GROUPS: &[(&[&str], f32, f32, f32)] = &[
+        (&["chết","thi thể","mất mạng","hi sinh","dead","death","died"],  -0.80, 0.60, 0.20),
+        (&["chiến tranh","bom","súng","cháy","hỗn loạn","war","bomb","chaos"], -0.75, 0.80, 0.30),
+        (&["đau buồn","khóc","nước mắt","tuyệt vọng","sobbing","crying","despair"], -0.70, 0.50, 0.25),
+        (&["sợ hãi","hoảng","run rẩy","terrified","panic","horrified"],   -0.60, 0.75, 0.25),
+        (&["đói","nghèo","khổ cực","hoang tàn","hunger","poverty","ruins"], -0.55, 0.45, 0.25),
+        (&["cô đơn","một mình","bị bỏ rơi","lonely","alone","abandoned"], -0.50, 0.30, 0.25),
+        (&["tức giận","phẫn nộ","căm ghét","furious","rage","hatred"],    -0.40, 0.85, 0.70),
+        (&["yêu","thương","hạnh phúc","vui mừng","love","happy","joyful"],  0.70, 0.55, 0.65),
+        (&["hy vọng","quyết tâm","kiên cường","hope","resilient","persevere"], 0.50, 0.55, 0.70),
+        (&["bình yên","yên tĩnh","an toàn","peaceful","calm","safe"],      0.50, 0.20, 0.60),
+    ];
+    let lo = text.to_lowercase();
+    let (mut sv, mut sa, mut sd, mut n) = (0.0f32, 0.0f32, 0.0f32, 0u32);
+    for &(pats, v, a, d) in GROUPS {
+        for &p in pats {
+            if lo.contains(p) { sv += v; sa += a; sd += d; n += 1; break; }
+        }
+    }
+    if n == 0 { return EmotionTag { valence: 0.0, arousal: 0.40, dominance: 0.50, intensity: 0.10 }; }
+    let nf = n as f32;
+    let v = (sv/nf).clamp(-0.95, 0.95);
+    let a = (sa/nf).clamp(0.10, 0.95);
+    let d = (sd/nf).clamp(0.10, 0.95);
+    let intensity = (v.abs()*0.7 + (a-0.5).abs()*0.3).clamp(0.0, 0.95);
+    EmotionTag { valence: v, arousal: a, dominance: d, intensity }
+}
+
+pub fn sentence_affect(text: &str) -> EmotionTag {
+    use olang::ling::apply_modifiers;
+    let words: alloc::vec::Vec<&str> = text.split_whitespace().collect();
+    let base = sentence_base_affect(&words);
+    let (mod_v, _) = apply_modifiers(&words, base.valence, base.arousal);
+    let result = EmotionTag {
+        valence:   mod_v.clamp(-1.0, 1.0),
+        arousal:   base.arousal,
+        dominance: base.dominance,
+        intensity: base.intensity,
+    };
+    if result.valence.abs() < 0.10 && result.intensity < 0.15 {
+        let boot = bootstrap_affect(text);
+        if boot.intensity > 0.15 { return boot; }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

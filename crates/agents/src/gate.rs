@@ -15,6 +15,7 @@ extern crate alloc;
 use alloc::string::String;
 
 use context::emotion::IntentKind;
+use context::intent::crisis_text_for;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EpistemicLevel
@@ -178,8 +179,8 @@ impl EpistemicFirewall {
             EpistemicLevel::Hypothesis =>
                 alloc::format!("[Giả thuyết] {}", content),
             EpistemicLevel::Unknown =>
-                // BlackCurtain — không bịa
-                alloc::format!("Tôi chưa có đủ thông tin về điều này."),
+                // BlackCurtain (QT9): không bịa, nói thật là chưa có đủ dữ liệu
+                alloc::format!("[chưa có đủ dữ liệu]"),
             EpistemicLevel::Deprecated =>
                 alloc::format!("[Thông tin cũ] {} (có thể đã được cập nhật)", content),
         }
@@ -213,10 +214,7 @@ fn crisis_response(text: &str) -> String {
 }
 
 fn default_crisis_response() -> String {
-    alloc::format!(
-        "Bạn có vẻ đang gặp khó khăn. Tôi ở đây với bạn. \
-         Đường dây hỗ trợ: 1800 599 920."
-    )
+    context::intent::crisis_text_vi()
 }
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {

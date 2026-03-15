@@ -14,6 +14,11 @@ use agents::learning::{LearningLoop, ProcessResult};
 use agents::encoder::ContentInput;
 use agents::gate::EpistemicLevel;
 use context::engine::ActivationResult;
+use context::infer::infer_context;
+use context::intent::{estimate_intent, decide_action};
+use context::emotion::IntentKind;
+use context::emotion::sentence_affect;
+use crate::response_template::{render, ResponseParams};
 use memory::dream::{DreamCycle, DreamConfig};
 use silk::walk::ResponseTone;
 
@@ -117,35 +122,73 @@ impl HomeRuntime {
     // ── Natural text ──────────────────────────────────────────────────────────
 
     fn process_natural(&mut self, text: &str, ts: i64) -> Response {
-        let input = ContentInput::Text { content: text.to_string(), timestamp: ts };
+        // ── Emotion Pipeline — 7 tầng ─────────────────────────────────────────
 
-        match self.learning.process_one(input) {
-            ProcessResult::Crisis { message } => Response {
-                text: message,
+        // T1: InferContext — điều kiện biên từ text
+        let emo_ctx = infer_context(text);
+
+        // T2: TextToEmotionTag — raw emotion từ từ ngữ
+        let raw_tag = sentence_affect(text);
+
+        // T3: ctx.Apply — scale theo S (S=1.0 FirstPerson/RealNow)
+        let scaled  = emo_ctx.apply(raw_tag);
+
+        // T4: IntentEstimate — scoring với keyword + mood amplifiers
+        let cur_v   = self.learning.context().fx();
+        let cur_a   = scaled.arousal;
+        let est     = estimate_intent(text, cur_v, cur_a);
+
+        // T5: Crisis → override ngay, trước mọi thứ
+        if est.primary == IntentKind::Crisis {
+            use crate::response_template::crisis_text;
+            return Response {
+                text: crisis_text(),
                 tone: ResponseTone::Supportive,
                 fx:   self.learning.context().fx(),
                 kind: ResponseKind::Crisis,
-            },
+            };
+        }
 
+        // T6: ConversationCurve — feed scaled emotion vào history
+        let input       = ContentInput::Text { content: text.to_string(), timestamp: ts };
+        let proc_result = self.learning.process_one(input);
+
+        // T7: Decide action → render response (text quyết định ở response_template)
+        let action  = decide_action(&est, cur_v);
+        let fx      = self.learning.context().fx();
+        let tone    = self.learning.context().tone();
+
+        match proc_result {
+            ProcessResult::Crisis { message } => Response {
+                text: message,
+                tone: ResponseTone::Supportive,
+                fx, kind: ResponseKind::Crisis,
+            },
             ProcessResult::Blocked { reason } => Response {
-                text: format!("Tôi không thể giúp với điều này. ({})", reason),
+                text: format!("({})", reason),
                 tone: ResponseTone::Gentle,
-                fx:   self.learning.context().fx(),
-                kind: ResponseKind::Blocked,
+                fx, kind: ResponseKind::Blocked,
             },
-
             ProcessResult::Ok { emotion, .. } => {
-                let fx   = self.learning.context().fx();
-                let tone = self.learning.context().tone();
-                let text = self.generate_response(tone, emotion.valence, fx);
+                use crate::response_template::tone_fallback;
+                use context::intent::IntentAction;
+                // Original chỉ dùng khi action = Proceed — không fill cho Heal/Risk/Manipulate
+                let original = match &action {
+                    IntentAction::Proceed => Some(tone_fallback(tone, emotion.valence)),
+                    _ => None,
+                };
+                let text = render(&ResponseParams {
+                    tone, action, valence: cur_v, fx,
+                    context: None, original,
+                });
                 Response { text, tone, fx, kind: ResponseKind::Natural }
-            }
-
-            ProcessResult::Empty => Response {
-                text: String::from("..."),
-                tone: ResponseTone::Engaged,
-                fx:   0.0,
-                kind: ResponseKind::Natural,
+            },
+            ProcessResult::Empty => {
+                let text = render(&ResponseParams {
+                    tone, action, valence: cur_v, fx,
+                    context: None, original: None,
+                });
+                Response { text, tone, fx, kind: ResponseKind::Natural }
             },
         }
     }
@@ -343,27 +386,10 @@ impl HomeRuntime {
 
     // ── Response generation ───────────────────────────────────────────────────
 
-    /// Sinh response text dựa trên tone và emotion.
-    /// Không nhảy quá 0.40/bước — dẫn từ từ.
+    /// Sinh fallback text khi không có original từ pipeline.
+    /// Dùng response_template::tone_fallback — không hardcode string ở đây.
     fn generate_response(&self, tone: ResponseTone, current_v: f32, _fx: f32) -> String {
-        match tone {
-            ResponseTone::Supportive =>
-                if current_v < -0.5 {
-                    String::from("Tôi nghe bạn. Bạn đang trải qua điều gì vậy?")
-                } else {
-                    String::from("Tôi hiểu. Bạn muốn kể thêm không?")
-                },
-            ResponseTone::Pause =>
-                String::from("Bạn có ổn không?"),
-            ResponseTone::Gentle =>
-                String::from("Tôi ở đây với bạn."),
-            ResponseTone::Reinforcing =>
-                String::from("Tốt lắm! Bạn đang tiến bộ rõ rệt."),
-            ResponseTone::Celebratory =>
-                String::from("Tuyệt vời! Tôi vui vì bạn."),
-            ResponseTone::Engaged =>
-                String::from("Tôi hiểu rồi."),
-        }
+        crate::response_template::tone_fallback(tone, current_v)
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────

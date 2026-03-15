@@ -10,3 +10,4 @@ extern crate alloc;
 
 pub mod origin;
 pub mod parser;
+pub mod response_template;
