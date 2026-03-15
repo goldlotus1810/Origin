@@ -178,12 +178,110 @@ fn sentence_emotion(sentence: &str) -> EmotionTag {
 
     if weight == 0.0 { return EmotionTag::NEUTRAL; }
 
+    let result_v = (tv / weight).max(-1.0).min(1.0);
+
+    // Lớp 3: topic inference (khi valence thấp)
+    // Nếu sentence chưa có signal rõ (|v| < 0.1), thử topic words
+    if result_v.abs() < 0.10 {
+        let topic_e = topic_inference(&lower, &words);
+        if topic_e.valence.abs() > 0.10 {
+            return topic_e;
+        }
+    }
+
     EmotionTag::new(
-        (tv / weight).max(-1.0).min(1.0),
+        result_v,
         (ta / weight).max(0.0).min(1.0),
         (td / weight).max(0.0).min(1.0),
         (ti / weight).max(0.0).min(1.0),
     )
+}
+
+/// Lớp 3: Topic inference — map sentence sang topic cluster.
+///
+/// Khi word-level không tìm được signal, dùng topic keywords.
+/// "éolienne" → renewable_energy cluster → valence=+0.60
+fn topic_inference(lower: &str, words: &[&str]) -> EmotionTag {
+    // Topic keywords → (valence, arousal)
+    // Ordered by specificity (longer phrases first)
+    static TOPIC_SIGNALS: &[(&str, f32, f32)] = &[
+        // Renewable energy / environment (positive)
+        ("hydroélectrique", 0.60, 0.45),
+        ("photovoltaïque",  0.60, 0.45),
+        ("renouvelables",   0.60, 0.45),
+        ("renouvelable",    0.60, 0.45),
+        ("écologiques",     0.60, 0.45),
+        ("écologique",      0.60, 0.45),
+        ("éoliennes",       0.60, 0.45),
+        ("éolienne",        0.60, 0.45),
+        ("solaire",         0.60, 0.45),
+        ("durables",        0.55, 0.40),
+        ("durable",         0.55, 0.40),
+        ("biodiversité",    0.55, 0.40),
+        ("biodiversite",    0.55, 0.40),
+        // Technology / innovation (positive)
+        ("crowdfunding",    0.55, 0.60),
+        ("innovation",      0.55, 0.55),
+        ("technologie",     0.50, 0.55),
+        ("développeurs",    0.50, 0.55),
+        ("développement",   0.45, 0.50),
+        // Science / research (positive)
+        ("scientifiques",   0.55, 0.50),
+        ("scientifique",    0.55, 0.50),
+        ("chercheurs",      0.50, 0.50),
+        ("recherche",       0.50, 0.50),
+        ("découverte",      0.55, 0.55),
+        // Health (neutral-positive)
+        ("vaccin",          0.35, 0.55),
+        ("médecin",         0.20, 0.45),
+        // Crisis / threat (negative)
+        ("catastrophe",    -0.65, 0.75),
+        ("menacées",       -0.60, 0.70),
+        ("menacés",        -0.60, 0.70),
+        ("extinction",     -0.65, 0.70),
+        ("disparaître",    -0.55, 0.65),
+        ("pollution",      -0.55, 0.60),
+        ("dégradation",    -0.55, 0.60),
+        // German equivalents
+        ("erneuerbar",      0.60, 0.45),
+        ("photovoltaik",    0.60, 0.45),
+        ("nachhaltig",      0.55, 0.40),
+        ("innovation",      0.55, 0.55),
+        ("wissenschaft",    0.55, 0.50),
+        ("forschung",       0.50, 0.50),
+        ("katastrophe",    -0.65, 0.75),
+        ("bedrohung",      -0.60, 0.70),
+        ("aussterben",     -0.65, 0.70),
+        // Spanish equivalents
+        ("renovables",      0.60, 0.45),
+        ("sostenible",      0.55, 0.40),
+        ("tecnología",      0.50, 0.55),
+        ("investigación",   0.50, 0.50),
+        ("descubrimiento",  0.55, 0.55),
+        ("catástrofe",     -0.65, 0.75),
+        ("amenaza",        -0.60, 0.70),
+    ];
+
+    let mut best_v = 0.0f32;
+    let mut best_a = 0.5f32;
+    let mut found  = false;
+
+    for &(topic, v, a) in TOPIC_SIGNALS {
+        if lower.contains(topic) || words.iter().any(|&w| w == topic) {
+            // Tìm thấy topic keyword
+            if !found || v.abs() > best_v.abs() {
+                best_v = v;
+                best_a = a;
+                found  = true;
+            }
+        }
+    }
+
+    if found {
+        EmotionTag::new(best_v, best_a, 0.5, best_a * 0.8)
+    } else {
+        EmotionTag::NEUTRAL
+    }
 }
 
 /// Sentence-level emotion từ cụm từ ghép tiếng Việt.
