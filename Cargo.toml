@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ucd",
+    "crates/olang",
+    "crates/silk",
+    "crates/vsdf",
+    "crates/context",
+    "crates/agents",
+    "crates/memory",
+    "crates/runtime",
+    "tools/seeder",
+    "tools/inspector",
+    "tools/server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+ucd     = { path = "crates/ucd" }
+olang   = { path = "crates/olang" }
+silk    = { path = "crates/silk" }
+vsdf    = { path = "crates/vsdf" }
+context = { path = "crates/context" }
+agents  = { path = "crates/agents" }
+memory  = { path = "crates/memory" }
+runtime = { path = "crates/runtime" }
+libm    = { version = "0.2", default-features = false }
+proptest = { version = "1.0" }
+ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc"] }
+sha2          = { version = "0.10", default-features = false }

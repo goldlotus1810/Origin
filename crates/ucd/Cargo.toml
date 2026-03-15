@@ -1,0 +1,9 @@
+[package]
+name    = "ucd"
+version.workspace = true
+edition.workspace = true
+build   = "build.rs"
+
+[lib]
+name = "ucd"
+path = "src/lib.rs"
