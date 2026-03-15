@@ -25,3 +25,4 @@ pub mod clone;
 pub mod self_model;
 pub mod separator;
 pub mod ling;
+pub mod compiler;
