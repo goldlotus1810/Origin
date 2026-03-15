@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn activate_single_turn() {
         let mut e = engine();
-        let r = e.on_activate(RawInput::text("hom nay troi dep", 1000));
+        let r = e.on_activate(RawInput::text("hôm nay trời đẹp", 1000));
         assert_eq!(r.turn, 0);
         assert_eq!(e.turn_count(), 1);
     }
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn activate_crisis_detected() {
         let mut e = engine();
-        let r = e.on_activate(RawInput::text("toi muon chet", 1000));
+        let r = e.on_activate(RawInput::text("tôi muốn chết", 1000));
         assert_eq!(r.intent, IntentKind::Crisis,
             "Crisis phải detect được");
     }
@@ -201,14 +201,14 @@ mod tests {
     #[test]
     fn activate_command_detected() {
         let mut e = engine();
-        let r = e.on_activate(RawInput::text("tat den phong khach", 1000));
+        let r = e.on_activate(RawInput::text("tắt đèn phòng khách", 1000));
         assert_eq!(r.intent, IntentKind::Command);
     }
 
     #[test]
     fn activate_sad_text_negative_affect() {
         let mut e = engine();
-        let r = e.on_activate(RawInput::text("toi buon qua hom nay", 1000));
+        let r = e.on_activate(RawInput::text("tôi buồn quá hôm nay", 1000));
         assert!(r.affect.valence < 0.0,
             "Câu buồn → affect âm: {}", r.affect.valence);
     }
@@ -217,8 +217,8 @@ mod tests {
     fn activate_three_turns_accumulate() {
         let mut e = engine();
         e.on_activate(RawInput::text("ok", 1000));
-        e.on_activate(RawInput::text("toi met", 2000));
-        e.on_activate(RawInput::text("buon qua", 3000));
+        e.on_activate(RawInput::text("tôi mệt rồi", 2000));
+        e.on_activate(RawInput::text("buồn quá", 3000));
 
         assert_eq!(e.turn_count(), 3);
         assert!(e.current_v() < 0.0, "Sau 3 turns buồn → V âm");
@@ -228,8 +228,8 @@ mod tests {
     fn activate_falling_curve_supportive() {
         let mut e = engine();
         e.on_activate(RawInput::text("ok binh thuong", 1000));
-        e.on_activate(RawInput::text("toi met roi", 2000));
-        let r = e.on_activate(RawInput::text("buon qua kho chiu", 3000));
+        e.on_activate(RawInput::text("tôi mệt rồi", 2000));
+        let r = e.on_activate(RawInput::text("buồn quá khó chịu", 3000));
 
         // Curve đang giảm → Supportive
         assert!(
@@ -242,7 +242,7 @@ mod tests {
     fn activate_audio_override_text() {
         let mut e = engine();
         // Text vui nhưng giọng run thấp
-        let raw = RawInput::text_with_audio("binh thuong thoi", 120.0, 0.2, 1000);
+        let raw = RawInput::text_with_audio("bình thường thôi", 120.0, 0.2, 1000);
         let r = e.on_activate(raw);
         // Pitch 120Hz rất thấp → audio override → V âm
         assert!(r.affect.valence < 0.1,
