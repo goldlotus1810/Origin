@@ -468,6 +468,7 @@ fn main() {
 
     // HASH_TO_CP — reverse index sorted by hash
     writeln!(src, "/// Reverse index: chain_hash → cp (binary search by hash) O(log n)").unwrap();
+    writeln!(src, "#[cfg(feature = \"reverse-index\")]").unwrap();
     writeln!(src, "pub static HASH_TO_CP: &[(u64, u32)] = &[").unwrap();
     for (hash, cp) in &hash_to_cp {
         writeln!(src, "    (0x{:016X}u64, 0x{:05X}),", hash, cp).unwrap();
@@ -478,6 +479,7 @@ fn main() {
     // CP_BUCKET — bucket index
     writeln!(src, "/// Bucket index: (shape, relation) → [cp] for top-n decode").unwrap();
     writeln!(src, "/// Format: flat array of (shape, relation, cp_count, cp[0], cp[1], ...)").unwrap();
+    writeln!(src, "#[cfg(feature = \"reverse-index\")]").unwrap();
     writeln!(src, "pub static CP_BUCKET_DATA: &[u32] = &[").unwrap();
     let mut bucket_offsets: Vec<((u8,u8), u32, u32)> = Vec::new(); // (key, offset, count)
     let mut offset: u32 = 0;
@@ -497,6 +499,7 @@ fn main() {
     writeln!(src).unwrap();
 
     writeln!(src, "/// Bucket lookup: (shape, relation) → (offset, count) into CP_BUCKET_DATA").unwrap();
+    writeln!(src, "#[cfg(feature = \"reverse-index\")]").unwrap();
     writeln!(src, "pub static CP_BUCKET_INDEX: &[(u8, u8, u32, u32)] = &[").unwrap();
     for ((s, r), off, cnt) in &bucket_offsets {
         writeln!(src, "    (0x{:02X}, 0x{:02X}, {}, {}),", s, r, off, cnt).unwrap();
@@ -538,8 +541,11 @@ pub struct UcdEntry {
     pub name:&'static str,
 }
 pub static UCD_TABLE: &[UcdEntry] = &[];
+#[cfg(feature = "reverse-index")]
 pub static HASH_TO_CP: &[(u64,u32)] = &[];
+#[cfg(feature = "reverse-index")]
 pub static CP_BUCKET_DATA: &[u32] = &[];
+#[cfg(feature = "reverse-index")]
 pub static CP_BUCKET_INDEX: &[(u8,u8,u32,u32)] = &[];
 pub static SDF_PRIMITIVES: &[(u32,u8)] = &[];
 pub static RELATION_PRIMITIVES: &[(u32,u8)] = &[];

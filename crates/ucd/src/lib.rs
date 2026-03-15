@@ -35,6 +35,9 @@ pub fn lookup(cp: u32) -> Option<&'static UcdEntry> {
 ///
 /// Binary search trên HASH_TO_CP (sorted by hash).
 /// O(log n). Dùng để decode MolecularChain → codepoint.
+///
+/// Requires feature `reverse-index` (default). Tắt trên embedded để tiết kiệm ~40KB.
+#[cfg(feature = "reverse-index")]
 #[inline]
 pub fn decode_hash(hash: u64) -> Option<u32> {
     HASH_TO_CP
@@ -43,10 +46,21 @@ pub fn decode_hash(hash: u64) -> Option<u32> {
         .map(|i| HASH_TO_CP[i].1)
 }
 
+/// Stub khi không có reverse-index (embedded build).
+/// Luôn trả None — Worker phải ISL request lên Chief để decode.
+#[cfg(not(feature = "reverse-index"))]
+#[inline]
+pub fn decode_hash(_hash: u64) -> Option<u32> {
+    None
+}
+
 /// Bucket lookup: (shape, relation) → slice of codepoints
 ///
 /// O(1) lookup. Dùng để tìm top-n candidates cho decode.
 /// Candidates cùng shape+relation, sort theo similarity.
+///
+/// Requires feature `reverse-index` (default).
+#[cfg(feature = "reverse-index")]
 pub fn bucket_cps(shape: u8, relation: u8) -> &'static [u32] {
     // Binary search trong CP_BUCKET_INDEX
     let idx = CP_BUCKET_INDEX.binary_search_by(|&(s, r, _, _)| {
@@ -61,6 +75,12 @@ pub fn bucket_cps(shape: u8, relation: u8) -> &'static [u32] {
         }
         Err(_) => &[],
     }
+}
+
+/// Stub khi không có reverse-index (embedded build).
+#[cfg(not(feature = "reverse-index"))]
+pub fn bucket_cps(_shape: u8, _relation: u8) -> &'static [u32] {
+    &[]
 }
 
 /// Shape byte của codepoint.
@@ -228,9 +248,10 @@ mod tests {
         }
     }
 
-    // ── Reverse lookup ──────────────────────────────────────────────────────
+    // ── Reverse lookup (requires feature "reverse-index") ──────────────────
 
     #[test]
+    #[cfg(feature = "reverse-index")]
     fn decode_hash_fire() {
         if table_len() == 0 { return; }
         let e = lookup(0x1F525).unwrap();
@@ -241,6 +262,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "reverse-index")]
     fn hash_to_cp_sorted() {
         for i in 1..HASH_TO_CP.len() {
             assert!(HASH_TO_CP[i-1].0 < HASH_TO_CP[i].0,
@@ -248,9 +270,16 @@ mod tests {
         }
     }
 
+    #[test]
+    #[cfg(not(feature = "reverse-index"))]
+    fn decode_hash_stub_returns_none() {
+        assert!(decode_hash(0x12345678).is_none(), "Stub always None");
+    }
+
     // ── Bucket lookup ───────────────────────────────────────────────────────
 
     #[test]
+    #[cfg(feature = "reverse-index")]
     fn bucket_sphere_member() {
         if table_len() == 0 { return; }
         let cps = bucket_cps(0x01, 0x01); // Sphere + Member
@@ -266,10 +295,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "reverse-index")]
     fn bucket_nonexistent_empty() {
         // Shape=0xFF không tồn tại
         let cps = bucket_cps(0xFF, 0xFF);
         assert!(cps.is_empty());
+    }
+
+    #[test]
+    #[cfg(not(feature = "reverse-index"))]
+    fn bucket_stub_returns_empty() {
+        assert!(bucket_cps(0x01, 0x01).is_empty(), "Stub always empty");
     }
 
     // ── SDF + RELATION primitives ───────────────────────────────────────────

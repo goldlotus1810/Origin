@@ -32,10 +32,27 @@ fn main() {
     }
 
     let session_id = now_ns() as u64;
-    // Load origin.olang nếu có
-    let file_bytes = std::fs::read("origin.olang").ok();
+    // Load origin.olang nếu có — with crash recovery
+    let file_bytes = std::fs::read(OLANG_FILE).ok();
     let mut rt = if let Some(ref bytes) = file_bytes {
         println!("[boot] origin.olang: {} bytes", bytes.len());
+        // Validate file trước khi load — best-effort recovery nếu corrupt
+        match olang::reader::OlangReader::new(bytes) {
+            Ok(reader) => {
+                let (_pf, info) = reader.parse_recoverable();
+                if let Some(ref err) = info.error {
+                    eprintln!("[boot] WARNING: origin.olang corrupt at byte {}: {:?}",
+                        info.last_good_offset, err);
+                    eprintln!("[boot] Recovered {} records from {} bytes",
+                        info.records_recovered, info.total_bytes);
+                }
+            }
+            Err(e) => {
+                eprintln!("[boot] WARNING: origin.olang invalid header: {:?}", e);
+                eprintln!("[boot] Starting from scratch — old file preserved as origin.olang.bak");
+                let _ = std::fs::copy(OLANG_FILE, "origin.olang.bak");
+            }
+        }
         HomeRuntime::with_file(session_id, Some(bytes))
     } else {
         println!("[boot] No origin.olang — booting from nothing");

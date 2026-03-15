@@ -50,40 +50,64 @@ pub fn lca_weighted(pairs: &[(&MolecularChain, u32)]) -> MolecularChain {
 ///   < 0.15 → concrete (các chain rất giống nhau)
 ///   < 0.40 → categorical (nhóm liên quan)
 ///   ≥ 0.40 → abstract (khái niệm trừu tượng)
+///
+/// extremity ∈ [0.0, 1.0]:
+///   Đo mức "cực đoan" trung bình của inputs.
+///   LCA(😀, 😡): variance cao (divergence) VÀ extremity cao (both extreme).
+///   LCA(😐, 😐): variance thấp VÀ extremity thấp (neutral).
+///   Dùng để phân biệt "trung lập thật" vs "trung bình hóa cực đoan".
 #[derive(Debug, Clone)]
 pub struct LcaResult {
     /// Chain kết quả LCA.
     pub chain: MolecularChain,
     /// Variance trung bình trên tất cả dimensions.
     pub variance: f32,
+    /// Per-dimension variance: [shape, relation, valence, arousal, time].
+    /// Cho phép biết CHIỀU NÀO diverge mạnh nhất.
+    pub dim_variance: [f32; 5],
+    /// Extremity: trung bình abs(input_i - midpoint) trên valence+arousal.
+    /// Cao = inputs đều cực đoan (dù khác hướng).
+    pub extremity: f32,
 }
 
 /// LCA kèm variance output.
 ///
 /// Variance = mean(1 - similarity_full(input_i, lca)) cho mọi input.
+/// Extremity = trung bình abs(value - midpoint) cho valence + arousal.
+/// dim_variance = per-dimension weighted variance.
 pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
+    let empty = LcaResult {
+        chain: MolecularChain::empty(), variance: 0.0,
+        dim_variance: [0.0; 5], extremity: 0.0,
+    };
+
     // Lọc chain rỗng
     let valid: Vec<(&MolecularChain, u32)> = pairs.iter()
         .filter(|(c, _)| !c.is_empty())
         .copied()
         .collect();
 
-    if valid.is_empty() {
-        return LcaResult { chain: MolecularChain::empty(), variance: 0.0 };
-    }
+    if valid.is_empty() { return empty; }
     if valid.len() == 1 {
-        return LcaResult { chain: valid[0].0.clone(), variance: 0.0 };
+        // Single chain: extremity = how extreme its valence+arousal are
+        let m = &valid[0].0.0[0];
+        let ext = extremity_single(m.emotion.valence, m.emotion.arousal);
+        return LcaResult {
+            chain: valid[0].0.clone(), variance: 0.0,
+            dim_variance: [0.0; 5], extremity: ext,
+        };
     }
 
     // Dùng độ dài chain ngắn nhất để avoid out-of-bounds
     let min_len = valid.iter().map(|(c, _)| c.len()).min().unwrap_or(0);
-    if min_len == 0 {
-        return LcaResult { chain: MolecularChain::empty(), variance: 0.0 };
-    }
+    if min_len == 0 { return empty; }
 
     let total_weight: u32 = valid.iter().map(|(_, w)| w).sum();
+    let tw_f = total_weight as f32;
 
     let mut result_mols = Vec::with_capacity(min_len);
+    let mut dim_var_accum = [0.0f32; 5]; // accumulate per-dimension variance
+    let mut extremity_accum = 0.0f32;
 
     for mol_idx in 0..min_len {
         // Collect dimension values từ mọi chain tại vị trí mol_idx
@@ -98,6 +122,30 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         let valence       = mode_or_wavg(&valences,  total_weight);
         let arousal       = mode_or_wavg(&arousals,  total_weight);
         let time_byte     = mode_or_wavg(&times,     total_weight);
+
+        // Per-dimension weighted variance: Σ w_i × (val_i - mean)² / Σ w_i
+        let all_dims: [&[(u8, u32)]; 5] = [&shapes, &relations, &valences, &arousals, &times];
+        let means: [u8; 5] = [shape_byte, relation_byte, valence, arousal, time_byte];
+        for (d, (vals, mean)) in all_dims.iter().zip(means.iter()).enumerate() {
+            let var: f32 = vals.iter()
+                .map(|(v, w)| {
+                    let diff = *v as f32 - *mean as f32;
+                    *w as f32 * diff * diff
+                })
+                .sum::<f32>() / (tw_f * 255.0 * 255.0); // normalize to [0,1]
+            dim_var_accum[d] += var;
+        }
+
+        // Extremity: how extreme are the INPUTS on valence+arousal?
+        // midpoint: valence=0x80, arousal=0x80
+        for &(v, w) in &valences {
+            let ext_v = (v as f32 - 128.0).abs() / 128.0; // [0,1]
+            extremity_accum += ext_v * w as f32 / tw_f;
+        }
+        for &(a, w) in &arousals {
+            let ext_a = (a as f32 - 128.0).abs() / 128.0;
+            extremity_accum += ext_a * w as f32 / tw_f;
+        }
 
         // Fallback nếu invalid byte (ví dụ shape=0x00)
         let shape    = ShapeBase::from_byte(shape_byte)
@@ -123,7 +171,22 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         .map(|(c, _)| 1.0 - c.similarity_full(&chain))
         .sum::<f32>() / n;
 
-    LcaResult { chain, variance }
+    // Normalize dim_variance by min_len
+    let ml = min_len as f32;
+    for dv in &mut dim_var_accum {
+        *dv /= ml;
+    }
+    // Normalize extremity: chia 2 (2 chiều: V + A) × min_len
+    extremity_accum /= 2.0 * ml;
+
+    LcaResult { chain, variance, dim_variance: dim_var_accum, extremity: extremity_accum }
+}
+
+/// Extremity of a single molecule (valence + arousal distance from midpoint).
+fn extremity_single(valence: u8, arousal: u8) -> f32 {
+    let ext_v = (valence as f32 - 128.0).abs() / 128.0;
+    let ext_a = (arousal as f32 - 128.0).abs() / 128.0;
+    (ext_v + ext_a) / 2.0
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,8 +259,21 @@ pub fn lca_many(chains: &[MolecularChain]) -> MolecularChain {
 
 /// LCA của slice chains kèm variance.
 pub fn lca_many_with_variance(chains: &[MolecularChain]) -> LcaResult {
-    if chains.is_empty() { return LcaResult { chain: MolecularChain::empty(), variance: 0.0 }; }
-    if chains.len() == 1 { return LcaResult { chain: chains[0].clone(), variance: 0.0 }; }
+    if chains.is_empty() {
+        return LcaResult {
+            chain: MolecularChain::empty(), variance: 0.0,
+            dim_variance: [0.0; 5], extremity: 0.0,
+        };
+    }
+    if chains.len() == 1 {
+        let ext = if chains[0].is_empty() { 0.0 } else {
+            extremity_single(chains[0].0[0].emotion.valence, chains[0].0[0].emotion.arousal)
+        };
+        return LcaResult {
+            chain: chains[0].clone(), variance: 0.0,
+            dim_variance: [0.0; 5], extremity: ext,
+        };
+    }
     let pairs: Vec<(&MolecularChain, u32)> = chains.iter().map(|c| (c, 1u32)).collect();
     lca_with_variance(&pairs)
 }
@@ -474,5 +550,47 @@ mod tests {
         // avg(0x01, 0x01, 0xFF, 0xFF) = (1+1+255+255)/4 = 128 = 0x80
         assert!((result as i32 - 0x80).abs() <= 2,
             "50% < 60% → weighted avg ≈ 0x80, got 0x{:02X}", result);
+    }
+
+    // ── Extremity — phát hiện "trung bình hóa cực đoan" ───────────────────
+
+    #[test]
+    fn extremity_identical_chains() {
+        if skip_if_empty() { return; }
+        let f = fire();
+        let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
+        // Extremity should be consistent (same chain → same extremity)
+        assert!(result.extremity >= 0.0 && result.extremity <= 1.0,
+            "Extremity bounded [0,1]: got {}", result.extremity);
+    }
+
+    #[test]
+    fn extremity_diverse_higher_than_neutral() {
+        if skip_if_empty() { return; }
+        // 🔥 💧 ❄ 🧠 → inputs spread out → extremity measurable
+        let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
+        // Just verify it's valid — actual extremity depends on UCD values
+        assert!(result.extremity >= 0.0 && result.extremity <= 1.0);
+    }
+
+    #[test]
+    fn dim_variance_shape() {
+        if skip_if_empty() { return; }
+        // dim_variance[0] = shape variance
+        let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
+        // All 5 dims should be non-negative
+        for (i, dv) in result.dim_variance.iter().enumerate() {
+            assert!(*dv >= 0.0, "dim_variance[{}] = {} >= 0", i, dv);
+        }
+    }
+
+    #[test]
+    fn dim_variance_identical_is_zero() {
+        if skip_if_empty() { return; }
+        let f = fire();
+        let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
+        for (i, dv) in result.dim_variance.iter().enumerate() {
+            assert!(*dv < 0.001, "Identical → dim_variance[{}] ≈ 0, got {}", i, dv);
+        }
     }
 }

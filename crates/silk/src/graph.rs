@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 use crate::edge::{SilkEdge, EdgeKind, EmotionTag};
 use crate::hebbian::{
     hebbian_strengthen, hebbian_decay, blend_emotion,
-    should_promote,
+    should_promote, fib, PROMOTE_WEIGHT,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +75,53 @@ impl SilkGraph {
             let _ = key;
             let edge = SilkEdge::associative(from, to, emotion, ts);
             self.insert_sorted(edge);
+        }
+    }
+
+    /// Cross-layer co-activation — kết nối giữa 2 tầng khác nhau.
+    ///
+    /// QT⑫ mở rộng: cho phép cross-layer Silk khi:
+    ///   1. Weight đạt Fib[n+2] threshold (n = abs(layer_a - layer_b))
+    ///   2. fire_count >= Fib[n+2] (nghiêm hơn same-layer Fib[n])
+    ///
+    /// `layers` = (from_layer, to_layer).
+    /// Caller (LeoAI/Chief) chịu trách nhiệm kiểm AAM approve.
+    /// Returns true nếu edge đủ điều kiện cross-layer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn co_activate_cross_layer(
+        &mut self,
+        from: u64, to: u64,
+        layers: (u8, u8),
+        emotion: EmotionTag,
+        reward: f32,
+        ts: i64,
+    ) -> bool {
+        let layer_diff = (layers.0 as i16 - layers.1 as i16).unsigned_abs() as usize;
+
+        // Same-layer → delegate to normal co_activate
+        if layer_diff == 0 {
+            self.co_activate(from, to, emotion, reward, ts);
+            return true;
+        }
+
+        // Cross-layer: Fib[n+2] threshold — stricter
+        let threshold = fib(layer_diff + 2);
+
+        // Check existing edge
+        if let Some(idx) = self.find_edge_idx(from, to, EdgeKind::Assoc) {
+            let e = &mut self.edges[idx];
+            e.weight     = hebbian_strengthen(e.weight, reward);
+            e.emotion    = blend_emotion(e.emotion, emotion, emotion.intensity);
+            e.fire_count = e.fire_count.saturating_add(1);
+            e.updated_at = ts;
+
+            // Cross-layer edge chỉ "hoạt động" khi đủ threshold
+            e.fire_count >= threshold && e.weight >= PROMOTE_WEIGHT
+        } else {
+            // Tạo mới — bắt đầu yếu, cần nhiều co-activation
+            let edge = SilkEdge::associative(from, to, emotion, ts);
+            self.insert_sorted(edge);
+            false // chưa đủ threshold
         }
     }
 
@@ -389,6 +436,51 @@ mod tests {
 
         let from_a = g.edges_from(0xA);
         assert_eq!(from_a.len(), 2, "2 edges from A");
+    }
+
+    // ── Cross-layer Silk ───────────────────────────────────────────────────
+
+    #[test]
+    fn cross_layer_same_layer_always_true() {
+        let mut g = SilkGraph::new();
+        let ok = g.co_activate_cross_layer(0xA, 0xB, (3, 3), emo(-0.5, 0.7), 0.8, 1000);
+        assert!(ok, "Same-layer → always accepted");
+        assert_eq!(g.assoc_count(), 1);
+    }
+
+    #[test]
+    fn cross_layer_starts_weak() {
+        let mut g = SilkGraph::new();
+        // L4→L5: diff=1, threshold=Fib[3]=3
+        let ok = g.co_activate_cross_layer(0xA, 0xB, (4, 5), emo(-0.5, 0.7), 0.8, 1000);
+        assert!(!ok, "First cross-layer co-activation → not enough");
+        assert_eq!(g.assoc_count(), 1, "Edge created but weak");
+    }
+
+    #[test]
+    fn cross_layer_needs_fib_n2_threshold() {
+        let mut g = SilkGraph::new();
+        // L3→L5: diff=2, threshold=Fib[4]=5
+        for i in 0..100 {
+            let ok = g.co_activate_cross_layer(
+                0xA, 0xB, (3, 5), emo(-0.5, 0.7), 1.0, i * 1000,
+            );
+            if ok {
+                // Must have fire_count >= 5 AND weight >= 0.7
+                let e = g.find_edge(0xA, 0xB, EdgeKind::Assoc).unwrap();
+                assert!(e.fire_count >= 5, "fire_count >= Fib[4]=5");
+                assert!(e.weight >= 0.7, "weight >= PROMOTE_WEIGHT");
+                return;
+            }
+        }
+        panic!("100 co-activations should eventually pass Fib[4]=5 threshold");
+    }
+
+    #[test]
+    fn cross_layer_deeper_is_harder() {
+        // diff=1 → Fib[3]=3, diff=3 → Fib[5]=8
+        use crate::hebbian::fib;
+        assert!(fib(3) < fib(5), "Deeper diff → higher threshold");
     }
 
     #[test]
