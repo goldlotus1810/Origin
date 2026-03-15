@@ -21,3 +21,4 @@ pub mod qr;
 pub mod ir;
 pub mod vm;
 pub mod startup;
+pub mod clone;
