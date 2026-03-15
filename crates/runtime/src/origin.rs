@@ -60,9 +60,10 @@ pub struct HomeRuntime {
     dream:      DreamCycle,
     registry:   Registry,
     alias_to_cp: BTreeMap<alloc::string::String, u32>,
-    self_model: SelfModel,
-    uptime_ns:  i64,
-    turn_count: u64,
+    self_model:      SelfModel,
+    uptime_ns:        i64,
+    turn_count:       u64,
+    last_dream_turn:  u64,  // turn khi Dream lần cuối chạy
 }
 
 impl HomeRuntime {
@@ -80,9 +81,10 @@ impl HomeRuntime {
             dream:      DreamCycle::new(DreamConfig::default()),
             alias_to_cp: build_alias_map(file_bytes),
             registry:   boot_result.registry,
-            self_model: SelfModel::new(),
-            uptime_ns:  0,
-            turn_count: 0,
+            self_model:      SelfModel::new(),
+            uptime_ns:        0,
+            turn_count:       0,
+            last_dream_turn:  0,
         }
     }
 
@@ -90,6 +92,14 @@ impl HomeRuntime {
     pub fn process_text(&mut self, text: &str, ts: i64) -> Response {
         self.turn_count += 1;
         self.uptime_ns = ts;
+
+        // Auto-Dream: sau mỗi DREAM_INTERVAL turns
+        const DREAM_INTERVAL: u64 = 8; // mỗi 8 turns
+        if self.turn_count - self.last_dream_turn >= DREAM_INTERVAL
+            && self.learning.stm().len() >= 3
+        {
+            self.run_dream(ts);
+        }
 
         // ── Parse: natural hoặc ○{} ──────────────────────────────────────────
         match self.parser.parse(text) {
@@ -176,13 +186,13 @@ impl HomeRuntime {
         for event in &result.events {
             match event {
                 VmEvent::Output(chain) => {
-                    // Output chain → STM: user tạo ra node này
+                    // Output chain → STM
                     if !chain.is_empty() {
                         self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
                         learned.push(chain.clone());
                     }
-                    let emoji = chain_to_emoji(chain);
-                    output_text.push_str(&format!("{} ", emoji));
+                    // LCA output: đã hiện các lookup rồi, chỉ hiện ∘
+                    output_text.push_str("○");
                 }
                 VmEvent::LookupAlias(alias) => {
                     // Check alias_to_cp cache trước (bao gồm L2 nodes)
@@ -556,23 +566,23 @@ fn build_alias_map(file_bytes: Option<&[u8]>) -> alloc::collections::BTreeMap<al
     use olang::startup::ALIAS_CODEPOINTS;
     let mut map = alloc::collections::BTreeMap::new();
 
-    // Seed từ static ALIAS_CODEPOINTS
+    // Seed từ static ALIAS_CODEPOINTS — HIGHEST priority
+    // Word → cp là ground truth, không override bằng hash lookup
     for &(alias, cp) in ALIAS_CODEPOINTS {
         map.insert(alias.to_string(), cp);
     }
 
-    // Load thêm từ file nếu có
+    // Load thêm từ file — chỉ thêm words CHƯA có trong static table
     if let Some(bytes) = file_bytes {
         if let Ok(reader) = olang::reader::OlangReader::new(bytes) {
             if let Ok(parsed) = reader.parse_all() {
                 for alias in &parsed.aliases {
                     if alias.name.starts_with("_qr_") { continue; }
-                    // Tìm codepoint canonical cho hash này
-                    // Ưu tiên: ALIAS_CODEPOINTS → decode_hash
+                    // Skip nếu đã có trong static table (tránh hash collision override)
+                    if map.contains_key(alias.name.as_str()) { continue; }
+                    // Tìm cp: ưu tiên ALIAS_CODEPOINTS name match → decode_hash
                     let cp_opt = ALIAS_CODEPOINTS.iter()
-                        .find(|&&(_, cp)| {
-                            olang::encoder::encode_codepoint(cp).chain_hash() == alias.chain_hash
-                        })
+                        .find(|&&(a, _)| a == alias.name.as_str())
                         .map(|&(_, cp)| cp)
                         .or_else(|| ucd::decode_hash(alias.chain_hash));
                     if let Some(cp) = cp_opt {
@@ -583,4 +593,49 @@ fn build_alias_map(file_bytes: Option<&[u8]>) -> alloc::collections::BTreeMap<al
         }
     }
     map
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-Dream — tự học khi idle
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl HomeRuntime {
+    /// Chạy Dream cycle và feed approved proposals vào Registry.
+    ///
+    /// Gọi tự động sau DREAM_INTERVAL turns.
+    /// Approved proposals → ĐN nodes mới trong Registry.
+    fn run_dream(&mut self, ts: i64) {
+        self.last_dream_turn = self.turn_count;
+
+        let result = self.dream.run(
+            self.learning.stm(),
+            self.learning.graph(),
+            ts,
+        );
+
+        // Feed approved proposals → Registry (ĐN — chưa phải QR)
+        {
+            use memory::proposal::{ProposalKind, AAMDecision};
+            let aam = memory::proposal::AAM::new();
+            for proposal in &result.proposals {
+                if matches!(aam.review(proposal), AAMDecision::Approved) {
+                    match &proposal.kind {
+                        ProposalKind::NewNode { chain, .. } => {
+                            self.registry.insert(chain, 3, 0, ts, false); // L3, ĐN
+                        }
+                        ProposalKind::PromoteQR { chain_hash, fire_count: _ } => {
+                            // Re-insert as QR
+                            let dummy = olang::encoder::encode_codepoint(0x25CB);
+                            self.registry.insert(&dummy, 0, 0, ts, true);
+                            let _ = chain_hash;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Update self-model
+        self.self_model.update(&self.registry, ts);
+    }
 }
