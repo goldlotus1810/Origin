@@ -23,7 +23,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use olang::molecular::{MolecularChain, RelationBase};
-use olang::lca::{lca, lca_weighted};
+use olang::lca::{lca, lca_weighted, lca_with_variance};
 use silk::edge::EmotionTag;
 
 use crate::skill::{Skill, ExecContext, SkillResult};
@@ -128,22 +128,18 @@ impl Skill for AbstractionSkill {
             return SkillResult::Insufficient;
         }
 
-        // LCA với equal weights
+        // LCA kèm variance — tính trực tiếp từ engine
         let pairs: Vec<(&MolecularChain, u32)> = ctx.input_chains.iter()
             .map(|c| (c, 1u32))
             .collect();
-        let abstract_chain = lca_weighted(&pairs);
+        let lca_result = lca_with_variance(&pairs);
 
-        if abstract_chain.is_empty() {
+        if lca_result.chain.is_empty() {
             return SkillResult::Insufficient;
         }
 
-        // Tính variance: trung bình khoảng cách từ mỗi chain đến LCA
-        // Dùng similarity_full() — tính cả emotion distance, không chỉ shape+relation
-        let n = ctx.input_chains.len() as f32;
-        let variance: f32 = ctx.input_chains.iter()
-            .map(|c| 1.0 - c.similarity_full(&abstract_chain))
-            .sum::<f32>() / n;
+        let abstract_chain = lca_result.chain;
+        let variance = lca_result.variance;
 
         // Variance → loại khái niệm
         let concept_type = if variance < 0.15 {

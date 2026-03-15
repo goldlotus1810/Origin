@@ -96,6 +96,78 @@ impl DreamProposal {
 // AAMDecision
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SkillProposal — từ instinct output
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Loại insight từ instinct.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InsightKind {
+    /// Phát hiện nhân quả: A → B
+    Causal {
+        cause_hash:  u64,
+        effect_hash: u64,
+    },
+    /// Phát hiện mâu thuẫn giữa 2 nodes
+    Contradiction {
+        chain_a_hash: u64,
+        chain_b_hash: u64,
+        score:        f32,
+    },
+    /// Tạo abstraction mới từ N chains
+    Abstraction {
+        abstract_chain: MolecularChain,
+        source_hashes:  Vec<u64>,
+        variance:       f32,  // concrete/categorical/abstract
+    },
+    /// Analogy: tìm được D từ A:B :: C:?
+    Analogy {
+        result_chain: MolecularChain,
+    },
+    /// High curiosity — node mới đáng explore
+    Curiosity {
+        chain_hash: u64,
+        novelty:    f32,
+    },
+}
+
+/// Proposal từ instinct Skills → AAM.
+///
+/// Khác DreamProposal: DreamProposal từ offline consolidation,
+/// SkillProposal từ real-time instinct processing.
+#[derive(Debug, Clone)]
+pub struct SkillProposal {
+    /// Skill nào tạo proposal
+    pub skill_name:  String,
+    /// Loại insight
+    pub kind:        InsightKind,
+    /// Confidence ∈ [0, 1]
+    pub confidence:  f32,
+    /// Timestamp
+    pub timestamp:   i64,
+}
+
+impl SkillProposal {
+    /// Tạo SkillProposal.
+    pub fn new(skill_name: &str, kind: InsightKind, confidence: f32, ts: i64) -> Self {
+        Self {
+            skill_name: String::from(skill_name),
+            kind,
+            confidence,
+            timestamp: ts,
+        }
+    }
+
+    /// Proposal đủ tin cậy không?
+    pub fn is_confident(&self) -> bool {
+        self.confidence >= 0.6
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AAMDecision
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Quyết định của AAM.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AAMDecision {
@@ -168,6 +240,60 @@ impl AAM {
         proposals.iter()
             .filter(|p| matches!(self.review(p), AAMDecision::Approved))
             .collect()
+    }
+
+    /// Review SkillProposal từ instinct.
+    pub fn review_skill(&self, proposal: &SkillProposal) -> AAMDecision {
+        if proposal.confidence < 0.5 {
+            return AAMDecision::Rejected {
+                reason: alloc::format!("skill confidence={:.2} < 0.5", proposal.confidence),
+            };
+        }
+
+        match &proposal.kind {
+            InsightKind::Causal { .. } => {
+                // Nhân quả: cần confidence cao
+                if proposal.confidence >= 0.7 {
+                    AAMDecision::Approved
+                } else {
+                    AAMDecision::Pending { needed_fire_count: 3 }
+                }
+            }
+
+            InsightKind::Contradiction { score, .. } => {
+                // Mâu thuẫn: score cao + confidence → approve
+                if *score > 0.5 && proposal.confidence >= 0.6 {
+                    AAMDecision::Approved
+                } else {
+                    AAMDecision::Pending { needed_fire_count: 2 }
+                }
+            }
+
+            InsightKind::Abstraction { source_hashes, .. } => {
+                // Abstraction: cần ≥ 3 sources
+                if source_hashes.len() >= 3 {
+                    AAMDecision::Approved
+                } else {
+                    AAMDecision::Pending { needed_fire_count: 3 }
+                }
+            }
+
+            InsightKind::Analogy { .. } => {
+                // Analogy: approve nếu confidence OK
+                AAMDecision::Approved
+            }
+
+            InsightKind::Curiosity { novelty, .. } => {
+                // Curiosity: novelty cao → worth exploring
+                if *novelty > 0.4 {
+                    AAMDecision::Approved
+                } else {
+                    AAMDecision::Rejected {
+                        reason: alloc::format!("novelty={:.2} too low", novelty),
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -250,6 +376,66 @@ mod tests {
         let aam = AAM::new();
         let approved = aam.review_batch(&proposals);
         assert_eq!(approved.len(), 1);
+    }
+
+    #[test]
+    fn skill_proposal_causal_approved() {
+        let p = SkillProposal::new("Causality", InsightKind::Causal {
+            cause_hash: 0x01, effect_hash: 0x02,
+        }, 0.8, 1000);
+        assert!(p.is_confident());
+        assert_eq!(AAM::new().review_skill(&p), AAMDecision::Approved);
+    }
+
+    #[test]
+    fn skill_proposal_causal_pending_low_conf() {
+        let p = SkillProposal::new("Causality", InsightKind::Causal {
+            cause_hash: 0x01, effect_hash: 0x02,
+        }, 0.55, 1000);
+        assert!(matches!(AAM::new().review_skill(&p), AAMDecision::Pending { .. }));
+    }
+
+    #[test]
+    fn skill_proposal_contradiction() {
+        let p = SkillProposal::new("Contradiction", InsightKind::Contradiction {
+            chain_a_hash: 0x01, chain_b_hash: 0x02, score: 0.75,
+        }, 0.7, 1000);
+        assert_eq!(AAM::new().review_skill(&p), AAMDecision::Approved);
+    }
+
+    #[test]
+    fn skill_proposal_curiosity_rejected_low_novelty() {
+        let p = SkillProposal::new("Curiosity", InsightKind::Curiosity {
+            chain_hash: 0x01, novelty: 0.2,
+        }, 0.8, 1000);
+        assert!(matches!(AAM::new().review_skill(&p), AAMDecision::Rejected { .. }));
+    }
+
+    #[test]
+    fn skill_proposal_curiosity_approved_high_novelty() {
+        let p = SkillProposal::new("Curiosity", InsightKind::Curiosity {
+            chain_hash: 0x01, novelty: 0.8,
+        }, 0.7, 1000);
+        assert_eq!(AAM::new().review_skill(&p), AAMDecision::Approved);
+    }
+
+    #[test]
+    fn skill_proposal_abstraction_needs_sources() {
+        if skip() { return; }
+        let chain = olang::encoder::encode_codepoint(0x1F525);
+        let p = SkillProposal::new("Abstraction", InsightKind::Abstraction {
+            abstract_chain: chain, source_hashes: vec![1, 2], variance: 0.3,
+        }, 0.8, 1000);
+        // Only 2 sources < 3 → pending
+        assert!(matches!(AAM::new().review_skill(&p), AAMDecision::Pending { .. }));
+    }
+
+    #[test]
+    fn skill_proposal_rejected_low_confidence() {
+        let p = SkillProposal::new("Analogy", InsightKind::Analogy {
+            result_chain: MolecularChain::empty(),
+        }, 0.3, 1000);
+        assert!(matches!(AAM::new().review_skill(&p), AAMDecision::Rejected { .. }));
     }
 
     #[test]

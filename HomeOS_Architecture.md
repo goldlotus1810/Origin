@@ -619,15 +619,15 @@ Tier 3: ESP32 (520KB SRAM)
 | Skill trait + ExecContext | ✅ Done | ↑ (agents) | QT4①-⑤: stateless, isolated, via ExecContext |
 | 7 Instinct Skills | ✅ Done | ↑ (agents) | Analogy, Abstraction, Causality, Contradiction, Curiosity, Reflection, Honesty |
 | LeoAI × Instincts | ✅ Done | ↑ (agents) | run_instincts() chạy 7 bản năng trên mỗi ingest |
-| SkillProposal | ⬜ Planned | — | **Chưa implement** — DreamProposal có, SkillProposal chưa |
-| LCA variance | ⬜ Planned | — | Thêm variance output cho LCA |
-| Window variance | ⬜ Planned | — | ConversationCurve instability detection |
+| SkillProposal | ✅ Done | ↑ (memory) | InsightKind: Causal, Contradiction, Abstraction, Analogy, Curiosity + AAM review_skill |
+| LCA variance | ✅ Done | ↑ (olang) | LcaResult { chain, variance }, lca_with_variance(), lca_many_with_variance() |
+| Window variance | ✅ Done | ↑ (context) | window_variance, unstable detection, Celebratory→Gentle override |
 | Cross-layer Silk | ⬜ Planned | — | Kết nối tầng khác với threshold cao + AAM |
 | World rendering | ⬜ Planned | — | vSDF → 3D scene |
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |
 
-**Tổng: 728 tests, 0 clippy warnings, 12 crates**
+**Tổng: 743 tests, 0 clippy warnings, 12 crates**
 
 ---
 
@@ -711,4 +711,4 @@ Design lock: KHÔNG — design có thể evolve nếu có bằng chứng mới
 ---
 
 *Bản vẽ này là la bàn. Code là hành trình.*
-*2026-03-15 · HomeOS v3 · 728 tests · 0 warnings*
+*2026-03-15 · HomeOS v3 · 743 tests · 0 warnings*

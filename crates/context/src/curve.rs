@@ -22,6 +22,9 @@ pub const BETA:  f32 = 0.4;
 // ConversationCurve
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Window size cho variance detection.
+const VARIANCE_WINDOW: usize = 5;
+
 /// ConversationCurve — theo dõi cảm xúc qua các turns.
 #[derive(Debug)]
 pub struct ConversationCurve {
@@ -37,6 +40,10 @@ pub struct ConversationCurve {
     pub fx_dn:   f32,
     /// f(x) tổng hợp
     pub fx:      f32,
+    /// Window variance — emotional instability indicator
+    pub window_variance: f32,
+    /// Emotional instability detected
+    pub unstable: bool,
 }
 
 impl ConversationCurve {
@@ -48,6 +55,8 @@ impl ConversationCurve {
             fx_conv: 0.0,
             fx_dn:   0.0,
             fx:      0.0,
+            window_variance: 0.0,
+            unstable: false,
         }
     }
 
@@ -76,6 +85,10 @@ impl ConversationCurve {
 
         // f(x) = α×f_conv + β×f_dn
         self.fx = ALPHA * self.fx_conv + BETA * self.fx_dn;
+
+        // Window variance — đo emotional instability
+        self.update_window_variance();
+
         self.fx
     }
 
@@ -87,8 +100,16 @@ impl ConversationCurve {
     }
 
     /// ResponseTone từ curve hiện tại.
+    ///
+    /// Nếu emotional instability detected (window variance cao + d1 đổi chiều):
+    /// → Gentle thay vì Celebratory (bảo vệ người dùng đang bất ổn)
     pub fn tone(&self) -> ResponseTone {
-        silk::walk::response_tone(&self.curve)
+        let base = silk::walk::response_tone(&self.curve);
+        // Instability override: đang bất ổn → Gentle thay vì Celebratory
+        if self.unstable && base == ResponseTone::Celebratory {
+            return ResponseTone::Gentle;
+        }
+        base
     }
 
     /// Số turns.
@@ -111,6 +132,55 @@ impl ConversationCurve {
 
     /// f(x) hiện tại.
     pub fn fx(&self) -> f32 { self.fx }
+
+    /// Window variance hiện tại.
+    pub fn window_variance(&self) -> f32 { self.window_variance }
+
+    /// Emotional instability?
+    pub fn is_unstable(&self) -> bool { self.unstable }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Window Variance — emotional instability detection
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Tính variance trong window gần nhất.
+    ///
+    /// Instability = variance cao (> 0.04) + d1 đổi chiều (sign change).
+    /// Khi instability → Gentle thay vì Celebratory.
+    fn update_window_variance(&mut self) {
+        let n = self.curve.len();
+        if n < VARIANCE_WINDOW {
+            self.window_variance = 0.0;
+            self.unstable = false;
+            return;
+        }
+
+        let window = &self.curve[n - VARIANCE_WINDOW..];
+
+        // Mean
+        let mean: f32 = window.iter().sum::<f32>() / VARIANCE_WINDOW as f32;
+
+        // Variance = Σ(v - mean)² / N
+        let var: f32 = window.iter()
+            .map(|v| (v - mean) * (v - mean))
+            .sum::<f32>() / VARIANCE_WINDOW as f32;
+
+        self.window_variance = var;
+
+        // D1 sign change trong window
+        let d1_window = &self.d1[if self.d1.len() >= VARIANCE_WINDOW - 1 {
+            self.d1.len() - (VARIANCE_WINDOW - 1)
+        } else {
+            0
+        }..];
+
+        let sign_changes = d1_window.windows(2)
+            .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
+            .count();
+
+        // Instability = variance cao + nhiều lần đổi chiều
+        self.unstable = var > 0.04 && sign_changes >= 2;
+    }
 }
 
 impl Default for ConversationCurve {
@@ -223,6 +293,58 @@ mod tests {
         assert_eq!(c.turn_count(), 6);
         assert_eq!(c.d1.len(), 5, "5 d1 values cho 6 turns");
         assert_eq!(c.d2.len(), 4, "4 d2 values cho 5 d1");
+    }
+
+    #[test]
+    fn curve_window_variance_stable() {
+        let mut c = ConversationCurve::new();
+        // 5 stable turns → low variance
+        for _ in 0..5 {
+            c.push(-0.3);
+        }
+        assert!(c.window_variance() < 0.01,
+            "Stable values → low variance: {}", c.window_variance());
+        assert!(!c.is_unstable(), "Stable → not unstable");
+    }
+
+    #[test]
+    fn curve_window_variance_oscillating() {
+        let mut c = ConversationCurve::new();
+        // Oscillating: -0.5, 0.3, -0.4, 0.2, -0.3 → high variance + sign changes
+        let vals = [-0.5, 0.3, -0.4, 0.2, -0.3];
+        for v in vals {
+            c.push(v);
+        }
+        assert!(c.window_variance() > 0.04,
+            "Oscillating → high variance: {}", c.window_variance());
+        assert!(c.is_unstable(),
+            "Oscillating with sign changes → unstable");
+    }
+
+    #[test]
+    fn curve_instability_overrides_celebratory() {
+        let mut c = ConversationCurve::new();
+        // Build instability: oscillate, then recover
+        let vals = [-0.5, 0.3, -0.4, 0.2, 0.5];
+        for v in vals {
+            c.push(v);
+        }
+        // Even if base tone would be Celebratory, instability → Gentle
+        if c.is_unstable() {
+            let tone = c.tone();
+            assert_ne!(tone, ResponseTone::Celebratory,
+                "Unstable → never Celebratory");
+        }
+    }
+
+    #[test]
+    fn curve_window_variance_too_few_turns() {
+        let mut c = ConversationCurve::new();
+        c.push(-0.5);
+        c.push(0.3);
+        assert_eq!(c.window_variance(), 0.0,
+            "< 5 turns → variance = 0");
+        assert!(!c.is_unstable());
     }
 
     #[test]

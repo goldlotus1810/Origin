@@ -41,18 +41,45 @@ pub fn lca(a: &MolecularChain, b: &MolecularChain) -> MolecularChain {
 /// `pairs` = slice of (chain_ref, fire_count).
 /// fire_count = số lần node đó được co-activate.
 pub fn lca_weighted(pairs: &[(&MolecularChain, u32)]) -> MolecularChain {
+    lca_with_variance(pairs).chain
+}
+
+/// Kết quả LCA kèm variance — đo mức trừu tượng.
+///
+/// variance ∈ [0.0, 1.0]:
+///   < 0.15 → concrete (các chain rất giống nhau)
+///   < 0.40 → categorical (nhóm liên quan)
+///   ≥ 0.40 → abstract (khái niệm trừu tượng)
+#[derive(Debug, Clone)]
+pub struct LcaResult {
+    /// Chain kết quả LCA.
+    pub chain: MolecularChain,
+    /// Variance trung bình trên tất cả dimensions.
+    pub variance: f32,
+}
+
+/// LCA kèm variance output.
+///
+/// Variance = mean(1 - similarity_full(input_i, lca)) cho mọi input.
+pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
     // Lọc chain rỗng
     let valid: Vec<(&MolecularChain, u32)> = pairs.iter()
         .filter(|(c, _)| !c.is_empty())
         .copied()
         .collect();
 
-    if valid.is_empty() { return MolecularChain::empty(); }
-    if valid.len() == 1 { return valid[0].0.clone(); }
+    if valid.is_empty() {
+        return LcaResult { chain: MolecularChain::empty(), variance: 0.0 };
+    }
+    if valid.len() == 1 {
+        return LcaResult { chain: valid[0].0.clone(), variance: 0.0 };
+    }
 
     // Dùng độ dài chain ngắn nhất để avoid out-of-bounds
     let min_len = valid.iter().map(|(c, _)| c.len()).min().unwrap_or(0);
-    if min_len == 0 { return MolecularChain::empty(); }
+    if min_len == 0 {
+        return LcaResult { chain: MolecularChain::empty(), variance: 0.0 };
+    }
 
     let total_weight: u32 = valid.iter().map(|(_, w)| w).sum();
 
@@ -88,7 +115,15 @@ pub fn lca_weighted(pairs: &[(&MolecularChain, u32)]) -> MolecularChain {
         });
     }
 
-    MolecularChain(result_mols)
+    let chain = MolecularChain(result_mols);
+
+    // Tính variance = mean(1 - similarity_full(input_i, lca))
+    let n = valid.len() as f32;
+    let variance: f32 = valid.iter()
+        .map(|(c, _)| 1.0 - c.similarity_full(&chain))
+        .sum::<f32>() / n;
+
+    LcaResult { chain, variance }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,6 +192,14 @@ pub fn lca_many(chains: &[MolecularChain]) -> MolecularChain {
     if chains.len() == 1 { return chains[0].clone(); }
     let pairs: Vec<(&MolecularChain, u32)> = chains.iter().map(|c| (c, 1u32)).collect();
     lca_weighted(&pairs)
+}
+
+/// LCA của slice chains kèm variance.
+pub fn lca_many_with_variance(chains: &[MolecularChain]) -> LcaResult {
+    if chains.is_empty() { return LcaResult { chain: MolecularChain::empty(), variance: 0.0 }; }
+    if chains.len() == 1 { return LcaResult { chain: chains[0].clone(), variance: 0.0 }; }
+    let pairs: Vec<(&MolecularChain, u32)> = chains.iter().map(|c| (c, 1u32)).collect();
+    lca_with_variance(&pairs)
 }
 
 /// LCA của slice chains với fire_counts.
@@ -355,6 +398,44 @@ mod tests {
         let max_val = fire_val.max(cold_val);
         assert!(res_val >= min_val && res_val <= max_val,
             "LCA valence={} phải nằm giữa {} và {}", res_val, min_val, max_val);
+    }
+
+    // ── LCA Variance ──────────────────────────────────────────────────────
+
+    #[test]
+    fn lca_variance_identical_is_zero() {
+        if skip_if_empty() { return; }
+        let f = fire();
+        let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
+        assert!(result.variance < 0.01,
+            "Identical chains → variance ≈ 0, got {}", result.variance);
+    }
+
+    #[test]
+    fn lca_variance_similar_is_concrete() {
+        if skip_if_empty() { return; }
+        // 🔥 và 🔥 (identical) → variance < 0.15 = concrete
+        let f1 = fire();
+        let f2 = fire();
+        let result = super::lca_many_with_variance(&[f1, f2]);
+        assert!(result.variance < 0.15,
+            "Same chains → concrete (var < 0.15), got {}", result.variance);
+    }
+
+    #[test]
+    fn lca_variance_diverse_is_abstract() {
+        if skip_if_empty() { return; }
+        // 🔥 💧 ❄ 🧠 → very different → variance should be notable
+        let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
+        assert!(result.variance > 0.05,
+            "Diverse chains → higher variance, got {}", result.variance);
+    }
+
+    #[test]
+    fn lca_variance_single_chain_zero() {
+        if skip_if_empty() { return; }
+        let result = super::lca_many_with_variance(&[fire()]);
+        assert_eq!(result.variance, 0.0, "Single chain → variance = 0");
     }
 
     // ── Mode detection edge cases ───────────────────────────────────────────
