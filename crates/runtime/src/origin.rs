@@ -6,6 +6,7 @@
 //!   SecurityGate → Parse → Encode → Context → STM → Silk → Response
 
 extern crate alloc;
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::format;
 
@@ -58,6 +59,7 @@ pub struct HomeRuntime {
     parser:     OlangParser,
     dream:      DreamCycle,
     registry:   Registry,
+    alias_to_cp: BTreeMap<alloc::string::String, u32>,
     self_model: SelfModel,
     uptime_ns:  i64,
     turn_count: u64,
@@ -76,6 +78,7 @@ impl HomeRuntime {
             learning:   LearningLoop::new(session_id),
             parser:     OlangParser::new(),
             dream:      DreamCycle::new(DreamConfig::default()),
+            alias_to_cp: build_alias_map(file_bytes),
             registry:   boot_result.registry,
             self_model: SelfModel::new(),
             uptime_ns:  0,
@@ -182,7 +185,13 @@ impl HomeRuntime {
                     output_text.push_str(&format!("{} ", emoji));
                 }
                 VmEvent::LookupAlias(alias) => {
-                    let (chain, cp_opt) = resolve_with_cp(alias, &self.registry);
+                    // Check alias_to_cp cache trước (bao gồm L2 nodes)
+                    let cp_from_cache = self.alias_to_cp.get(alias.as_str()).copied();
+                    let (chain, cp_opt) = if let Some(cp) = cp_from_cache {
+                        (olang::encoder::encode_codepoint(cp), Some(cp))
+                    } else {
+                        resolve_with_cp(alias, &self.registry)
+                    };
                     if !chain.is_empty() {
                         // Lookup → STM: user referenced this node
                         self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
@@ -534,4 +543,44 @@ fn relation_op_to_byte(op: RelationOp) -> u8 {
         RelationOp::Contains    => 0x0A,
         RelationOp::Intersects  => 0x0B,
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alias → Codepoint cache (từ file, bao gồm L2 nodes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build alias→cp map từ origin.olang file.
+///
+/// Dùng tại boot để resolve_olang có thể tìm bất kỳ alias nào trong file.
+fn build_alias_map(file_bytes: Option<&[u8]>) -> alloc::collections::BTreeMap<alloc::string::String, u32> {
+    use olang::startup::ALIAS_CODEPOINTS;
+    let mut map = alloc::collections::BTreeMap::new();
+
+    // Seed từ static ALIAS_CODEPOINTS
+    for &(alias, cp) in ALIAS_CODEPOINTS {
+        map.insert(alias.to_string(), cp);
+    }
+
+    // Load thêm từ file nếu có
+    if let Some(bytes) = file_bytes {
+        if let Ok(reader) = olang::reader::OlangReader::new(bytes) {
+            if let Ok(parsed) = reader.parse_all() {
+                for alias in &parsed.aliases {
+                    if alias.name.starts_with("_qr_") { continue; }
+                    // Tìm codepoint canonical cho hash này
+                    // Ưu tiên: ALIAS_CODEPOINTS → decode_hash
+                    let cp_opt = ALIAS_CODEPOINTS.iter()
+                        .find(|&&(_, cp)| {
+                            olang::encoder::encode_codepoint(cp).chain_hash() == alias.chain_hash
+                        })
+                        .map(|&(_, cp)| cp)
+                        .or_else(|| ucd::decode_hash(alias.chain_hash));
+                    if let Some(cp) = cp_opt {
+                        map.insert(alias.name.clone(), cp);
+                    }
+                }
+            }
+        }
+    }
+    map
 }

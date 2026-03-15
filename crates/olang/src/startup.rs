@@ -287,13 +287,47 @@ pub static ALIAS_CODEPOINTS: &[(&str, u32)] = &[
     // joy / sadness / tired / anger / fear
     ("vui", 0x1F60A), ("happy", 0x1F60A), ("joy", 0x1F60A),
     ("hạnh phúc", 0x1F60A),
+    // French
+    ("heureux", 0x1F60A), ("joie", 0x1F60A), ("joyeux", 0x1F60A),
+    ("triste", 0x1F614), ("malheureux", 0x1F614),
+    ("amour", 0x2764), ("famille", 0x1F46A),
+    ("excellent", 0x2B50), ("parfait", 0x2B50),
+    ("terrible", 0x1F4A9), ("horrible", 0x1F4A9),
+    ("fatigué", 0x1F634), ("épuisé", 0x1F634),
+    // German
+    ("glücklich", 0x1F60A), ("fröhlich", 0x1F60A), ("schön", 0x1F60A),
+    ("traurig", 0x1F614), ("unglücklich", 0x1F614),
+    ("liebe", 0x2764), ("mögen", 0x2764),
+    ("familie", 0x1F46A), ("wunderbar", 0x2B50), ("perfekt", 0x2B50),
+    ("schrecklich", 0x1F4A9), ("schlecht", 0x1F4A9),
+    ("müde", 0x1F634), ("erschöpft", 0x1F634),
+    ("angst", 0x1F628), ("wütend", 0x1F621),
+    // Spanish
+    ("feliz", 0x1F60A), ("alegre", 0x1F60A), ("contento", 0x1F60A),
+    ("triste", 0x1F614),
+    ("amor", 0x2764), ("querer", 0x2764),
+    ("familia", 0x1F46A), ("hogar", 0x1F46A),
+    ("excelente", 0x2B50), ("perfecto", 0x2B50),
+    ("terrible", 0x1F4A9), ("malo", 0x1F4A9), ("peor", 0x1F4A9),
+    ("cansado", 0x1F634), ("agotado", 0x1F634),
+    ("miedo", 0x1F628), ("enojado", 0x1F621),
+    // Italian
+    ("buon", 0x1F60A), ("bellissimo", 0x1F60A), ("felice", 0x1F60A),
+    ("famiglia", 0x1F46A),
+    // Portuguese
+    ("feliz", 0x1F60A), ("alegre", 0x1F60A),
+    ("familia", 0x1F46A), ("lar", 0x1F46A),
+    ("triste", 0x1F614),
+    ("amor", 0x2764), ("amar", 0x2764),
+    // Vietnamese
     ("buồn", 0x1F614), ("sad", 0x1F614), ("buồn bã", 0x1F614),
     ("mệt", 0x1F634), ("tired", 0x1F634), ("mệt mỏi", 0x1F634),
     ("giận", 0x1F621), ("angry", 0x1F621), ("tức", 0x1F621),
     ("sợ", 0x1F628), ("scared", 0x1F628), ("lo", 0x1F628),
     ("yêu", 0x2764), ("love", 0x2764),
+    ("gia đình", 0x1F46A),
     ("tuyệt", 0x2B50), ("great", 0x2B50), ("xuất sắc", 0x2B50),
-    ("tệ", 0x1F4A9), ("bad", 0x1F4A9), ("terrible", 0x1F4A9),
+    ("tệ", 0x1F4A9), ("bad", 0x1F4A9),
     ("đau", 0x1F915), ("pain", 0x1F915),
     ("cô đơn", 0x1F614),
     // danger / alert
@@ -411,11 +445,15 @@ fn cp_to_str(cp: u32) -> alloc::string::String {
 }
 
 
-/// Resolve alias → (chain, codepoint) — codepoint từ ALIAS_CODEPOINTS.
+/// Resolve alias → (chain, codepoint) — codepoint từ ALIAS_CODEPOINTS hoặc Registry.
 ///
-/// Trả về codepoint để caller biết exact emoji thay vì dùng bucket search.
+/// Ưu tiên:
+///   1. Single char emoji → direct encode
+///   2. ALIAS_CODEPOINTS exact match (L0 atoms)
+///   3. Registry hash → scan ALIAS_CODEPOINTS để tìm canonical cp
+///   4. First emoji char trong string
 pub fn resolve_with_cp(name: &str, registry: &Registry) -> (MolecularChain, Option<u32>) {
-    // Single char → codepoint trực tiếp
+    // 1. Single char → codepoint trực tiếp
     let chars: alloc::vec::Vec<char> = name.chars().collect();
     if chars.len() == 1 {
         let cp = chars[0] as u32;
@@ -424,23 +462,37 @@ pub fn resolve_with_cp(name: &str, registry: &Registry) -> (MolecularChain, Opti
         }
     }
 
-    // ALIAS_CODEPOINTS exact word match
+    // 2. ALIAS_CODEPOINTS exact word match (nhanh, L0 atoms)
     for &(alias, cp) in ALIAS_CODEPOINTS {
         if alias == name {
             return (encode_codepoint(cp), Some(cp));
         }
     }
 
-    // Registry lookup
-    if let Some(_hash) = registry.lookup_name(name) {
-        for &(alias, cp) in ALIAS_CODEPOINTS {
-            if alias == name {
-                return (encode_codepoint(cp), Some(cp));
+    // 3. Registry lookup → hash → find canonical cp
+    if let Some(hash) = registry.lookup_name(name) {
+        // Tìm cp trong ALIAS_CODEPOINTS có cùng hash
+        for &(_, cp) in ALIAS_CODEPOINTS {
+            let candidate = encode_codepoint(cp);
+            if candidate.chain_hash() == hash {
+                return (candidate, Some(cp));
+            }
+        }
+        // Fallback: decode_hash từ UCD
+        if let Some(cp) = ucd::decode_hash(hash) {
+            return (encode_codepoint(cp), Some(cp));
+        }
+        // Fallback: trả chain từ encode_codepoint nếu có single-char alias trong registry
+        for c in name.chars() {
+            let cp = c as u32;
+            if cp > 0x2000 {
+                let chain = encode_codepoint(cp);
+                return (chain, Some(cp));
             }
         }
     }
 
-    // First emoji char
+    // 4. First emoji char
     for c in name.chars() {
         let cp = c as u32;
         if cp > 0x2000 {
