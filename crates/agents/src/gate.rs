@@ -15,6 +15,7 @@ extern crate alloc;
 use alloc::string::String;
 
 use context::emotion::IntentKind;
+use crate::encoder::ContentInput;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EpistemicLevel
@@ -111,7 +112,38 @@ impl SecurityGate {
         GateVerdict::Allow
     }
 
-    /// Kiểm tra intent.
+    /// Kiểm tra bất kỳ ContentInput nào — bản năng, chạy trước mọi thứ.
+    ///
+    /// Text → check_text (crisis, harm, manipulation, delete)
+    /// Audio → check anomaly (extreme patterns)
+    /// Sensor → check safety (dangerous values)
+    /// Other → Allow
+    pub fn check_input(&self, input: &ContentInput) -> GateVerdict {
+        match input {
+            ContentInput::Text { content, .. } => self.check_text(content),
+            ContentInput::Code { content, .. } => {
+                // Code có thể chứa lệnh nguy hiểm
+                if self.is_delete_attempt(content) {
+                    return GateVerdict::Block { reason: BlockReason::DeleteAttempt };
+                }
+                GateVerdict::Allow
+            }
+            ContentInput::Sensor { kind, value, .. } => {
+                // Safety check: sensor values cực đoan → cảnh báo
+                use crate::encoder::SensorKind;
+                match kind {
+                    SensorKind::Temperature if *value > 60.0 || *value < -20.0 => {
+                        GateVerdict::Block { reason: BlockReason::PhysicalHarm }
+                    }
+                    _ => GateVerdict::Allow,
+                }
+            }
+            // Audio, Math, System → Allow (no text to check)
+            _ => GateVerdict::Allow,
+        }
+    }
+
+    /// Kiểm tra intent — nếu Crisis → ưu tiên tuyệt đối.
     pub fn check_intent(&self, intent: IntentKind) -> GateVerdict {
         if intent == IntentKind::Crisis {
             GateVerdict::Crisis {

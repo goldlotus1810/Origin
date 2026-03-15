@@ -15,7 +15,7 @@ use silk::edge::EmotionTag;
 use silk::graph::SilkGraph;
 use context::engine::ContextEngine;
 
-use crate::encoder::{ContentEncoder, ContentInput, EncodedContent};
+use crate::encoder::{ContentEncoder, ContentInput, EncodedContent, SensorKind};
 use crate::gate::{SecurityGate, GateVerdict};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,26 +152,25 @@ impl LearningLoop {
 
     /// Xử lý một ContentInput qua toàn bộ pipeline.
     ///
-    /// Gate → Encode → Context → STM → Silk → kết quả
+    /// BẢN NĂNG — chạy cho MỌI modality (text, audio, sensor, code, math, system).
+    /// Gate → Encode → Context → STM → Silk → Learn → kết quả
     pub fn process_one(&mut self, input: ContentInput) -> ProcessResult {
         let ts = input.timestamp();
 
-        // ── 0. Security Gate — TRƯỚC MỌI THỨ ────────────────────────────────
-        if let ContentInput::Text { ref content, .. } = input {
-            match self.gate.check_text(content) {
-                GateVerdict::Crisis { message } => {
-                    return ProcessResult::Crisis { message };
-                }
-                GateVerdict::Block { reason } => {
-                    return ProcessResult::Blocked {
-                        reason: alloc::format!("{:?}", reason),
-                    };
-                }
-                GateVerdict::Allow | GateVerdict::BlackCurtain => {}
+        // ── 0. Security Gate — BẢN NĂNG: TRƯỚC MỌI THỨ, MỌI MODALITY ────────
+        match self.gate.check_input(&input) {
+            GateVerdict::Crisis { message } => {
+                return ProcessResult::Crisis { message };
             }
+            GateVerdict::Block { reason } => {
+                return ProcessResult::Blocked {
+                    reason: alloc::format!("{:?}", reason),
+                };
+            }
+            GateVerdict::Allow | GateVerdict::BlackCurtain => {}
         }
 
-        // ── 1. Encode → chain ─────────────────────────────────────────────────
+        // ── 1. Encode → chain (BẢN NĂNG: mọi input → MolecularChain) ────────
         let encoded: EncodedContent = self.encoder.encode(input.clone());
         if encoded.chain.is_empty() { return ProcessResult::Empty; }
 
@@ -179,16 +178,27 @@ impl LearningLoop {
         let emotion = encoded.emotion;
         let hash    = chain.chain_hash();
 
-        // ── 2. Context Engine ─────────────────────────────────────────────────
-        if let ContentInput::Text { ref content, timestamp } = input {
+        // ── 2. Context Engine — BẢN NĂNG: mọi modality cập nhật context ─────
+        {
             use context::snapshot::RawInput;
-            self.context.on_activate(RawInput::text(content, timestamp));
+            let raw = match &input {
+                ContentInput::Text { content, timestamp } =>
+                    RawInput::text(content, *timestamp),
+                ContentInput::Audio { freq_hz, amplitude, timestamp, .. } =>
+                    RawInput::audio(*freq_hz, *amplitude, *timestamp),
+                _ =>
+                    // Sensor, Code, Math, System → text-like context
+                    RawInput::text("", ts),
+            };
+            if raw.text.is_some() || raw.audio_pitch.is_some() {
+                self.context.on_activate(raw);
+            }
         }
 
-        // ── 3. STM — lưu observation ─────────────────────────────────────────
+        // ── 3. STM — BẢN NĂNG: mọi input → observation (ghi nhớ) ────────────
         self.stm.push(chain.clone(), emotion, ts);
 
-        // ── 4. Silk — co_activate với node trước ─────────────────────────────
+        // ── 4. Silk — BẢN NĂNG: co_activate với node trước (liên tưởng) ──────
         if let Some(prev) = self.prev_hash {
             if prev != hash {
                 self.graph.co_activate(prev, hash, emotion,
@@ -197,9 +207,27 @@ impl LearningLoop {
         }
         self.prev_hash = Some(hash);
 
-        // ── 4b. 5 tầng học ngôn ngữ: câu → cụm từ → từ ────────────────────
-        if let ContentInput::Text { ref content, timestamp } = input {
-            self.learn_text(content, emotion, timestamp);
+        // ── 5. Học chuyên sâu theo modality ──────────────────────────────────
+        match &input {
+            ContentInput::Text { content, timestamp } => {
+                // 5 tầng học ngôn ngữ: câu → cụm từ → từ → ký tự
+                self.learn_text(content, emotion, *timestamp);
+            }
+            ContentInput::Audio { freq_hz, amplitude, .. } => {
+                // Audio: co-activate freq pattern với emotion
+                let freq_hash = frequency_hash(*freq_hz);
+                self.graph.co_activate(hash, freq_hash, emotion,
+                    amplitude.max(0.1), ts);
+            }
+            ContentInput::Sensor { kind, value, .. } => {
+                // Sensor: co-activate sensor kind với value pattern
+                let kind_hash = sensor_kind_hash(kind);
+                self.graph.co_activate(hash, kind_hash, emotion,
+                    value.abs().clamp(0.1, 1.0), ts);
+            }
+            _ => {
+                // Code, Math, System — chain + STM + Silk đủ (đã chạy ở bước 3+4)
+            }
         }
 
         ProcessResult::Ok { chain, emotion }
@@ -538,6 +566,37 @@ fn is_stop_word(w: &str) -> bool {
         "the"|"and"|"was"|"for"|"are"|"with"|"his"|"that"|"had"|
         "but"|"not"|"from"|"they"|"she"|"him"|"her"|"its"|"also"
     )
+}
+
+/// Hash cho frequency range (audio learning).
+fn frequency_hash(freq_hz: f32) -> u64 {
+    // Quantize to octave bands: 20-40, 40-80, ..., 10240-20480
+    let octave = if freq_hz <= 0.0 { 0u8 }
+    else { ((libm::log2f(freq_hz / 20.0).max(0.0)) as u8).min(10) };
+    let mut h = 0xcbf29ce484222325_u64;
+    h ^= 0xAA_u64; // namespace: audio
+    h = h.wrapping_mul(0x100000001b3);
+    h ^= octave as u64;
+    h = h.wrapping_mul(0x100000001b3);
+    h
+}
+
+/// Hash cho sensor kind (sensor learning).
+fn sensor_kind_hash(kind: &SensorKind) -> u64 {
+    let tag = match kind {
+        SensorKind::Temperature => 0x01u8,
+        SensorKind::Humidity    => 0x02,
+        SensorKind::Light       => 0x03,
+        SensorKind::Motion      => 0x04,
+        SensorKind::Sound       => 0x05,
+        SensorKind::Power       => 0x06,
+    };
+    let mut h = 0xcbf29ce484222325_u64;
+    h ^= 0xBB_u64; // namespace: sensor
+    h = h.wrapping_mul(0x100000001b3);
+    h ^= tag as u64;
+    h = h.wrapping_mul(0x100000001b3);
+    h
 }
 
 #[cfg(test)]

@@ -79,6 +79,42 @@ impl RawInput {
             timestamp:    ts,
         }
     }
+
+    pub fn sensor(value: f32, ts: i64) -> Self {
+        Self {
+            text:         None,
+            modality:     ModalitySource::Sensor,
+            audio_pitch:  None,
+            audio_energy: None,
+            image_affect: None,
+            sensor_value: Some(value),
+            timestamp:    ts,
+        }
+    }
+
+    pub fn image(affect: EmotionTag, ts: i64) -> Self {
+        Self {
+            text:         None,
+            modality:     ModalitySource::Image,
+            audio_pitch:  None,
+            audio_energy: None,
+            image_affect: Some(affect),
+            sensor_value: None,
+            timestamp:    ts,
+        }
+    }
+
+    pub fn system(ts: i64) -> Self {
+        Self {
+            text:         None,
+            modality:     ModalitySource::System,
+            audio_pitch:  None,
+            audio_energy: None,
+            image_affect: None,
+            sensor_value: None,
+            timestamp:    ts,
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

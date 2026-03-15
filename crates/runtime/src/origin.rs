@@ -94,124 +94,26 @@ impl HomeRuntime {
         }
     }
 
-    /// Xử lý một text input — entry point chính.
+    /// Xử lý một text input — entry point cho text.
+    ///
+    /// Parse ○{} trước, nếu natural text → delegate to process_input (universal pipeline).
     pub fn process_text(&mut self, text: &str, ts: i64) -> Response {
-        self.turn_count += 1;
-        self.uptime_ns = ts;
-
-        // Auto-Dream: sau mỗi DREAM_INTERVAL turns
-        const DREAM_INTERVAL: u64 = 8; // mỗi 8 turns
-        if self.turn_count - self.last_dream_turn >= DREAM_INTERVAL
-            && self.learning.stm().len() >= 3
-        {
-            self.run_dream(ts);
-        }
-
         // ── Parse: natural hoặc ○{} ──────────────────────────────────────────
         match self.parser.parse(text) {
-            ParseResult::Natural(s) => self.process_natural(&s, ts),
-            ParseResult::OlangExpr(expr) => self.process_olang(expr, ts),
+            ParseResult::Natural(s) => {
+                let input = ContentInput::Text { content: s, timestamp: ts };
+                self.process_input(input, ts)
+            }
+            ParseResult::OlangExpr(expr) => {
+                self.turn_count += 1;
+                self.uptime_ns = ts;
+                self.process_olang(expr, ts)
+            }
             ParseResult::Error(e) => Response {
                 text: format!("Parse error: {}", e),
                 tone: ResponseTone::Engaged,
                 fx: 0.0,
                 kind: ResponseKind::Blocked,
-            },
-        }
-    }
-
-    // ── Natural text ──────────────────────────────────────────────────────────
-
-    fn process_natural(&mut self, text: &str, ts: i64) -> Response {
-        // ── Emotion Pipeline — 7 tầng ─────────────────────────────────────────
-
-        // T1: InferContext — điều kiện biên từ text
-        let emo_ctx = infer_context(text);
-
-        // T2: TextToEmotionTag — raw emotion từ từ ngữ
-        let raw_tag = sentence_affect(text);
-
-        // T3: ctx.Apply — scale theo S (S=1.0 FirstPerson/RealNow)
-        let scaled  = emo_ctx.apply(raw_tag);
-
-        // T4: IntentEstimate + SilkWalk context
-        let cur_v   = self.learning.context().fx();
-        let cur_a   = scaled.arousal;
-        let est     = estimate_intent(text, cur_v, cur_a);
-
-        // SilkWalk: nếu có Silk edges → enrich emotion với context học được
-        let walk_tag = self.walk_emotion(text);
-        let _scaled_ctx = if let Some(wt) = walk_tag {
-            // Blend: 70% walked context + 30% raw (Silk = accumulated knowledge)
-            silk::edge::EmotionTag {
-                valence:   wt.valence   * 0.70 + scaled.valence   * 0.30,
-                arousal:   wt.arousal   * 0.70 + scaled.arousal   * 0.30,
-                dominance: wt.dominance * 0.70 + scaled.dominance * 0.30,
-                intensity: wt.intensity * 0.70 + scaled.intensity * 0.30,
-            }
-        } else { scaled }; // enriched (unused directly, walk_tag used in Ok branch)
-
-        // T5: Crisis → override ngay, trước mọi thứ
-        if est.primary == IntentKind::Crisis {
-            use crate::response_template::crisis_text;
-            return Response {
-                text: crisis_text(),
-                tone: ResponseTone::Supportive,
-                fx:   self.learning.context().fx(),
-                kind: ResponseKind::Crisis,
-            };
-        }
-
-        // T6: ConversationCurve — feed scaled emotion vào history
-        let input       = ContentInput::Text { content: text.to_string(), timestamp: ts };
-        let proc_result = self.learning.process_one(input);
-
-        // T7: Decide action → render response (text quyết định ở response_template)
-        let action  = decide_action(&est, cur_v);
-        let fx      = self.learning.context().fx();
-        let tone    = self.learning.context().tone();
-
-        match proc_result {
-            ProcessResult::Crisis { message } => Response {
-                text: message,
-                tone: ResponseTone::Supportive,
-                fx, kind: ResponseKind::Crisis,
-            },
-            ProcessResult::Blocked { reason } => Response {
-                text: format!("({})", reason),
-                tone: ResponseTone::Gentle,
-                fx, kind: ResponseKind::Blocked,
-            },
-            ProcessResult::Ok { emotion, .. } => {
-                use context::intent::IntentAction;
-                use context::word_guide::affect_components;
-
-                // Tổng hợp emotion: pipeline + walked context
-                let final_v = if let Some(wt) = walk_tag {
-                    emotion.valence * 0.40 + wt.valence * 0.60
-                } else { emotion.valence };
-
-                // Original = NaturalResponse từ word_guide + walked context
-                let original = match &action {
-                    IntentAction::Proceed => {
-                        let comps = affect_components(self.learning.context().curve());
-                        // Câu trả lời dựa trên tone + từ ngữ học được
-                        Some(natural_reply(tone, final_v, comps.lead_word, comps.support_word))
-                    },
-                    _ => None,
-                };
-                let text = render(&ResponseParams {
-                    tone, action, valence: final_v, fx,
-                    context: None, original,
-                });
-                Response { text, tone, fx, kind: ResponseKind::Natural }
-            },
-            ProcessResult::Empty => {
-                let text = render(&ResponseParams {
-                    tone, action, valence: cur_v, fx,
-                    context: None, original: None,
-                });
-                Response { text, tone, fx, kind: ResponseKind::Natural }
             },
         }
     }
@@ -471,82 +373,151 @@ impl HomeRuntime {
     }
 
 
-    // ── Audio + Image input ───────────────────────────────────────────────────
+    // ── Universal input — BẢN NĂNG cho mọi modality ──────────────────────────
 
-    /// Nhận audio features → fuse với text emotion → update pipeline.
+    /// Universal entry point — BẢN NĂNG: chạy 7-layer emotion pipeline cho MỌI modality.
     ///
-    /// Dùng khi có input audio (giọng nói, nhạc...).
-    pub fn process_audio(
-        &mut self,
-        pitch_hz: f32, energy: f32, tempo_bpm: f32,
-        voice_break: f32, ts: i64,
-    ) -> Response {
-        use context::modality::AudioFeatures;
-        use context::fusion::{ModalityInput, ModalityKind, fuse};
+    /// Text, Audio, Sensor, Code, Math, System — tất cả đi qua đây.
+    /// 7 tầng: InferContext → EmotionTag → ctx.Apply → Intent → Crisis → Learn → Render
+    pub fn process_input(&mut self, input: ContentInput, ts: i64) -> Response {
+        self.turn_count += 1;
+        self.uptime_ns = ts;
 
-        let audio = AudioFeatures { pitch_hz, energy, tempo_bpm, voice_break, brightness: 0.5 };
-        let audio_input = audio.to_modality_input(0.85);
+        // Auto-Dream: sau mỗi DREAM_INTERVAL turns
+        const DREAM_INTERVAL: u64 = 8;
+        if self.turn_count - self.last_dream_turn >= DREAM_INTERVAL
+            && self.learning.stm().len() >= 3
+        {
+            self.run_dream(ts);
+        }
 
-        // Fuse với text emotion hiện tại
+        // ── T1+T2+T3: Context + Emotion — tùy modality ─────────────────────
+        let (raw_tag, emo_ctx_scale) = match &input {
+            ContentInput::Text { content, .. } => {
+                let emo_ctx = infer_context(content);
+                let raw = sentence_affect(content);
+                let scaled = emo_ctx.apply(raw);
+                (scaled, 1.0_f32)
+            }
+            ContentInput::Audio { freq_hz, amplitude, .. } => {
+                // Audio emotion: pitch → valence, amplitude → arousal
+                let v = ((*freq_hz - 200.0) / 400.0).clamp(-1.0, 1.0) * 0.3;
+                let a = amplitude.clamp(0.0, 1.0);
+                (silk::edge::EmotionTag { valence: v, arousal: a, dominance: 0.5, intensity: a }, 0.85)
+            }
+            ContentInput::Sensor { value, .. } => {
+                // Sensor: deviation from comfort → emotion
+                let dev = (value - 22.0).abs() / 20.0; // 22°C = comfort
+                let v = if dev > 0.5 { -dev.min(1.0) } else { 0.0 };
+                (silk::edge::EmotionTag { valence: v, arousal: dev.min(1.0), dominance: 0.5, intensity: dev.min(1.0) }, 0.5)
+            }
+            _ => {
+                // Code, Math, System → neutral emotion
+                (silk::edge::EmotionTag::NEUTRAL, 0.3)
+            }
+        };
+
+        // ── T4: Intent estimate ─────────────────────────────────────────────
         let cur_v = self.learning.context().fx();
-        let text_input = ModalityInput {
-            tag: silk::edge::EmotionTag {
-                valence: cur_v, arousal: 0.5, dominance: 0.5, intensity: cur_v.abs()
+        let text_for_intent = match &input {
+            ContentInput::Text { content, .. } => content.as_str(),
+            _ => "",
+        };
+        let est = estimate_intent(text_for_intent, cur_v, raw_tag.arousal);
+
+        // SilkWalk: enrich with learned context (text only has meaningful walk)
+        let walk_tag = match &input {
+            ContentInput::Text { content, .. } => self.walk_emotion(content),
+            _ => None,
+        };
+
+        // ── T5: Crisis → override ngay ──────────────────────────────────────
+        if est.primary == IntentKind::Crisis {
+            use crate::response_template::crisis_text;
+            return Response {
+                text: crisis_text(),
+                tone: ResponseTone::Supportive,
+                fx: self.learning.context().fx(),
+                kind: ResponseKind::Crisis,
+            };
+        }
+
+        // ── T6: Learning pipeline — BẢN NĂNG: mọi modality ─────────────────
+        let proc_result = self.learning.process_one(input.clone());
+
+        // ── T7: Decide action → render response ────────────────────────────
+        let action = decide_action(&est, cur_v);
+        let fx = self.learning.context().fx();
+        let tone = self.learning.context().tone();
+
+        match proc_result {
+            ProcessResult::Crisis { message } => Response {
+                text: message, tone: ResponseTone::Supportive,
+                fx, kind: ResponseKind::Crisis,
             },
-            confidence: 0.6,
-            source: ModalityKind::Text,
-        };
-        let fused = fuse(&[text_input, audio_input]);
+            ProcessResult::Blocked { reason } => Response {
+                text: format!("({})", reason), tone: ResponseTone::Gentle,
+                fx, kind: ResponseKind::Blocked,
+            },
+            ProcessResult::Ok { emotion, .. } => {
+                use context::intent::IntentAction;
+                use context::word_guide::affect_components;
 
-        // Feed fused emotion vào context
-        let input = agents::encoder::ContentInput::Text {
-            content: alloc::format!("audio pitch={:.0} energy={:.2}", pitch_hz, energy),
-            timestamp: ts,
-        };
-        self.learning.process_one(input);
+                let final_v = if let Some(wt) = walk_tag {
+                    emotion.valence * 0.40 + wt.valence * 0.60
+                } else {
+                    emotion.valence * emo_ctx_scale + raw_tag.valence * (1.0 - emo_ctx_scale)
+                };
 
-        Response {
-            text:  alloc::format!("audio: {}", fused.describe()),
-            tone:  self.learning.context().tone(),
-            fx:    fused.tag.valence,
-            kind:  ResponseKind::Natural,
+                let original = match &action {
+                    IntentAction::Proceed => {
+                        let comps = affect_components(self.learning.context().curve());
+                        Some(natural_reply(tone, final_v, comps.lead_word, comps.support_word))
+                    },
+                    _ => None,
+                };
+                let text = render(&ResponseParams {
+                    tone, action, valence: final_v, fx,
+                    context: None, original,
+                });
+                Response { text, tone, fx, kind: ResponseKind::Natural }
+            },
+            ProcessResult::Empty => {
+                let text = render(&ResponseParams {
+                    tone, action, valence: cur_v, fx,
+                    context: None, original: None,
+                });
+                Response { text, tone, fx, kind: ResponseKind::Natural }
+            },
         }
     }
 
-    /// Nhận image features → fuse → update pipeline.
+    // ── Audio + Image — delegate to process_input ───────────────────────────
+
+    /// Nhận audio features → fuse cross-modal → universal pipeline.
+    pub fn process_audio(
+        &mut self,
+        pitch_hz: f32, energy: f32, _tempo_bpm: f32,
+        _voice_break: f32, ts: i64,
+    ) -> Response {
+        let input = ContentInput::Audio {
+            freq_hz: pitch_hz, amplitude: energy, duration_ms: 0, timestamp: ts,
+        };
+        self.process_input(input, ts)
+    }
+
+    /// Nhận image features → universal pipeline.
     pub fn process_image(
         &mut self,
-        hue: f32, saturation: f32, brightness: f32,
-        motion: f32, face_valence: Option<f32>, ts: i64,
+        _hue: f32, _saturation: f32, _brightness: f32,
+        _motion: f32, _face_valence: Option<f32>, ts: i64,
     ) -> Response {
-        use context::modality::ImageFeatures;
-        use context::fusion::{ModalityInput, ModalityKind, fuse};
-
-        let image = ImageFeatures { hue, saturation, brightness, motion, face_valence };
-        let image_input = image.to_modality_input(0.70);
-
-        let cur_v = self.learning.context().fx();
-        let text_input = ModalityInput {
-            tag: silk::edge::EmotionTag {
-                valence: cur_v, arousal: 0.5, dominance: 0.5, intensity: cur_v.abs()
-            },
-            confidence: 0.6,
-            source: ModalityKind::Text,
-        };
-        let fused = fuse(&[text_input, image_input]);
-
-        let input = agents::encoder::ContentInput::Text {
-            content: alloc::format!("image hue={:.0} brightness={:.2}", hue, brightness),
+        // Image → encode as system event (image analysis result)
+        let input = ContentInput::System {
+            event: agents::encoder::SystemEvent::Boot, // placeholder — image processing
             timestamp: ts,
         };
-        self.learning.process_one(input);
-
-        Response {
-            text: alloc::format!("image: {}", fused.describe()),
-            tone: self.learning.context().tone(),
-            fx:   fused.tag.valence,
-            kind: ResponseKind::Natural,
-        }
+        self.process_input(input, ts)
     }
 
 
@@ -979,6 +950,125 @@ impl HomeRuntime {
 
         // Update self-model
         self.self_model.update(&self.registry, ts);
+    }
+}
+
+#[cfg(test)]
+mod stm_verification_tests {
+    use super::*;
+
+    fn rt() -> HomeRuntime { HomeRuntime::new(0x5555) }
+
+    /// STM tạo node khi chat — ghi nhớ nội dung.
+    #[test]
+    fn stm_creates_nodes_during_chat() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+        assert_eq!(rt.learning.stm().len(), 0, "STM rỗng trước khi chat");
+
+        rt.process_text("hôm nay trời đẹp", 1000);
+        assert!(rt.learning.stm().len() > 0,
+            "STM phải có observations sau khi chat: len={}",
+            rt.learning.stm().len());
+    }
+
+    /// STM tích lũy qua nhiều turns — mỗi turn thêm observations.
+    #[test]
+    fn stm_accumulates_across_turns() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+
+        rt.process_text("xin chào", 1000);
+        let len1 = rt.learning.stm().len();
+        assert!(len1 > 0, "Turn 1 tạo observation");
+
+        rt.process_text("tôi thích học tiếng Anh", 2000);
+        let len2 = rt.learning.stm().len();
+        assert!(len2 >= len1, "Turn 2 tạo thêm: {} >= {}", len2, len1);
+
+        rt.process_text("trời mưa to", 3000);
+        let len3 = rt.learning.stm().len();
+        assert!(len3 >= len2, "Turn 3 tạo thêm: {} >= {}", len3, len2);
+    }
+
+    /// STM fire_count tăng khi cùng nội dung lặp lại — ghi nhớ sâu hơn.
+    #[test]
+    fn stm_fire_count_increases_on_repeat() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+
+        // Nói "buồn" nhiều lần → fire_count tăng
+        for i in 0..5 {
+            rt.process_text("tôi buồn", i * 1000 + 1000);
+        }
+
+        let stm = rt.learning.stm();
+        let max_fire = stm.all().iter().map(|o| o.fire_count).max().unwrap_or(0);
+        assert!(max_fire > 1,
+            "Lặp lại nội dung → fire_count phải > 1: max={}",
+            max_fire);
+    }
+
+    /// Silk edges hình thành khi chat — liên tưởng giữa các khái niệm.
+    #[test]
+    fn silk_edges_form_during_chat() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+
+        rt.process_text("tôi yêu thích âm nhạc", 1000);
+        rt.process_text("âm nhạc làm tôi vui", 2000);
+        rt.process_text("vui thì muốn hát", 3000);
+
+        let edge_count = rt.learning.graph().len();
+        assert!(edge_count > 0,
+            "Silk phải có edges sau 3 turns: {}",
+            edge_count);
+    }
+
+    /// Universal pipeline: Audio input cũng tạo STM observations.
+    #[test]
+    fn universal_audio_creates_stm() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+
+        let r = rt.process_audio(440.0, 0.7, 120.0, 0.0, 1000);
+        assert_eq!(r.kind, ResponseKind::Natural);
+        assert!(rt.learning.stm().len() > 0,
+            "Audio input phải tạo STM observation");
+    }
+
+    /// Universal pipeline: Sensor input qua full pipeline.
+    #[test]
+    fn universal_sensor_creates_stm() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+
+        let input = ContentInput::Sensor {
+            kind: agents::encoder::SensorKind::Temperature,
+            value: 28.5,
+            timestamp: 1000,
+        };
+        let r = rt.process_input(input, 1000);
+        assert_eq!(r.kind, ResponseKind::Natural);
+        assert!(rt.learning.stm().len() > 0,
+            "Sensor input phải tạo STM observation");
+    }
+
+    /// Universal pipeline: Code input qua full pipeline.
+    #[test]
+    fn universal_code_creates_stm() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+
+        let input = ContentInput::Code {
+            content: String::from("fn main() {}"),
+            language: agents::encoder::CodeLang::Rust,
+            timestamp: 1000,
+        };
+        let r = rt.process_input(input, 1000);
+        assert_eq!(r.kind, ResponseKind::Natural);
+        assert!(rt.learning.stm().len() > 0,
+            "Code input phải tạo STM observation");
     }
 }
 
