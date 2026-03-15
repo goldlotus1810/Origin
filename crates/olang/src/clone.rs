@@ -19,7 +19,6 @@ use crate::molecular::MolecularChain;
 use crate::encoder::encode_codepoint;
 use crate::writer::OlangWriter;
 use crate::reader::{OlangReader, ParsedFile};
-use crate::registry::Registry;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DeviceProfile — khả năng của thiết bị

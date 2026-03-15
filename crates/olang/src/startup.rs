@@ -188,7 +188,7 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<(), ParseErr
 /// Verify: ○ không làm hỏng thứ gì.
 ///
 /// Lấy một chain từ registry → LCA(x, x) == x.
-fn verify_identity(registry: &Registry) -> Result<(), String> {
+fn verify_identity(_registry: &Registry) -> Result<(), String> {
     if ucd::table_len() == 0 { return Ok(()); } // skip nếu không có UCD
 
     // Test với origin node

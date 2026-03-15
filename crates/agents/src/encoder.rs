@@ -134,7 +134,7 @@ impl ContentEncoder {
 
     /// Encode một ContentInput → EncodedContent.
     pub fn encode(&self, input: ContentInput) -> EncodedContent {
-        let ts = input.timestamp();
+        let _ts = input.timestamp();
         match input {
             ContentInput::Text { content, timestamp } =>
                 self.encode_text(&content, timestamp),
@@ -192,7 +192,7 @@ impl ContentEncoder {
         let chain = encode_codepoint(note_cp);
 
         // Emotion từ audio
-        let pitch_norm = (freq_hz / 440.0).min(2.0); // A4=440Hz = neutral
+        let _pitch_norm = (freq_hz / 440.0).min(2.0); // A4=440Hz = neutral
         let valence = if freq_hz < 150.0 { -0.4 } // giọng thấp = lo lắng
                       else if freq_hz > 500.0 { 0.3 } // giọng cao = excited
                       else { 0.0 };

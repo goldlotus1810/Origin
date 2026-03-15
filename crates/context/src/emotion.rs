@@ -6,8 +6,6 @@
 //! Cross-modal: text + audio → blend.
 
 extern crate alloc;
-use alloc::vec::Vec;
-use alloc::string::String;
 
 use silk::edge::EmotionTag;
 

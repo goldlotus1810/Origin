@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 use crate::edge::{SilkEdge, EdgeKind, EmotionTag};
 use crate::hebbian::{
     hebbian_strengthen, hebbian_decay, blend_emotion,
-    fib, should_promote,
+    should_promote,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

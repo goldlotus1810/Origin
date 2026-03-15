@@ -10,7 +10,7 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::collections::BTreeMap;
 
 use silk::edge::EmotionTag;
@@ -69,6 +69,7 @@ static CORE_LEXICON: &[WordEntry] = &[
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Constants cho TargetAffect — không magic numbers.
+#[allow(dead_code)]
 const MAX_STEP_PER_TURN: f32 = 0.40; // không nhảy quá 0.40/bước (từ Go)
 const PAUSE_STEP:        f32 = 0.15;
 const SUPPORTIVE_STEP:   f32 = 0.20;

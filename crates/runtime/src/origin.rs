@@ -12,8 +12,6 @@ use alloc::format;
 
 use agents::learning::{LearningLoop, ProcessResult};
 use agents::encoder::ContentInput;
-use agents::gate::EpistemicLevel;
-use context::engine::ActivationResult;
 use context::infer::infer_context;
 use context::intent::{estimate_intent, decide_action};
 use context::emotion::IntentKind;
@@ -133,10 +131,22 @@ impl HomeRuntime {
         // T3: ctx.Apply — scale theo S (S=1.0 FirstPerson/RealNow)
         let scaled  = emo_ctx.apply(raw_tag);
 
-        // T4: IntentEstimate — scoring với keyword + mood amplifiers
+        // T4: IntentEstimate + SilkWalk context
         let cur_v   = self.learning.context().fx();
         let cur_a   = scaled.arousal;
         let est     = estimate_intent(text, cur_v, cur_a);
+
+        // SilkWalk: nếu có Silk edges → enrich emotion với context học được
+        let walk_tag = self.walk_emotion(text);
+        let _scaled_ctx = if let Some(wt) = walk_tag {
+            // Blend: 70% walked context + 30% raw (Silk = accumulated knowledge)
+            silk::edge::EmotionTag {
+                valence:   wt.valence   * 0.70 + scaled.valence   * 0.30,
+                arousal:   wt.arousal   * 0.70 + scaled.arousal   * 0.30,
+                dominance: wt.dominance * 0.70 + scaled.dominance * 0.30,
+                intensity: wt.intensity * 0.70 + scaled.intensity * 0.30,
+            }
+        } else { scaled }; // enriched (unused directly, walk_tag used in Ok branch)
 
         // T5: Crisis → override ngay, trước mọi thứ
         if est.primary == IntentKind::Crisis {
@@ -170,15 +180,25 @@ impl HomeRuntime {
                 fx, kind: ResponseKind::Blocked,
             },
             ProcessResult::Ok { emotion, .. } => {
-                use crate::response_template::tone_fallback;
                 use context::intent::IntentAction;
-                // Original chỉ dùng khi action = Proceed — không fill cho Heal/Risk/Manipulate
+                use context::word_guide::affect_components;
+
+                // Tổng hợp emotion: pipeline + walked context
+                let final_v = if let Some(wt) = walk_tag {
+                    emotion.valence * 0.40 + wt.valence * 0.60
+                } else { emotion.valence };
+
+                // Original = NaturalResponse từ word_guide + walked context
                 let original = match &action {
-                    IntentAction::Proceed => Some(tone_fallback(tone, emotion.valence)),
+                    IntentAction::Proceed => {
+                        let comps = affect_components(self.learning.context().curve());
+                        // Câu trả lời dựa trên tone + từ ngữ học được
+                        Some(natural_reply(tone, final_v, comps.lead_word, comps.support_word))
+                    },
                     _ => None,
                 };
                 let text = render(&ResponseParams {
-                    tone, action, valence: cur_v, fx,
+                    tone, action, valence: final_v, fx,
                     context: None, original,
                 });
                 Response { text, tone, fx, kind: ResponseKind::Natural }
@@ -388,8 +408,63 @@ impl HomeRuntime {
 
     /// Sinh fallback text khi không có original từ pipeline.
     /// Dùng response_template::tone_fallback — không hardcode string ở đây.
+    #[allow(dead_code)]
     fn generate_response(&self, tone: ResponseTone, current_v: f32, _fx: f32) -> String {
         crate::response_template::tone_fallback(tone, current_v)
+    }
+
+
+
+
+    // ── SilkWalk — tìm context liên quan ─────────────────────────────────────
+
+    /// Walk Silk từ các từ khóa trong câu hỏi.
+    /// Trả về danh sách (hash, emotion, weight) của nodes liên quan nhất.
+    fn silk_walk_query(&self, query: &str) -> alloc::vec::Vec<(u64, silk::edge::EmotionTag, f32)> {
+        let words = query.split_whitespace()
+            .filter(|w| w.chars().count() > 2)
+            .take(8);
+
+        let mut found: alloc::vec::Vec<(u64, silk::edge::EmotionTag, f32)> = alloc::vec::Vec::new();
+
+        for w in words {
+            // FNV hash y hệt learn_text
+            let mut h = 0xcbf29ce484222325_u64;
+            for b in w.to_lowercase().bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x100000001b3);
+            }
+
+            // Walk từ node này → lấy neighbors có weight cao nhất
+            let edges = self.learning.graph().edges_from(h);
+            for e in edges {
+                if e.weight > 0.05 {
+                    found.push((e.to_hash, e.emotion, e.weight));
+                }
+            }
+        }
+
+        // Sort by weight descending
+        found.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        found.truncate(5);
+        found
+    }
+
+    /// Tổng hợp emotion từ SilkWalk result.
+    fn walk_emotion(&self, query: &str) -> Option<silk::edge::EmotionTag> {
+        let results = self.silk_walk_query(query);
+        if results.is_empty() { return None; }
+
+        let _n = results.len() as f32;
+        let (sv, sa, sd, si) = results.iter().fold((0.0f32, 0.0f32, 0.0f32, 0.0f32),
+            |(v,a,d,i), (_,e,w)| (v + e.valence*w, a + e.arousal*w, d + e.dominance*w, i + e.intensity*w));
+        let tw: f32 = results.iter().map(|r| r.2).sum();
+        if tw < 0.001 { return None; }
+
+        Some(silk::edge::EmotionTag {
+            valence:   sv/tw, arousal: sa/tw,
+            dominance: sd/tw, intensity: si/tw,
+        })
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
@@ -397,6 +472,40 @@ impl HomeRuntime {
     pub fn turn_count(&self) -> u64 { self.turn_count }
     pub fn fx(&self) -> f32 { self.learning.context().fx() }
     pub fn tone(&self) -> ResponseTone { self.learning.context().tone() }
+}
+
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// natural_reply — câu trả lời có nội dung từ word_guide
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tạo câu trả lời từ tone + từ ngữ học được.
+/// Không hardcode string — dùng từ của lead_word/support_word từ lexicon.
+fn natural_reply(tone: silk::walk::ResponseTone, v: f32, lead: &str, support: &str) -> alloc::string::String {
+    use silk::walk::ResponseTone;
+    match tone {
+        ResponseTone::Pause | ResponseTone::Supportive => {
+            if v < -0.50 {
+                alloc::format!("Cảm giác {} và {} — bạn muốn kể thêm không?", lead, support)
+            } else {
+                alloc::format!("Mình nghe thấy điều đó. {} — bạn đang ổn không?", lead)
+            }
+        }
+        ResponseTone::Gentle => {
+            alloc::format!("Cứ từ từ. {} thôi.", lead)
+        }
+        ResponseTone::Reinforcing => {
+            alloc::format!("Đúng rồi — {} và {}.", lead, support)
+        }
+        ResponseTone::Celebratory => {
+            alloc::format!("Tuyệt! {} lắm.", lead)
+        }
+        ResponseTone::Engaged => {
+            alloc::format!("{} — {}.", lead, support)
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

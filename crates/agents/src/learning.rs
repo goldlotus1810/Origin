@@ -11,7 +11,6 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use olang::molecular::MolecularChain;
-use olang::registry::Registry;
 use silk::edge::EmotionTag;
 use silk::graph::SilkGraph;
 use context::engine::ContextEngine;
@@ -128,7 +127,9 @@ pub struct LearningLoop {
     stm:      ShortTermMemory,
     graph:    SilkGraph,
     /// Hash của chain trước — để co_activate Silk
-    prev_hash: Option<u64>,
+    prev_hash:      Option<u64>,
+    /// Hash đại diện câu trước — link câu với câu
+    prev_sent_hash: Option<u64>,
 }
 
 impl LearningLoop {
@@ -139,7 +140,8 @@ impl LearningLoop {
             context:   ContextEngine::new(session_id),
             stm:       ShortTermMemory::new(512),
             graph:     SilkGraph::new(),
-            prev_hash: None,
+            prev_hash:      None,
+            prev_sent_hash: None,
         }
     }
 
@@ -190,7 +192,103 @@ impl LearningLoop {
         }
         self.prev_hash = Some(hash);
 
+        // ── 4b. 5 tầng học ngôn ngữ: câu → cụm từ → từ ────────────────────
+        if let ContentInput::Text { ref content, timestamp } = input {
+            self.learn_text(content, emotion, timestamp);
+        }
+
         ProcessResult::Ok { chain, emotion }
+    }
+
+
+
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // learn_text — 5 tầng học từ văn bản
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // Đoạn văn → Câu → Cụm từ → Từ → Ký tự
+    //
+    // Ký tự đã có ở L0 (encode_codepoint). Từ đây xử lý 4 tầng trên.
+
+    /// Feed text qua 4 tầng học còn lại (câu/cụm từ/từ đã có ký tự ở L0).
+    pub fn learn_text(&mut self, text: &str, paragraph_emotion: EmotionTag, ts: i64) {
+
+        // ── Tầng 1: Câu — tách theo dấu câu ─────────────────────────────────
+        let sentences = split_sentences(text);
+        for (si, sent) in sentences.iter().enumerate() {
+            if sent.trim().is_empty() { continue; }
+
+            // Emotion của câu này (blend paragraph + word-level)
+            let sent_tag = {
+                let wt = context::emotion::sentence_affect(sent);
+                // 50/50 paragraph context vs câu riêng
+                EmotionTag {
+                    valence:   (paragraph_emotion.valence   + wt.valence)   / 2.0,
+                    arousal:   (paragraph_emotion.arousal   + wt.arousal)   / 2.0,
+                    dominance: (paragraph_emotion.dominance + wt.dominance) / 2.0,
+                    intensity: (paragraph_emotion.intensity + wt.intensity) / 2.0,
+                }
+            };
+
+            let words = content_words(sent);
+            if words.is_empty() { continue; }
+
+            let hashes: alloc::vec::Vec<u64> = words.iter()
+                .map(|w| word_hash(w))
+                .collect();
+
+            // ── Tầng 2: Từ — node riêng, emotion = context blend ─────────────
+            for (wi, w) in words.iter().enumerate() {
+                let wt  = context::emotion::word_affect(w);
+                let tag = if wt.intensity > 0.10 {
+                    // Blend: 60% sentence context + 40% lexicon
+                    EmotionTag {
+                        valence:   sent_tag.valence   * 0.6 + wt.valence   * 0.4,
+                        arousal:   sent_tag.arousal   * 0.6 + wt.arousal   * 0.4,
+                        dominance: sent_tag.dominance * 0.6 + wt.dominance * 0.4,
+                        intensity: sent_tag.intensity * 0.6 + wt.intensity * 0.4,
+                    }
+                } else {
+                    sent_tag
+                };
+
+                // Activate từ với từ liền trước trong câu
+                if wi > 0 {
+                    // Cạnh từ gần nhau (khoảng cách 1) → reward cao
+                    self.graph.co_activate(hashes[wi-1], hashes[wi], tag, 0.8, ts);
+                }
+
+                // ── Tầng 3: Cụm từ — sliding window 5 ───────────────────────
+                let win_end = (wi + 5).min(hashes.len());
+                for wj in (wi + 2)..win_end { // bắt đầu từ +2 (khoảng cách 1 đã làm trên)
+                    let gap = (wj - wi) as f32;
+                    let proximity = 1.0 - gap / 5.0; // gần hơn → mạnh hơn
+
+                    let pair_tag = EmotionTag {
+                        valence:   sent_tag.valence,
+                        arousal:   sent_tag.arousal,
+                        dominance: sent_tag.dominance,
+                        intensity: sent_tag.intensity * proximity,
+                    };
+                    self.graph.co_activate(hashes[wi], hashes[wj], pair_tag,
+                        proximity * sent_tag.intensity.max(0.05), ts);
+                }
+            }
+
+            // ── Tầng 4: Câu liên tiếp — link câu trước với câu sau ───────────
+            if si > 0 && !hashes.is_empty() {
+                // Lấy hash đại diện của câu = hash từ đầu tiên
+                let sent_hash = hashes[0];
+                if let Some(prev_sent_hash) = self.prev_sent_hash {
+                    self.graph.co_activate(prev_sent_hash, sent_hash, sent_tag,
+                        sent_tag.intensity.max(0.05), ts);
+                }
+                self.prev_sent_hash = Some(sent_hash);
+            } else if si == 0 && !hashes.is_empty() {
+                self.prev_sent_hash = Some(hashes[0]);
+            }
+        }
     }
 
     // ── Accessors ────────────────────────────────────────────────────────────
@@ -211,6 +309,7 @@ impl LearningLoop {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
+
 
 #[cfg(test)]
 mod tests {
@@ -371,5 +470,118 @@ mod tests {
         assert!(!candidates.is_empty(), "Phải có candidates");
         // Top candidate phải có fire_count cao nhất
         assert!(candidates[0].fire_count >= 1);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers — tách văn bản
+// ─────────────────────────────────────────────────────────────────────────────
+
+use alloc::string::ToString;
+
+/// Tách văn bản thành câu theo dấu . ! ?
+fn split_sentences(text: &str) -> alloc::vec::Vec<alloc::string::String> {
+    let mut sentences = alloc::vec::Vec::new();
+    let mut cur = alloc::string::String::new();
+    for ch in text.chars() {
+        cur.push(ch);
+        if matches!(ch, '.' | '!' | '?' | '。' | '！' | '？') {
+            let s = cur.trim().to_string();
+            if !s.is_empty() { sentences.push(s); }
+            cur.clear();
+        }
+    }
+    let s = cur.trim().to_string();
+    if !s.is_empty() { sentences.push(s); }
+    sentences
+}
+
+/// Lấy content words — loại stop words và từ quá ngắn.
+fn content_words(text: &str) -> alloc::vec::Vec<alloc::string::String> {
+    text.split_whitespace()
+        .map(|w| {
+            // Bỏ dấu câu xung quanh
+            { let s: alloc::string::String = w.chars().filter(|c| c.is_alphanumeric() || *c > '\x7f').collect(); s.to_lowercase() }
+        })
+        .filter(|w| {
+            let n = w.chars().count();
+            n >= 2 && !is_stop_word(w)
+        })
+        .collect()
+}
+
+/// Hash ổn định cho một từ.
+fn word_hash(word: &str) -> u64 {
+    let mut h = 0xcbf29ce484222325_u64; // FNV offset
+    for b in word.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3); // FNV prime
+    }
+    h
+}
+
+/// Stop words — không tạo Silk node riêng.
+fn is_stop_word(w: &str) -> bool {
+    matches!(w,
+        // VI phổ biến
+        "và"|"của"|"các"|"trong"|"với"|"này"|"đó"|"cho"|"những"|"một"|
+        "hay"|"khi"|"đã"|"đang"|"sẽ"|"bị"|"được"|"có"|"là"|"thì"|
+        "mà"|"nên"|"vì"|"nếu"|"theo"|"sau"|"trên"|"dưới"|"như"|
+        "rồi"|"lại"|"cũng"|"vẫn"|"còn"|"ra"|"vào"|"lên"|"xuống"|
+        "đây"|"đó"|"kia"|"ở"|"tại"|"về"|"đến"|"từ"|"qua"|"lúc"|
+        // EN phổ biến
+        "the"|"and"|"was"|"for"|"are"|"with"|"his"|"that"|"had"|
+        "but"|"not"|"from"|"they"|"she"|"him"|"her"|"its"|"also"
+    )
+}
+
+#[cfg(test)]
+mod word_level_tests {
+    use super::*;
+
+    #[test]
+    fn content_words_vietnamese() {
+        let words = content_words("Natasha Rostova lần đầu dự vũ hội, tim đập rộn ràng.");
+        assert!(!words.is_empty(), "Phải có content words từ tiếng Việt");
+        // "Natasha", "Rostova", "lần", "đầu", "vũ", "hội", "tim", "đập", "rộn", "ràng"
+        assert!(words.iter().any(|w| w.contains("natasha") || w.contains("rostova")),
+            "Tên riêng phải được giữ lại");
+    }
+
+    #[test]
+    fn word_hash_deterministic() {
+        assert_eq!(word_hash("natasha"), word_hash("natasha"));
+        assert_ne!(word_hash("natasha"), word_hash("andrei"));
+    }
+
+    #[test]
+    fn split_sentences_vn() {
+        let sents = split_sentences("Andrei nằm xuống. Bầu trời xanh! Tất cả vô nghĩa?");
+        assert_eq!(sents.len(), 3, "3 câu: {:?}", sents);
+    }
+
+    #[test]
+    fn learn_text_creates_silk_edges() {
+        let mut ll = LearningLoop::new(0xABCD);
+        let emotion = silk::edge::EmotionTag {
+            valence: -0.65, arousal: 0.55, dominance: 0.30, intensity: 0.60
+        };
+        ll.learn_text(
+            "Andrei nằm trên chiến trường, bầu trời xanh vô tận.",
+            emotion, 1000
+        );
+        let edges = ll.graph().len();
+        assert!(edges > 0, "Phải tạo được Silk edges từ câu văn");
+    }
+
+    #[test]
+    fn learn_text_multiple_sentences() {
+        let mut ll = LearningLoop::new(0xBEEF);
+        let emo = silk::edge::EmotionTag {
+            valence: -0.60, arousal: 0.50, dominance: 0.30, intensity: 0.55
+        };
+        ll.learn_text("Natasha yêu Andrei. Pierre tìm kiếm ý nghĩa.", emo, 1000);
+        let edges = ll.graph().len();
+        assert!(edges > 0, "Multi-sentence phải có edges");
     }
 }

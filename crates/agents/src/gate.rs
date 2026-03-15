@@ -15,7 +15,6 @@ extern crate alloc;
 use alloc::string::String;
 
 use context::emotion::IntentKind;
-use context::intent::crisis_text_for;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EpistemicLevel

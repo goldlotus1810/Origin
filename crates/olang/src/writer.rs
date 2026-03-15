@@ -34,7 +34,6 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use alloc::string::String;
 
 use crate::molecular::MolecularChain;
 
@@ -204,6 +203,7 @@ pub enum WriteError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
     use super::*;
     use crate::encoder::encode_codepoint;
 

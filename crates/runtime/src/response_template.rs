@@ -14,7 +14,7 @@ use alloc::string::{String, ToString};
 use alloc::format;
 
 use silk::walk::ResponseTone;
-use context::intent::{IntentAction, ClarifyKind, crisis_text_for, crisis_text_vi};
+use context::intent::{IntentAction, ClarifyKind};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ResponseTemplate
@@ -110,7 +110,7 @@ fn ask_context_text(angry: bool, cur_v: f32) -> String {
     }
 }
 
-fn empathize_text(tone: ResponseTone, cur_v: f32, original: Option<&str>) -> String {
+fn empathize_text(_tone: ResponseTone, cur_v: f32, original: Option<&str>) -> String {
     // Cấu trúc: thừa nhận cảm xúc → [thông tin nếu có]
     let ack = if cur_v < -0.60 {
         "Mình nghe bạn."

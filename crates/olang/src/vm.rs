@@ -81,7 +81,7 @@ impl VmStack {
         self.data.last()
     }
 
-    fn is_empty(&self) -> bool { self.data.is_empty() }
+    fn _is_empty(&self) -> bool { self.data.is_empty() }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
