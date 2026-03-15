@@ -97,8 +97,10 @@ pub enum EdgeKind {
     Sync        = 0x11, // ∥
     // Language
     Translates  = 0x12, // f(L) alias
-    // Associative (Hebbian)
-    Assoc       = 0xFF, // ~ co-activation
+    // Associative learned (Hebbian + EmotionTag)
+    Assoc       = 0xFF, // ~ co-activation (generic)
+    EdgeAssoc   = 0xA0, // ~ liên tưởng học được (với EmotionTag + source)
+    EdgeCausal  = 0xA1, // →→ nhân quả học được (với confidence)
     // QR Supersession
     Supersedes  = 0xF0, // B supersedes A
 }
@@ -126,6 +128,8 @@ impl EdgeKind {
             0x12 => Some(Self::Translates),
             0xF0 => Some(Self::Supersedes),
             0xFF => Some(Self::Assoc),
+            0xA0 => Some(Self::EdgeAssoc),
+            0xA1 => Some(Self::EdgeCausal),
             _    => None,
         }
     }
@@ -143,8 +147,59 @@ impl EdgeKind {
 
     /// Associative edge — weight thay đổi theo Hebbian.
     pub fn is_associative(self) -> bool {
-        self == Self::Assoc
+        matches!(self, Self::Assoc | Self::EdgeAssoc | Self::EdgeCausal)
     }
+
+    /// Symbol cho edge kind.
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Member     => "∈",  Self::Subset    => "⊂",
+            Self::Equiv      => "≡",  Self::Similar   => "≈",
+            Self::Compose    => "∘",  Self::Causes    => "→",
+            Self::Orthogonal => "⊥",  Self::DerivedFrom => "←",
+            Self::Assoc      => "~",
+            Self::EdgeAssoc  => "~~", // liên tưởng
+            Self::EdgeCausal => "→→", // nhân quả
+            _                => "?",
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ModalitySource — nguồn gốc học
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Nguồn gốc khi tạo EdgeAssoc/EdgeCausal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ModalitySource {
+    /// Từ text/ngôn ngữ
+    Text  = 0x01,
+    /// Từ audio/giọng nói
+    Audio = 0x02,
+    /// Từ hình ảnh/video
+    Image = 0x03,
+    /// Từ cảm biến sinh học (nhịp tim, nhiệt độ...)
+    Bio   = 0x04,
+    /// Từ nhiều nguồn kết hợp
+    Fused = 0x05,
+}
+
+impl ModalitySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text  => "text",
+            Self::Audio => "audio",
+            Self::Image => "image",
+            Self::Bio   => "bio",
+            Self::Fused => "fused",
+        }
+    }
+}
+
+impl Default for ModalitySource {
+    fn default() -> Self { Self::Text }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +228,10 @@ pub struct SilkEdge {
     pub created_at: i64,
     /// Timestamp cập nhật cuối (ns)
     pub updated_at: i64,
+    /// Nguồn gốc học (text/audio/image/bio)
+    pub source:     ModalitySource,
+    /// Confidence cho EdgeCausal ∈ [0.0, 1.0]
+    pub confidence: f32,
 }
 
 impl SilkEdge {
@@ -188,6 +247,8 @@ impl SilkEdge {
             fire_count: 1,
             created_at: ts,
             updated_at: ts,
+            source:     ModalitySource::Text,
+            confidence: 1.0,
         }
     }
 
@@ -200,6 +261,8 @@ impl SilkEdge {
             from_hash, to_hash,
             kind:       EdgeKind::Assoc,
             emotion,
+            source:     ModalitySource::Text,
+            confidence: 0.0,
             weight:     0.1, // khởi đầu yếu
             fire_count: 1,
             created_at: ts,
