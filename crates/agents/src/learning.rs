@@ -87,6 +87,11 @@ impl ShortTermMemory {
     pub fn is_empty(&self) -> bool { self.observations.is_empty() }
     pub fn all(&self) -> &[Observation] { &self.observations }
 
+    /// Tìm observation theo chain_hash.
+    pub fn find_by_hash(&self, hash: u64) -> Option<&Observation> {
+        self.observations.iter().find(|o| o.chain.chain_hash() == hash)
+    }
+
     /// Xóa observations đã được promote lên QR.
     pub fn remove_promoted(&mut self, hashes: &[u64]) {
         self.observations.retain(|o| !hashes.contains(&o.chain.chain_hash()));

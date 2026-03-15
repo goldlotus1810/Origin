@@ -6,9 +6,12 @@
 //! ○(∅) == ○ — boot từ hư không.
 
 use std::io::{self, BufRead, Write};
+use std::fs::OpenOptions;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use runtime::origin::HomeRuntime;
+
+const OLANG_FILE: &str = "origin.olang";
 
 fn now_ns() -> i64 {
     SystemTime::now()
@@ -69,10 +72,51 @@ fn main() {
         // Output
         println!("{}", response.text);
         println!();
+
+        // Flush pending writes → origin.olang (QT9: ghi file TRƯỚC)
+        flush_pending(&mut rt);
+    }
+
+    // Final persist: serialize remaining learned data
+    let final_bytes = rt.serialize_learned(now_ns());
+    if final_bytes.len() > olang::writer::HEADER_SIZE {
+        if let Err(e) = append_to_file(OLANG_FILE, &final_bytes) {
+            eprintln!("[persist] Error writing final state: {}", e);
+        } else {
+            println!("[persist] Saved {} bytes on exit", final_bytes.len());
+        }
     }
 
     // Stats khi thoát
     println!();
     println!("○ Session ended · {} turns · f(x)={:.3}",
         rt.turn_count(), rt.fx());
+}
+
+/// Flush pending writes từ runtime → origin.olang.
+fn flush_pending(rt: &mut HomeRuntime) {
+    if !rt.has_pending_writes() { return; }
+
+    let bytes = rt.drain_pending_writes();
+    if bytes.is_empty() { return; }
+
+    match append_to_file(OLANG_FILE, &bytes) {
+        Ok(()) => {
+            // Silent success — không spam console
+        }
+        Err(e) => {
+            eprintln!("[persist] Error flushing {} bytes: {}", bytes.len(), e);
+        }
+    }
+}
+
+/// Append bytes vào file (tạo mới nếu chưa có).
+fn append_to_file(path: &str, bytes: &[u8]) -> io::Result<()> {
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    f.write_all(bytes)?;
+    f.flush()?;
+    Ok(())
 }

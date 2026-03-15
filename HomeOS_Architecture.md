@@ -627,7 +627,7 @@ Tier 3: ESP32 (520KB SRAM)
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |
 
-**Tổng: 743 tests, 0 clippy warnings, 12 crates**
+**Tổng: 746 tests, 0 clippy warnings, 12 crates**
 
 ---
 
@@ -711,4 +711,4 @@ Design lock: KHÔNG — design có thể evolve nếu có bằng chứng mới
 ---
 
 *Bản vẽ này là la bàn. Code là hành trình.*
-*2026-03-15 · HomeOS v3 · 743 tests · 0 warnings*
+*2026-03-15 · HomeOS v3 · 746 tests · 0 warnings*

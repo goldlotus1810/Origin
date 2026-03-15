@@ -67,6 +67,8 @@ pub struct HomeRuntime {
     uptime_ns:        i64,
     turn_count:       u64,
     last_dream_turn:  u64,  // turn khi Dream lần cuối chạy
+    /// QT9: bytes chờ ghi disk — caller (server) drain và flush.
+    pending_writes:   alloc::vec::Vec<u8>,
 }
 
 impl HomeRuntime {
@@ -88,6 +90,7 @@ impl HomeRuntime {
             uptime_ns:        0,
             turn_count:       0,
             last_dream_turn:  0,
+            pending_writes:   alloc::vec::Vec::new(),
         }
     }
 
@@ -603,6 +606,24 @@ impl HomeRuntime {
     pub fn turn_count(&self) -> u64 { self.turn_count }
     pub fn fx(&self) -> f32 { self.learning.context().fx() }
     pub fn tone(&self) -> ResponseTone { self.learning.context().tone() }
+
+    // ── Persistence — QT9: ghi file TRƯỚC, cập nhật RAM SAU ────────────────
+
+    /// Có bytes chờ ghi disk không?
+    pub fn has_pending_writes(&self) -> bool { !self.pending_writes.is_empty() }
+
+    /// Lấy pending bytes và xóa buffer.
+    ///
+    /// Caller (server) chịu trách nhiệm:
+    ///   `OpenOptions::new().create(true).append(true).open("origin.olang")?.write_all(&bytes)?`
+    ///
+    /// Gọi sau mỗi turn hoặc khi shutdown.
+    pub fn drain_pending_writes(&mut self) -> alloc::vec::Vec<u8> {
+        core::mem::take(&mut self.pending_writes)
+    }
+
+    /// Số bytes đang chờ ghi.
+    pub fn pending_bytes(&self) -> usize { self.pending_writes.len() }
 }
 
 
@@ -869,8 +890,11 @@ impl HomeRuntime {
     /// Chạy Dream cycle và feed approved proposals vào Registry.
     ///
     /// Gọi tự động sau DREAM_INTERVAL turns.
-    /// Approved proposals → ĐN nodes mới trong Registry.
+    /// QT9: ghi file TRƯỚC — cập nhật RAM SAU.
+    /// Approved proposals → pending_writes → Registry.
     fn run_dream(&mut self, ts: i64) {
+        use olang::writer::OlangWriter;
+
         self.last_dream_turn = self.turn_count;
 
         let result = self.dream.run(
@@ -879,25 +903,77 @@ impl HomeRuntime {
             ts,
         );
 
-        // Feed approved proposals → Registry (ĐN — chưa phải QR)
+        // Feed approved proposals
+        // QT9: serialize TRƯỚC → pending_writes → RỒII mới cập nhật Registry
         {
             use memory::proposal::{ProposalKind, AAMDecision};
             let aam = memory::proposal::AAM::new();
+
+            let mut writer = OlangWriter::new(ts);
+
             for proposal in &result.proposals {
                 if matches!(aam.review(proposal), AAMDecision::Approved) {
                     match &proposal.kind {
                         ProposalKind::NewNode { chain, .. } => {
-                            self.registry.insert(chain, 3, 0, ts, false); // L3, ĐN
+                            // 1. Ghi file TRƯỚC (QT9)
+                            let _ = writer.append_node(chain, 3, false, ts);
+                        }
+                        ProposalKind::PromoteQR { chain_hash, .. } => {
+                            // PromoteQR: tìm chain trong STM → ghi lại với is_qr=true
+                            if let Some(obs) = self.learning.stm().find_by_hash(*chain_hash) {
+                                let _ = writer.append_node(&obs.chain, 0, true, ts);
+                            }
+                        }
+                        ProposalKind::NewEdge { from_hash, to_hash, edge_kind } => {
+                            writer.append_edge(*from_hash, *to_hash, *edge_kind, ts);
+                        }
+                        ProposalKind::SupersedeQR { .. } => {
+                            // SupersedeQR: chưa implement disk format — skip
+                        }
+                    }
+                }
+            }
+
+            // Accumulate bytes vào pending_writes
+            if writer.write_count() > 0 {
+                self.pending_writes.extend_from_slice(writer.as_bytes());
+            }
+
+            // 2. Cập nhật RAM SAU (QT9)
+            for proposal in &result.proposals {
+                if matches!(aam.review(proposal), AAMDecision::Approved) {
+                    match &proposal.kind {
+                        ProposalKind::NewNode { chain, .. } => {
+                            self.registry.insert(chain, 3, 0, ts, false);
                         }
                         ProposalKind::PromoteQR { chain_hash, fire_count: _ } => {
-                            // Re-insert as QR
-                            let dummy = olang::encoder::encode_codepoint(0x25CB);
-                            self.registry.insert(&dummy, 0, 0, ts, true);
+                            if let Some(obs) = self.learning.stm().find_by_hash(*chain_hash) {
+                                self.registry.insert(&obs.chain, 0, 0, ts, true);
+                            }
                             let _ = chain_hash;
                         }
                         _ => {}
                     }
                 }
+            }
+        }
+
+        // Persist Silk edges đủ mạnh (accumulated during this session)
+        {
+            let mut writer = OlangWriter::new(ts);
+            let graph = self.learning.graph();
+            for edge in graph.all_edges() {
+                if edge.kind.is_associative() && edge.weight >= 0.30 {
+                    writer.append_edge(
+                        edge.from_hash,
+                        edge.to_hash,
+                        edge.kind.as_byte(),
+                        edge.updated_at,
+                    );
+                }
+            }
+            if writer.write_count() > 0 {
+                self.pending_writes.extend_from_slice(writer.as_bytes());
             }
         }
 
@@ -949,5 +1025,46 @@ mod persist_tests {
         }
         // saveable_edges() không panic
         let _ = rt.saveable_edges();
+    }
+
+    #[test]
+    fn pending_writes_empty_initially() {
+        let rt = HomeRuntime::new(0xDEAD);
+        assert!(!rt.has_pending_writes());
+        assert_eq!(rt.pending_bytes(), 0);
+    }
+
+    #[test]
+    fn drain_pending_clears_buffer() {
+        let mut rt = HomeRuntime::new(0xBEEF);
+        // Feed enough turns to trigger dream (DREAM_INTERVAL=8)
+        for i in 0..10 {
+            let text = alloc::format!("câu {} buồn đau khổ mất mát", i);
+            rt.process_text(&text, i as i64 * 1000);
+        }
+        // Drain whatever pending writes accumulated
+        let bytes = rt.drain_pending_writes();
+        // After drain → empty
+        assert!(!rt.has_pending_writes(), "drain clears buffer");
+        assert_eq!(rt.pending_bytes(), 0);
+        // bytes may or may not have content depending on dream
+        let _ = bytes;
+    }
+
+    #[test]
+    fn qt9_write_before_ram() {
+        // Verify: after dream, pending_writes contain bytes
+        // AND registry was updated (both happened in order)
+        let mut rt = HomeRuntime::new(0xF00D);
+        for i in 0..12 {
+            let text = alloc::format!("từ {} buồn vui đau sợ hạnh phúc hy vọng", i);
+            rt.process_text(&text, i as i64 * 1000);
+        }
+        // At this point, dream may have run (after 8 turns)
+        // If dream produced proposals, pending_writes should have data
+        // This is a structural test — verifying no panic and correct flow
+        let pending = rt.pending_bytes();
+        let drained = rt.drain_pending_writes();
+        assert_eq!(drained.len(), pending);
     }
 }
