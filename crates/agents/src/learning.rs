@@ -195,8 +195,10 @@ impl LearningLoop {
 
     // ── Accessors ────────────────────────────────────────────────────────────
 
-    pub fn stm(&self)      -> &ShortTermMemory { &self.stm }
-    pub fn graph(&self)    -> &SilkGraph       { &self.graph }
+    pub fn stm(&self)       -> &ShortTermMemory { &self.stm }
+    pub fn graph(&self)     -> &SilkGraph       { &self.graph }
+    pub fn stm_mut(&mut self)   -> &mut ShortTermMemory { &mut self.stm }
+    pub fn graph_mut(&mut self) -> &mut SilkGraph       { &mut self.graph }
     pub fn context(&self)  -> &ContextEngine   { &self.context }
     pub fn turn_count(&self) -> usize          { self.context.turn_count() }
 

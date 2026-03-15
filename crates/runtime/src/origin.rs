@@ -164,17 +164,29 @@ impl HomeRuntime {
         let vm      = OlangVM::new();
         let result  = vm.execute(&prog);
 
-        // Collect output từ VM events
-        let mut output_text = String::new();
+        // Collect output từ VM events + FEED vào LearningLoop
+        let mut output_text  = String::new();
+        let mut learned: alloc::vec::Vec<olang::molecular::MolecularChain> = alloc::vec::Vec::new();
+        // Compute emotion once — tránh borrow conflict
+        let cur_emotion = self.learning.context().last_emotion();
+
         for event in &result.events {
             match event {
                 VmEvent::Output(chain) => {
+                    // Output chain → STM: user tạo ra node này
+                    if !chain.is_empty() {
+                        self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
+                        learned.push(chain.clone());
+                    }
                     let emoji = chain_to_emoji(chain);
                     output_text.push_str(&format!("{} ", emoji));
                 }
                 VmEvent::LookupAlias(alias) => {
                     let (chain, cp_opt) = resolve_with_cp(alias, &self.registry);
                     if !chain.is_empty() {
+                        // Lookup → STM: user referenced this node
+                        self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
+                        learned.push(chain.clone());
                         let emoji = if let Some(cp) = cp_opt {
                             char::from_u32(cp)
                                 .map(|c| { let mut s = alloc::string::String::new(); s.push(c); s })
@@ -188,6 +200,13 @@ impl HomeRuntime {
                     }
                 }
                 VmEvent::CreateEdge { from, to, rel } => {
+                    // Explicit edge → Silk: user asserted relation
+                    self.learning.graph_mut().co_activate(
+                        *from, *to,
+                        cur_emotion,
+                        1.0, // intentional → full reward
+                        ts,
+                    );
                     output_text.push_str(&format!("edge(0x{:04X}→0x{:04X} rel=0x{:02X}) ",
                         from & 0xFFFF, to & 0xFFFF, rel));
                 }
@@ -204,6 +223,20 @@ impl HomeRuntime {
                 VmEvent::Error(e) => {
                     output_text.push_str(&format!("[err:{:?}] ", e));
                 }
+            }
+        }
+
+        // Consecutive lookup/output → Silk co_activate (A ∘ B = association)
+        if learned.len() >= 2 {
+            for w in learned.windows(2) {
+                let ha = w[0].chain_hash();
+                let hb = w[1].chain_hash();
+                self.learning.graph_mut().co_activate(
+                    ha, hb,
+                    cur_emotion,
+                    0.7, // intentional but indirect
+                    ts,
+                );
             }
         }
 

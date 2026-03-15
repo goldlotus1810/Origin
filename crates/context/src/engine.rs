@@ -160,6 +160,17 @@ impl ContextEngine {
     /// Valence hiện tại.
     pub fn current_v(&self) -> f32 { self.curve.current_v() }
 
+    /// EmotionTag từ ConversationCurve hiện tại.
+    /// Dùng để feed vào Silk khi VM events xảy ra.
+    pub fn last_emotion(&self) -> EmotionTag {
+        let v = self.curve.current_v();
+        let d1 = self.curve.d1_now();
+        // valence → emotion byte, arousal từ d1 (momentum)
+        let v_byte = ((v + 1.0) * 127.5) as u8;
+        let a_byte = (d1.abs() * 255.0).min(255.0) as u8;
+        EmotionTag::new(v, a_byte as f32 / 255.0, 0.5, 0.5)
+    }
+
     /// ConversationCurve (read-only).
     pub fn curve(&self) -> &ConversationCurve { &self.curve }
 
