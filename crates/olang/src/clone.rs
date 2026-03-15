@@ -77,6 +77,18 @@ impl DeviceProfile {
         }
     }
 
+    pub fn server(id: &str) -> Self {
+        Self {
+            id:           id.to_string(),
+            device_type:  DeviceType::Server,
+            capabilities: alloc::vec![
+                Capability::Audio, Capability::Vision, Capability::Network,
+                Capability::Compute, Capability::Storage, Capability::Emotion,
+            ],
+            max_bytes:    64_000,
+        }
+    }
+
     pub fn sensor(id: &str) -> Self {
         Self {
             id:           id.to_string(),
@@ -435,5 +447,201 @@ mod tests {
         let parsed = reader.parse_all().expect("parse all");
         assert_eq!(parsed.node_count(), result.node_count,
             "Roundtrip node count khớp");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WorkerPackage — bundle sẵn sàng deploy lên thiết bị
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Package hoàn chỉnh để deploy Worker lên thiết bị.
+///
+/// Chứa: worker.olang (L0+L1 tối thiểu) + ISL address + metadata.
+/// Deploy: HTTP PUT device_ip:7777/worker với body = WorkerPackage::to_bytes()
+#[allow(missing_docs)]
+#[derive(Debug, Clone)]
+pub struct WorkerPackage {
+    /// ISL address được cấp cho Worker này
+    pub isl_layer:    u8,
+    pub isl_group:    u8,
+    pub isl_subgroup: u8,
+    pub isl_index:    u8,
+    /// ISL address của Chief quản lý
+    pub chief_layer:    u8,
+    pub chief_group:    u8,
+    pub chief_subgroup: u8,
+    pub chief_index:    u8,
+    /// Worker kind (từ WorkerKind enum)
+    pub worker_kind:  u8,
+    /// worker.olang bytes
+    pub olang_bytes:  Vec<u8>,
+    /// Timestamp tạo package
+    pub created_at:   i64,
+}
+
+impl WorkerPackage {
+    /// Serialize thành bytes để gửi qua mạng.
+    ///
+    /// Layout: [magic(4)] [version(1)] [isl_addr(4)] [chief_addr(4)]
+    ///         [kind(1)] [created_at(8)] [olang_len(4)] [olang_bytes...]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(26 + self.olang_bytes.len());
+        out.extend_from_slice(b"WKPK");          // magic
+        out.push(0x01);                           // version
+        out.push(self.isl_layer);
+        out.push(self.isl_group);
+        out.push(self.isl_subgroup);
+        out.push(self.isl_index);
+        out.push(self.chief_layer);
+        out.push(self.chief_group);
+        out.push(self.chief_subgroup);
+        out.push(self.chief_index);
+        out.push(self.worker_kind);
+        out.extend_from_slice(&self.created_at.to_be_bytes());
+        let len = self.olang_bytes.len() as u32;
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&self.olang_bytes);
+        out
+    }
+
+    /// Deserialize từ bytes.
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        if b.len() < 26 { return None; }
+        if &b[0..4] != b"WKPK" { return None; }
+        // version b[4] = 0x01
+        let isl_layer    = b[5];
+        let isl_group    = b[6];
+        let isl_subgroup = b[7];
+        let isl_index    = b[8];
+        let chief_layer    = b[9];
+        let chief_group    = b[10];
+        let chief_subgroup = b[11];
+        let chief_index    = b[12];
+        let worker_kind  = b[13];
+        let created_at   = i64::from_be_bytes([b[14],b[15],b[16],b[17],b[18],b[19],b[20],b[21]]);
+        let olang_len    = u32::from_be_bytes([b[22],b[23],b[24],b[25]]) as usize;
+        if b.len() < 26 + olang_len { return None; }
+        Some(Self {
+            isl_layer, isl_group, isl_subgroup, isl_index,
+            chief_layer, chief_group, chief_subgroup, chief_index,
+            worker_kind,
+            olang_bytes: b[26..26 + olang_len].to_vec(),
+            created_at,
+        })
+    }
+
+    /// Kích thước tổng.
+    pub fn wire_size(&self) -> usize { 26 + self.olang_bytes.len() }
+}
+
+/// Export Worker từ origin.olang cho một thiết bị cụ thể.
+///
+/// Kết hợp clone_for_device + đóng gói WorkerPackage sẵn deploy.
+pub fn export_worker(
+    origin_bytes:  &[u8],
+    profile:       &DeviceProfile,
+    isl_addr:      [u8; 4],  // [layer, group, subgroup, index]
+    chief_addr:    [u8; 4],
+    worker_kind:   u8,
+    ts:            i64,
+) -> Option<WorkerPackage> {
+    let result = clone_for_device(origin_bytes, profile, ts)?;
+    Some(WorkerPackage {
+        isl_layer:    isl_addr[0],
+        isl_group:    isl_addr[1],
+        isl_subgroup: isl_addr[2],
+        isl_index:    isl_addr[3],
+        chief_layer:    chief_addr[0],
+        chief_group:    chief_addr[1],
+        chief_subgroup: chief_addr[2],
+        chief_index:    chief_addr[3],
+        worker_kind,
+        olang_bytes:  result.bytes,
+        created_at:   ts,
+    })
+}
+
+#[cfg(test)]
+mod package_tests {
+    use super::*;
+
+    fn origin() -> Vec<u8> {
+        // Tạo minimal origin.olang
+        let mut w = OlangWriter::new(1000);
+        let ch = encode_codepoint(0x1F525); // 🔥
+        let _ = w.append_node(&ch, 0, true, 1000);
+        let _ = w.append_alias("fire", ch.chain_hash(), 1000);
+        w.into_bytes()
+    }
+
+    #[test]
+    fn package_round_trip() {
+        let pkg = WorkerPackage {
+            isl_layer: 1, isl_group: 5, isl_subgroup: 0, isl_index: 3,
+            chief_layer: 1, chief_group: 0, chief_subgroup: 0, chief_index: 0,
+            worker_kind: 0x01,
+            olang_bytes: alloc::vec![0x01, 0x02, 0x03],
+            created_at: 12345,
+        };
+        let bytes = pkg.to_bytes();
+        let dec   = WorkerPackage::from_bytes(&bytes).unwrap();
+        assert_eq!(dec.isl_layer,    pkg.isl_layer);
+        assert_eq!(dec.isl_index,    pkg.isl_index);
+        assert_eq!(dec.worker_kind,  pkg.worker_kind);
+        assert_eq!(dec.olang_bytes,  pkg.olang_bytes);
+        assert_eq!(dec.created_at,   pkg.created_at);
+    }
+
+    #[test]
+    fn package_magic_check() {
+        let mut bad = alloc::vec![0u8; 30];
+        assert!(WorkerPackage::from_bytes(&bad).is_none(), "Bad magic → None");
+        bad[0..4].copy_from_slice(b"WKPK");
+        // len = 0 → olang_bytes empty → OK
+        assert!(WorkerPackage::from_bytes(&bad).is_some());
+    }
+
+    #[test]
+    fn export_worker_creates_package() {
+        let bytes   = origin();
+        let profile = DeviceProfile::sensor("sensor_01");
+        let pkg = export_worker(
+            &bytes, &profile,
+            [1, 5, 0, 1], // ISL addr worker
+            [1, 0, 0, 0], // ISL addr chief
+            0x01,         // WorkerKind::Sensor
+            2000,
+        );
+        assert!(pkg.is_some(), "Export phải thành công");
+        let pkg = pkg.unwrap();
+        assert!(!pkg.olang_bytes.is_empty(), "olang_bytes không rỗng");
+        assert!(pkg.wire_size() < 64_000, "< 64KB: {} bytes", pkg.wire_size());
+    }
+
+    #[test]
+    fn export_different_profiles_different_sizes() {
+        let bytes  = origin();
+        let sensor = DeviceProfile::sensor("s1");
+        let server = DeviceProfile::server("srv1");
+
+        let p_sensor = export_worker(&bytes, &sensor, [1,0,0,1], [1,0,0,0], 0x01, 1000);
+        let p_server = export_worker(&bytes, &server, [1,0,0,2], [1,0,0,0], 0xFF, 1000);
+
+        // Cả hai đều thành công
+        assert!(p_sensor.is_some());
+        assert!(p_server.is_some());
+    }
+
+    #[test]
+    fn wire_size_formula() {
+        let pkg = WorkerPackage {
+            isl_layer: 0, isl_group: 0, isl_subgroup: 0, isl_index: 0,
+            chief_layer: 0, chief_group: 0, chief_subgroup: 0, chief_index: 0,
+            worker_kind: 0,
+            olang_bytes: alloc::vec![0u8; 100],
+            created_at: 0,
+        };
+        assert_eq!(pkg.wire_size(), 126); // 26 header + 100 body
+        assert_eq!(pkg.to_bytes().len(), 126);
     }
 }
