@@ -204,6 +204,10 @@ pub enum OlangIrExpr {
     Compose(String, String),
     /// ○{🔥 ∈ ?} — relation query
     Relation { subject: String, rel: u8, object: Option<String> },
+    /// Direct chain push (e.g. ZWJ sequence already encoded)
+    Push(crate::molecular::MolecularChain),
+    /// ZWJ sequence: preserve original codepoints for display
+    ZwjDisplay { original: alloc::string::String, chain: crate::molecular::MolecularChain },
     /// ○{dream} — system command
     Command(String),
     /// Pipeline
@@ -230,6 +234,13 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             } else {
                 prog.push_op(Op::Query(*rel));
             }
+        }
+
+        OlangIrExpr::Push(chain) => {
+            prog.push_op(Op::Push(chain.clone()));
+        }
+        OlangIrExpr::ZwjDisplay { chain, .. } => {
+            prog.push_op(Op::Push(chain.clone()));
         }
 
         OlangIrExpr::Command(cmd) => {

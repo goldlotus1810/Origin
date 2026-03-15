@@ -23,3 +23,4 @@ pub mod vm;
 pub mod startup;
 pub mod clone;
 pub mod self_model;
+pub mod separator;

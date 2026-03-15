@@ -436,3 +436,7 @@ mod tests {
         }
     }
 }
+
+impl Default for MolecularChain {
+    fn default() -> Self { MolecularChain::empty() }
+}

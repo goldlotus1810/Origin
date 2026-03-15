@@ -20,6 +20,7 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
+use olang::separator::{parse_to_chains, parse_tokens, SepToken};
 use alloc::string::{String, ToString};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,6 +179,19 @@ impl OlangParser {
                 let inner_expr = self.parse_expr(inner.trim())?;
                 return Ok(OlangExpr::Pipeline(alloc::vec![inner_expr]));
             }
+        }
+
+        // ZWJ sequence: contains U+200D → ZwjSeq node
+        if trimmed.contains('\u{200D}') {
+            return Ok(OlangExpr::Query(trimmed.to_string()));
+        }
+
+        // + operator without relation ops → route to separator parser
+        if trimmed.contains('+') && !trimmed.chars().any(|c| RelationOp::from_char(c).is_some()) {
+            return Ok(OlangExpr::Compose {
+                a: trimmed.split('+').next().unwrap_or("").trim().to_string(),
+                b: trimmed.split('+').nth(1).unwrap_or("").trim().to_string(),
+            });
         }
 
         // Tokenize: split by whitespace, preserve Unicode operators

@@ -263,7 +263,7 @@ pub fn resolve(name: &str, registry: &Registry) -> MolecularChain {
 
 /// Bảng tra cứu alias → codepoint cho L0 nodes.
 /// Dùng khi registry không có chain raw (chỉ có hash).
-static ALIAS_CODEPOINTS: &[(&str, u32)] = &[
+pub static ALIAS_CODEPOINTS: &[(&str, u32)] = &[
     // fire
     ("fire", 0x1F525), ("lửa", 0x1F525), ("lua", 0x1F525),
     ("feu", 0x1F525),  ("fuego", 0x1F525),
@@ -284,15 +284,172 @@ static ALIAS_CODEPOINTS: &[(&str, u32)] = &[
     ("∘", 0x2218), ("compose", 0x2218),
     ("∈", 0x2208), ("member", 0x2208),
     ("∅", 0x2205), ("empty", 0x2205),
-    // joy / sadness
+    // joy / sadness / tired / anger / fear
     ("vui", 0x1F60A), ("happy", 0x1F60A), ("joy", 0x1F60A),
-    ("buồn", 0x1F614), ("sad", 0x1F614),
+    ("hạnh phúc", 0x1F60A),
+    ("buồn", 0x1F614), ("sad", 0x1F614), ("buồn bã", 0x1F614),
+    ("mệt", 0x1F634), ("tired", 0x1F634), ("mệt mỏi", 0x1F634),
+    ("giận", 0x1F621), ("angry", 0x1F621), ("tức", 0x1F621),
+    ("sợ", 0x1F628), ("scared", 0x1F628), ("lo", 0x1F628),
+    ("yêu", 0x2764), ("love", 0x2764),
+    ("tuyệt", 0x2B50), ("great", 0x2B50), ("xuất sắc", 0x2B50),
+    ("tệ", 0x1F4A9), ("bad", 0x1F4A9), ("terrible", 0x1F4A9),
+    ("đau", 0x1F915), ("pain", 0x1F915),
+    ("cô đơn", 0x1F614),
     // danger / alert
     ("danger", 0x26A0), ("nguy hiểm", 0x26A0),
     // yes / no
     ("yes", 0x2705), ("có", 0x2705),
     ("no", 0x274C), ("không", 0x274C),
 ];
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// chain_to_emoji — display layer only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tìm emoji đại diện gần nhất cho một MolecularChain.
+///
+/// Ưu tiên:
+///   1. Exact match trong ALIAS_CODEPOINTS (O(n) nhỏ)
+///   2. decode_hash từ UCD reverse index
+///   3. Bucket search theo emotion distance
+pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
+    use alloc::string::ToString;
+
+    if chain.is_empty() || ucd::table_len() == 0 {
+        return "○".to_string();
+    }
+
+    // ZWJ chain (N > 1 molecules): reconstruct từng molecule
+    if chain.len() > 1 {
+        let mut zwj_s = alloc::string::String::new();
+        for (i, mol) in chain.0.iter().enumerate() {
+            // Restore relation=Member trước khi decode
+            // (ZWJ set relation=Compose/Member, cần Member để match UCD)
+            let mut normalized = mol.clone();
+            normalized.relation = crate::molecular::RelationBase::Member;
+            let single = crate::molecular::MolecularChain(alloc::vec![normalized]);
+            let cp = ucd::decode_hash(single.chain_hash()).unwrap_or_else(|| {
+                // Fallback: bucket search với relation=Member + emotion match
+                let cands = ucd::bucket_cps(mol.shape.as_byte(), 0x01);
+                if cands.is_empty() { 0x25CB }
+                else { best_in_bucket(cands, mol.emotion.valence, mol.emotion.arousal) }
+            });
+            if let Some(c) = char::from_u32(cp) { zwj_s.push(c); }
+            if i < chain.len() - 1 {
+                zwj_s.push('‍'); // ZWJ
+            }
+        }
+        if !zwj_s.is_empty() { return zwj_s; }
+    }
+
+    let hash = chain.chain_hash();
+
+    // 1. Exact match: tìm trong ALIAS_CODEPOINTS
+    for &(_, cp) in ALIAS_CODEPOINTS {
+        let candidate = crate::encoder::encode_codepoint(cp);
+        if candidate.chain_hash() == hash {
+            return cp_to_str(cp);
+        }
+    }
+
+    // 2. UCD reverse lookup: decode_hash → codepoint
+    if let Some(cp) = ucd::decode_hash(hash) {
+        return cp_to_str(cp);
+    }
+
+    // 3. Bucket search: emotion distance
+    let mol      = &chain.0[0];
+    let shape    = mol.shape.as_byte();
+    let relation = mol.relation.as_byte();
+    let v_target = mol.emotion.valence;
+    let a_target = mol.emotion.arousal;
+
+    let candidates = ucd::bucket_cps(shape, relation);
+    let best_cp = if !candidates.is_empty() {
+        best_in_bucket(candidates, v_target, a_target)
+    } else {
+        // Fallback: thử relation khác cùng shape
+        let mut found = 0u32;
+        for rel in 1u8..=8 {
+            let cands = ucd::bucket_cps(shape, rel);
+            if !cands.is_empty() {
+                found = best_in_bucket(cands, v_target, a_target);
+                break;
+            }
+        }
+        if found == 0 { return "○".to_string(); }
+        found
+    };
+
+    cp_to_str(best_cp)
+}
+
+fn best_in_bucket(candidates: &[u32], v_target: u8, a_target: u8) -> u32 {
+    let mut best_cp   = candidates[0];
+    let mut best_dist = u32::MAX;
+    for &cp in candidates.iter().take(24) {
+        let v = ucd::valence_of(cp);
+        let a = ucd::arousal_of(cp);
+        let dv = (v as i32 - v_target as i32).unsigned_abs();
+        let da = (a as i32 - a_target as i32).unsigned_abs();
+        let dist = dv * dv + da * da;
+        if dist < best_dist { best_dist = dist; best_cp = cp; }
+    }
+    best_cp
+}
+
+fn cp_to_str(cp: u32) -> alloc::string::String {
+    if let Some(c) = char::from_u32(cp) {
+        let mut s = alloc::string::String::new();
+        s.push(c);
+        s
+    } else {
+        alloc::format!("U+{:04X}", cp)
+    }
+}
+
+
+/// Resolve alias → (chain, codepoint) — codepoint từ ALIAS_CODEPOINTS.
+///
+/// Trả về codepoint để caller biết exact emoji thay vì dùng bucket search.
+pub fn resolve_with_cp(name: &str, registry: &Registry) -> (MolecularChain, Option<u32>) {
+    // Single char → codepoint trực tiếp
+    let chars: alloc::vec::Vec<char> = name.chars().collect();
+    if chars.len() == 1 {
+        let cp = chars[0] as u32;
+        if cp > 0x20 {
+            return (encode_codepoint(cp), Some(cp));
+        }
+    }
+
+    // ALIAS_CODEPOINTS exact word match
+    for &(alias, cp) in ALIAS_CODEPOINTS {
+        if alias == name {
+            return (encode_codepoint(cp), Some(cp));
+        }
+    }
+
+    // Registry lookup
+    if let Some(_hash) = registry.lookup_name(name) {
+        for &(alias, cp) in ALIAS_CODEPOINTS {
+            if alias == name {
+                return (encode_codepoint(cp), Some(cp));
+            }
+        }
+    }
+
+    // First emoji char
+    for c in name.chars() {
+        let cp = c as u32;
+        if cp > 0x2000 {
+            return (encode_codepoint(cp), Some(cp));
+        }
+    }
+
+    (MolecularChain::empty(), None)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests

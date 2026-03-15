@@ -18,8 +18,9 @@ use silk::walk::ResponseTone;
 
 use crate::parser::{OlangParser, OlangExpr, ParseResult, RelationOp};
 use olang::ir::{OlangIrExpr, compile_expr};
+use olang::separator::parse_to_chains;
 use olang::vm::{OlangVM, VmEvent};
-use olang::startup::{boot, resolve};
+use olang::startup::{boot, resolve_with_cp, chain_to_emoji};
 use olang::self_model::SelfModel;
 use olang::registry::Registry;
 
@@ -140,8 +141,21 @@ impl HomeRuntime {
 
     fn process_olang(&mut self, expr: OlangExpr, ts: i64) -> Response {
         // Commands bypass VM
-        if let OlangExpr::Command(cmd) = expr {
-            return self.handle_command(&cmd, ts);
+        if let OlangExpr::Command(ref cmd) = expr {
+            return self.handle_command(cmd, ts);
+        }
+        // ZWJ: display original codepoints directly (before VM)
+        if let OlangExpr::Query(ref s) = expr {
+            if s.contains('‍') {
+                let chains = parse_to_chains(s);
+                let mol_count: usize = chains.iter().map(|c| c.len()).sum();
+                return Response {
+                    text: format!("○ {} ({} mol)", s, mol_count),
+                    tone: ResponseTone::Engaged,
+                    fx: self.learning.context().fx(),
+                    kind: ResponseKind::OlangResult,
+                };
+            }
         }
 
         // Compile OlangExpr → OlangIrExpr → OlangProgram
@@ -155,15 +169,22 @@ impl HomeRuntime {
         for event in &result.events {
             match event {
                 VmEvent::Output(chain) => {
-                    let hash = chain.chain_hash();
-                    output_text.push_str(&format!("hash=0x{:08X} ", hash & 0xFFFF_FFFF));
+                    let emoji = chain_to_emoji(chain);
+                    output_text.push_str(&format!("{} ", emoji));
                 }
                 VmEvent::LookupAlias(alias) => {
-                    let chain = resolve(alias, &self.registry);
+                    let (chain, cp_opt) = resolve_with_cp(alias, &self.registry);
                     if !chain.is_empty() {
-                        output_text.push_str(&format!("[{}=0x{:08X}] ", alias, chain.chain_hash() & 0xFFFF_FFFF));
+                        let emoji = if let Some(cp) = cp_opt {
+                            char::from_u32(cp)
+                                .map(|c| { let mut s = alloc::string::String::new(); s.push(c); s })
+                                .unwrap_or_else(|| chain_to_emoji(&chain))
+                        } else {
+                            chain_to_emoji(&chain)
+                        };
+                        output_text.push_str(&format!("{}={} ", alias, emoji));
                     } else {
-                        output_text.push_str(&format!("[{}=?] ", alias));
+                        output_text.push_str(&format!("{}=? ", alias));
                     }
                 }
                 VmEvent::CreateEdge { from, to, rel } => {
@@ -431,6 +452,18 @@ mod tests {
 /// Convert parser OlangExpr → IR OlangIrExpr.
 fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
     match expr {
+        OlangExpr::Query(ref name) if name.contains('‍') => {
+            // ZWJ sequence: encode + tag for display
+            let chains = parse_to_chains(name);
+            if !chains.is_empty() {
+                // Use first chain as representative, preserve original for display
+                return OlangIrExpr::ZwjDisplay {
+                    original: name.clone(),
+                    chain: chains.into_iter().next().unwrap_or_default(),
+                };
+            }
+            OlangIrExpr::Query(name.clone())
+        }
         OlangExpr::Query(name) =>
             OlangIrExpr::Query(name),
 
