@@ -15,3 +15,4 @@ pub mod fit;
 pub mod spline;
 pub mod vector;
 pub mod delta;
+pub mod physics;
