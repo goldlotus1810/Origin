@@ -12,3 +12,4 @@ pub mod encoder;
 pub mod learning;
 pub mod book;
 pub mod gate;
+pub mod worker;
