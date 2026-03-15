@@ -1,5 +1,5 @@
 
-## TODO — Display Layer (Phase 4 completion)
+## DONE — Display Layer (Phase 4 completion) ✓
 
 ### chain_to_emoji() — đã viết, chưa wire
 
@@ -20,3 +20,9 @@ Không sửa VM. Không sửa Op. Không sửa VmEvent.
 Chỉ sửa phần render trong `process_olang()`.
 
 Làm sau khi Phase 7 (WASM) xong.
+
+
+## Next — Phase 8: Data L2-Ln
+
+Seed KnowTree L2-Ln từ multilingual corpus.
+Feature flag: `l2-data`
