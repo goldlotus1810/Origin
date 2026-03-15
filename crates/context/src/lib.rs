@@ -17,3 +17,4 @@ pub mod engine;
 pub mod context;
 pub mod infer;
 pub mod fusion;
+pub mod word_guide;
