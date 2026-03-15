@@ -12,3 +12,5 @@ extern crate alloc;
 pub mod sdf;
 pub mod ffr;
 pub mod fit;
+pub mod spline;
+pub mod vector;
