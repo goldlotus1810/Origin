@@ -5,6 +5,7 @@ members = [
     "crates/olang",
     "crates/silk",
     "crates/vsdf",
+    "crates/isl",
     "crates/wasm",
     "crates/context",
     "crates/agents",

@@ -1,0 +1,11 @@
+[package]
+name    = "isl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+olang = { path = "../olang" }
+
+[lib]
+name = "isl"
+path = "src/lib.rs"
