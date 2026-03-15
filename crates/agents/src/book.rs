@@ -12,6 +12,7 @@ use alloc::string::{String, ToString};
 
 use silk::edge::EmotionTag;
 use context::emotion::word_affect;
+use olang::ling::apply_modifiers;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SentenceRecord
@@ -178,7 +179,13 @@ fn sentence_emotion(sentence: &str) -> EmotionTag {
 
     if weight == 0.0 { return EmotionTag::NEUTRAL; }
 
-    let result_v = (tv / weight).max(-1.0).min(1.0);
+    // Apply linguistic modifiers (negation, amplifier, diminisher, contrast)
+    let words_vec: alloc::vec::Vec<&str> = words.iter().copied().collect();
+    let raw_v = tv / weight;
+    let (mod_v, mod_a) = apply_modifiers(&words_vec, raw_v, ta / weight);
+
+    let result_v = mod_v.max(-1.0).min(1.0);
+    let _ = mod_a; // arousal computed separately
 
     // Lớp 3: topic inference (khi valence thấp)
     // Nếu sentence chưa có signal rõ (|v| < 0.1), thử topic words
