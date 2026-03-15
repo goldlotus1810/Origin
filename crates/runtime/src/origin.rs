@@ -17,8 +17,10 @@ use memory::dream::{DreamCycle, DreamConfig};
 use silk::walk::ResponseTone;
 
 use crate::parser::{OlangParser, OlangExpr, ParseResult, RelationOp};
-use olang::ir::{OlangIrExpr, OlangProgram, Op, compile_expr};
+use olang::ir::{OlangIrExpr, compile_expr};
 use olang::vm::{OlangVM, VmEvent};
+use olang::startup::{boot, resolve, BootResult};
+use olang::registry::Registry;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Response
@@ -50,20 +52,28 @@ pub enum ResponseKind {
 ///
 /// ○(∅) == ○: boot từ hư không, sống từ đây.
 pub struct HomeRuntime {
-    learning: LearningLoop,
-    parser:   OlangParser,
-    dream:    DreamCycle,
-    uptime_ns: i64,
+    learning:   LearningLoop,
+    parser:     OlangParser,
+    dream:      DreamCycle,
+    registry:   Registry,
+    uptime_ns:  i64,
     turn_count: u64,
 }
 
 impl HomeRuntime {
-    /// Boot từ hư không.
+    /// Boot từ hư không — ○(∅)==○.
     pub fn new(session_id: u64) -> Self {
+        Self::with_file(session_id, None)
+    }
+
+    /// Boot với file bytes — load registry từ origin.olang.
+    pub fn with_file(session_id: u64, file_bytes: Option<&[u8]>) -> Self {
+        let boot_result = boot(file_bytes);
         Self {
             learning:   LearningLoop::new(session_id),
             parser:     OlangParser::new(),
             dream:      DreamCycle::new(DreamConfig::default()),
+            registry:   boot_result.registry,
             uptime_ns:  0,
             turn_count: 0,
         }
@@ -146,7 +156,12 @@ impl HomeRuntime {
                     output_text.push_str(&format!("hash=0x{:08X} ", hash & 0xFFFF_FFFF));
                 }
                 VmEvent::LookupAlias(alias) => {
-                    output_text.push_str(&format!("[{}] ", alias));
+                    let chain = resolve(alias, &self.registry);
+                    if !chain.is_empty() {
+                        output_text.push_str(&format!("[{}=0x{:08X}] ", alias, chain.chain_hash() & 0xFFFF_FFFF));
+                    } else {
+                        output_text.push_str(&format!("[{}=?] ", alias));
+                    }
                 }
                 VmEvent::CreateEdge { from, to, rel } => {
                     output_text.push_str(&format!("edge(0x{:04X}→0x{:04X} rel=0x{:02X}) ",

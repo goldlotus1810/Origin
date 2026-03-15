@@ -29,7 +29,15 @@ fn main() {
     }
 
     let session_id = now_ns() as u64;
-    let mut rt = HomeRuntime::new(session_id);
+    // Load origin.olang nếu có
+    let file_bytes = std::fs::read("origin.olang").ok();
+    let mut rt = if let Some(ref bytes) = file_bytes {
+        println!("[boot] origin.olang: {} bytes", bytes.len());
+        HomeRuntime::with_file(session_id, Some(bytes))
+    } else {
+        println!("[boot] No origin.olang — booting from nothing");
+        HomeRuntime::new(session_id)
+    };
 
     let stdin  = io::stdin();
     let stdout = io::stdout();

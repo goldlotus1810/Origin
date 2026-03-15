@@ -52,6 +52,7 @@ pub struct RegistryEntry {
 ///
 /// In-memory index được rebuild từ origin.olang lúc startup.
 /// Mọi thay đổi được ghi vào file TRƯỚC khi cập nhật RAM.
+#[allow(missing_docs)]
 pub struct Registry {
     /// chain_hash → RegistryEntry (sorted by hash for binary search)
     entries: Vec<(u64, RegistryEntry)>,
@@ -470,5 +471,14 @@ mod tests {
             assert_eq!(r.lookup_name(alias), Some(hash),
                 "Alias '{}' phải trỏ về cùng node", alias);
         }
+    }
+}
+
+impl core::fmt::Debug for Registry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Registry")
+            .field("len", &self.entries.len())
+            .field("aliases", &self.names.len())
+            .finish()
     }
 }

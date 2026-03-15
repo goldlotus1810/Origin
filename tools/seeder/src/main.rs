@@ -16,11 +16,11 @@ use olang::log::{EventLog, LogEvent};
 /// L0 Seed Map: (tên, codepoint, aliases)
 /// Chain KHÔNG hardcode — đến từ encode_codepoint(cp).
 static L0_NODES: &[(&str, u32, &[&str])] = &[
-    ("fire",    0x1F525, &["lua", "fire", "feu"]),
+    ("fire",    0x1F525, &["lua", "lửa", "fire", "feu"]),
     ("light",   0x1F4A1, &["anh-sang", "light"]),
     ("spark",   0x2728,  &["tia-lua", "spark"]),
     ("bolt",    0x26A1,  &["set", "lightning"]),
-    ("water",   0x1F4A7, &["nuoc", "water", "eau"]),
+    ("water",   0x1F4A7, &["nuoc", "nước", "water", "eau"]),
     ("earth",   0x1F30D, &["dat", "earth"]),
     ("wind",    0x1F32C, &["gio", "wind"]),
     ("sound",   0x1F50A, &["am-thanh", "sound"]),
@@ -38,10 +38,10 @@ static L0_NODES: &[(&str, u32, &[&str])] = &[
     ("house",   0x1F3E1, &["nha-o", "house"]),
     ("nature",  0x1F333, &["thien-nhien", "nature"]),
     ("ocean",   0x1F30A, &["bien", "ocean", "sea"]),
-    ("mind",    0x1F9E0, &["tam-tri", "mind", "brain"]),
+    ("mind",    0x1F9E0, &["tam-tri", "tâm trí", "mind", "brain"]),
     ("person",  0x1F464, &["nguoi", "person"]),
     ("eye",     0x1F441, &["mat", "eye"]),
-    ("heart",   0x2764,  &["tim", "heart"]),
+    ("heart",   0x2764,  &["tim", "trái tim", "heart"]),
     ("yes",     0x2705,  &["co", "yes", "true"]),
     ("no",      0x274C,  &["khong", "no", "false"]),
     ("now",     0x23F0,  &["bay-gio", "now"]),

@@ -20,3 +20,4 @@ pub mod reader;
 pub mod qr;
 pub mod ir;
 pub mod vm;
+pub mod startup;
