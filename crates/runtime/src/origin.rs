@@ -19,7 +19,8 @@ use silk::walk::ResponseTone;
 use crate::parser::{OlangParser, OlangExpr, ParseResult, RelationOp};
 use olang::ir::{OlangIrExpr, compile_expr};
 use olang::vm::{OlangVM, VmEvent};
-use olang::startup::{boot, resolve, BootResult};
+use olang::startup::{boot, resolve};
+use olang::self_model::SelfModel;
 use olang::registry::Registry;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ pub struct HomeRuntime {
     parser:     OlangParser,
     dream:      DreamCycle,
     registry:   Registry,
+    self_model: SelfModel,
     uptime_ns:  i64,
     turn_count: u64,
 }
@@ -74,6 +76,7 @@ impl HomeRuntime {
             parser:     OlangParser::new(),
             dream:      DreamCycle::new(DreamConfig::default()),
             registry:   boot_result.registry,
+            self_model: SelfModel::new(),
             uptime_ns:  0,
             turn_count: 0,
         }
@@ -202,16 +205,21 @@ impl HomeRuntime {
     fn handle_command(&mut self, cmd: &str, ts: i64) -> Response {
         match cmd {
             "stats" => {
+                // Update self-model tại thời điểm query
+                self.self_model.update(&self.registry, ts);
+                let summary = self.self_model.summary();
                 let text = format!(
                     "HomeOS ○\n\
                      Turns   : {}\n\
                      STM     : {} observations\n\
                      Silk    : {} edges\n\
-                     f(x)    : {:.3}",
+                     f(x)    : {:.3}\n\
+                     {}",
                     self.turn_count,
                     self.learning.stm().len(),
                     self.learning.graph().len(),
                     self.learning.context().fx(),
+                    summary,
                 );
                 Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
             }
