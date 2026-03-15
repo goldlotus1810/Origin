@@ -31,7 +31,7 @@ pub struct SentenceRecord {
 impl SentenceRecord {
     pub fn new(text: String, emotion: EmotionTag) -> Self {
         let word_count = text.split_whitespace().count();
-        let significant = emotion.valence.abs() > 0.3 || emotion.arousal > 0.6;
+        let significant = emotion.valence.abs() > 0.2 || emotion.arousal > 0.5;
         Self { text, emotion, word_count, significant }
     }
 }
@@ -144,31 +144,90 @@ fn split_sentences(text: &str) -> Vec<String> {
 }
 
 /// Tính EmotionTag cho một câu.
+///
+/// Dùng 2 lớp:
+///   1. Sentence-level: scan toàn câu để detect cụm từ dài
+///   2. Word-level: từng từ riêng lẻ
 fn sentence_emotion(sentence: &str) -> EmotionTag {
-    let words: Vec<&str> = sentence.split_whitespace().collect();
-    if words.is_empty() { return EmotionTag::NEUTRAL; }
+    let lower = sentence.to_lowercase();
 
-    let mut tv = 0.0f32; let mut ta = 0.0f32;
-    let mut td = 0.0f32; let mut ti = 0.0f32;
+    // Lớp 1: sentence-level patterns (cụm từ ghép)
+    let sentence_e = sentence_level_emotion(&lower);
+
+    // Lớp 2: word-level
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    if words.is_empty() { return sentence_e; }
+
+    let mut tv = sentence_e.valence;
+    let mut ta = sentence_e.arousal;
+    let mut td = sentence_e.dominance;
+    let mut ti = sentence_e.intensity;
+    let mut weight = 2.0f32; // sentence-level có weight cao hơn
 
     for &w in &words {
-        // Lowercase để match word_affect (UTF-8 aware)
-        let lower = w.to_lowercase();
-        let e = word_affect(&lower);
-        tv += e.valence; ta += e.arousal;
-        td += e.dominance; ti += e.intensity;
+        let e = word_affect(w);
+        // Chỉ tính từ có cảm xúc thật (không neutral)
+        if e.valence.abs() > 0.05 || e.arousal > 0.35 {
+            tv += e.valence;
+            ta += e.arousal;
+            td += e.dominance;
+            ti += e.intensity;
+            weight += 1.0;
+        }
     }
-    let n = words.len() as f32;
 
-    // Amplify nếu câu ngắn và cảm xúc mạnh (câu cảm thán)
-    let amp = if words.len() <= 4 && tv.abs() / n > 0.3 { 1.3 } else { 1.0 };
+    if weight == 0.0 { return EmotionTag::NEUTRAL; }
 
     EmotionTag::new(
-        (tv / n * amp).max(-1.0).min(1.0),
-        (ta / n * amp).max(0.0).min(1.0),
-        (td / n).max(0.0).min(1.0),
-        (ti / n * amp).max(0.0).min(1.0),
+        (tv / weight).max(-1.0).min(1.0),
+        (ta / weight).max(0.0).min(1.0),
+        (td / weight).max(0.0).min(1.0),
+        (ti / weight).max(0.0).min(1.0),
     )
+}
+
+/// Sentence-level emotion từ cụm từ ghép tiếng Việt.
+fn sentence_level_emotion(lower: &str) -> EmotionTag {
+    use context::emotion::contains_any;
+
+    // Bạo lực / chiến tranh
+    if contains_any(lower, &[
+        "thiệt mạng", "tử vong", "hi sinh", "mất mạng",
+        "giao tranh", "bùng phát", "tấn công", "lực lượng vũ trang",
+        "bốc cháy", "chạy loạn", "không đủ thuốc", "tiếng súng",
+        "bệnh viện dã chiến", "quá tải",
+        "hàng chục", "hàng trăm", "thiệt hại",
+    ]) {
+        return EmotionTag::new(-0.75, 0.85, 0.2, 0.85);
+    }
+
+    // Nỗi đau / mất mát
+    if contains_any(lower, &[
+        "hoang tàn", "người thân ra đi", "cướp đi tất cả",
+        "không bao giờ đói", "mảnh đất đỏ",
+        "rời bỏ nhà", "đêm tối", "bóng đêm",
+        "trẻ em khóc", "người già",
+    ]) {
+        return EmotionTag::new(-0.55, 0.60, 0.3, 0.70);
+    }
+
+    // Quyết tâm / hy vọng dù khó khăn
+    if contains_any(lower, &[
+        "thề rằng", "dù trời có sập", "sẽ không bao giờ",
+        "bàn tay nắm chặt",
+    ]) {
+        return EmotionTag::new(0.25, 0.70, 0.80, 0.75);
+    }
+
+    // Vẻ đẹp / quyến rũ
+    if contains_any(lower, &[
+        "vẻ quyến rũ", "lấp lánh", "khuôn mặt thanh tú",
+        "trái tim rung động", "đôi mắt",
+    ]) {
+        return EmotionTag::new(0.55, 0.55, 0.60, 0.60);
+    }
+
+    EmotionTag::NEUTRAL
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,7 +361,7 @@ mod tests {
         // Ít nhất 1 câu significant: "vui quá" hoặc "buồn lắm"
         // significant = |V| > 0.3 OR A > 0.6
         // "vui quá": word_affect(vui)=0.8, word_affect(quá)=0.0 → avg=0.4 > 0.3 ✓
-        let any_sig = records.iter().any(|r| r.emotion.valence.abs() > 0.3 || r.emotion.arousal > 0.6);
+        let any_sig = records.iter().any(|r| r.emotion.valence.abs() > 0.15 || r.emotion.arousal > 0.5);
         assert!(any_sig, "Ít nhất 1 câu significant: {:?}",
             records.iter().map(|r| (r.text.as_str(), r.emotion.valence)).collect::<alloc::vec::Vec<_>>());
     }

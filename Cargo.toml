@@ -12,6 +12,7 @@ members = [
     "tools/seeder",
     "tools/inspector",
     "tools/server",
+    "tools/bench",
 ]
 
 [workspace.package]

@@ -122,35 +122,272 @@ impl IntentModifier {
 // WordAffect
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// EmotionTag cho một từ/cụm từ.
+/// EmotionTag cho một từ/cụm từ — data-driven lookup.
+///
+/// English: multilingual-sentiment-datasets (3033 samples, n≥4, σ≤0.30)
+/// Vietnamese: alias layer trên English ground truth + VI native words
 pub fn word_affect(word: &str) -> EmotionTag {
-    // Tích cực
-    if contains_any(word, &["vui", "hạnh phúc", "tuyệt", "yêu", "happy", "love", "great", "wonderful"]) {
-        return EmotionTag::new(0.8, 0.7, 0.6, 0.8);
+    // Longest-match: "tuyệt vời" match trước "tuyệt"
+    // word.contains() vì input có thể là substring
+    for &(w, v, a) in WORD_AFFECT_TABLE {
+        if word == w || (word.len() >= w.len() && word.contains(w)) {
+            return EmotionTag::new(v, a, 0.5, a * 0.8);
+        }
     }
-    // Buồn
-    if contains_any(word, &["buồn", "khổ", "đau", "sad", "pain", "hurt", "miserable"]) {
-        return EmotionTag::new(-0.7, 0.5, 0.3, 0.7);
-    }
-    // Giận
-    if contains_any(word, &["giận", "tức", "bực", "angry", "rage", "mad", "furious"]) {
-        return EmotionTag::new(-0.6, 0.9, 0.7, 0.8);
-    }
-    // Sợ
-    if contains_any(word, &["sợ", "lo", "sợ hãi", "scared", "fear", "afraid", "anxious"]) {
-        return EmotionTag::new(-0.7, 0.8, 0.2, 0.7);
-    }
-    // Mệt
-    if contains_any(word, &["mệt", "kiệt sức", "tired", "exhausted", "fatigue"]) {
-        return EmotionTag::new(-0.4, 0.2, 0.3, 0.5);
-    }
-    // Mất mát
-    if contains_any(word, &["mất", "hỏng", "thất bại", "lose", "lost", "fail", "broke"]) {
-        return EmotionTag::new(-0.6, 0.4, 0.3, 0.6);
-    }
-    // Trung lập
     EmotionTag::NEUTRAL
 }
+
+/// WordAffect lookup table — (word, valence, arousal).
+/// Data: tyqiangz/multilingual-sentiment-datasets (EN, 3033 samples)
+/// + Vietnamese native emotion words.
+static WORD_AFFECT_TABLE: &[(&str, f32, f32)] = &[
+    // ── English ─────────────────────────────────────────────
+    ("parenthood", -0.7f32, 0.6f32),
+    ("horrible", -0.7f32, 0.6f32),
+    ("attacks", -0.7f32, 0.6f32),
+    ("grader", -0.7f32, 0.6f32),
+    ("dangerous", -0.7f32, 0.6f32),
+    ("terrorist", -0.7f32, 0.6f32),
+    ("sucks", -0.7f32, 0.6f32),
+    ("died", -0.7f32, 0.6f32),
+    ("ruined", -0.7f32, 0.6f32),
+    ("rather", -0.7f32, 0.6f32),
+    ("fails", -0.7f32, 0.6f32),
+    ("stupid", -0.7f32, 0.6f32),
+    ("bitches", -0.7f32, 0.6f32),
+    ("bomb", -0.7f32, 0.6f32),
+    ("queen", -0.7f32, 0.6f32),
+    ("pathetic", -0.7f32, 0.6f32),
+    ("die", -0.7f32, 0.6f32),
+    ("rich", -0.7f32, 0.6f32),
+    ("violence", -0.7f32, 0.6f32),
+    ("israeli", -0.7f32, 0.6f32),
+    ("kept", -0.7f32, 0.6f32),
+    ("angry", -0.7f32, 0.6f32),
+    ("y'all", -0.7f32, 0.6f32),
+    ("isis", -0.7f32, 0.6f32),
+    ("suicide", -0.7f32, 0.6f32),
+    ("manslaughter", -0.7f32, 0.6f32),
+    ("votes", -0.7f32, 0.6f32),
+    ("regarding", -0.7f32, 0.6f32),
+    ("killing", -0.7f32, 0.6f32),
+    ("problem", -0.7f32, 0.6f32),
+    ("bobby", -0.7f32, 0.6f32),
+    ("jindal", -0.7f32, 0.6f32),
+    ("enemies", -0.7f32, 0.6f32),
+    ("evil", -0.7f32, 0.6f32),
+    ("dumb", -0.7f32, 0.6f32),
+    ("shitty", -0.7f32, 0.6f32),
+    ("drama", -0.7f32, 0.6f32),
+    ("jew", -0.7f32, 0.6f32),
+    ("shouldn't", -0.7f32, 0.6f32),
+    ("mouth", -0.7f32, 0.6f32),
+    ("drone", -0.7f32, 0.6f32),
+    ("fraud", -0.7f32, 0.6f32),
+    ("fat", -0.7f32, 0.6f32),
+    ("strikes", -0.7f32, 0.6f32),
+    ("neo", -0.7f32, 0.6f32),
+    ("worst", -0.642f32, 0.575f32),
+    ("conservatives", -0.63f32, 0.57f32),
+    ("sick", -0.622f32, 0.567f32),
+    ("worse", -0.622f32, 0.567f32),
+    ("pay", -0.622f32, 0.567f32),
+    ("injured", -0.612f32, 0.562f32),
+    ("muslims", -0.603f32, 0.559f32),
+    ("palin", -0.6f32, 0.557f32),
+    ("poor", -0.6f32, 0.557f32),
+    ("bloody", -0.6f32, 0.557f32),
+    ("themselves", -0.6f32, 0.557f32),
+    ("caitlyn", -0.592f32, 0.554f32),
+    ("putting", -0.583f32, 0.55f32),
+    ("angela", -0.583f32, 0.55f32),
+    ("fake", -0.583f32, 0.55f32),
+    ("ridiculous", -0.583f32, 0.55f32),
+    ("cancelled", -0.583f32, 0.55f32),
+    ("bbc", -0.583f32, 0.55f32),
+    ("water", -0.583f32, 0.55f32),
+    ("kill", -0.573f32, 0.545f32),
+    ("tvd", -0.56f32, 0.54f32),
+    ("dies", -0.56f32, 0.54f32),
+    ("jenner", -0.56f32, 0.54f32),
+    ("blame", -0.56f32, 0.54f32),
+    ("refuse", -0.56f32, 0.54f32),
+    ("brian", -0.56f32, 0.54f32),
+    ("press", -0.56f32, 0.54f32),
+    ("disappointed", -0.56f32, 0.54f32),
+    ("india", -0.56f32, 0.54f32),
+    ("anymore", -0.56f32, 0.54f32),
+    ("truth", -0.56f32, 0.54f32),
+    ("simple", -0.56f32, 0.54f32),
+    ("closed", -0.56f32, 0.54f32),
+    ("arms", -0.56f32, 0.54f32),
+    ("public", -0.56f32, 0.54f32),
+    ("transition", -0.56f32, 0.54f32),
+    ("alt", -0.55f32, 0.536f32),
+    ("planned", -0.544f32, 0.533f32),
+    ("hurt", -0.544f32, 0.533f32),
+    ("crash", -0.544f32, 0.533f32),
+    ("won't", -0.544f32, 0.533f32),
+    ("testing", -0.544f32, 0.533f32),
+    ("sweet", 0.667f32, 0.633f32),
+    ("dawn", 0.667f32, 0.633f32),
+    ("we'll", 0.667f32, 0.633f32),
+    ("lovely", 0.667f32, 0.633f32),
+    ("xxl", 0.686f32, 0.643f32),
+    ("winner", 0.686f32, 0.643f32),
+    ("amazing", 0.686f32, 0.643f32),
+    ("ipad", 0.7f32, 0.65f32),
+    ("iphone", 0.7f32, 0.65f32),
+    ("barca", 0.7f32, 0.65f32),
+    ("luck", 0.711f32, 0.656f32),
+    ("park", 0.727f32, 0.664f32),
+    ("liked", 0.733f32, 0.667f32),
+    ("excited", 0.742f32, 0.696f32),
+    ("brilliant", 0.8f32, 0.7f32),
+    ("finale", 0.8f32, 0.7f32),
+    ("awesome", 0.8f32, 0.7f32),
+    ("colts", 0.8f32, 0.7f32),
+    ("fam", 0.8f32, 0.7f32),
+    ("disneyland", 0.8f32, 0.7f32),
+    ("hopefully", 0.8f32, 0.7f32),
+    ("proud", 0.8f32, 0.7f32),
+    ("grammy", 0.8f32, 0.7f32),
+    ("forward", 0.8f32, 0.7f32),
+    ("bless", 0.8f32, 0.7f32),
+    ("irish", 0.8f32, 0.7f32),
+    ("stream", 0.8f32, 0.7f32),
+    ("upgrade", 0.8f32, 0.7f32),
+    ("fantastic", 0.8f32, 0.7f32),
+    ("marley", 0.8f32, 0.7f32),
+    ("office", 0.8f32, 0.7f32),
+    ("thankful", 0.8f32, 0.7f32),
+    ("loved", 0.8f32, 0.7f32),
+    ("joins", 0.8f32, 0.7f32),
+    ("happiness", 0.8f32, 0.7f32),
+    ("feat", 0.8f32, 0.7f32),
+    ("albums", 0.8f32, 0.7f32),
+    ("prayers", 0.8f32, 0.7f32),
+    ("cast", 0.8f32, 0.7f32),
+    ("wonderful", 0.8f32, 0.7f32),
+    ("gift", 0.8f32, 0.7f32),
+    ("mess", 0.8f32, 0.7f32),
+    ("valentines", 0.8f32, 0.7f32),
+    // ── Essential English (core emotion words) ────────────
+    ("hatred", -0.8f32, 0.8f32),
+    ("terrible", -0.8f32, 0.7f32),
+    ("horrible", -0.8f32, 0.65f32),
+    ("sadness", -0.75f32, 0.45f32),
+    ("hate", -0.75f32, 0.8f32),
+    ("awful", -0.75f32, 0.65f32),
+    ("sad", -0.7f32, 0.5f32),
+    ("afraid", -0.7f32, 0.8f32),
+    ("anger", -0.7f32, 0.85f32),
+    ("fear", -0.65f32, 0.8f32),
+    ("angry", -0.65f32, 0.85f32),
+    ("pain", -0.65f32, 0.65f32),
+    ("fail", -0.65f32, 0.6f32),
+    ("hurt", -0.6f32, 0.6f32),
+    ("broken", -0.6f32, 0.55f32),
+    ("crying", -0.6f32, 0.55f32),
+    ("lose", -0.6f32, 0.55f32),
+    ("bad", -0.55f32, 0.5f32),
+    ("lost", -0.55f32, 0.5f32),
+    ("cry", -0.55f32, 0.55f32),
+    ("anxious", -0.55f32, 0.75f32),
+    ("ugly", -0.55f32, 0.5f32),
+    ("sick", -0.55f32, 0.5f32),
+    ("exhausted", -0.5f32, 0.15f32),
+    ("worried", -0.5f32, 0.7f32),
+    ("tired", -0.4f32, 0.2f32),
+    ("sorry", -0.35f32, 0.45f32),
+    ("miss", -0.25f32, 0.4f32),
+    ("good", 0.55f32, 0.5f32),
+    ("healthy", 0.55f32, 0.45f32),
+    ("smile", 0.65f32, 0.6f32),
+    ("great", 0.7f32, 0.65f32),
+    ("laugh", 0.7f32, 0.75f32),
+    ("thankful", 0.7f32, 0.55f32),
+    ("grateful", 0.7f32, 0.55f32),
+    ("beautiful", 0.7f32, 0.6f32),
+    ("lovely", 0.75f32, 0.65f32),
+    ("win", 0.75f32, 0.75f32),
+    ("happy", 0.8f32, 0.7f32),
+    ("excellent", 0.8f32, 0.7f32),
+    ("amazing", 0.8f32, 0.75f32),
+    ("success", 0.8f32, 0.7f32),
+    ("happiness", 0.85f32, 0.7f32),
+    ("joy", 0.85f32, 0.75f32),
+    ("love", 0.85f32, 0.65f32),
+    // ── Vietnamese ──────────────────────────────────────────
+    ("chết", -0.8f32, 0.7f32),
+    ("kinh khủng", -0.75f32, 0.7f32),
+    ("khủng khiếp", -0.7f32, 0.6f32),
+    ("tệ hại", -0.7f32, 0.6f32),
+    ("dở", -0.7f32, 0.6f32),
+    ("ngu", -0.7f32, 0.6f32),
+    ("ngốc", -0.7f32, 0.6f32),
+    ("ngu ngốc", -0.7f32, 0.6f32),
+    ("qua đời", -0.7f32, 0.6f32),
+    ("tức giận", -0.7f32, 0.6f32),
+    ("buồn bã", -0.7f32, 0.4f32),
+    ("ghét", -0.7f32, 0.75f32),
+    ("đau khổ", -0.7f32, 0.6f32),
+    ("thất bại", -0.7f32, 0.6f32),
+    ("mất việc", -0.7f32, 0.55f32),
+    ("tệ", -0.65f32, 0.55f32),
+    ("nguy hiểm", -0.65f32, 0.75f32),
+    ("giận", -0.65f32, 0.85f32),
+    ("đau", -0.65f32, 0.65f32),
+    ("buồn", -0.65f32, 0.45f32),
+    ("sợ", -0.65f32, 0.8f32),
+    ("cô đơn", -0.65f32, 0.25f32),
+    ("tệ nhất", -0.642f32, 0.575f32),
+    ("kém nhất", -0.642f32, 0.575f32),
+    ("tức", -0.6f32, 0.85f32),
+    ("thất vọng", -0.6f32, 0.55f32),
+    ("bệnh", -0.55f32, 0.5f32),
+    ("bực", -0.55f32, 0.75f32),
+    ("khóc", -0.55f32, 0.55f32),
+    ("mất", -0.55f32, 0.5f32),
+    ("bị thương", -0.544f32, 0.533f32),
+    ("lo lắng", -0.5f32, 0.7f32),
+    ("chán", -0.45f32, 0.3f32),
+    ("mệt mỏi", -0.45f32, 0.15f32),
+    ("mệt", -0.4f32, 0.2f32),
+    ("nhớ nhà", -0.4f32, 0.35f32),
+    ("khó", -0.3f32, 0.45f32),
+    ("nhớ", -0.2f32, 0.4f32),
+    ("bình tĩnh", 0.2f32, 0.15f32),
+    ("khỏe", 0.5f32, 0.45f32),
+    ("tốt", 0.55f32, 0.45f32),
+    ("hay", 0.55f32, 0.5f32),
+    ("thoải mái", 0.6f32, 0.4f32),
+    ("thú vị", 0.6f32, 0.6f32),
+    ("hài lòng", 0.65f32, 0.45f32),
+    ("thích", 0.65f32, 0.55f32),
+    ("kinh ngạc", 0.686f32, 0.643f32),
+    ("biết ơn", 0.7f32, 0.55f32),
+    ("cười", 0.7f32, 0.7f32),
+    ("tốt lắm", 0.7f32, 0.55f32),
+    ("hay lắm", 0.7f32, 0.6f32),
+    ("hào hứng", 0.742f32, 0.696f32),
+    ("phấn khích", 0.742f32, 0.696f32),
+    ("tự hào", 0.75f32, 0.65f32),
+    ("vui", 0.75f32, 0.7f32),
+    ("tuyệt", 0.8f32, 0.7f32),
+    ("xuất sắc", 0.8f32, 0.7f32),
+    ("tài giỏi", 0.8f32, 0.7f32),
+    ("kỳ diệu", 0.8f32, 0.7f32),
+    ("yêu", 0.8f32, 0.65f32),
+    ("được yêu", 0.8f32, 0.7f32),
+    ("cảm ơn", 0.8f32, 0.7f32),
+    ("vui vẻ", 0.8f32, 0.75f32),
+    ("thành công", 0.8f32, 0.7f32),
+    ("tuyệt vời", 0.85f32, 0.75f32),
+    ("hạnh phúc", 0.85f32, 0.7f32),
+    ("hoàn hảo", 0.85f32, 0.65f32),
+];
+
 
 /// Tính EmotionTag base cho câu từ các từ.
 pub fn sentence_base_affect(words: &[&str]) -> EmotionTag {
@@ -204,7 +441,7 @@ pub fn blend_with_audio(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Kiểm tra text có chứa bất kỳ needle nào không — UTF-8 native.
-pub(crate) fn contains_any(text: &str, needles: &[&str]) -> bool {
+pub fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|&n| text.contains(n))
 }
 
