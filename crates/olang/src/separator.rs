@@ -242,8 +242,8 @@ pub fn token_to_chain(token: &SepToken) -> MolecularChain {
 /// Xử lý đúng 4 separator:
 ///   ZWJ → 1 chain N molecules
 ///   +   → LCA của 2 chains
-///   space → sequence (nhiều chains riêng)
-///   none → juxtapose (nhiều chains riêng)
+///       space → sequence (nhiều chains riêng)
+///       none → juxtapose (nhiều chains riêng)
 pub fn parse_to_chains(input: &str) -> Vec<MolecularChain> {
     // Tách theo space trước (SEPARATE)
     let segments: Vec<&str> = input.split(' ')

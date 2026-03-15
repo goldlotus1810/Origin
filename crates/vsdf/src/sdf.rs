@@ -40,10 +40,12 @@ impl Vec3 {
         Self::new(fmaxf(self.x, s), fmaxf(self.y, s), fmaxf(self.z, s))
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, o: Self) -> Self {
         Self::new(self.x - o.x, self.y - o.y, self.z - o.z)
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, o: Self) -> Self {
         Self::new(self.x + o.x, self.y + o.y, self.z + o.z)
     }

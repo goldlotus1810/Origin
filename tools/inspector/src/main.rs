@@ -66,7 +66,7 @@ fn main() {
     if !parsed.aliases.is_empty() {
         println!();
         println!("── Sample Aliases (first 10) ─────────────────");
-        let mut aliases: Vec<_> = parsed.aliases.iter()
+        let aliases: Vec<_> = parsed.aliases.iter()
             .filter(|a| !a.name.starts_with("_qr_"))
             .take(10)
             .collect();

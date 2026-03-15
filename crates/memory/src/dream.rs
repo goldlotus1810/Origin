@@ -196,7 +196,7 @@ impl DreamCycle {
         let mut parent: Vec<usize> = (0..n).collect();
 
         // Union-Find: find root iteratively
-        fn find_root(parent: &mut Vec<usize>, mut x: usize) -> usize {
+        fn find_root(parent: &mut [usize], mut x: usize) -> usize {
             while parent[x] != x {
                 let pp = parent[parent[x]];
                 parent[x] = pp;
@@ -221,9 +221,9 @@ impl DreamCycle {
 
         // Group by root
         let mut groups: BTreeMap<usize, Vec<&'a Observation>> = BTreeMap::new();
-        for i in 0..n {
+        for (i, &obs) in observations.iter().enumerate() {
             let root = find_root(&mut parent, i);
-            groups.entry(root).or_default().push(observations[i]);
+            groups.entry(root).or_default().push(obs);
         }
 
         groups.into_values().collect()

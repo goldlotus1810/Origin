@@ -123,7 +123,7 @@ impl LeoAI {
         self.learning.process_one(input);
 
         // Auto-dream mỗi dream_interval turns
-        if self.ingested % self.dream_interval == 0 {
+        if self.ingested.is_multiple_of(self.dream_interval) {
             self.run_dream(ts);
         }
 

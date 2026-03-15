@@ -20,10 +20,10 @@ use crate::edge::EmotionTag;
 pub const LR: f32 = 0.1;
 
 /// Golden ratio φ = 1.618...
-pub const PHI: f32 = 1.6180339887498949;
+pub const PHI: f32 = 1.618_034;
 
 /// φ⁻¹ = 1/φ ≈ 0.618 — decay factor mỗi 24h.
-pub const PHI_INV: f32 = 0.6180339887498949;
+pub const PHI_INV: f32 = 0.618_034;
 
 /// Weight threshold để promote lên nhánh mới.
 pub const PROMOTE_WEIGHT: f32 = 0.7;

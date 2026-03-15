@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
+console_error_panic_hook = []
 
 [dependencies]
 ucd     = { workspace = true }

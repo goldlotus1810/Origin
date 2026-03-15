@@ -88,10 +88,10 @@ pub fn sentence_affect(
     // Normalize
     if total_weight > 0.0 {
         // Clamp valence và arousal
-        composite.valence   = composite.valence.max(-1.0).min(1.0);
-        composite.arousal   = composite.arousal.max(0.0).min(1.0);
-        composite.dominance = composite.dominance.max(0.0).min(1.0);
-        composite.intensity = composite.intensity.max(0.0).min(1.0);
+        composite.valence   = composite.valence.clamp(-1.0, 1.0);
+        composite.arousal   = composite.arousal.clamp(0.0, 1.0);
+        composite.dominance = composite.dominance.clamp(0.0, 1.0);
+        composite.intensity = composite.intensity.clamp(0.0, 1.0);
     }
 
     WalkResult { composite, path, total_weight }

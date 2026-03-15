@@ -173,10 +173,10 @@ impl LingParser {
         PosTag::Other
     }
 
-    fn is_negation(&self, w: &str)   -> bool { NEGATIONS.iter().any(|&n| n == w) }
-    fn is_amplifier(&self, w: &str)  -> bool { AMPLIFIERS.iter().any(|&n| n == w) }
-    fn is_diminisher(&self, w: &str) -> bool { DIMINISHERS.iter().any(|&n| n == w) }
-    fn is_contrast(&self, w: &str)   -> bool { CONTRASTS.iter().any(|&n| n == w) }
+    fn is_negation(&self, w: &str)   -> bool { NEGATIONS.contains(&w) }
+    fn is_amplifier(&self, w: &str)  -> bool { AMPLIFIERS.contains(&w) }
+    fn is_diminisher(&self, w: &str) -> bool { DIMINISHERS.contains(&w) }
+    fn is_contrast(&self, w: &str)   -> bool { CONTRASTS.contains(&w) }
 
     fn is_adjective(&self, w: &str) -> bool {
         // Vietnamese adjectives — thường đứng sau noun
@@ -188,7 +188,7 @@ impl LingParser {
                        "terrible"|"wonderful"|"awful"|"beautiful"|"ugly")
         // FR/DE/ES adjectives
         || matches!(w, "triste"|"heureux"|"heureuse"|"traurig"|"glücklich"|
-                       "feliz"|"triste")
+                       "feliz")
         // Suffix-based (crude but effective for EN)
         || w.ends_with("ful") || w.ends_with("less") || w.ends_with("ous")
         || w.ends_with("ive") || w.ends_with("ible") || w.ends_with("al")
@@ -258,10 +258,10 @@ pub fn apply_modifiers(tokens: &[&str], base_v: f32, base_a: f32) -> (f32, f32) 
     let mut contrast_idx: Option<usize> = None;
 
     for (i, &w) in ls.iter().enumerate() {
-        if NEGATIONS.iter().any(|&n| n == w)   { neg_count += 1; }
-        if AMPLIFIERS.iter().any(|&n| n == w)  { amp_found = true; }
-        if DIMINISHERS.iter().any(|&n| n == w) { dim_found = true; }
-        if CONTRASTS.iter().any(|&n| n == w) && contrast_idx.is_none() {
+        if NEGATIONS.contains(&w)   { neg_count += 1; }
+        if AMPLIFIERS.contains(&w)  { amp_found = true; }
+        if DIMINISHERS.contains(&w) { dim_found = true; }
+        if CONTRASTS.contains(&w) && contrast_idx.is_none() {
             contrast_idx = Some(i);
         }
     }
@@ -275,7 +275,7 @@ pub fn apply_modifiers(tokens: &[&str], base_v: f32, base_a: f32) -> (f32, f32) 
         let v_after  = sub_valence(after,  base_v);
         // Weight: after=0.65, before=0.35
         v = v_before * 0.35 + v_after * 0.65;
-        return (v.max(-1.0).min(1.0), a);
+        return (v.clamp(-1.0, 1.0), a);
     }
 
     // Negation: odd count → negate, even count → double-neg (weaker positive)
@@ -283,7 +283,7 @@ pub fn apply_modifiers(tokens: &[&str], base_v: f32, base_a: f32) -> (f32, f32) 
         if neg_count % 2 == 1 {
             // "không buồn" → -V * 0.7 (không hoàn toàn trung tính)
             v = -v * 0.70;
-            a = a * 0.80;
+            a *= 0.80;
         } else {
             // "không phải không vui" → nhẹ positive
             v = v.abs() * 0.40;
@@ -292,14 +292,14 @@ pub fn apply_modifiers(tokens: &[&str], base_v: f32, base_a: f32) -> (f32, f32) 
 
     // Amplifier: khuếch đại
     if amp_found {
-        v = (v * 1.45).max(-1.0).min(1.0);
-        a = (a * 1.30).max(0.0).min(1.0);
+        v = (v * 1.45).clamp(-1.0, 1.0);
+        a = (a * 1.30).clamp(0.0, 1.0);
     }
 
     // Diminisher: giảm
     if dim_found && !amp_found {
-        v = v * 0.50;
-        a = a * 0.70;
+        v *= 0.50;
+        a *= 0.70;
     }
 
     (v, a)
@@ -312,8 +312,8 @@ fn sub_valence(tokens: &[&str], fallback: f32) -> f32 {
     let mut count = 0u32;
     for &w in tokens {
         // Simple: check nếu word có trong amplifiers/negations/emotion
-        if NEGATIONS.iter().any(|&n| n == w) { v -= 0.3; count += 1; }
-        else if AMPLIFIERS.iter().any(|&n| n == w) { /* skip */ }
+        if NEGATIONS.contains(&w) { v -= 0.3; count += 1; }
+        else if AMPLIFIERS.contains(&w) { /* skip */ }
         else {
             // Crude: assume word carries base_v if unknown
             count += 1;

@@ -9,7 +9,6 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use olang::encoder::encode_codepoint;
-use olang::lca::lca;
 use olang::qr::QRSigner;
 use olang::writer::OlangWriter;
 use olang::registry::Registry;

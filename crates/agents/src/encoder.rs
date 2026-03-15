@@ -221,11 +221,11 @@ impl ContentEncoder {
         let chain = encode_codepoint(cp);
 
         // Emotion từ sensor value
-        let norm = (value / 100.0).min(1.0).max(0.0);
+        let norm = (value / 100.0).clamp(0.0, 1.0);
         let valence = match kind {
             SensorKind::Temperature =>
                 if value > 38.0 { -0.3 } else if value < 10.0 { -0.2 } else { 0.1 },
-            SensorKind::Motion  => if value > 0.5 { 0.0 } else { 0.0 },
+            SensorKind::Motion  => 0.0,
             SensorKind::Sound   => if value > 80.0 { -0.2 } else { 0.0 },
             _ => 0.0,
         };
@@ -339,10 +339,10 @@ fn text_emotion(text: &str) -> EmotionTag {
     }
     let n = words.len() as f32;
     EmotionTag::new(
-        (tv/n).max(-1.0).min(1.0),
-        (ta/n).max(0.0).min(1.0),
-        (td/n).max(0.0).min(1.0),
-        (ti/n).max(0.0).min(1.0),
+        (tv / n).clamp(-1.0, 1.0),
+        (ta / n).clamp(0.0, 1.0),
+        (td / n).clamp(0.0, 1.0),
+        (ti / n).clamp(0.0, 1.0),
     )
 }
 

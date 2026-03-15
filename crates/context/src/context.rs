@@ -187,9 +187,8 @@ impl EmotionContext {
         // Intensity scale theo S² — aesthetic floor cho Fiction/Music
         let floor = 0.15_f32 * raw.intensity;
         let mut intensity = (raw.intensity * s * s).max(0.0_f32);
-        if matches!(self.source, EmotionSource::Fiction | EmotionSource::Music) {
-            if intensity < floor { intensity = floor; }
-        }
+        if matches!(self.source, EmotionSource::Fiction | EmotionSource::Music)
+            && intensity < floor { intensity = floor; }
 
         EmotionTag {
             valence:   valence.clamp(-1.0, 1.0),

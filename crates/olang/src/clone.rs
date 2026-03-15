@@ -154,7 +154,7 @@ fn is_relevant(chain: &MolecularChain, profile: &DeviceProfile) -> bool {
     }
 
     // Audio profile: cần emotion nodes (valence mạnh)
-    if profile.has(Capability::Audio) && (v > 0xC0 || v < 0x40) {
+    if profile.has(Capability::Audio) && !(0x40..=0xC0).contains(&v) {
         return true;
     }
 
@@ -223,11 +223,11 @@ fn filter_and_write(
 
     // Filter nodes
     for node in &parsed.nodes {
-        if is_relevant(&node.chain, profile) {
-            if let Ok(_) = writer.append_node(&node.chain, node.layer, node.is_qr, node.timestamp) {
-                kept_hashes.push(node.chain.chain_hash());
-                node_count += 1;
-            }
+        if is_relevant(&node.chain, profile)
+            && writer.append_node(&node.chain, node.layer, node.is_qr, node.timestamp).is_ok()
+        {
+            kept_hashes.push(node.chain.chain_hash());
+            node_count += 1;
         }
         // Stop nếu đã đủ max_bytes
         if writer.size() >= profile.max_bytes { break; }
@@ -236,17 +236,16 @@ fn filter_and_write(
     // Filter aliases — chỉ giữ aliases trỏ về nodes đã giữ
     for alias in &parsed.aliases {
         if alias.name.starts_with("_qr_") { continue; }
-        if kept_hashes.contains(&alias.chain_hash) {
-            if writer.append_alias(&alias.name, alias.chain_hash, alias.timestamp).is_ok() {
+        if kept_hashes.contains(&alias.chain_hash)
+            && writer.append_alias(&alias.name, alias.chain_hash, alias.timestamp).is_ok() {
                 alias_count += 1;
             }
-        }
         if writer.size() >= profile.max_bytes { break; }
     }
 
     // Thêm device identity marker
     let device_chain = encode_codepoint(device_type_cp(profile.device_type));
-    if let Ok(_) = writer.append_node(&device_chain, 0, true, ts) {
+    if writer.append_node(&device_chain, 0, true, ts).is_ok() {
         writer.append_alias(&profile.id, device_chain.chain_hash(), ts).ok();
         node_count += 1;
     }
@@ -300,14 +299,13 @@ pub fn compute_delta(
 
     for node in &device_parsed.nodes {
         let hash = node.chain.chain_hash();
-        if !origin_hashes.contains(&hash) {
-            if delta_writer.append_node(
+        if !origin_hashes.contains(&hash)
+            && delta_writer.append_node(
                 &node.chain, node.layer, false, // ĐN — cần AAM approve
                 node.timestamp,
             ).is_ok() {
                 delta_count += 1;
             }
-        }
     }
 
     if delta_count == 0 { return None; } // Không có gì mới

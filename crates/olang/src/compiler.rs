@@ -172,7 +172,7 @@ fn emit_rust(prog: &OlangProgram) -> Result<String, CompileError> {
     out.push_str("    fn olang_edge(a: u64, b: u64, rel: u8);\n");
     out.push_str("}\n\n");
 
-    let fn_name = prog.name.replace(' ', "_").replace('-', "_");
+    let fn_name = prog.name.replace([' ', '-'], "_");
     out.push_str(&format!("pub fn {}() {{\n", fn_name));
     out.push_str("    let mut stack: Vec<u64> = Vec::new();\n");
 

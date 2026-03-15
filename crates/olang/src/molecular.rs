@@ -246,7 +246,7 @@ impl MolecularChain {
 
     /// Deserialize từ bytes (phải là bội số của 5).
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        if b.len() % 5 != 0 { return None; }
+        if !b.len().is_multiple_of(5) { return None; }
         let mut ms = Vec::with_capacity(b.len() / 5);
         for chunk in b.chunks_exact(5) {
             let arr: [u8; 5] = chunk.try_into().unwrap();

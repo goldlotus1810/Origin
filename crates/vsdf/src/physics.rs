@@ -17,7 +17,6 @@ extern crate alloc;
 use libm::sqrtf;
 use crate::sdf::{SdfKind, SdfParams, Vec3, sdf};
 use crate::vector::VectorField;
-use crate::spline::VectorSpline;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gradient analytical — ∇f per primitive
@@ -91,7 +90,7 @@ fn grad_capsule(p: Vec3, params: &SdfParams) -> Vec3 {
 /// ∇torus(P, R, r) — analytical qua chain rule
 fn grad_torus(p: Vec3, params: &SdfParams) -> Vec3 {
     let big_r  = params.r;
-    let small_r = params.r2;
+    let _small_r = params.r2;
     let xz_len = sqrtf(p.x*p.x + p.z*p.z).max(1e-6);
     let qx = xz_len - big_r;
     let qy = p.y;

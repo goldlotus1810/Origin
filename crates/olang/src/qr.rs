@@ -51,9 +51,9 @@ impl QRRecord {
     /// message = SHA256(chain_bytes || hash_le8 || ts_le8)
     pub fn message_bytes(chain: &MolecularChain, hash: u64, timestamp: i64) -> [u8; 32] {
         let mut hasher = Sha256::new();
-        hasher.update(&chain.to_bytes());
-        hasher.update(&hash.to_le_bytes());
-        hasher.update(&timestamp.to_le_bytes());
+        hasher.update(chain.to_bytes());
+        hasher.update(hash.to_le_bytes());
+        hasher.update(timestamp.to_le_bytes());
         let result = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&result);
@@ -142,9 +142,7 @@ impl QRSigner {
 /// Verify QRRecord với public key.
 pub fn verify_qr(record: &QRRecord, verifying_key: &VerifyingKey) -> bool {
     let message = QRRecord::message_bytes(&record.chain, record.hash, record.timestamp);
-    let sig = match Signature::from_bytes(&record.signature) {
-        sig => sig,
-    };
+    let sig = Signature::from_bytes(&record.signature);
     verifying_key.verify(&message, &sig).is_ok()
 }
 
@@ -175,10 +173,10 @@ impl QRSupersessionRecord {
     /// Message bytes để sign.
     pub fn message_bytes(old: u64, new: u64, reason: &[u8; 32], ts: i64) -> [u8; 32] {
         let mut hasher = Sha256::new();
-        hasher.update(&old.to_le_bytes());
-        hasher.update(&new.to_le_bytes());
+        hasher.update(old.to_le_bytes());
+        hasher.update(new.to_le_bytes());
         hasher.update(reason.as_slice());
-        hasher.update(&ts.to_le_bytes());
+        hasher.update(ts.to_le_bytes());
         let result = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&result);

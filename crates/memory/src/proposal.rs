@@ -155,7 +155,7 @@ impl AAM {
                 // Supersede cần confidence cao hơn
                 if proposal.confidence < 0.8 {
                     return AAMDecision::Rejected {
-                        reason: alloc::format!("SupersedeQR cần confidence ≥ 0.8"),
+                        reason: "SupersedeQR cần confidence ≥ 0.8".into(),
                     };
                 }
                 AAMDecision::Approved

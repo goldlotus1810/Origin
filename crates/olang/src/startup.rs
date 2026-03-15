@@ -361,7 +361,7 @@ pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
         for (i, mol) in chain.0.iter().enumerate() {
             // Restore relation=Member trước khi decode
             // (ZWJ set relation=Compose/Member, cần Member để match UCD)
-            let mut normalized = mol.clone();
+            let mut normalized = *mol;
             normalized.relation = crate::molecular::RelationBase::Member;
             let single = crate::molecular::MolecularChain(alloc::vec![normalized]);
             let cp = ucd::decode_hash(single.chain_hash()).unwrap_or_else(|| {

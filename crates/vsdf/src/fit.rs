@@ -9,9 +9,8 @@
 //!   0.4..0.7 → hold, cần thêm observation
 
 extern crate alloc;
-use alloc::vec::Vec;
 
-use olang::molecular::{MolecularChain, ShapeBase};
+use olang::molecular::MolecularChain;
 use olang::encoder::encode_codepoint;
 
 use crate::sdf::{SdfKind, SdfParams, Vec3, sdf};
@@ -188,6 +187,7 @@ fn kind_to_codepoint(kind: SdfKind) -> u32 {
 mod tests {
     use super::*;
     use alloc::vec;
+    use alloc::vec::Vec;
 
     fn skip() -> bool { ucd::table_len() == 0 }
 

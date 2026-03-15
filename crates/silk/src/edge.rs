@@ -173,8 +173,10 @@ impl EdgeKind {
 /// Nguồn gốc khi tạo EdgeAssoc/EdgeCausal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum ModalitySource {
     /// Từ text/ngôn ngữ
+    #[default]
     Text  = 0x01,
     /// Từ audio/giọng nói
     Audio = 0x02,
@@ -198,9 +200,6 @@ impl ModalitySource {
     }
 }
 
-impl Default for ModalitySource {
-    fn default() -> Self { Self::Text }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SilkEdge — một edge trong graph

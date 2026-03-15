@@ -255,7 +255,7 @@ impl HomeRuntime {
                         learned.push(chain.clone());
                     }
                     // LCA output: đã hiện các lookup rồi, chỉ hiện ∘
-                    output_text.push_str("○");
+                    output_text.push('○');
                 }
                 VmEvent::LookupAlias(alias) => {
                     // Check alias_to_cp cache trước (bao gồm L2 nodes)

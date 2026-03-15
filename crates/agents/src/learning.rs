@@ -528,7 +528,7 @@ fn is_stop_word(w: &str) -> bool {
         "hay"|"khi"|"đã"|"đang"|"sẽ"|"bị"|"được"|"có"|"là"|"thì"|
         "mà"|"nên"|"vì"|"nếu"|"theo"|"sau"|"trên"|"dưới"|"như"|
         "rồi"|"lại"|"cũng"|"vẫn"|"còn"|"ra"|"vào"|"lên"|"xuống"|
-        "đây"|"đó"|"kia"|"ở"|"tại"|"về"|"đến"|"từ"|"qua"|"lúc"|
+        "đây"|"kia"|"ở"|"tại"|"về"|"đến"|"từ"|"qua"|"lúc"|
         // EN phổ biến
         "the"|"and"|"was"|"for"|"are"|"with"|"his"|"that"|"had"|
         "but"|"not"|"from"|"they"|"she"|"him"|"her"|"its"|"also"

@@ -111,11 +111,11 @@ fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
     for &(val, w) in values {
         // Tìm trong seen
         let mut found = false;
-        for i in 0..n_seen {
-            if seen[i].0 == val {
-                seen[i].1 += w;
-                if seen[i].1 > best_weight {
-                    best_weight = seen[i].1;
+        for entry in &mut seen[..n_seen] {
+            if entry.0 == val {
+                entry.1 += w;
+                if entry.1 > best_weight {
+                    best_weight = entry.1;
                     best_val    = val;
                 }
                 found = true;
@@ -134,7 +134,7 @@ fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
 
     // Mode threshold: ≥ 60% của total weight
     // threshold_numerator / threshold_denominator = 60/100
-    let threshold = (total * 6 + 9) / 10; // ceiling của 60%
+    let threshold = (total * 6).div_ceil(10); // ceiling của 60%
     if best_weight >= threshold {
         return best_val; // Mode chiến thắng
     }

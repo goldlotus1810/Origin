@@ -22,14 +22,14 @@ use std::path::PathBuf;
 
 struct Group {
     byte:   u8,
-    name:   &'static str,
+    _name:  &'static str,
     ranges: &'static [(u32, u32)],
 }
 
 static GROUPS: &[Group] = &[
     Group {
         byte:   0x01, // SDF
-        name:   "SDF",
+        _name:  "SDF",
         ranges: &[
             (0x2190, 0x21FF), // Arrows
             (0x2500, 0x257F), // Box Drawing
@@ -45,7 +45,7 @@ static GROUPS: &[Group] = &[
     },
     Group {
         byte:   0x02, // MATH
-        name:   "MATH",
+        _name:  "MATH",
         ranges: &[
             (0x2070, 0x209F), // Superscripts and Subscripts
             (0x2100, 0x214F), // Letterlike Symbols
@@ -59,7 +59,7 @@ static GROUPS: &[Group] = &[
     },
     Group {
         byte:   0x03, // EMOTICON
-        name:   "EMOTICON",
+        _name:  "EMOTICON",
         ranges: &[
             (0x2600, 0x26FF), // Miscellaneous Symbols
             (0x1F300, 0x1F5FF), // Misc Symbols and Pictographs
@@ -72,7 +72,7 @@ static GROUPS: &[Group] = &[
     },
     Group {
         byte:   0x04, // MUSICAL
-        name:   "MUSICAL",
+        _name:  "MUSICAL",
         ranges: &[
             (0x1D100, 0x1D1FF), // Musical Symbols (CORE)
             (0x4DC0, 0x4DFF),   // Yijing Hexagram Symbols (64 states)

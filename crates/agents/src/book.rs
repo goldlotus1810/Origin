@@ -180,11 +180,11 @@ fn sentence_emotion(sentence: &str) -> EmotionTag {
     if weight == 0.0 { return EmotionTag::NEUTRAL; }
 
     // Apply linguistic modifiers (negation, amplifier, diminisher, contrast)
-    let words_vec: alloc::vec::Vec<&str> = words.iter().copied().collect();
+    let words_vec: alloc::vec::Vec<&str> = words.to_vec();
     let raw_v = tv / weight;
     let (mod_v, mod_a) = apply_modifiers(&words_vec, raw_v, ta / weight);
 
-    let result_v = mod_v.max(-1.0).min(1.0);
+    let result_v = mod_v.clamp(-1.0, 1.0);
     let _ = mod_a; // arousal computed separately
 
     // Lớp 3: topic inference (khi valence thấp)
@@ -198,9 +198,9 @@ fn sentence_emotion(sentence: &str) -> EmotionTag {
 
     EmotionTag::new(
         result_v,
-        (ta / weight).max(0.0).min(1.0),
-        (td / weight).max(0.0).min(1.0),
-        (ti / weight).max(0.0).min(1.0),
+        (ta / weight).clamp(0.0, 1.0),
+        (td / weight).clamp(0.0, 1.0),
+        (ti / weight).clamp(0.0, 1.0),
     )
 }
 
@@ -274,7 +274,7 @@ fn topic_inference(lower: &str, words: &[&str]) -> EmotionTag {
     let mut found  = false;
 
     for &(topic, v, a) in TOPIC_SIGNALS {
-        if lower.contains(topic) || words.iter().any(|&w| w == topic) {
+        if lower.contains(topic) || words.contains(&topic) {
             // Tìm thấy topic keyword
             if !found || v.abs() > best_v.abs() {
                 best_v = v;

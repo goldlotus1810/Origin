@@ -204,7 +204,7 @@ fn hue_to_valence(hue: f32, sat: f32) -> f32 {
     // Nếu saturation thấp → hue không có nghĩa nhiều
     let weight = sat.clamp(0.0, 1.0);
 
-    let base = if hue < 30.0 || hue > 330.0 {
+    let base = if !(30.0..=330.0).contains(&hue) {
         -0.10 // đỏ: nguy hiểm/kích thích — neutral-negative
     } else if hue < 60.0 {
          0.30 // cam: ấm áp

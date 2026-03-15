@@ -141,10 +141,10 @@ impl PhraseDict {
             tw += w;
         }
         EmotionTag::new(
-            (tv/tw).max(-1.0).min(1.0),
-            (ta/tw).max(0.0).min(1.0),
-            (td/tw).max(0.0).min(1.0),
-            (ti/tw).max(0.0).min(1.0),
+            (tv/tw).clamp(-1.0, 1.0),
+            (ta/tw).clamp(0.0, 1.0),
+            (td/tw).clamp(0.0, 1.0),
+            (ti/tw).clamp(0.0, 1.0),
         )
     }
 }

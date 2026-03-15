@@ -77,7 +77,7 @@ impl<'a> OlangReader<'a> {
     /// Parse header và tạo reader.
     pub fn new(data: &'a [u8]) -> Result<Self, ParseError> {
         if data.len() < HEADER_SIZE { return Err(ParseError::TooShort); }
-        if &data[0..4] != &MAGIC   { return Err(ParseError::BadMagic); }
+        if data[0..4] != MAGIC   { return Err(ParseError::BadMagic); }
         if data[4] != VERSION       { return Err(ParseError::UnsupportedVersion); }
 
         let created_at = i64::from_le_bytes(data[5..13].try_into().unwrap());

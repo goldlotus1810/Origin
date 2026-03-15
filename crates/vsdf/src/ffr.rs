@@ -84,7 +84,7 @@ impl FfrPoint {
 
     /// Khoảng cách Fibonacci giữa 2 điểm (5D Manhattan trên index).
     pub fn fib_distance(a: u64, b: u64) -> u64 {
-        if a > b { a - b } else { b - a }
+        a.abs_diff(b)
     }
 }
 

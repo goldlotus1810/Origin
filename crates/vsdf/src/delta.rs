@@ -133,7 +133,7 @@ impl DeltaChain {
     /// Resolve: apply tất cả deltas → (SdfKind, SdfParams) cuối.
     pub fn resolve(&self) -> (SdfKind, SdfParams) {
         let mut kind   = self.base_kind;
-        let mut params = self.base_params.clone();
+        let mut params = self.base_params;
 
         for d in &self.deltas {
             if let Some(k) = d.kind  { kind = k; }

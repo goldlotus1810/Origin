@@ -172,14 +172,14 @@ impl EpistemicFirewall {
         match level {
             EpistemicLevel::Fact =>
                 // QR node — không disclaimer
-                alloc::format!("{}", content),
+                String::from(content),
             EpistemicLevel::Opinion =>
                 alloc::format!("[Chưa chắc chắn] {}", content),
             EpistemicLevel::Hypothesis =>
                 alloc::format!("[Giả thuyết] {}", content),
             EpistemicLevel::Unknown =>
                 // BlackCurtain (QT9): không bịa, nói thật là chưa có đủ dữ liệu
-                alloc::format!("[chưa có đủ dữ liệu]"),
+                String::from("[chưa có đủ dữ liệu]"),
             EpistemicLevel::Deprecated =>
                 alloc::format!("[Thông tin cũ] {} (có thể đã được cập nhật)", content),
         }
@@ -198,17 +198,13 @@ impl EpistemicFirewall {
 fn crisis_response(text: &str) -> String {
     // Tiếng Việt hoặc tiếng Anh tùy ngữ cảnh
     if text.chars().any(|c| c as u32 > 0x1000) {
-        alloc::format!(
-            "Tôi thấy bạn đang trải qua thời điểm rất khó khăn. \
+        String::from("Tôi thấy bạn đang trải qua thời điểm rất khó khăn. \
              Bạn không cô đơn. \
-             Hãy gọi đường dây hỗ trợ: 1800 599 920 (miễn phí, 24/7)."
-        )
+             Hãy gọi đường dây hỗ trợ: 1800 599 920 (miễn phí, 24/7).")
     } else {
-        alloc::format!(
-            "I can hear you're going through something very difficult. \
+        String::from("I can hear you're going through something very difficult. \
              You're not alone. \
-             Please reach out: Crisis Text Line — text HOME to 741741."
-        )
+             Please reach out: Crisis Text Line — text HOME to 741741.")
     }
 }
 
