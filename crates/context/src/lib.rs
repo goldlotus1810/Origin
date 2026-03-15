@@ -18,3 +18,4 @@ pub mod context;
 pub mod infer;
 pub mod fusion;
 pub mod word_guide;
+pub mod modality;

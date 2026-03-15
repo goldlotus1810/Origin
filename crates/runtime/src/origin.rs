@@ -467,6 +467,85 @@ impl HomeRuntime {
         })
     }
 
+
+    // ── Audio + Image input ───────────────────────────────────────────────────
+
+    /// Nhận audio features → fuse với text emotion → update pipeline.
+    ///
+    /// Dùng khi có input audio (giọng nói, nhạc...).
+    pub fn process_audio(
+        &mut self,
+        pitch_hz: f32, energy: f32, tempo_bpm: f32,
+        voice_break: f32, ts: i64,
+    ) -> Response {
+        use context::modality::AudioFeatures;
+        use context::fusion::{ModalityInput, ModalityKind, fuse};
+
+        let audio = AudioFeatures { pitch_hz, energy, tempo_bpm, voice_break, brightness: 0.5 };
+        let audio_input = audio.to_modality_input(0.85);
+
+        // Fuse với text emotion hiện tại
+        let cur_v = self.learning.context().fx();
+        let text_input = ModalityInput {
+            tag: silk::edge::EmotionTag {
+                valence: cur_v, arousal: 0.5, dominance: 0.5, intensity: cur_v.abs()
+            },
+            confidence: 0.6,
+            source: ModalityKind::Text,
+        };
+        let fused = fuse(&[text_input, audio_input]);
+
+        // Feed fused emotion vào context
+        let input = agents::encoder::ContentInput::Text {
+            content: alloc::format!("audio pitch={:.0} energy={:.2}", pitch_hz, energy),
+            timestamp: ts,
+        };
+        self.learning.process_one(input);
+
+        Response {
+            text:  alloc::format!("audio: {}", fused.describe()),
+            tone:  self.learning.context().tone(),
+            fx:    fused.tag.valence,
+            kind:  ResponseKind::Natural,
+        }
+    }
+
+    /// Nhận image features → fuse → update pipeline.
+    pub fn process_image(
+        &mut self,
+        hue: f32, saturation: f32, brightness: f32,
+        motion: f32, face_valence: Option<f32>, ts: i64,
+    ) -> Response {
+        use context::modality::ImageFeatures;
+        use context::fusion::{ModalityInput, ModalityKind, fuse};
+
+        let image = ImageFeatures { hue, saturation, brightness, motion, face_valence };
+        let image_input = image.to_modality_input(0.70);
+
+        let cur_v = self.learning.context().fx();
+        let text_input = ModalityInput {
+            tag: silk::edge::EmotionTag {
+                valence: cur_v, arousal: 0.5, dominance: 0.5, intensity: cur_v.abs()
+            },
+            confidence: 0.6,
+            source: ModalityKind::Text,
+        };
+        let fused = fuse(&[text_input, image_input]);
+
+        let input = agents::encoder::ContentInput::Text {
+            content: alloc::format!("image hue={:.0} brightness={:.2}", hue, brightness),
+            timestamp: ts,
+        };
+        self.learning.process_one(input);
+
+        Response {
+            text: alloc::format!("image: {}", fused.describe()),
+            tone: self.learning.context().tone(),
+            fx:   fused.tag.valence,
+            kind: ResponseKind::Natural,
+        }
+    }
+
     // ── Accessors ─────────────────────────────────────────────────────────────
 
     pub fn turn_count(&self) -> u64 { self.turn_count }
