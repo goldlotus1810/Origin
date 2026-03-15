@@ -96,10 +96,11 @@ NGƯỜI DÙNG
 AAM  [tier 0] — stateless · approve · quyết định cuối
                — im lặng · chỉ hoạt động khi được gọi
     ↓ ISL
-LeoAI      [tier 1] — KnowledgeChief + Learning + Dream + Curator
-HomeChief  [tier 1] — quản lý Worker thiết bị nhà
-VisionChief[tier 1] — quản lý Worker camera/sensor
+LeoAI       [tier 1] — KnowledgeChief + Learning + Dream + Curator
+HomeChief   [tier 1] — quản lý Worker thiết bị nhà
+VisionChief [tier 1] — quản lý Worker camera/sensor
 NetworkChief[tier 1] — quản lý Worker network/security
+GeneralChief[tier 1] — generic (mở rộng sau)
     ↓ ISL
 Workers [tier 2 · SILENT]
   Nằm tại thiết bị
@@ -166,11 +167,12 @@ Worker LÀ HomeOS thu nhỏ tại thiết bị
 
 Worker = L0 + L1 tối thiểu + Skills cần thiết
 
-Worker_camera  = L0 + FFR + vSDF + InverseRenderSkill
-Worker_light   = L0 + ActuatorSkill
-Worker_door    = L0 + ActuatorSkill + SecuritySkill
-Worker_sensor  = L0 + SensorSkill
-Worker_network = L0 + NetworkSkill + ImmunitySkill
+Worker_camera  = L0 + FFR + vSDF + InverseRenderSkill    (WorkerKind::Camera)
+Worker_light   = L0 + ActuatorSkill                     (WorkerKind::Actuator)
+Worker_door    = L0 + ActuatorSkill + SecuritySkill      (WorkerKind::Actuator)
+Worker_sensor  = L0 + SensorSkill                       (WorkerKind::Sensor)
+Worker_network = L0 + NetworkSkill + ImmunitySkill       (WorkerKind::Network)
+Worker_generic = L0 + custom Skills                      (WorkerKind::Generic)
 
 Nguyên tắc:
   Xử lý local → gửi molecular chain (không raw data)
@@ -546,7 +548,7 @@ Tier 3: ESP32 (520KB SRAM)
 | Writer/Reader | ✅ Done | ↑ | ○LNG v0.03, crash recovery |
 | Silk + Hebbian | ✅ Done | 31 | EmotionTag per edge, φ⁻¹ decay |
 | Emotion V/A/D/I | ✅ Done | 12 | 4 chiều, ConversationCurve (cần window variance) |
-| ContentEncoder | ✅ Done | 139 (agents) | Text/Audio/Sensor/Code |
+| ContentEncoder | ✅ Done | 96 (agents) | Text/Audio/Sensor/Code |
 | LearningLoop | ✅ Done | ↑ | 5 tầng text learning |
 | BookReader | ✅ Done | ↑ | 3 tầng emotion inference |
 | SecurityGate | ✅ Done | ↑ | Crisis detect, EpistemicFirewall |
@@ -562,6 +564,7 @@ Tier 3: ESP32 (520KB SRAM)
 | LeoAI | ✅ Done | ↑ (agents) | States: Listening/Learning/Dreaming/Proposing |
 | Cross-modal fusion | ✅ Done | ↑ (context) | Audio/Image/Bio → EmotionTag |
 | SelfModel | ✅ Done | ↑ (olang) | ○{stats} tự mô tả |
+| Skill trait + ExecContext | ✅ Done | ↑ (agents) | QT4①-⑤: stateless, isolated, via ExecContext |
 | SkillProposal | ⬜ Planned | — | **Chưa implement** — DreamProposal có, SkillProposal chưa |
 | LCA variance | ⬜ Planned | — | Thêm variance output cho LCA |
 | Window variance | ⬜ Planned | — | ConversationCurve instability detection |
@@ -570,7 +573,7 @@ Tier 3: ESP32 (520KB SRAM)
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |
 
-**Tổng: 701 tests, 0 clippy warnings, 12 crates**
+**Tổng: 707 tests, 0 clippy warnings, 12 crates**
 
 ---
 
@@ -654,4 +657,4 @@ Design lock: KHÔNG — design có thể evolve nếu có bằng chứng mới
 ---
 
 *Bản vẽ này là la bàn. Code là hành trình.*
-*2026-03-15 · HomeOS v3 · 701 tests · 0 warnings*
+*2026-03-15 · HomeOS v3 · 707 tests · 0 warnings*

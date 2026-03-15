@@ -131,7 +131,7 @@ ucd (build.rs đọc UnicodeData.txt → bảng tĩnh lúc compile)
 
 Tools (std):
   seeder   — seed 35 L0 nodes từ UCD
-  server   — WebSocket + REPL (axum)
+  server   — Terminal REPL (stdin/stdout)
   inspector — đọc/verify origin.olang
 ```
 
@@ -323,7 +323,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 | **olang** | Core: Molecule, LCA, Registry, VM, Compiler | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs`, `clone.rs` | `cargo test -p olang` |
 | **silk** | Hebbian learning, emotion edges, walk | `edge.rs`, `hebbian.rs`, `walk.rs`, `graph.rs` | `cargo test -p silk` |
 | **context** | Emotion V/A/D/I, ConversationCurve, Intent | `emotion.rs`, `curve.rs`, `intent.rs`, `fusion.rs` | `cargo test -p context` |
-| **agents** | Encoder, Learning, Gate, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
+| **agents** | Encoder, Learning, Gate, Skill, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
 | **memory** | STM, Dream, Proposals, AAM | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
 | **runtime** | HomeRuntime entry point, ○{} Parser | `origin.rs`, `parser.rs`, `response_template.rs` | `cargo test -p runtime` |
 | **isl** | Inter-system messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs`, `queue.rs` | `cargo test -p isl` |
@@ -334,7 +334,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 | Tool | Mục đích | Test |
 |------|---------|------|
 | **seeder** | Seed 35 L0 nodes từ UCD | `cargo test -p seeder` |
-| **server** | WebSocket REPL (axum) | `cargo test -p server` |
+| **server** | Terminal REPL (stdin/stdout) | `cargo test -p server` |
 | **inspector** | Đọc/verify origin.olang | `cargo test -p inspector` |
 
 ---
@@ -345,7 +345,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (701 tests)
+# Test toàn bộ (707 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)

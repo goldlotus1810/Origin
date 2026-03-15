@@ -4,8 +4,8 @@
 //!
 //! Phân cấp:
 //!   AAM → Chief → Worker  (chain of command)
-//!   Chief không nói chuyện với Chief khác
-//!   Worker không nói chuyện với Worker
+//!   ✅ AAM ↔ Chief · ✅ Chief ↔ Chief · ✅ Chief ↔ Worker
+//!   ❌ AAM ↔ Worker · ❌ Worker ↔ Worker
 //!
 //! Vòng đời: chờ ISL → wake → xử lý → tổng hợp → báo LeoAI → sleep
 //!
