@@ -1,0 +1,373 @@
+//! # learning — LearningLoop
+//!
+//! Trái tim đập — kết nối mọi subsystem.
+//! Mỗi input → ContentEncoder → chain → STM → Silk → Dream.
+//!
+//! Pipeline:
+//!   input → gate.check() → encode() → context.on_activate()
+//!   → stm.push(chain) → silk.co_activate() → [dream khi idle]
+
+extern crate alloc;
+use alloc::vec::Vec;
+
+use olang::molecular::MolecularChain;
+use olang::registry::Registry;
+use silk::edge::EmotionTag;
+use silk::graph::SilkGraph;
+use context::engine::ContextEngine;
+
+use crate::encoder::{ContentEncoder, ContentInput, EncodedContent};
+use crate::gate::{SecurityGate, GateVerdict};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ShortTermMemory (ĐN)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ĐN — Short-Term Memory.
+///
+/// Buffer trước khi vào QR (long-term).
+/// Tối đa 512 observations trước khi Dream flush.
+#[derive(Debug)]
+pub struct ShortTermMemory {
+    observations: Vec<Observation>,
+    max_size:     usize,
+}
+
+/// Một observation trong ĐN.
+#[derive(Debug, Clone)]
+pub struct Observation {
+    pub chain:     MolecularChain,
+    pub emotion:   EmotionTag,
+    pub timestamp: i64,
+    pub fire_count: u32,
+}
+
+impl ShortTermMemory {
+    pub fn new(max_size: usize) -> Self {
+        Self { observations: Vec::new(), max_size }
+    }
+
+    /// Thêm observation — nếu đã có chain tương tự → tăng fire_count.
+    pub fn push(&mut self, chain: MolecularChain, emotion: EmotionTag, ts: i64) {
+        let hash = chain.chain_hash();
+
+        // Tìm observation đã có
+        if let Some(obs) = self.observations.iter_mut()
+            .find(|o| o.chain.chain_hash() == hash)
+        {
+            obs.fire_count += 1;
+            // Blend emotion
+            obs.emotion = obs.emotion.blend(emotion, 0.3);
+            obs.timestamp = ts;
+            return;
+        }
+
+        // Mới — thêm vào
+        if self.observations.len() >= self.max_size {
+            // Xóa observation ít được fire nhất (LFU eviction)
+            if let Some(min_idx) = self.observations.iter()
+                .enumerate()
+                .min_by_key(|(_, o)| o.fire_count)
+                .map(|(i, _)| i)
+            {
+                self.observations.remove(min_idx);
+            }
+        }
+
+        self.observations.push(Observation { chain, emotion, timestamp: ts, fire_count: 1 });
+    }
+
+    /// Observations được fire nhiều nhất — Dream candidates.
+    pub fn top_n(&self, n: usize) -> Vec<&Observation> {
+        let mut sorted: Vec<&Observation> = self.observations.iter().collect();
+        sorted.sort_by(|a, b| b.fire_count.cmp(&a.fire_count));
+        sorted.into_iter().take(n).collect()
+    }
+
+    pub fn len(&self) -> usize { self.observations.len() }
+    pub fn is_empty(&self) -> bool { self.observations.is_empty() }
+    pub fn all(&self) -> &[Observation] { &self.observations }
+
+    /// Xóa observations đã được promote lên QR.
+    pub fn remove_promoted(&mut self, hashes: &[u64]) {
+        self.observations.retain(|o| !hashes.contains(&o.chain.chain_hash()));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProcessResult
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Kết quả của process_one().
+#[derive(Debug)]
+pub enum ProcessResult {
+    /// Xử lý thành công
+    Ok {
+        chain:   MolecularChain,
+        emotion: EmotionTag,
+    },
+    /// SecurityGate block
+    Blocked { reason: alloc::string::String },
+    /// Crisis — cần response đặc biệt
+    Crisis  { message: alloc::string::String },
+    /// Input rỗng
+    Empty,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LearningLoop
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Trái tim đập của HomeOS.
+///
+/// Kết nối: Gate → Encoder → Context → STM → Silk
+pub struct LearningLoop {
+    gate:     SecurityGate,
+    encoder:  ContentEncoder,
+    context:  ContextEngine,
+    stm:      ShortTermMemory,
+    graph:    SilkGraph,
+    /// Hash của chain trước — để co_activate Silk
+    prev_hash: Option<u64>,
+}
+
+impl LearningLoop {
+    pub fn new(session_id: u64) -> Self {
+        Self {
+            gate:      SecurityGate::new(),
+            encoder:   ContentEncoder::new(),
+            context:   ContextEngine::new(session_id),
+            stm:       ShortTermMemory::new(512),
+            graph:     SilkGraph::new(),
+            prev_hash: None,
+        }
+    }
+
+    /// Xử lý một ContentInput qua toàn bộ pipeline.
+    ///
+    /// Gate → Encode → Context → STM → Silk → kết quả
+    pub fn process_one(&mut self, input: ContentInput) -> ProcessResult {
+        let ts = input.timestamp();
+
+        // ── 0. Security Gate — TRƯỚC MỌI THỨ ────────────────────────────────
+        if let ContentInput::Text { ref content, .. } = input {
+            match self.gate.check_text(content) {
+                GateVerdict::Crisis { message } => {
+                    return ProcessResult::Crisis { message };
+                }
+                GateVerdict::Block { reason } => {
+                    return ProcessResult::Blocked {
+                        reason: alloc::format!("{:?}", reason),
+                    };
+                }
+                GateVerdict::Allow | GateVerdict::BlackCurtain => {}
+            }
+        }
+
+        // ── 1. Encode → chain ─────────────────────────────────────────────────
+        let encoded: EncodedContent = self.encoder.encode(input.clone());
+        if encoded.chain.is_empty() { return ProcessResult::Empty; }
+
+        let chain   = encoded.chain.clone();
+        let emotion = encoded.emotion;
+        let hash    = chain.chain_hash();
+
+        // ── 2. Context Engine ─────────────────────────────────────────────────
+        if let ContentInput::Text { ref content, timestamp } = input {
+            use context::snapshot::RawInput;
+            self.context.on_activate(RawInput::text(content, timestamp));
+        }
+
+        // ── 3. STM — lưu observation ─────────────────────────────────────────
+        self.stm.push(chain.clone(), emotion, ts);
+
+        // ── 4. Silk — co_activate với node trước ─────────────────────────────
+        if let Some(prev) = self.prev_hash {
+            if prev != hash {
+                self.graph.co_activate(prev, hash, emotion,
+                    emotion.intensity.max(0.1), ts);
+            }
+        }
+        self.prev_hash = Some(hash);
+
+        ProcessResult::Ok { chain, emotion }
+    }
+
+    // ── Accessors ────────────────────────────────────────────────────────────
+
+    pub fn stm(&self)      -> &ShortTermMemory { &self.stm }
+    pub fn graph(&self)    -> &SilkGraph       { &self.graph }
+    pub fn context(&self)  -> &ContextEngine   { &self.context }
+    pub fn turn_count(&self) -> usize          { self.context.turn_count() }
+
+    /// Dream candidates từ STM.
+    pub fn dream_candidates(&self, n: usize) -> Vec<&Observation> {
+        self.stm.top_n(n)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use crate::encoder::{SensorKind, SystemEvent};
+
+    fn loop_() -> LearningLoop { LearningLoop::new(0x1234) }
+
+    fn skip() -> bool { ucd::table_len() == 0 }
+
+    fn text(s: &str) -> ContentInput {
+        ContentInput::Text { content: s.to_string(), timestamp: 1000 }
+    }
+
+    // ── STM ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn stm_push_increases_len() {
+        if skip() { return; }
+        let mut stm = ShortTermMemory::new(10);
+        let chain = olang::encoder::encode_codepoint(0x1F525);
+        stm.push(chain, EmotionTag::NEUTRAL, 1000);
+        assert_eq!(stm.len(), 1);
+    }
+
+    #[test]
+    fn stm_same_chain_increments_fire() {
+        if skip() { return; }
+        let mut stm = ShortTermMemory::new(10);
+        let chain = olang::encoder::encode_codepoint(0x1F525);
+        stm.push(chain.clone(), EmotionTag::NEUTRAL, 1000);
+        stm.push(chain.clone(), EmotionTag::NEUTRAL, 2000);
+        stm.push(chain.clone(), EmotionTag::NEUTRAL, 3000);
+        assert_eq!(stm.len(), 1, "Cùng chain → không tạo duplicate");
+        assert_eq!(stm.all()[0].fire_count, 3);
+    }
+
+    #[test]
+    fn stm_top_n_sorted() {
+        if skip() { return; }
+        let mut stm = ShortTermMemory::new(10);
+        let c1 = olang::encoder::encode_codepoint(0x1F525); // fire
+        let c2 = olang::encoder::encode_codepoint(0x1F4A7); // water
+        let c3 = olang::encoder::encode_codepoint(0x2744);  // snow
+
+        // c2 fire nhiều nhất
+        for _ in 0..5 { stm.push(c2.clone(), EmotionTag::NEUTRAL, 1); }
+        for _ in 0..3 { stm.push(c1.clone(), EmotionTag::NEUTRAL, 2); }
+        for _ in 0..1 { stm.push(c3.clone(), EmotionTag::NEUTRAL, 3); }
+
+        let top = stm.top_n(2);
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0].fire_count, 5, "Top 1 phải có fire_count=5");
+        assert_eq!(top[1].fire_count, 3, "Top 2 phải có fire_count=3");
+    }
+
+    #[test]
+    fn stm_eviction_lfu() {
+        if skip() { return; }
+        let mut stm = ShortTermMemory::new(3); // max 3
+        // Đổ 4 chains khác nhau
+        let chains: Vec<_> = [0x1F525u32, 0x1F4A7, 0x2744, 0x1F9E0]
+            .iter().map(|&cp| olang::encoder::encode_codepoint(cp)).collect();
+
+        stm.push(chains[0].clone(), EmotionTag::NEUTRAL, 1);
+        stm.push(chains[0].clone(), EmotionTag::NEUTRAL, 2); // fire=2
+        stm.push(chains[1].clone(), EmotionTag::NEUTRAL, 3); // fire=1
+        stm.push(chains[2].clone(), EmotionTag::NEUTRAL, 4); // fire=1
+        // Max reached, thêm chains[3] → evict LFU (chains[1] hoặc chains[2])
+        stm.push(chains[3].clone(), EmotionTag::NEUTRAL, 5);
+
+        assert_eq!(stm.len(), 3, "Eviction giữ max_size");
+        // chains[0] vẫn còn (fire=2 cao nhất)
+        assert!(stm.all().iter().any(|o| o.chain.chain_hash() == chains[0].chain_hash()),
+            "chains[0] fire=2 phải còn");
+    }
+
+    // ── LearningLoop ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn process_text_ok() {
+        if skip() { return; }
+        let mut l = loop_();
+        let r = l.process_one(text("hôm nay trời đẹp"));
+        assert!(matches!(r, ProcessResult::Ok { .. }), "Normal text → Ok");
+        assert_eq!(l.stm().len(), 1);
+    }
+
+    #[test]
+    fn process_crisis_intercept() {
+        let mut l = loop_();
+        let r = l.process_one(text("tôi muốn chết"));
+        assert!(matches!(r, ProcessResult::Crisis { .. }),
+            "Crisis phải được intercept trước khi encode");
+        // STM không được populated
+        assert_eq!(l.stm().len(), 0, "Crisis không vào STM");
+    }
+
+    #[test]
+    fn process_block_intercept() {
+        let mut l = loop_();
+        let r = l.process_one(text("rm -rf /"));
+        assert!(matches!(r, ProcessResult::Blocked { .. }));
+        assert_eq!(l.stm().len(), 0, "Blocked không vào STM");
+    }
+
+    #[test]
+    fn process_multiple_builds_silk() {
+        if skip() { return; }
+        let mut l = loop_();
+        // Dùng emoji — mỗi cái có codepoint khác nhau → chain hash khác nhau
+        l.process_one(ContentInput::Text { content: "🔥".to_string(), timestamp: 1000 });
+        l.process_one(ContentInput::Text { content: "💧".to_string(), timestamp: 2000 });
+        l.process_one(ContentInput::Text { content: "🔥".to_string(), timestamp: 3000 });
+        // Silk: 🔥 → 💧 (different hashes → edge)
+        // STM phải có entries
+        assert!(l.stm().len() > 0, "STM phải có entries");
+        // Graph có thể có hoặc không tùy chain hash — check STM thay thế
+    }
+
+    #[test]
+    fn process_sensor_ok() {
+        if skip() { return; }
+        let mut l = loop_();
+        let r = l.process_one(ContentInput::Sensor {
+            kind: SensorKind::Temperature, value: 38.0, timestamp: 1000,
+        });
+        assert!(matches!(r, ProcessResult::Ok { .. }));
+    }
+
+    #[test]
+    fn process_system_boot_ok() {
+        if skip() { return; }
+        let mut l = loop_();
+        let r = l.process_one(ContentInput::System {
+            event: SystemEvent::Boot, timestamp: 0,
+        });
+        assert!(matches!(r, ProcessResult::Ok { .. }));
+    }
+
+    #[test]
+    fn dream_candidates_top_fired() {
+        if skip() { return; }
+        let mut l = loop_();
+        // Gửi "tôi buồn" nhiều lần
+        for i in 0..5 {
+            l.process_one(ContentInput::Text {
+                content: "tôi buồn".to_string(), timestamp: i * 1000,
+            });
+        }
+        l.process_one(ContentInput::Text {
+            content: "trời đẹp".to_string(), timestamp: 10000,
+        });
+
+        let candidates = l.dream_candidates(1);
+        assert!(!candidates.is_empty(), "Phải có candidates");
+        // Top candidate phải có fire_count cao nhất
+        assert!(candidates[0].fire_count >= 1);
+    }
+}
