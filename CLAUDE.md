@@ -64,6 +64,57 @@ Tại sao ~5400 mà không phải 150K (toàn bộ Unicode)?
 
 ---
 
+## Phân cấp Agent (bất biến)
+
+```
+NGƯỜI DÙNG
+    ↓
+AAM  [tier 0] — stateless · approve · quyết định cuối
+               — im lặng · chỉ hoạt động khi được gọi
+    ↓ ISL
+LeoAI      [tier 1] — KnowledgeChief + Learning + Dream + Curator
+HomeChief  [tier 1] — quản lý Worker thiết bị nhà
+VisionChief[tier 1] — quản lý Worker camera/sensor
+NetworkChief[tier 1] — quản lý Worker network/security
+    ↓ ISL
+Workers [tier 2 · SILENT]
+  Nằm tại thiết bị · L0 + L1 tối thiểu
+  Skill đúng việc đó · Báo cáo molecular chain — không raw data
+
+Giao tiếp:
+  ✅ AAM ↔ Chief     ✅ Chief ↔ Chief     ✅ Chief ↔ Worker
+  ❌ AAM ↔ Worker    ❌ Worker ↔ Worker
+
+Sinh học:
+  Worker = tế bào thần kinh ngoại vi
+  Chief  = tủy sống — xử lý, tổng hợp
+  LeoAI  = não — học, hiểu, sắp xếp, nhớ
+  AAM    = ý thức — quyết định cuối cùng
+
+Tất cả: Silent by default · Wake on ISL · Xử lý → sleep
+```
+
+### LeoAI — Bộ não:
+```
+Skills:
+  Nhận:    IngestSkill · ModalityFusion
+  Hiểu:    ClusterSkill · SimilaritySkill · DeltaSkill
+  Sắp xếp: CuratorSkill · MergeSkill · PruneSkill
+  Học:     HebbianSkill · DreamSkill
+  Đề xuất: ProposalSkill · HonestySkill
+```
+
+### Worker profiles:
+```
+Worker_camera  = L0 + FFR + vSDF + InverseRenderSkill
+Worker_light   = L0 + ActuatorSkill
+Worker_door    = L0 + ActuatorSkill + SecuritySkill
+Worker_sensor  = L0 + SensorSkill
+Worker_network = L0 + NetworkSkill + ImmunitySkill
+```
+
+---
+
 ## Dependency Graph
 
 ```
@@ -71,7 +122,7 @@ ucd (build.rs đọc UnicodeData.txt → bảng tĩnh lúc compile)
  └→ olang (Molecule, MolecularChain, LCA, Registry, Writer/Reader, VM, IR, Compiler)
      ├→ silk (SilkGraph, Hebbian learning, EmotionTag per edge, WalkWeighted)
      │   └→ context (EmotionTag V/A/D/I, ConversationCurve, Intent, Modality Fusion)
-     │       └→ agents (ContentEncoder, LearningLoop, BookReader, SecurityGate, LeoAI)
+     │       └→ agents (ContentEncoder, LearningLoop, BookReader, SecurityGate, LeoAI, Chief, Worker)
      │           └→ memory (ShortTermMemory, DreamCycle, Proposals, AAM)
      │               └→ runtime (HomeRuntime — entry point, ○{} Parser)
      │                   └→ wasm (WebAssembly bindings cho browser)
@@ -117,6 +168,9 @@ f'' < -0.25          → Pause        (đột ngột xấu → dừng, hỏi)
 f'  > +0.15          → Reinforcing  (hồi phục → tiếp tục)
 f'' > +0.25 && V > 0 → Celebratory  (bước ngoặt tốt)
 V < -0.20, stable    → Gentle       (buồn ổn định → dịu dàng)
+
+⚠️ Planned: window variance — nếu variance(N turns) cao + f' đổi chiều
+   → "emotional instability" → Gentle thay vì Celebratory
 ```
 
 ### Cross-modal fusion (fusion.rs):
@@ -127,7 +181,7 @@ Conflict (text vui + giọng run) → Audio thắng valence, confidence giảm
 
 ---
 
-## 18 Quy Tắc Bất Biến
+## Quy Tắc Bất Biến
 
 **AI PHẢI tuân thủ khi viết code:**
 
@@ -151,14 +205,22 @@ Node:
 Silk:
   ⑪ Silk chỉ ở Ln-1 — tự do giữa lá cùng tầng
   ⑫ Kết nối tầng trên → qua NodeLx đại diện
+     (⚠️ Planned: cross-layer Silk với threshold Fib[n+2] + AAM approve)
   ⑬ Silk mang EmotionTag của khoảnh khắc co-activation
 
 Kiến trúc:
   ⑭ L0 không import L1 — tuyệt đối
-  ⑮ Chỉ 2 Agent (AAM + LeoAI) — không thêm
+  ⑮ Agent tiers: AAM(tier 0) + Chiefs(tier 1) + Workers(tier 2)
   ⑯ L2-Ln đổ vào SAU khi L0+L1 hoàn thiện
   ⑰ Fibonacci xuyên suốt — cấu trúc, threshold, render
   ⑱ Không đủ evidence → im lặng — KHÔNG bịa (BlackCurtain)
+
+Skill (QT4):
+  ⑲ 1 Skill = 1 trách nhiệm
+  ⑳ Skill không biết Agent là gì
+  ㉑ Skill không biết Skill khác tồn tại
+  ㉒ Skill giao tiếp qua ExecContext.State
+  ㉓ Skill không giữ state — state nằm trong Agent
 ```
 
 ---
@@ -199,6 +261,19 @@ file.seek(0); file.write_all(&new_data);
 // ✅ ĐÚNG — Append-only (QT8)
 writer.append_node(&chain, layer, is_qr, ts);
 // QR sai → thêm SupersedeQR record, không xóa QR cũ
+
+// ❌ SAI — Worker gửi raw data
+chief.send(raw_image_bytes);
+
+// ✅ ĐÚNG — Worker gửi molecular chain
+let chain = encode_sensor_reading(&reading);
+chief.receive_frame(ISLFrame::with_body(msg, &chain.to_bytes()));
+
+// ❌ SAI — Skill giữ state hoặc biết Agent
+struct MySkill { agent: &Agent, cache: HashMap<...> }
+
+// ✅ ĐÚNG — Skill stateless, dùng ExecContext
+fn execute(&self, ctx: &mut ExecContext) -> SkillResult { ... }
 ```
 
 ---
@@ -216,6 +291,26 @@ origin.olang — append-only binary
 origin.olang.weights  — Hebbian weights (append-only)
 origin.olang.registry — chain index (rebuild được từ origin.olang)
 log.olang             — event log (append-only)
+
+WorkerPackage binary (clone.rs):
+  [magic "WKPK"][version][isl_addr:4B][chief_addr:4B]
+  [worker_kind:1B][created_at:8B][olang_len:4B][olang_bytes]
+```
+
+---
+
+## ISL — Inter-System Link
+
+```
+ISLAddress: [layer:1B][group:1B][subgroup:1B][index:1B] = 4 bytes
+ISLMessage: [from:4B][to:4B][msg_type:1B][payload:3B]  = 12 bytes
+ISLFrame:   12B header + 2B length + variable body
+
+MsgType: Text(0x01) Query(0x02) Learn(0x03) Propose(0x04)
+         ActuatorCmd(0x05) Tick(0x06) Dream(0x07) Emergency(0x08)
+         Approved(0x09) Broadcast(0x0A) ChainPayload(0x0B) Ack(0x0C) Nack(0x0D)
+
+ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 ```
 
 ---
@@ -225,14 +320,14 @@ log.olang             — event log (append-only)
 | Crate | Mục đích | Files chính | Test |
 |-------|---------|-------------|------|
 | **ucd** | Unicode → Molecule lookup | `build.rs`, `src/lib.rs` | `cargo test -p ucd` |
-| **olang** | Core: Molecule, LCA, Registry, VM, Compiler | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs` | `cargo test -p olang` |
+| **olang** | Core: Molecule, LCA, Registry, VM, Compiler | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs`, `clone.rs` | `cargo test -p olang` |
 | **silk** | Hebbian learning, emotion edges, walk | `edge.rs`, `hebbian.rs`, `walk.rs`, `graph.rs` | `cargo test -p silk` |
 | **context** | Emotion V/A/D/I, ConversationCurve, Intent | `emotion.rs`, `curve.rs`, `intent.rs`, `fusion.rs` | `cargo test -p context` |
-| **agents** | Encoder, Learning, BookReader, Gate | `encoder.rs`, `learning.rs`, `book.rs`, `gate.rs` | `cargo test -p agents` |
+| **agents** | Encoder, Learning, Gate, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
 | **memory** | STM, Dream, Proposals, AAM | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
 | **runtime** | HomeRuntime entry point, ○{} Parser | `origin.rs`, `parser.rs`, `response_template.rs` | `cargo test -p runtime` |
-| **isl** | Inter-module messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs` | `cargo test -p isl` |
-| **vsdf** | 18 SDF + ∇f + FFR Fibonacci render | `sdf.rs`, `ffr.rs`, `physics.rs`, `vector.rs` | `cargo test -p vsdf` |
+| **isl** | Inter-system messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs`, `queue.rs` | `cargo test -p isl` |
+| **vsdf** | 18 SDF + ∇f + FFR Fibonacci render | `sdf.rs`, `ffr.rs`, `physics.rs`, `vector.rs`, `fit.rs` | `cargo test -p vsdf` |
 | **wasm** | Browser WebAssembly bindings | `lib.rs` | `cargo test -p homeos-wasm` |
 
 **Tools (std):**
@@ -306,11 +401,12 @@ DREAM     = Offline consolidation (STM → cluster → promote QR)
 **Đã chứng minh (toán học):**
 - FFR render: ~89 ô = Fib[11] spiral, 23300× ít hơn ray march
 - Cấu trúc cây: depth tăng theo Fibonacci tự nhiên
+- Decay φ⁻¹ ≈ 0.618: optimal forgetting rate
 
 **Giả thuyết (cần validation):**
 - Hebbian threshold: Fib[n] co-activations để promote
 - Dream trigger: Fib[n] lá đủ để cluster
-- Decay rate: φ⁻¹ ≈ 0.618 per 24h
+- Dream cluster scoring: α=0.3, β=0.4, γ=0.3 (cần A/B testing)
 
 ---
 
@@ -321,4 +417,7 @@ DREAM     = Offline consolidation (STM → cluster → promote QR)
 3. Emotion phải đi qua TOÀN BỘ pipeline — không tắt bước nào
 4. SecurityGate LUÔN chạy trước
 5. Append-only — không bao giờ delete/overwrite
-6. Test trước khi commit: `cargo test --workspace && cargo clippy --workspace`
+6. Worker gửi chain, KHÔNG gửi raw data
+7. Skill stateless — state nằm trong Agent
+8. Silent by default — không polling, không heartbeat
+9. Test trước khi commit: `cargo test --workspace && cargo clippy --workspace`
