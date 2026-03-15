@@ -834,10 +834,11 @@ pub fn bootstrap_affect(text: &str) -> EmotionTag {
 
 pub fn sentence_affect(text: &str) -> EmotionTag {
     use olang::ling::apply_modifiers;
+    use crate::infer::{detect_tense, Tense};
     let words: alloc::vec::Vec<&str> = text.split_whitespace().collect();
     let base = sentence_base_affect(&words);
     let (mod_v, _) = apply_modifiers(&words, base.valence, base.arousal);
-    let result = EmotionTag {
+    let mut result = EmotionTag {
         valence:   mod_v.clamp(-1.0, 1.0),
         arousal:   base.arousal,
         dominance: base.dominance,
@@ -845,8 +846,11 @@ pub fn sentence_affect(text: &str) -> EmotionTag {
     };
     if result.valence.abs() < 0.10 && result.intensity < 0.15 {
         let boot = bootstrap_affect(text);
-        if boot.intensity > 0.15 { return boot; }
+        if boot.intensity > 0.15 { result = boot; }
     }
+    // Scale intensity theo tense: sắp xảy ra → nhẹ hơn đang xảy ra
+    let tense = detect_tense(text);
+    result.intensity *= tense.intensity_scale();
     result
 }
 
