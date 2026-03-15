@@ -6,3 +6,7 @@ edition.workspace = true
 [[bin]]
 name = "inspector"
 path = "src/main.rs"
+
+[dependencies]
+ucd   = { workspace = true }
+olang = { workspace = true, features = ["std"] }

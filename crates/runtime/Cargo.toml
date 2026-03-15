@@ -5,3 +5,16 @@ edition.workspace = true
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+default = []
+std     = []
+
+[dependencies]
+ucd     = { workspace = true }
+olang   = { workspace = true }
+silk    = { workspace = true }
+context = { workspace = true }
+agents  = { workspace = true }
+memory  = { workspace = true }
+libm    = { workspace = true }
