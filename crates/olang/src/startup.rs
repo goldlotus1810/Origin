@@ -86,10 +86,13 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     let mut registry = Registry::new();
     let mut stage = BootStage::SelfInit;
 
-    // Stage 2: Axiom Load — seed 4 axiom nodes
+    // Stage 2: Axiom Load — seed 4 axiom nodes + L1 system components
     // Dùng UCD nếu có, không thì bỏ qua
     if ucd::table_len() > 0 {
         seed_axioms(&mut registry);
+        // L1 seed: đăng ký tất cả Skills, Agents, VM ops, Sensors
+        // Quy tắc: mọi thứ tạo ra đều phải đăng ký Registry
+        seed_l1_system(&mut registry);
         stage = BootStage::AxiomLoad;
     }
 
@@ -186,6 +189,145 @@ fn seed_axioms(registry: &mut Registry) {
         registry.register_alias("∈", hm);
         registry.register_alias("instance", hm);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Seed L1 — đăng ký toàn bộ system components vào Registry
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// L1 System Seed — đăng ký tất cả Skills, Agents, VM ops, Sensors.
+///
+/// Quy tắc bất biến: **mọi thứ tạo ra đều phải đăng ký Registry**.
+/// L1 = bản thiết kế DNA của HomeOS — clone sang thiết bị mới chỉ cần copy L1.
+///
+/// Mỗi component → encode_codepoint(cp) → insert_with_kind(chain, 1, ..., NodeKind::Xxx)
+pub fn seed_l1_system(registry: &mut Registry) {
+    use crate::registry::NodeKind;
+
+    if ucd::table_len() == 0 {
+        return;
+    }
+
+    let ts = 0i64;
+    let mut offset = 1000u64; // L1 offsets start after L0
+
+    // Helper: register 1 component
+    let mut reg = |cp: u32, kind: NodeKind, name: &str, aliases: &[&str]| {
+        let chain = encode_codepoint(cp);
+        let h = registry.insert_with_kind(&chain, 1, offset, ts, true, kind);
+        registry.register_alias(name, h);
+        for &a in aliases {
+            registry.register_alias(a, h);
+        }
+        offset += 1;
+    };
+
+    // ── Skills: 7 Instinct ─────────────────────────────────────────────────
+    // Dùng Dingbats (0x2700-0x27BF) — SDF group, có trong UCD
+    reg(0x2700, NodeKind::Skill, "skill:honesty",       &["Honesty"]);
+    reg(0x2701, NodeKind::Skill, "skill:contradiction",  &["Contradiction"]);
+    reg(0x2702, NodeKind::Skill, "skill:causality",      &["Causality"]);
+    reg(0x2703, NodeKind::Skill, "skill:abstraction",    &["Abstraction"]);
+    reg(0x2704, NodeKind::Skill, "skill:analogy",        &["Analogy"]);
+    reg(0x2706, NodeKind::Skill, "skill:curiosity",      &["Curiosity"]);
+    reg(0x2707, NodeKind::Skill, "skill:reflection",     &["Reflection"]);
+
+    // ── Skills: 11 LeoAI Domain ────────────────────────────────────────────
+    // Dùng Box Drawing chars (0x2500-0x257F) — SDF group, có trong UCD
+    reg(0x2500, NodeKind::Skill, "skill:ingest",         &["IngestSkill"]);
+    reg(0x2502, NodeKind::Skill, "skill:similarity",     &["SimilaritySkill"]);
+    reg(0x250C, NodeKind::Skill, "skill:delta",          &["DeltaSkill"]);
+    reg(0x2510, NodeKind::Skill, "skill:cluster",        &["ClusterSkill"]);
+    reg(0x2514, NodeKind::Skill, "skill:curator",        &["CuratorSkill"]);
+    reg(0x2518, NodeKind::Skill, "skill:merge",          &["MergeSkill"]);
+    reg(0x251C, NodeKind::Skill, "skill:prune",          &["PruneSkill"]);
+    reg(0x2524, NodeKind::Skill, "skill:hebbian",        &["HebbianSkill"]);
+    reg(0x252C, NodeKind::Skill, "skill:dream",          &["DreamSkill"]);
+    reg(0x2534, NodeKind::Skill, "skill:proposal",       &["ProposalSkill"]);
+    reg(0x253C, NodeKind::Skill, "skill:inverse_render", &["InverseRenderSkill"]);
+
+    // ── Skills: Advanced ───────────────────────────────────────────────────
+    reg(0x2550, NodeKind::Skill, "skill:generalization",    &["GeneralizationSkill"]);
+    reg(0x2551, NodeKind::Skill, "skill:temporal_pattern",  &["TemporalPatternSkill"]);
+
+    // ── Skills: 4 Worker ───────────────────────────────────────────────────
+    // Dùng Geometric Shapes (0x25A0-0x25FF) — SDF group
+    reg(0x25A0, NodeKind::Skill, "skill:sensor",         &["SensorSkill"]);
+    reg(0x25A1, NodeKind::Skill, "skill:actuator",       &["ActuatorSkill"]);
+    reg(0x25B2, NodeKind::Skill, "skill:security",       &["SecuritySkill"]);
+    reg(0x25B3, NodeKind::Skill, "skill:network",        &["NetworkSkill"]);
+
+    // ── Agents ─────────────────────────────────────────────────────────────
+    // Dùng Misc Symbols (0x2600-0x26FF) — EMOTICON group, có trong UCD
+    // Chess symbols cho hierarchy
+    reg(0x2654, NodeKind::Agent, "agent:aam",            &["AAM"]);       // ♔ King = AAM
+    reg(0x2655, NodeKind::Agent, "agent:leo",            &["LeoAI"]);     // ♕ Queen = LeoAI
+    reg(0x2656, NodeKind::Agent, "agent:chief:home",     &["HomeChief"]); // ♖ Rook
+    reg(0x2657, NodeKind::Agent, "agent:chief:vision",   &["VisionChief"]);  // ♗ Bishop
+    reg(0x2658, NodeKind::Agent, "agent:chief:network",  &["NetworkChief"]); // ♘ Knight
+    reg(0x2659, NodeKind::Agent, "agent:chief:general",  &["GeneralChief"]); // ♙ Pawn
+    // Workers — dùng black chess pieces
+    reg(0x265A, NodeKind::Agent, "agent:worker:sensor",   &["WorkerSensor"]);   // ♚
+    reg(0x265B, NodeKind::Agent, "agent:worker:actuator", &["WorkerActuator"]); // ♛
+    reg(0x265C, NodeKind::Agent, "agent:worker:camera",   &["WorkerCamera"]);   // ♜
+    reg(0x265D, NodeKind::Agent, "agent:worker:network",  &["WorkerNetwork"]);  // ♝
+    reg(0x265E, NodeKind::Agent, "agent:worker:generic",  &["WorkerGeneric"]);  // ♞
+
+    // ── Program: VM Built-in Functions ─────────────────────────────────────
+    // Dùng Mathematical Operators (0x2200-0x22FF) — MATH group
+    reg(0x2211, NodeKind::Program, "fn:hyp_add",         &["__hyp_add"]);  // ∑
+    reg(0x2212, NodeKind::Program, "fn:hyp_sub",         &["__hyp_sub"]);  // −
+    reg(0x2217, NodeKind::Program, "fn:hyp_mul",         &["__hyp_mul"]);  // ∗
+    reg(0x2215, NodeKind::Program, "fn:hyp_div",         &["__hyp_div"]);  // ∕
+    reg(0x2214, NodeKind::Program, "fn:phys_add",        &["__phys_add"]); // ∔
+    reg(0x2216, NodeKind::Program, "fn:phys_sub",        &["__phys_sub"]); // ∖
+
+    // ── Program: VM Opcodes (26 ops) ───────────────────────────────────────
+    // Dùng Arrows (0x2190-0x21FF) — SDF group, có trong UCD
+    reg(0x2190, NodeKind::Program, "op:push",            &["Push"]);      // ←
+    reg(0x2191, NodeKind::Program, "op:push_num",        &["PushNum"]);   // ↑
+    reg(0x2192, NodeKind::Program, "op:push_mol",        &["PushMol"]);   // →
+    reg(0x2193, NodeKind::Program, "op:load",            &["Load"]);      // ↓
+    reg(0x2194, NodeKind::Program, "op:lca",             &["Lca"]);       // ↔
+    reg(0x2195, NodeKind::Program, "op:edge",            &["Edge"]);      // ↕
+    reg(0x2196, NodeKind::Program, "op:query",           &["Query"]);     // ↖
+    reg(0x2197, NodeKind::Program, "op:emit",            &["Emit"]);      // ↗
+    reg(0x2198, NodeKind::Program, "op:dup",             &["Dup"]);       // ↘
+    reg(0x2199, NodeKind::Program, "op:pop",             &["Pop"]);       // ↙
+    reg(0x219A, NodeKind::Program, "op:swap",            &["Swap"]);      // ↚
+    reg(0x219B, NodeKind::Program, "op:jmp",             &["Jmp"]);       // ↛
+    reg(0x21A0, NodeKind::Program, "op:jz",              &["Jz"]);        // ↠
+    reg(0x21A3, NodeKind::Program, "op:loop",            &["Loop"]);      // ↣
+    reg(0x21A6, NodeKind::Program, "op:call",            &["Call"]);      // ↦
+    reg(0x21A9, NodeKind::Program, "op:store",           &["Store"]);     // ↩
+    reg(0x21AA, NodeKind::Program, "op:load_local",      &["LoadLocal"]); // ↪
+    reg(0x21AB, NodeKind::Program, "op:scope_begin",     &["ScopeBegin"]);// ↫
+    reg(0x21AC, NodeKind::Program, "op:scope_end",       &["ScopeEnd"]); // ↬
+    reg(0x21AD, NodeKind::Program, "op:fuse",            &["Fuse"]);      // ↭
+    reg(0x21AE, NodeKind::Program, "op:trace",           &["Trace"]);     // ↮
+    reg(0x21B0, NodeKind::Program, "op:inspect",         &["Inspect"]);   // ↰
+    reg(0x21B1, NodeKind::Program, "op:assert",          &["Assert"]);    // ↱
+    reg(0x21B2, NodeKind::Program, "op:typeof",          &["TypeOf"]);    // ↲
+    reg(0x21B3, NodeKind::Program, "op:halt",            &["Halt"]);      // ↳
+    reg(0x21B4, NodeKind::Program, "op:nop",             &["Nop"]);       // ↴
+
+    // ── Program: Compiler / Process ────────────────────────────────────────
+    // Dùng Supplemental Arrows-A (0x27F0-0x27FF) — SDF group
+    reg(0x27F0, NodeKind::Program, "prog:vm",            &["OlangVM"]);
+    reg(0x27F1, NodeKind::Program, "prog:compiler",      &["OlangCompiler"]);
+    reg(0x27F5, NodeKind::Program, "prog:parser",        &["OlangParser"]);
+    reg(0x27F6, NodeKind::Program, "prog:program",       &["OlangProgram"]);
+    reg(0x27F7, NodeKind::Program, "prog:ir",            &["OlangIR"]);
+    reg(0x27F8, NodeKind::Program, "prog:semantic",      &["OlangSemantic"]);
+
+    // ── Sensor types ───────────────────────────────────────────────────────
+    // Dùng Misc Symbols (0x2600-0x26FF) — EMOTICON group
+    reg(0x2600, NodeKind::Sensor, "sensor:temperature",  &["Temperature"]); // ☀
+    reg(0x2601, NodeKind::Sensor, "sensor:humidity",     &["Humidity"]);    // ☁
+    reg(0x2602, NodeKind::Sensor, "sensor:light",        &["LightSensor"]);// ☂
+    reg(0x2603, NodeKind::Sensor, "sensor:motion",       &["Motion"]);      // ☃
+    reg(0x2604, NodeKind::Sensor, "sensor:sound",        &["SoundSensor"]);// ☄
+    reg(0x2607, NodeKind::Sensor, "sensor:power",        &["Power"]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1071,5 +1213,115 @@ mod tests {
         let result = boot(Some(&bytes));
         // fire should be classified (Axiom at L0)
         assert!(result.manifest.len() > 0);
+    }
+
+    // ── L1 System Seed ─────────────────────────────────────────────────────
+
+    #[test]
+    fn l1_seed_registers_skills() {
+        if skip() { return; }
+        use crate::registry::NodeKind;
+        let mut r = Registry::new();
+        seed_l1_system(&mut r);
+        let skills = r.entries_by_kind(NodeKind::Skill);
+        // 7 instinct + 11 domain + 2 advanced + 4 worker = 24
+        assert!(skills.len() >= 24,
+            "Expected ≥24 skills, got {}", skills.len());
+        // All at L1
+        for s in &skills {
+            assert_eq!(s.layer, 1, "Skill should be L1");
+        }
+    }
+
+    #[test]
+    fn l1_seed_registers_agents() {
+        if skip() { return; }
+        use crate::registry::NodeKind;
+        let mut r = Registry::new();
+        seed_l1_system(&mut r);
+        let agents = r.entries_by_kind(NodeKind::Agent);
+        // AAM + LeoAI + 4 Chiefs + 5 Workers = 11
+        assert!(agents.len() >= 11,
+            "Expected ≥11 agents, got {}", agents.len());
+    }
+
+    #[test]
+    fn l1_seed_registers_program_components() {
+        if skip() { return; }
+        use crate::registry::NodeKind;
+        let mut r = Registry::new();
+        seed_l1_system(&mut r);
+        let progs = r.entries_by_kind(NodeKind::Program);
+        // 6 built-in fns + 26 opcodes + 6 compiler = 38
+        assert!(progs.len() >= 38,
+            "Expected ≥38 program nodes, got {}", progs.len());
+    }
+
+    #[test]
+    fn l1_seed_registers_sensors() {
+        if skip() { return; }
+        use crate::registry::NodeKind;
+        let mut r = Registry::new();
+        seed_l1_system(&mut r);
+        let sensors = r.entries_by_kind(NodeKind::Sensor);
+        assert!(sensors.len() >= 6,
+            "Expected ≥6 sensors, got {}", sensors.len());
+    }
+
+    #[test]
+    fn l1_seed_all_have_aliases() {
+        if skip() { return; }
+        let mut r = Registry::new();
+        seed_l1_system(&mut r);
+        // Every L1 node should have at least 1 alias
+        assert!(r.alias_count() >= r.len(),
+            "Each L1 node needs an alias: {} aliases for {} nodes",
+            r.alias_count(), r.len());
+    }
+
+    #[test]
+    fn l1_seed_lookup_by_name() {
+        if skip() { return; }
+        let mut r = Registry::new();
+        seed_l1_system(&mut r);
+        // Should be able to find skills by name
+        assert!(r.lookup_name("skill:honesty").is_some(), "skill:honesty not found");
+        assert!(r.lookup_name("skill:causality").is_some(), "skill:causality not found");
+        assert!(r.lookup_name("agent:aam").is_some(), "agent:aam not found");
+        assert!(r.lookup_name("agent:leo").is_some(), "agent:leo not found");
+        assert!(r.lookup_name("fn:hyp_add").is_some(), "fn:hyp_add not found");
+        assert!(r.lookup_name("op:push").is_some(), "op:push not found");
+        assert!(r.lookup_name("sensor:temperature").is_some(), "sensor:temperature not found");
+        assert!(r.lookup_name("prog:vm").is_some(), "prog:vm not found");
+    }
+
+    #[test]
+    fn l1_seed_kind_summary() {
+        if skip() { return; }
+        use crate::registry::NodeKind;
+        let mut r = Registry::new();
+        seed_l1_system(&mut r);
+        let summary = r.kind_summary();
+        // Should have at least 4 different kinds
+        assert!(summary.len() >= 4,
+            "Expected ≥4 kinds, got {}: {:?}", summary.len(), summary);
+        // All kinds should have >0 count
+        for (kind, count) in &summary {
+            assert!(*count > 0, "{:?} should have entries", kind);
+        }
+    }
+
+    #[test]
+    fn boot_includes_l1_seed() {
+        if skip() { return; }
+        use crate::registry::NodeKind;
+        let result = boot(None);
+        // Boot should include L1 system nodes
+        let skills = result.registry.entries_by_kind(NodeKind::Skill);
+        assert!(skills.len() >= 24,
+            "Boot should seed L1 skills: got {}", skills.len());
+        let agents = result.registry.entries_by_kind(NodeKind::Agent);
+        assert!(agents.len() >= 11,
+            "Boot should seed L1 agents: got {}", agents.len());
     }
 }

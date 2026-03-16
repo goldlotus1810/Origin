@@ -26,6 +26,84 @@ use crate::lca::lca_weighted;
 use crate::molecular::MolecularChain;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// NodeKind — phân loại node theo nhóm L1
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Nhóm node — mọi thứ tạo ra đều thuộc 1 nhóm.
+///
+/// L1 là nơi tập hợp toàn bộ "bản thiết kế" của HomeOS:
+///   - Knowledge: kiến thức L0 device + kiến thức học được
+///   - Memory: STM observations, trí nhớ ngắn hạn
+///   - Agent: AAM, LeoAI, Chief, Worker
+///   - Skill: 24 skills (7 instinct + 15 domain + worker skills)
+///   - Program: VM ops, functions, compiler components
+///   - Device: thiết bị đang kết nối
+///   - Sensor: cảm biến của device
+///   - Emotion: emotion nodes từ ConversationCurve
+///
+/// Đây chính là DNA — khi clone sang thiết bị mới, chỉ cần copy L1 nodes
+/// → thiết bị tự biết mình có gì, biết làm gì, không cần train lại.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum NodeKind {
+    /// L0 Unicode alphabet — innate, immutable (35 seeded nodes)
+    Alphabet = 0,
+    /// Knowledge — kiến thức đã học, concepts, truths
+    Knowledge = 1,
+    /// Memory — STM observations, trí nhớ ngắn hạn
+    Memory = 2,
+    /// Agent — AAM, LeoAI, Chief, Worker definitions
+    Agent = 3,
+    /// Skill — stateless functions (7 instinct + 15 domain + 4 worker)
+    Skill = 4,
+    /// Program — VM ops, built-in functions, compiler components
+    Program = 5,
+    /// Device — thiết bị đang kết nối HomeOS
+    Device = 6,
+    /// Sensor — cảm biến của HomeOS/device
+    Sensor = 7,
+    /// Emotion — emotion states, conversation curve points
+    Emotion = 8,
+    /// System — internal housekeeping (layer reps, branch markers)
+    System = 9,
+}
+
+impl NodeKind {
+    /// Parse from byte.
+    pub fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(Self::Alphabet),
+            1 => Some(Self::Knowledge),
+            2 => Some(Self::Memory),
+            3 => Some(Self::Agent),
+            4 => Some(Self::Skill),
+            5 => Some(Self::Program),
+            6 => Some(Self::Device),
+            7 => Some(Self::Sensor),
+            8 => Some(Self::Emotion),
+            9 => Some(Self::System),
+            _ => None,
+        }
+    }
+
+    /// Display name for reporting.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Alphabet => "Alphabet",
+            Self::Knowledge => "Knowledge",
+            Self::Memory => "Memory",
+            Self::Agent => "Agent",
+            Self::Skill => "Skill",
+            Self::Program => "Program",
+            Self::Device => "Device",
+            Self::Sensor => "Sensor",
+            Self::Emotion => "Emotion",
+            Self::System => "System",
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Entry — một record trong sổ cái
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -42,6 +120,8 @@ pub struct RegistryEntry {
     pub created_at: i64,
     /// Trạng thái: false=ĐN (đang học), true=QR (đã chứng minh)
     pub is_qr: bool,
+    /// Nhóm node — phân loại theo chức năng
+    pub kind: NodeKind,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,6 +177,10 @@ impl Registry {
     ///
     /// Gọi SAU KHI đã ghi vào file (QT8).
     /// Tự động cập nhật layer_rep qua LCA.
+    /// Đăng ký node mới vào sổ cái (default kind = Knowledge).
+    ///
+    /// Gọi SAU KHI đã ghi vào file (QT8).
+    /// Tự động cập nhật layer_rep qua LCA.
     pub fn insert(
         &mut self,
         chain: &MolecularChain,
@@ -104,6 +188,20 @@ impl Registry {
         file_offset: u64,
         created_at: i64,
         is_qr: bool,
+    ) -> u64 {
+        let kind = if layer == 0 { NodeKind::Alphabet } else { NodeKind::Knowledge };
+        self.insert_with_kind(chain, layer, file_offset, created_at, is_qr, kind)
+    }
+
+    /// Đăng ký node mới với NodeKind cụ thể.
+    pub fn insert_with_kind(
+        &mut self,
+        chain: &MolecularChain,
+        layer: u8,
+        file_offset: u64,
+        created_at: i64,
+        is_qr: bool,
+        kind: NodeKind,
     ) -> u64 {
         let hash = chain.chain_hash();
 
@@ -118,6 +216,7 @@ impl Registry {
             file_offset,
             created_at,
             is_qr,
+            kind,
         };
 
         // Insert vào entries (sorted by hash)
@@ -286,6 +385,36 @@ impl Registry {
             .iter()
             .filter(|(_, e)| !e.is_qr)
             .map(|(_, e)| e)
+            .collect()
+    }
+
+    // ── NodeKind queries ──────────────────────────────────────────────────
+
+    /// Tất cả entries theo NodeKind.
+    pub fn entries_by_kind(&self, kind: NodeKind) -> Vec<&RegistryEntry> {
+        self.entries
+            .iter()
+            .filter(|(_, e)| e.kind == kind)
+            .map(|(_, e)| e)
+            .collect()
+    }
+
+    /// Đếm entries theo NodeKind.
+    pub fn count_by_kind(&self, kind: NodeKind) -> usize {
+        self.entries.iter().filter(|(_, e)| e.kind == kind).count()
+    }
+
+    /// Summary: đếm từng nhóm NodeKind.
+    pub fn kind_summary(&self) -> Vec<(NodeKind, usize)> {
+        let kinds = [
+            NodeKind::Alphabet, NodeKind::Knowledge, NodeKind::Memory,
+            NodeKind::Agent, NodeKind::Skill, NodeKind::Program,
+            NodeKind::Device, NodeKind::Sensor, NodeKind::Emotion,
+            NodeKind::System,
+        ];
+        kinds.iter()
+            .map(|&k| (k, self.count_by_kind(k)))
+            .filter(|(_, c)| *c > 0)
             .collect()
     }
 }
@@ -535,6 +664,72 @@ mod tests {
                 alias
             );
         }
+    }
+
+    // ── NodeKind tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn node_kind_roundtrip() {
+        for b in 0u8..=9 {
+            let kind = NodeKind::from_byte(b).unwrap();
+            assert_eq!(kind as u8, b);
+            assert!(!kind.label().is_empty());
+        }
+        assert!(NodeKind::from_byte(10).is_none());
+    }
+
+    #[test]
+    fn insert_with_kind() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let chain = encode_codepoint(0x1F525); // 🔥
+        let h = r.insert_with_kind(&chain, 1, 0, 0, true, NodeKind::Skill);
+        let entry = r.lookup_hash(h).unwrap();
+        assert_eq!(entry.kind, NodeKind::Skill);
+        assert_eq!(entry.layer, 1);
+    }
+
+    #[test]
+    fn insert_default_kind() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        // L0 insert → Alphabet
+        let c0 = encode_codepoint(0x25CB);
+        let h0 = r.insert(&c0, 0, 0, 0, true);
+        assert_eq!(r.lookup_hash(h0).unwrap().kind, NodeKind::Alphabet);
+        // L1 insert → Knowledge (default)
+        let c1 = encode_codepoint(0x1F525);
+        let h1 = r.insert(&c1, 1, 0, 0, false);
+        assert_eq!(r.lookup_hash(h1).unwrap().kind, NodeKind::Knowledge);
+    }
+
+    #[test]
+    fn entries_by_kind() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        // Use codepoints from UCD groups: Box Drawing (SDF) + Misc Symbols (EMOTICON)
+        let c1 = encode_codepoint(0x2500); // ─ Box Drawing
+        let c2 = encode_codepoint(0x2502); // │ Box Drawing
+        let c3 = encode_codepoint(0x2654); // ♔ Chess King (Misc Symbols)
+        r.insert_with_kind(&c1, 1, 0, 0, true, NodeKind::Skill);
+        r.insert_with_kind(&c2, 1, 1, 0, true, NodeKind::Skill);
+        r.insert_with_kind(&c3, 1, 2, 0, true, NodeKind::Agent);
+        assert_eq!(r.entries_by_kind(NodeKind::Skill).len(), 2);
+        assert_eq!(r.entries_by_kind(NodeKind::Agent).len(), 1);
+        assert_eq!(r.entries_by_kind(NodeKind::Device).len(), 0);
+    }
+
+    #[test]
+    fn kind_summary() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let c1 = encode_codepoint(0x2500); // ─ Box Drawing
+        let c2 = encode_codepoint(0x2654); // ♔ Chess King
+        r.insert_with_kind(&c1, 1, 0, 0, true, NodeKind::Skill);
+        r.insert_with_kind(&c2, 1, 1, 0, true, NodeKind::Agent);
+        let summary = r.kind_summary();
+        assert!(summary.iter().any(|(k, c)| *k == NodeKind::Skill && *c == 1));
+        assert!(summary.iter().any(|(k, c)| *k == NodeKind::Agent && *c == 1));
     }
 }
 
