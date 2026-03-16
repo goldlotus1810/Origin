@@ -155,12 +155,39 @@ impl TimeDim {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Molecule — 5 bytes
+// Tagged encoding constants — presence mask (giống DeltaMolecule nhưng delta từ defaults)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Đơn vị thông tin cơ bản — **5 bytes**.
+/// Bit 0: shape present (≠ default Sphere)
+pub const PRESENT_SHAPE: u8 = 0x01;
+/// Bit 1: relation present (≠ default Member)
+pub const PRESENT_RELATION: u8 = 0x02;
+/// Bit 2: valence present (≠ default 0x80)
+pub const PRESENT_VALENCE: u8 = 0x04;
+/// Bit 3: arousal present (≠ default 0x80)
+pub const PRESENT_AROUSAL: u8 = 0x08;
+/// Bit 4: time present (≠ default Medium)
+pub const PRESENT_TIME: u8 = 0x10;
+
+/// Default values cho tagged encoding (khớp UCD defaults cho unknown codepoints).
+pub const TAGGED_DEFAULT_SHAPE: u8 = 0x01; // Sphere
+/// Default relation byte.
+pub const TAGGED_DEFAULT_RELATION: u8 = 0x01; // Member
+/// Default valence byte.
+pub const TAGGED_DEFAULT_VALENCE: u8 = 0x80; // neutral
+/// Default arousal byte.
+pub const TAGGED_DEFAULT_AROUSAL: u8 = 0x80; // moderate
+/// Default time byte.
+pub const TAGGED_DEFAULT_TIME: u8 = 0x03; // Medium
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Molecule — 5 bytes (RAM) / 1-6 bytes (tagged wire format)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Đơn vị thông tin cơ bản — **5 bytes** trong RAM.
 ///
-/// Wire format: `[shape][relation][valence][arousal][time]`
+/// Legacy wire format: `[shape][relation][valence][arousal][time]` (5 bytes cố định)
+/// Tagged wire format: `[mask][present_values...]` (1-6 bytes, chỉ ghi non-default)
 ///
 /// Mọi Molecule đến từ `encoder::encode_codepoint()`.
 /// Không bao giờ tạo Molecule struct literal trong code production.
@@ -199,6 +226,124 @@ impl Molecule {
             },
             time: TimeDim::from_byte(b[4])?,
         })
+    }
+
+    /// Presence mask — bit nào bật = dimension đó ≠ default.
+    ///
+    /// Dùng bởi tagged encoding để biết fields nào cần ghi.
+    pub fn presence_mask(&self) -> u8 {
+        let mut mask = 0u8;
+        if self.shape.as_byte() != TAGGED_DEFAULT_SHAPE {
+            mask |= PRESENT_SHAPE;
+        }
+        if self.relation.as_byte() != TAGGED_DEFAULT_RELATION {
+            mask |= PRESENT_RELATION;
+        }
+        if self.emotion.valence != TAGGED_DEFAULT_VALENCE {
+            mask |= PRESENT_VALENCE;
+        }
+        if self.emotion.arousal != TAGGED_DEFAULT_AROUSAL {
+            mask |= PRESENT_AROUSAL;
+        }
+        if self.time.as_byte() != TAGGED_DEFAULT_TIME {
+            mask |= PRESENT_TIME;
+        }
+        mask
+    }
+
+    /// Serialize → tagged bytes (1-6 bytes, chỉ ghi non-default dimensions).
+    ///
+    /// Format: `[mask: 1B][present_values: 0-5B]`
+    /// - mask bit 0: shape, bit 1: relation, bit 2: valence, bit 3: arousal, bit 4: time
+    /// - values ghi theo thứ tự: shape, relation, valence, arousal, time (chỉ ghi nếu bit bật)
+    ///
+    /// Decode bằng `from_tagged_bytes()`. Absent fields → defaults (Sphere/Member/0x80/0x80/Medium).
+    pub fn to_tagged_bytes(&self) -> Vec<u8> {
+        let mask = self.presence_mask();
+        let mut out = Vec::with_capacity(1 + mask.count_ones() as usize);
+        out.push(mask);
+        if mask & PRESENT_SHAPE != 0 {
+            out.push(self.shape.as_byte());
+        }
+        if mask & PRESENT_RELATION != 0 {
+            out.push(self.relation.as_byte());
+        }
+        if mask & PRESENT_VALENCE != 0 {
+            out.push(self.emotion.valence);
+        }
+        if mask & PRESENT_AROUSAL != 0 {
+            out.push(self.emotion.arousal);
+        }
+        if mask & PRESENT_TIME != 0 {
+            out.push(self.time.as_byte());
+        }
+        out
+    }
+
+    /// Deserialize từ tagged bytes.
+    ///
+    /// Returns `(Molecule, bytes_consumed)`. Absent fields → defaults.
+    pub fn from_tagged_bytes(b: &[u8]) -> Option<(Self, usize)> {
+        if b.is_empty() {
+            return None;
+        }
+        let mask = b[0];
+        let expected = 1 + mask.count_ones() as usize;
+        if b.len() < expected {
+            return None;
+        }
+
+        let mut idx = 1usize;
+        let shape = if mask & PRESENT_SHAPE != 0 {
+            let s = ShapeBase::from_byte(b[idx])?;
+            idx += 1;
+            s
+        } else {
+            ShapeBase::from_byte(TAGGED_DEFAULT_SHAPE)?
+        };
+        let relation = if mask & PRESENT_RELATION != 0 {
+            let r = RelationBase::from_byte(b[idx])?;
+            idx += 1;
+            r
+        } else {
+            RelationBase::from_byte(TAGGED_DEFAULT_RELATION)?
+        };
+        let valence = if mask & PRESENT_VALENCE != 0 {
+            let v = b[idx];
+            idx += 1;
+            v
+        } else {
+            TAGGED_DEFAULT_VALENCE
+        };
+        let arousal = if mask & PRESENT_AROUSAL != 0 {
+            let a = b[idx];
+            idx += 1;
+            a
+        } else {
+            TAGGED_DEFAULT_AROUSAL
+        };
+        let time = if mask & PRESENT_TIME != 0 {
+            let t = TimeDim::from_byte(b[idx])?;
+            idx += 1;
+            t
+        } else {
+            TimeDim::from_byte(TAGGED_DEFAULT_TIME)?
+        };
+
+        Some((
+            Self {
+                shape,
+                relation,
+                emotion: EmotionDim { valence, arousal },
+                time,
+            },
+            idx,
+        ))
+    }
+
+    /// Tagged byte size (without actually serializing).
+    pub fn tagged_size(&self) -> usize {
+        1 + self.presence_mask().count_ones() as usize
     }
 
     /// Điểm tương đồng giữa 2 molecules ∈ [0, 5].
@@ -338,6 +483,49 @@ impl MolecularChain {
             total += 0.3 * shape_m + 0.2 * rel_m + 0.5 * emo_sim;
         }
         total / n as f32
+    }
+
+    /// Serialize → tagged bytes (variable length, chỉ ghi non-default dimensions).
+    ///
+    /// Format: `[mol_count: u8][mol_1_tagged][mol_2_tagged]...`
+    /// Mỗi molecule: `[mask: u8][present_values: 0-5B]`
+    pub fn to_tagged_bytes(&self) -> Vec<u8> {
+        let estimated = 1 + self.0.len() * 3; // average ~3 bytes per mol
+        let mut out = Vec::with_capacity(estimated);
+        out.push(self.0.len() as u8);
+        for m in &self.0 {
+            out.extend_from_slice(&m.to_tagged_bytes());
+        }
+        out
+    }
+
+    /// Deserialize từ tagged bytes.
+    ///
+    /// Format: `[mol_count: u8][mol_1_tagged][mol_2_tagged]...`
+    pub fn from_tagged_bytes(b: &[u8]) -> Option<Self> {
+        if b.is_empty() {
+            return None;
+        }
+        let mol_count = b[0] as usize;
+        if mol_count == 0 {
+            return Some(Self(Vec::new()));
+        }
+        let mut ms = Vec::with_capacity(mol_count);
+        let mut pos = 1usize;
+        for _ in 0..mol_count {
+            if pos >= b.len() {
+                return None;
+            }
+            let (mol, consumed) = Molecule::from_tagged_bytes(&b[pos..])?;
+            ms.push(mol);
+            pos += consumed;
+        }
+        Some(Self(ms))
+    }
+
+    /// Tagged byte size (without serializing).
+    pub fn tagged_byte_size(&self) -> usize {
+        1 + self.0.iter().map(|m| m.tagged_size()).sum::<usize>()
     }
 
     /// Nối 2 chains.
@@ -580,6 +768,117 @@ mod tests {
                 assert_eq!(m.to_bytes()[1], r);
             }
         }
+    }
+
+    // ── Tagged encoding ─────────────────────────────────────────────────
+
+    #[test]
+    fn tagged_all_defaults_minimal() {
+        // Molecule với tất cả giá trị default → mask=0x00, chỉ 1 byte
+        let m = test_mol(0x01, 0x01, 0x80, 0x80, 0x03); // Sphere, Member, neutral, Medium
+        let tagged = m.to_tagged_bytes();
+        assert_eq!(tagged.len(), 1, "All defaults → only mask byte");
+        assert_eq!(tagged[0], 0x00, "mask = 0 (nothing non-default)");
+    }
+
+    #[test]
+    fn tagged_roundtrip_all_defaults() {
+        let m = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let tagged = m.to_tagged_bytes();
+        let (decoded, consumed) = Molecule::from_tagged_bytes(&tagged).unwrap();
+        assert_eq!(decoded, m);
+        assert_eq!(consumed, tagged.len());
+    }
+
+    #[test]
+    fn tagged_roundtrip_all_nondefault() {
+        // All non-default → mask=0x1F, 6 bytes
+        let m = test_mol(0x04, 0x06, 0xC0, 0xC0, 0x04); // Cone, Causes, high emotion, Fast
+        let tagged = m.to_tagged_bytes();
+        assert_eq!(tagged.len(), 6, "All non-default → 6 bytes");
+        assert_eq!(tagged[0], 0x1F, "mask = all bits set");
+        let (decoded, consumed) = Molecule::from_tagged_bytes(&tagged).unwrap();
+        assert_eq!(decoded, m);
+        assert_eq!(consumed, 6);
+    }
+
+    #[test]
+    fn tagged_partial_nondefault() {
+        // Only valence non-default → mask=0x04, 2 bytes
+        let m = test_mol(0x01, 0x01, 0xC0, 0x80, 0x03);
+        let tagged = m.to_tagged_bytes();
+        assert_eq!(tagged.len(), 2, "Only valence → 2 bytes");
+        assert_eq!(tagged[0], PRESENT_VALENCE);
+        assert_eq!(tagged[1], 0xC0);
+        let (decoded, _) = Molecule::from_tagged_bytes(&tagged).unwrap();
+        assert_eq!(decoded, m);
+    }
+
+    #[test]
+    fn tagged_saves_space_vs_legacy() {
+        // SDF-like: shape + time non-default
+        let sdf_mol = test_mol(0x02, 0x01, 0x80, 0x80, 0x01); // Capsule, Static
+        assert!(sdf_mol.tagged_size() < 5, "SDF mol should be < 5 tagged bytes");
+
+        // EMOTICON-like: valence + arousal + time non-default
+        let emo_mol = test_mol(0x01, 0x01, 0xC0, 0xC0, 0x04); // high V+A, Fast
+        assert!(emo_mol.tagged_size() < 5, "EMOTICON mol should be < 5 tagged bytes");
+    }
+
+    #[test]
+    fn tagged_chain_roundtrip() {
+        let m1 = test_mol(0x01, 0x01, 0xC0, 0xFF, 0x04);
+        let m2 = test_mol(0x02, 0x06, 0x30, 0x20, 0x02);
+        let chain = MolecularChain(alloc::vec![m1, m2]);
+        let tagged = chain.to_tagged_bytes();
+        let decoded = MolecularChain::from_tagged_bytes(&tagged).unwrap();
+        assert_eq!(chain, decoded);
+    }
+
+    #[test]
+    fn tagged_chain_empty() {
+        let chain = MolecularChain::empty();
+        let tagged = chain.to_tagged_bytes();
+        assert_eq!(tagged, alloc::vec![0u8]); // mol_count = 0
+        let decoded = MolecularChain::from_tagged_bytes(&tagged).unwrap();
+        assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn tagged_chain_savings() {
+        // Chain of 2 sparse molecules
+        let m1 = test_mol(0x01, 0x01, 0x80, 0x80, 0x01); // only time non-default
+        let m2 = test_mol(0x01, 0x01, 0xC0, 0x80, 0x03); // only valence non-default
+        let chain = MolecularChain(alloc::vec![m1, m2]);
+        let legacy_size = chain.to_bytes().len(); // 10 bytes
+        let tagged_size = chain.tagged_byte_size();
+        assert!(
+            tagged_size < legacy_size,
+            "Tagged {} < legacy {} bytes",
+            tagged_size,
+            legacy_size
+        );
+    }
+
+    #[test]
+    fn tagged_hash_compatibility() {
+        // Hash phải giống nhau bất kể format ghi
+        let m = test_mol(0x01, 0x01, 0xC0, 0xC0, 0x04);
+        let chain = MolecularChain::single(m);
+        let hash1 = chain.chain_hash();
+        // Roundtrip through tagged format
+        let tagged = chain.to_tagged_bytes();
+        let decoded = MolecularChain::from_tagged_bytes(&tagged).unwrap();
+        let hash2 = decoded.chain_hash();
+        assert_eq!(hash1, hash2, "Hash phải stable qua tagged roundtrip");
+    }
+
+    #[test]
+    fn tagged_numeric_chain_roundtrip() {
+        let chain = MolecularChain::from_number(42.0);
+        let tagged = chain.to_tagged_bytes();
+        let decoded = MolecularChain::from_tagged_bytes(&tagged).unwrap();
+        assert_eq!(decoded.to_number().unwrap(), 42.0);
     }
 }
 

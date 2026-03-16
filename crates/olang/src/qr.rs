@@ -13,8 +13,9 @@
 //!   QR_B (mới) được tạo với SupersedesQR edge đến QR_A.
 //!   Query QR_A → nhận QR_B + ghi chú "deprecated".
 //!
-//! ## Wire format QR record:
-//!   [chain_bytes: N×5][chain_hash: 8][timestamp: 8][signature: 64] = N×5 + 80 bytes
+//! ## Wire format QR record (v0.05 — tagged):
+//!   [chain_tagged_bytes][chain_hash: 8][timestamp: 8][signature: 64]
+//!   chain_tagged_bytes = [mol_count: u8][mol_1_tagged]...[mol_N_tagged]
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -58,35 +59,34 @@ impl QRRecord {
         out
     }
 
-    /// Serialize → bytes để ghi vào file.
+    /// Serialize → bytes để ghi vào file (v0.05 tagged format).
     ///
-    /// Format: [chain_len: u8][chain: N×5][hash: 8][ts: 8][sig: 64]
+    /// Format: [tagged_chain_bytes][hash: 8][ts: 8][sig: 64]
+    /// tagged_chain_bytes = [mol_count: u8][mol_1_tagged]...[mol_N_tagged]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let chain_bytes = self.chain.to_bytes();
-        let mut out = Vec::with_capacity(1 + chain_bytes.len() + 8 + 8 + 64);
-        out.push((chain_bytes.len() / 5) as u8);
-        out.extend_from_slice(&chain_bytes);
+        let chain_tagged = self.chain.to_tagged_bytes();
+        let mut out = Vec::with_capacity(chain_tagged.len() + 8 + 8 + 64);
+        out.extend_from_slice(&chain_tagged);
         out.extend_from_slice(&self.hash.to_le_bytes());
         out.extend_from_slice(&self.timestamp.to_le_bytes());
         out.extend_from_slice(&self.signature);
         out
     }
 
-    /// Deserialize từ bytes.
+    /// Deserialize từ bytes (v0.05 tagged format).
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 1 + 5 + 8 + 8 + 64 {
+        // Minimum: 1 (mol_count=0) + 8 + 8 + 64 = 81 bytes
+        if data.len() < 1 + 8 + 8 + 64 {
             return None;
         }
 
-        let chain_len = data[0] as usize;
-        let chain_bytes_len = chain_len * 5;
-        let needed = 1 + chain_bytes_len + 8 + 8 + 64;
-        if data.len() < needed {
+        let chain = MolecularChain::from_tagged_bytes(data)?;
+        let chain_tagged_len = chain.tagged_byte_size();
+
+        let mut pos = chain_tagged_len;
+        if pos + 8 + 8 + 64 > data.len() {
             return None;
         }
-
-        let chain = MolecularChain::from_bytes(&data[1..1 + chain_bytes_len])?;
-        let mut pos = 1 + chain_bytes_len;
 
         let hash = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
         pos += 8;

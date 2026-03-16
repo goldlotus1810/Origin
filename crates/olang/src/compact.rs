@@ -245,7 +245,7 @@ impl ChainDictionary {
         let id = self.entries.len() as u32;
         self.entries.push(DictEntry {
             hash,
-            chain_bytes: chain.to_bytes(),
+            chain_bytes: chain.to_tagged_bytes(),
             usage_count: 1,
         });
         id
@@ -254,7 +254,7 @@ impl ChainDictionary {
     /// Lookup dictionary ID → chain.
     pub fn lookup(&self, id: u32) -> Option<MolecularChain> {
         let entry = self.entries.get(id as usize)?;
-        MolecularChain::from_bytes(&entry.chain_bytes)
+        MolecularChain::from_tagged_bytes(&entry.chain_bytes)
     }
 
     /// Lookup hash → dictionary ID.
@@ -427,8 +427,8 @@ impl CompactNode {
                 let child_mol = &chain.0[0];
                 let delta = DeltaMolecule::encode(parent_mol, child_mol);
 
-                // Nếu delta nhỏ hơn full → dùng delta
-                if delta.size() < 5 {
+                // Nếu delta nhỏ hơn tagged full → dùng delta
+                if delta.size() < child_mol.tagged_size() {
                     return Self {
                         hash,
                         parent_hash: parent_chain.chain_hash(),
@@ -454,13 +454,13 @@ impl CompactNode {
             };
         }
 
-        // 4. Full encoding (fallback)
+        // 4. Full encoding fallback (tagged format — variable length)
         Self {
             hash,
             parent_hash: parent.map_or(0, |p| p.chain_hash()),
             layer,
             kind: CompactKind::Full,
-            data: chain.to_bytes(),
+            data: chain.to_tagged_bytes(),
             created_at: ts,
         }
     }
@@ -474,7 +474,7 @@ impl CompactNode {
         dict: &ChainDictionary,
     ) -> Option<MolecularChain> {
         match self.kind {
-            CompactKind::Full => MolecularChain::from_bytes(&self.data),
+            CompactKind::Full => MolecularChain::from_tagged_bytes(&self.data),
             CompactKind::Delta => {
                 let parent_chain = parent?;
                 if parent_chain.is_empty() {
@@ -1661,14 +1661,22 @@ mod tests {
 
     #[test]
     fn compact_node_delta_encoding() {
-        let parent = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
-        let child = MolecularChain::single(test_mol(0x01, 0x01, 0x90, 0x80, 0x03));
+        // Parent có nhiều non-default fields → tagged size lớn
+        let parent = MolecularChain::single(test_mol(0x02, 0x06, 0xC0, 0xC0, 0x04));
+        // Child chỉ khác parent ở valence → delta nhỏ hơn tagged
+        let child = MolecularChain::single(test_mol(0x02, 0x06, 0xD0, 0xC0, 0x04));
         let mut dict = ChainDictionary::new(100);
         dict.register(&parent); // pre-register parent
         let node = CompactNode::encode(&child, Some(&parent), &mut dict, 2, 1000);
-        // Delta should be chosen (2 bytes < 5 bytes full)
+        // Delta should be chosen (2 bytes < tagged ~6 bytes)
         assert_eq!(node.kind, CompactKind::Delta, "Should use delta encoding");
-        assert!(node.data_size() < 5, "Delta data < full 5 bytes");
+        let child_tagged = child.0[0].tagged_size();
+        assert!(
+            node.data_size() < child_tagged,
+            "Delta {} bytes < tagged {} bytes",
+            node.data_size(),
+            child_tagged
+        );
     }
 
     #[test]

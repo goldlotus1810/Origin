@@ -16,7 +16,13 @@
 //!   0x02 = EdgeRecord
 //!   0x03 = AliasRecord
 //!
-//! NodeRecord:
+//! NodeRecord (v0.05 — tagged molecule encoding):
+//!   [0x01][mol_count: u8][tagged_chain_bytes...][layer: u8]
+//!   [is_qr: u8][timestamp: 8 bytes i64]
+//!   Mỗi molecule: [mask: u8][present_values: 0-5B]
+//!   Total: 1 + 1 + Σ(1 + popcount(mask)) + 1 + 1 + 8 bytes
+//!
+//! NodeRecord (v0.03-v0.04 legacy — fixed 5-byte molecules):
 //!   [0x01][chain_len: u8][chain: N×5 bytes][layer: u8]
 //!   [is_qr: u8][timestamp: 8 bytes i64]
 //!   Total: 1 + 1 + N×5 + 1 + 1 + 8 = 12 + N×5 bytes
@@ -44,8 +50,10 @@ use crate::molecular::MolecularChain;
 /// Magic bytes: "○LNG" = 0xE2 0x97 0x8B 0x4C (○ = U+25CB)
 pub const MAGIC: [u8; 4] = [0xE2, 0x97, 0x8B, 0x4C];
 
-/// Version hiện tại — v0.04 (thêm RT_AMEND)
-pub const VERSION: u8 = 0x04;
+/// Version hiện tại — v0.05 (tagged molecule encoding)
+pub const VERSION: u8 = 0x05;
+/// Version trước — v0.04 (thêm RT_AMEND, vẫn đọc được)
+pub const VERSION_V04: u8 = 0x04;
 /// Version trước — v0.03 (vẫn đọc được)
 pub const VERSION_V03: u8 = 0x03;
 
@@ -114,8 +122,9 @@ impl OlangWriter {
         self.buf.extend_from_slice(&created_at.to_le_bytes());
     }
 
-    /// Ghi NodeRecord.
+    /// Ghi NodeRecord (v0.05 tagged format).
     ///
+    /// Mỗi molecule ghi `[mask][present_values]` thay vì cố định 5 bytes.
     /// Returns offset của record trong file.
     pub fn append_node(
         &mut self,
@@ -124,18 +133,16 @@ impl OlangWriter {
         is_qr: bool,
         timestamp: i64,
     ) -> Result<u64, WriteError> {
-        let chain_bytes = chain.to_bytes();
-        let chain_len = chain_bytes.len() / 5; // số molecules
-
-        if chain_len > 255 {
+        if chain.len() > 255 {
             return Err(WriteError::ChainTooLong);
         }
 
         let offset = self.buf.len() as u64;
 
         self.buf.push(RT_NODE);
-        self.buf.push(chain_len as u8);
-        self.buf.extend_from_slice(&chain_bytes);
+        // Ghi tagged chain: [mol_count][mol_1_tagged]...[mol_N_tagged]
+        let tagged = chain.to_tagged_bytes();
+        self.buf.extend_from_slice(&tagged);
         self.buf.push(layer);
         self.buf.push(if is_qr { 0x01 } else { 0x00 });
         self.buf.extend_from_slice(&timestamp.to_le_bytes());
@@ -290,11 +297,14 @@ mod tests {
         let offset = w.append_node(&chain, 0, false, 1000).unwrap();
 
         assert_eq!(offset, before as u64, "Offset phải là vị trí trước khi ghi");
-        // NodeRecord: 1 + 1 + 1×5 + 1 + 1 + 8 = 17 bytes
+        // NodeRecord v0.05: 1(type) + tagged_chain_bytes + 1(layer) + 1(is_qr) + 8(ts)
+        // tagged_chain = 1(mol_count) + mol_tagged_size
+        let expected = 1 + chain.tagged_byte_size() + 1 + 1 + 8;
         assert_eq!(
             w.size() - before,
-            17,
-            "NodeRecord size = 17 bytes cho 1-mol chain"
+            expected,
+            "NodeRecord size = {} bytes cho 1-mol chain (tagged)",
+            expected,
         );
         assert_eq!(w.write_count(), 1);
     }
@@ -310,8 +320,9 @@ mod tests {
 
         // Verify QR flag
         let bytes = w.as_bytes();
-        // QR byte: offset = HEADER_SIZE + 1(type) + 1(len) + 5(chain) + 1(layer) = HEADER_SIZE + 8
-        let qr_pos = HEADER_SIZE + 1 + 1 + 5 + 1;
+        // QR byte: offset = HEADER_SIZE + 1(type) + tagged_chain_size + 1(layer)
+        let tagged_size = chain.tagged_byte_size();
+        let qr_pos = HEADER_SIZE + 1 + tagged_size + 1;
         assert_eq!(bytes[qr_pos], 0x01, "QR flag = 0x01");
     }
 

@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
 use crate::writer::{
-    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_EDGE, RT_NODE, VERSION, VERSION_V03,
+    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_EDGE, RT_NODE, VERSION, VERSION_V03, VERSION_V04,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,6 +85,7 @@ pub enum ParseError {
 pub struct OlangReader<'a> {
     data: &'a [u8],
     created_at: i64,
+    version: u8,
 }
 
 impl<'a> OlangReader<'a> {
@@ -96,13 +97,18 @@ impl<'a> OlangReader<'a> {
         if data[0..4] != MAGIC {
             return Err(ParseError::BadMagic);
         }
-        // Accept both v0.03 and v0.04 (backward compatible)
-        if data[4] != VERSION && data[4] != VERSION_V03 {
+        let version = data[4];
+        // Accept v0.03, v0.04, and v0.05 (backward compatible)
+        if version != VERSION && version != VERSION_V04 && version != VERSION_V03 {
             return Err(ParseError::UnsupportedVersion);
         }
 
         let created_at = i64::from_le_bytes(data[5..13].try_into().unwrap());
-        Ok(Self { data, created_at })
+        Ok(Self {
+            data,
+            created_at,
+            version,
+        })
     }
 
     /// Timestamp khi file được tạo.
@@ -126,23 +132,36 @@ impl<'a> OlangReader<'a> {
 
             match rt {
                 RT_NODE => {
-                    // [chain_len: u8][chain: N×5][layer: u8][is_qr: u8][ts: 8]
                     if pos + 1 > self.data.len() {
                         return Err(ParseError::Truncated);
                     }
-                    let chain_len = self.data[pos] as usize;
-                    pos += 1;
 
-                    let chain_bytes_len = chain_len * 5;
-                    if pos + chain_bytes_len + 1 + 1 + 8 > self.data.len() {
+                    let chain = if self.version >= VERSION {
+                        // v0.05: tagged format [mol_count][mol_1_tagged]...
+                        let tagged_start = pos;
+                        let chain = MolecularChain::from_tagged_bytes(&self.data[pos..])
+                            .ok_or(ParseError::InvalidChain)?;
+                        // Advance past: 1 (mol_count) + sum of tagged molecule sizes
+                        pos = tagged_start + chain.tagged_byte_size();
+                    chain
+                    } else {
+                        // v0.03-v0.04: legacy fixed [chain_len: u8][chain: N×5]
+                        let chain_len = self.data[pos] as usize;
+                        pos += 1;
+                        let chain_bytes_len = chain_len * 5;
+                        if pos + chain_bytes_len + 1 + 1 + 8 > self.data.len() {
+                            return Err(ParseError::Truncated);
+                        }
+                        let chain_bytes = &self.data[pos..pos + chain_bytes_len];
+                        let chain = MolecularChain::from_bytes(chain_bytes)
+                            .ok_or(ParseError::InvalidChain)?;
+                        pos += chain_bytes_len;
+                        chain
+                    };
+
+                    if pos + 1 + 1 + 8 > self.data.len() {
                         return Err(ParseError::Truncated);
                     }
-
-                    let chain_bytes = &self.data[pos..pos + chain_bytes_len];
-                    let chain =
-                        MolecularChain::from_bytes(chain_bytes).ok_or(ParseError::InvalidChain)?;
-                    pos += chain_bytes_len;
-
                     let layer = self.data[pos];
                     pos += 1;
                     let is_qr = self.data[pos] != 0;
@@ -297,19 +316,42 @@ impl<'a> OlangReader<'a> {
                         error = Some(ParseError::Truncated);
                         break;
                     }
-                    let chain_len = self.data[pos] as usize;
-                    pos += 1;
 
-                    let chain_bytes_len = chain_len * 5;
-                    if pos + chain_bytes_len + 1 + 1 + 8 > self.data.len() {
-                        error = Some(ParseError::Truncated);
-                        break;
-                    }
+                    let chain_result = if self.version >= VERSION {
+                        // v0.05: tagged format
+                        match MolecularChain::from_tagged_bytes(&self.data[pos..]) {
+                            Some(chain) => {
+                                let size = chain.tagged_byte_size();
+                                pos += size;
+                                Some(chain)
+                            }
+                            None => None,
+                        }
+                    } else {
+                        // v0.03-v0.04: legacy fixed format
+                        let chain_len = self.data[pos] as usize;
+                        pos += 1;
+                        let chain_bytes_len = chain_len * 5;
+                        if pos + chain_bytes_len + 1 + 1 + 8 > self.data.len() {
+                            error = Some(ParseError::Truncated);
+                            break;
+                        }
+                        let chain_bytes = &self.data[pos..pos + chain_bytes_len];
+                        match MolecularChain::from_bytes(chain_bytes) {
+                            Some(chain) => {
+                                pos += chain_bytes_len;
+                                Some(chain)
+                            }
+                            None => None,
+                        }
+                    };
 
-                    let chain_bytes = &self.data[pos..pos + chain_bytes_len];
-                    match MolecularChain::from_bytes(chain_bytes) {
+                    match chain_result {
                         Some(chain) => {
-                            pos += chain_bytes_len;
+                            if pos + 1 + 1 + 8 > self.data.len() {
+                                error = Some(ParseError::Truncated);
+                                break;
+                            }
                             let layer = self.data[pos];
                             pos += 1;
                             let is_qr = self.data[pos] != 0;

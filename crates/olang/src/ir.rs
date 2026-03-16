@@ -177,7 +177,7 @@ impl Op {
                 b
             }
             Self::Push(c) => {
-                let cb = c.to_bytes();
+                let cb = c.to_tagged_bytes();
                 let mut b = alloc::vec![0x30, cb.len() as u8];
                 b.extend_from_slice(&cb);
                 b
