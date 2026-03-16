@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use crate::ir::{OlangProgram, Op};
 use crate::lca::lca;
-use crate::molecular::MolecularChain;
+use crate::molecular::{EmotionDim, Molecule, MolecularChain};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VmEvent — side effects VM muốn thực hiện
@@ -239,6 +239,26 @@ impl OlangVM {
 
                 Op::PushNum(n) => {
                     if let Err(e) = stack.push(MolecularChain::from_number(*n)) {
+                        events.push(VmEvent::Error(e));
+                        break;
+                    }
+                }
+
+                Op::PushMol(s, r, v, a, t) => {
+                    // Construct 1-molecule chain from explicit dimension values.
+                    // Used by LeoAI to express knowledge as Olang code:
+                    //   { S=1 R=2 V=128 A=128 T=3 } → Molecule → Chain
+                    let mol = Molecule {
+                        shape: *s,
+                        relation: *r,
+                        emotion: EmotionDim {
+                            valence: *v,
+                            arousal: *a,
+                        },
+                        time: *t,
+                    };
+                    let chain = MolecularChain(alloc::vec![mol]);
+                    if let Err(e) = stack.push(chain) {
                         events.push(VmEvent::Error(e));
                         break;
                     }
@@ -1443,5 +1463,75 @@ mod tests {
         prog.push_op(Op::Halt);
         let result = vm().execute(&prog);
         assert!(!result.has_error(), "Depth should reset after ScopeEnd");
+    }
+
+    // ── PushMol — molecular literal execution ──────────────────────────────
+
+    #[test]
+    fn push_mol_creates_chain() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushMol(1, 6, 200, 180, 4));
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "PushMol should not error");
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1, "One chain emitted");
+        let chain = outputs[0];
+        assert_eq!(chain.len(), 1, "Chain has exactly 1 molecule");
+        let mol = chain.first().unwrap();
+        assert_eq!(mol.shape, 1);
+        assert_eq!(mol.relation, 6);
+        assert_eq!(mol.emotion.valence, 200);
+        assert_eq!(mol.emotion.arousal, 180);
+        assert_eq!(mol.time, 4);
+    }
+
+    #[test]
+    fn push_mol_default_values() {
+        // Defaults from semantic: S=1, R=1, V=128, A=128, T=3
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushMol(1, 1, 128, 128, 3));
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let mol = result.outputs()[0].first().unwrap();
+        assert_eq!(mol.shape, 1);
+        assert_eq!(mol.relation, 1);
+        assert_eq!(mol.emotion.valence, 128);
+        assert_eq!(mol.emotion.arousal, 128);
+        assert_eq!(mol.time, 3);
+    }
+
+    #[test]
+    fn push_mol_then_lca() {
+        // Two molecular literals → LCA → single output
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushMol(1, 6, 200, 180, 4));
+        prog.push_op(Op::PushMol(2, 3, 100, 90, 2));
+        prog.push_op(Op::Lca);
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "LCA of two mol literals should work");
+        assert_eq!(result.outputs().len(), 1);
+        assert!(!result.outputs()[0].is_empty());
+    }
+
+    #[test]
+    fn push_mol_dup_and_truth() {
+        // PushMol → Dup → Truth (==) → should produce 1 output
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushMol(1, 6, 200, 180, 4));
+        prog.push_op(Op::Dup);
+        prog.push_op(Op::Call("__assert_truth".into()));
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        // Truth of identical chains → non-empty output
+        assert_eq!(result.outputs().len(), 1);
+        assert!(!result.outputs()[0].is_empty(), "Same chain == same chain should be truthy");
     }
 }

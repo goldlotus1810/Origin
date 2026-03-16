@@ -165,6 +165,10 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::TypeOf => "/* typeof */".into(),
         Op::Why => "/* why */ { pop(&s); } /* pop second, keep first */".into(),
         Op::Explain => "/* explain */".into(),
+        Op::PushMol(s, r, v, a, t) => format!(
+            "push(&s, olang_mol(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}));",
+            s, r, v, a, t
+        ),
     })
 }
 
@@ -231,6 +235,10 @@ fn rust_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::ScopeBegin => "{ // scope begin".into(),
         Op::ScopeEnd => "} // scope end".into(),
         Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => "// debug primitive (runtime only)".into(),
+        Op::PushMol(s, r, v, a, t) => format!(
+            "stack.push(Molecule::new(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}).into());",
+            s, r, v, a, t
+        ),
     })
 }
 
@@ -330,6 +338,10 @@ fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileE
         Op::ScopeBegin => "block $scope ;; scope begin".into(),
         Op::ScopeEnd => "end ;; scope end".into(),
         Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => ";; debug primitive (runtime only)".into(),
+        Op::PushMol(s, r, v, a, t) => format!(
+            "i32.const 0x{:02X}{:02X}{:02X}{:02X}{:02X} ;; mol S={} R={} V={} A={} T={}",
+            s, r, v, a, t, s, r, v, a, t
+        ),
     })
 }
 

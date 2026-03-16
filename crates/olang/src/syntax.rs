@@ -149,6 +149,19 @@ pub enum Expr {
 
     /// `(expr)` — grouping
     Group(Box<Expr>),
+
+    /// Molecular literal: `{ S=1 R=2 V=128 A=128 T=3 }`
+    ///
+    /// Construct a 1-molecule chain from explicit dimension values.
+    /// Unspecified dimensions use defaults:
+    ///   S=1 (Sphere), R=1 (Member), V=128 (neutral), A=128 (moderate), T=3 (Medium)
+    MolLiteral {
+        shape: Option<u32>,
+        relation: Option<u32>,
+        valence: Option<u32>,
+        arousal: Option<u32>,
+        time: Option<u32>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -651,11 +664,62 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Ident("?".to_string()))
             }
 
+            // Molecular literal: { S=1 R=2 V=128 A=128 T=3 }
+            Token::LBrace => {
+                self.try_parse_mol_literal()
+            }
+
             other => Err(ParseError::new(&alloc::format!(
                 "Unexpected token: {:?}",
                 other
             ))),
         }
+    }
+
+    /// Parse molecular literal: `{ S=1 R=2 V=128 A=128 T=3 }`
+    ///
+    /// Dimensions: S(hape), R(elation), V(alence), A(rousal), T(ime)
+    /// All optional — unspecified = default.
+    fn try_parse_mol_literal(&mut self) -> Result<Expr, ParseError> {
+        self.advance(); // consume {
+
+        let mut shape = None;
+        let mut relation = None;
+        let mut valence = None;
+        let mut arousal = None;
+        let mut time = None;
+
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let dim_name = self.expect_ident()?;
+            self.expect(&Token::Eq)?;
+            let val = self.expect_int()?;
+
+            match dim_name.as_str() {
+                "S" | "shape" => shape = Some(val),
+                "R" | "relation" => relation = Some(val),
+                "V" | "valence" => valence = Some(val),
+                "A" | "arousal" => arousal = Some(val),
+                "T" | "time" => time = Some(val),
+                _ => return Err(ParseError::new(&alloc::format!(
+                    "Unknown dimension '{}'. Use S, R, V, A, or T", dim_name
+                ))),
+            }
+
+            // Optional comma separator
+            if self.check(&Token::Comma) {
+                self.advance();
+            }
+        }
+
+        self.expect(&Token::RBrace)?;
+
+        Ok(Expr::MolLiteral {
+            shape,
+            relation,
+            valence,
+            arousal,
+            time,
+        })
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
@@ -1251,5 +1315,77 @@ mod tests {
 
         let phys = parse("fire ⧺ water").unwrap();
         assert!(matches!(phys[0], Stmt::Expr(Expr::PhysOp { .. })));
+    }
+
+    // ── Molecular Literals ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_mol_literal_all_dims() {
+        let stmts = parse("{ S=1 R=6 V=200 A=180 T=4 }").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::MolLiteral {
+                shape: Some(1),
+                relation: Some(6),
+                valence: Some(200),
+                arousal: Some(180),
+                time: Some(4),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_mol_literal_partial() {
+        let stmts = parse("{ S=1 R=2 T=3 }").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::MolLiteral {
+                shape: Some(1),
+                relation: Some(2),
+                valence: None,
+                arousal: None,
+                time: Some(3),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_mol_literal_with_commas() {
+        let stmts = parse("{ S=1, R=6, V=200, A=180, T=4 }").unwrap();
+        assert!(matches!(stmts[0], Stmt::Expr(Expr::MolLiteral { .. })));
+    }
+
+    #[test]
+    fn parse_mol_literal_truth_assertion() {
+        // "lửa" == { S=1 R=6 T=4 }
+        let stmts = parse("\"lửa\" == { S=1 R=6 T=4 }").unwrap();
+        assert!(matches!(stmts[0], Stmt::Expr(Expr::Truth { .. })));
+    }
+
+    #[test]
+    fn parse_mol_literal_long_names() {
+        let stmts = parse("{ shape=1 relation=6 valence=200 arousal=180 time=4 }").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::MolLiteral {
+                shape: Some(1),
+                relation: Some(6),
+                valence: Some(200),
+                arousal: Some(180),
+                time: Some(4),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_mol_literal_in_let() {
+        let stmts = parse("let fire = { S=1 R=6 V=200 A=180 T=4 };").unwrap();
+        assert!(matches!(stmts[0], Stmt::Let { .. }));
+    }
+
+    #[test]
+    fn parse_mol_literal_unknown_dim_errors() {
+        let result = parse("{ X=1 }");
+        assert!(result.is_err());
     }
 }

@@ -107,6 +107,11 @@ pub enum Op {
     Why,
     /// Explain: pop 1 chain, truy ngược nguồn gốc (tại sao chain này tồn tại)
     Explain,
+
+    /// Push 1-molecule chain from explicit dimension values.
+    /// `{ S=1 R=2 V=128 A=128 T=3 }` → MolecularChain with 1 Molecule.
+    /// Used by LeoAI to express knowledge as Olang code.
+    PushMol(u8, u8, u8, u8, u8),
 }
 
 impl Op {
@@ -143,6 +148,7 @@ impl Op {
             Self::TypeOf => "TYPEOF",
             Self::Why => "WHY",
             Self::Explain => "EXPLAIN",
+            Self::PushMol(..) => "PUSH_MOL",
         }
     }
 
@@ -220,6 +226,7 @@ impl Op {
             Self::TypeOf => alloc::vec![0x0E],
             Self::Why => alloc::vec![0x0F],
             Self::Explain => alloc::vec![0x12],
+            Self::PushMol(s, r, v, a, t) => alloc::vec![0x36, *s, *r, *v, *a, *t],
         }
     }
 }

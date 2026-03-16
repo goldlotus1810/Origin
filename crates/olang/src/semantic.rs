@@ -307,6 +307,25 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
         Expr::Group(inner) => {
             validate_expr(inner, scope, errors);
         }
+
+        Expr::MolLiteral { shape, relation, valence, arousal, time } => {
+            // Validate dimension values are in valid byte range (0-255)
+            for (name, val) in [("S", shape), ("R", relation), ("V", valence), ("A", arousal), ("T", time)] {
+                if let Some(v) = val {
+                    if *v > 255 {
+                        errors.push(SemError::new(&alloc::format!(
+                            "Dimension {name}={v} exceeds max 255"
+                        )));
+                    }
+                    // Shape and Relation must be > 0 (no zero-byte)
+                    if (name == "S" || name == "R" || name == "T") && *v == 0 {
+                        errors.push(SemError::new(&alloc::format!(
+                            "Dimension {name} must be > 0"
+                        )));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -648,6 +667,16 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::Group(inner) => {
             lower_expr(inner, ctx);
+        }
+
+        Expr::MolLiteral { shape, relation, valence, arousal, time } => {
+            // Molecular literal → PushMol with defaults for unspecified dimensions
+            let s = shape.unwrap_or(1) as u8;     // Sphere
+            let r = relation.unwrap_or(1) as u8;   // Member
+            let v = valence.unwrap_or(128) as u8;   // neutral
+            let a = arousal.unwrap_or(128) as u8;   // moderate
+            let t = time.unwrap_or(3) as u8;       // Medium
+            ctx.emit(Op::PushMol(s, r, v, a, t));
         }
     }
 }
@@ -1036,5 +1065,63 @@ mod tests {
         assert!(prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if (*n - 1.0).abs() < f64::EPSILON)));
         assert!(prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if (*n - 2.0).abs() < f64::EPSILON)));
         assert!(prog.ops.contains(&Op::Call("__hyp_add".into())));
+    }
+
+    // ── Molecular Literal — validation & lowering ──────────────────────────
+
+    #[test]
+    fn validate_mol_literal_valid() {
+        let stmts = parse("{ S=1 R=6 V=200 A=180 T=4 }").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Valid mol literal should pass: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_mol_literal_zero_shape_errors() {
+        let stmts = parse("{ S=0 R=1 T=1 }").unwrap();
+        let errors = validate(&stmts);
+        assert!(
+            errors.iter().any(|e| e.message.contains("S must be > 0")),
+            "S=0 should error: {:?}", errors
+        );
+    }
+
+    #[test]
+    fn validate_mol_literal_exceeds_max() {
+        let stmts = parse("{ S=999 }").unwrap();
+        let errors = validate(&stmts);
+        assert!(
+            errors.iter().any(|e| e.message.contains("exceeds max 255")),
+            "S=999 should error: {:?}", errors
+        );
+    }
+
+    #[test]
+    fn lower_mol_literal_all_dims() {
+        let stmts = parse("{ S=1 R=6 V=200 A=180 T=4 }").unwrap();
+        let prog = lower(&stmts);
+        assert!(
+            prog.ops.contains(&Op::PushMol(1, 6, 200, 180, 4)),
+            "Should lower to PushMol(1,6,200,180,4): {:?}", prog.ops
+        );
+    }
+
+    #[test]
+    fn lower_mol_literal_defaults() {
+        // Only S=5 specified → R=1(default), V=128, A=128, T=3
+        let stmts = parse("{ S=5 }").unwrap();
+        let prog = lower(&stmts);
+        assert!(
+            prog.ops.contains(&Op::PushMol(5, 1, 128, 128, 3)),
+            "Unspecified dims should get defaults: {:?}", prog.ops
+        );
+    }
+
+    #[test]
+    fn lower_mol_literal_in_emit() {
+        let stmts = parse("emit { S=2 R=3 V=100 A=50 T=1 };").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::PushMol(2, 3, 100, 50, 1)));
+        assert!(prog.ops.contains(&Op::Emit));
     }
 }

@@ -424,6 +424,99 @@ impl LeoAI {
     // Internal
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Express — LeoAI writes Olang code to describe what it knows
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Generate Olang code expressing knowledge about an STM observation.
+    ///
+    /// LeoAI becomes a meta-programmer: it writes Olang code that describes
+    /// the molecular coordinates of concepts it has learned.
+    ///
+    /// Example output: `"lửa" == { S=1 R=6 V=200 A=180 T=4 }`
+    ///
+    /// This is the bridge between cognitive understanding and executable code.
+    /// LeoAI "thinks in Olang" — expressing truth assertions about what it knows.
+    pub fn express_observation(&self, chain_hash: u64) -> Option<alloc::string::String> {
+        let obs = self.learning.stm().find_by_hash(chain_hash)?;
+        let mol = obs.chain.first()?;
+
+        // Generate molecular literal assertion
+        Some(alloc::format!(
+            "{{ S={} R={} V={} A={} T={} }}",
+            mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time,
+        ))
+    }
+
+    /// Generate Olang truth assertion: `alias == { S=.. R=.. V=.. A=.. T=.. }`
+    ///
+    /// LeoAI expresses: "I know that this alias maps to this molecular pattern."
+    /// The VM can then execute this to verify the assertion.
+    pub fn express_truth(&self, alias: &str, chain_hash: u64) -> Option<alloc::string::String> {
+        let obs = self.learning.stm().find_by_hash(chain_hash)?;
+        let mol = obs.chain.first()?;
+
+        Some(alloc::format!(
+            "\"{}\" == {{ S={} R={} V={} A={} T={} }}",
+            alias, mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time,
+        ))
+    }
+
+    /// Generate Olang for ALL observations in STM — LeoAI's complete expressed knowledge.
+    ///
+    /// Returns a Vec of Olang code strings, one per observation.
+    /// Each describes the molecular coordinates of a learned concept.
+    pub fn express_all(&self) -> Vec<alloc::string::String> {
+        self.learning
+            .stm()
+            .all()
+            .iter()
+            .filter_map(|obs| {
+                let mol = obs.chain.first()?;
+                Some(alloc::format!(
+                    "{{ S={} R={} V={} A={} T={} }}",
+                    mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time,
+                ))
+            })
+            .collect()
+    }
+
+    /// Generate Olang evolution expression: shows how one concept derived from another.
+    ///
+    /// Example: `{ S=1 R=6 V=48 A=144 T=4 } ← { S=1 R=6 V=200 A=180 T=4 }`
+    /// "angry fire ← happy fire" — derived via valence shift.
+    pub fn express_evolution(
+        &self,
+        source_hash: u64,
+        evolved_hash: u64,
+    ) -> Option<alloc::string::String> {
+        let source_obs = self.learning.stm().find_by_hash(source_hash)?;
+        let evolved_obs = self.learning.stm().find_by_hash(evolved_hash)?;
+        let s_mol = source_obs.chain.first()?;
+        let e_mol = evolved_obs.chain.first()?;
+
+        // Find which dimension changed
+        let deltas = s_mol.dimension_delta(e_mol);
+        let dim_name = if deltas.len() == 1 {
+            match deltas[0].0 {
+                olang::molecular::Dimension::Shape => "S",
+                olang::molecular::Dimension::Relation => "R",
+                olang::molecular::Dimension::Valence => "V",
+                olang::molecular::Dimension::Arousal => "A",
+                olang::molecular::Dimension::Time => "T",
+            }
+        } else {
+            "?"
+        };
+
+        Some(alloc::format!(
+            "{{ S={} R={} V={} A={} T={} }} ← {{ S={} R={} V={} A={} T={} }} (* Δ{} *)",
+            e_mol.shape, e_mol.relation, e_mol.emotion.valence, e_mol.emotion.arousal, e_mol.time,
+            s_mol.shape, s_mol.relation, s_mol.emotion.valence, s_mol.emotion.arousal, s_mol.time,
+            dim_name,
+        ))
+    }
+
     fn make_proposal_frame(&self, p: &LeoPendingProposal) -> ISLFrame {
         let conf_q = (p.confidence * 255.0) as u8;
         let fire_low = (p.fire_count & 0xFF) as u8;
@@ -754,5 +847,68 @@ mod tests {
         assert!(pf.nodes[0].is_qr, "Node phải là QR");
         assert_eq!(pf.nodes[0].layer, 0);
         assert_eq!(pf.nodes[0].timestamp, 2000);
+    }
+
+    // ── Express — LeoAI generates Olang code ──────────────────────────────
+
+    #[test]
+    fn express_observation_returns_mol_literal() {
+        let mut l = leo();
+        l.ingest(report(-0.5, 1), 1000);
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+        let expr = l.express_observation(hash);
+        assert!(expr.is_some(), "Should express existing observation");
+        let s = expr.unwrap();
+        assert!(s.starts_with("{ S="), "Should be mol literal: {}", s);
+        assert!(s.ends_with(" }"), "Should end with ' }}': {}", s);
+        assert!(s.contains("V="), "Should contain valence");
+    }
+
+    #[test]
+    fn express_observation_missing_returns_none() {
+        let l = leo();
+        assert!(l.express_observation(0xDEAD).is_none());
+    }
+
+    #[test]
+    fn express_truth_includes_alias() {
+        let mut l = leo();
+        l.ingest(report(-0.5, 1), 1000);
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+        let expr = l.express_truth("lửa", hash);
+        assert!(expr.is_some());
+        let s = expr.unwrap();
+        assert!(s.contains("\"lửa\" =="), "Should contain alias assertion: {}", s);
+        assert!(s.contains("S="), "Should contain mol dims: {}", s);
+    }
+
+    #[test]
+    fn express_all_returns_all_stm() {
+        let mut l = leo();
+        l.ingest(report(-0.5, 1), 1000);
+        l.ingest(report(0.3, 2), 2000);
+        let exprs = l.express_all();
+        assert!(!exprs.is_empty(), "Should express at least 1 observation: got {}", exprs.len());
+        for s in &exprs {
+            assert!(s.contains("S="), "Each should be mol literal: {}", s);
+        }
+    }
+
+    #[test]
+    fn express_evolution_shows_delta() {
+        let mut l = leo();
+        // Ingest two observations — they'll differ in dimensions
+        l.ingest(report(-0.5, 1), 1000);
+        l.ingest(report(0.8, 2), 2000);
+        let obs = l.learning.stm().all();
+        if obs.len() >= 2 {
+            let h1 = obs[0].chain.chain_hash();
+            let h2 = obs[1].chain.chain_hash();
+            let expr = l.express_evolution(h1, h2);
+            assert!(expr.is_some(), "Should express evolution");
+            let s = expr.unwrap();
+            assert!(s.contains("←"), "Should contain arrow: {}", s);
+            assert!(s.contains("Δ"), "Should contain delta marker: {}", s);
+        }
     }
 }
