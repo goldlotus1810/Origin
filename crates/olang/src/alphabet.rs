@@ -9,11 +9,19 @@
 //! ─────────────────────────────────────────────────────────────────
 //! Relation      ∈ ⊂ ≡ ⊥ ∘ → ≈ ← ∪ ∩ ∂ ∖ ↔ ⟳ ⚡ ∥     16 toán tử quan hệ
 //! Symbol        ≔ ⇒ ↻ ○                                  Gán, suy ra, lặp, xuất
-//! Arithmetic    + - × ÷                                   Số học (chỉ cho number)
+//! Arithmetic    + - × ÷                                   Giả thuyết (QT3: chưa chứng minh)
+//! Physical      ⧺ ⊖                                      Vật lý (QT3: đã chứng minh)
 //! Delimiter     { } ( ) ; , = ? " |                       Cấu trúc
 //! Digit         0-9                                       Số nguyên
-//! Ident         Unicode letters, emoji, _, -              Tên node / biến
+//! Ident         Unicode letters, emoji, _                 Tên node / biến
 //! Whitespace    space, tab, newline, CR                   Phân cách token
+//!
+//! ## QT3: Ba tầng nhận thức
+//!
+//! ```text
+//! +/-   = giả thuyết (chưa chứng minh)
+//! ⧺/⊖   = vật lý (đã chứng minh — thêm/bớt thật)
+//! ==    = sự thật chắc chắn
 //! ```
 //!
 //! ## Hai dạng cú pháp (tương đương)
@@ -44,15 +52,17 @@ pub enum CharClass {
     Relation,
     /// Ký hiệu cấu trúc: ≔ ⇒ ↻ ○
     Symbol,
-    /// Số học: + - × ÷
+    /// Số học giả thuyết (QT3): + - × ÷
     Arithmetic,
+    /// Vật lý đã chứng minh (QT3): ⧺ ⊖
+    Physical,
     /// Dấu phân cách: { } ( ) ; , = ? " |
     Delimiter,
     /// Khoảng trắng
     Whitespace,
     /// Chữ số: 0-9
     Digit,
-    /// Ký tự định danh: Unicode letter, emoji, _, -
+    /// Ký tự định danh: Unicode letter, emoji, _
     Ident,
 }
 
@@ -64,8 +74,10 @@ pub fn classify(c: char) -> CharClass {
         | '⟳' | '⚡' | '∥' => CharClass::Relation,
         // Symbol operators (control flow)
         '≔' | '⇒' | '↻' | '○' => CharClass::Symbol,
-        // Arithmetic
+        // Arithmetic (QT3: hypothesis — chưa chứng minh)
         '+' | '-' | '×' | '÷' => CharClass::Arithmetic,
+        // Physical (QT3: proven — đã chứng minh)
+        '⧺' | '⊖' => CharClass::Physical,
         // Delimiters
         '{' | '}' | '(' | ')' | ';' | ',' | '=' | '?' | '"' | '|' => CharClass::Delimiter,
         // Whitespace
@@ -198,17 +210,18 @@ impl RelOp {
 // ArithOp — Số học (chỉ cho numbers, KHÔNG cho nodes)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Toán tử số học. Chỉ dùng giữa 2 số.
+/// Toán tử số học GIẢ THUYẾT (QT3: +/- = chưa chứng minh).
 /// Nodes dùng ∘ (compose) hoặc ZWJ, KHÔNG dùng +.
+/// Quá trình: quan sát → +/- → chứng minh → ==
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArithOp {
-    /// `+` — cộng
+    /// `+` — cộng (giả thuyết)
     Add,
-    /// `-` — trừ
+    /// `-` — trừ (giả thuyết)
     Sub,
-    /// `×` (U+00D7) — nhân
+    /// `×` (U+00D7) — nhân (giả thuyết)
     Mul,
-    /// `÷` (U+00F7) — chia
+    /// `÷` (U+00F7) — chia (giả thuyết)
     Div,
 }
 
@@ -221,6 +234,42 @@ impl ArithOp {
             '×' => Some(Self::Mul),
             '÷' => Some(Self::Div),
             _ => None,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PhysOp — Vật lý đã chứng minh (QT3: ⧺/⊖ = thêm/bớt thật)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Toán tử vật lý ĐÃ CHỨNG MINH (QT3: ⧺/⊖ = sự thật).
+///
+/// Khác với +/- (giả thuyết): ⧺/⊖ chỉ dùng khi có bằng chứng.
+/// ⧺ = thêm vật lý (đã xác nhận)
+/// ⊖ = bớt vật lý (đã xác nhận)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysOp {
+    /// ⧺ (U+29FA) — thêm vật lý (đã chứng minh)
+    PhysAdd,
+    /// ⊖ (U+2296) — bớt vật lý (đã chứng minh)
+    PhysSub,
+}
+
+impl PhysOp {
+    /// Parse ký tự → PhysOp.
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            '⧺' => Some(Self::PhysAdd),
+            '⊖' => Some(Self::PhysSub),
+            _ => None,
+        }
+    }
+
+    /// Ký tự Unicode đại diện.
+    pub fn as_char(self) -> char {
+        match self {
+            Self::PhysAdd => '⧺',
+            Self::PhysSub => '⊖',
         }
     }
 }
@@ -272,6 +321,7 @@ pub fn is_command(s: &str) -> bool {
             | "status"
             | "help"
             | "learn"
+            | "fuse"
     )
 }
 
@@ -311,8 +361,12 @@ pub enum Token {
     // ── Operators ──
     /// Relation operator (16 loại)
     Rel(RelOp),
-    /// Arithmetic operator (4 loại)
+    /// Arithmetic operator — giả thuyết (QT3: +/-)
     Arith(ArithOp),
+    /// Physical operator — đã chứng minh (QT3: ⧺/⊖)
+    Phys(PhysOp),
+    /// == sự thật chắc chắn (QT3)
+    Truth,
 
     // ── Symbol operators (Unicode math) ──
     /// ≔ (U+2254) — define / gán
@@ -404,7 +458,13 @@ impl<'a> Lexer<'a> {
             _ => {}
         }
 
-        // Arithmetic operators
+        // Physical operators (QT3: ⧺/⊖ — proven)
+        if let Some(op) = PhysOp::from_char(c) {
+            self.chars.next();
+            return Token::Phys(op);
+        }
+
+        // Arithmetic operators (QT3: +/- — hypothesis)
         if let Some(op) = ArithOp::from_char(c) {
             self.chars.next();
             return Token::Arith(op);
@@ -438,6 +498,11 @@ impl<'a> Lexer<'a> {
             }
             '=' => {
                 self.chars.next();
+                // == → Truth (QT3: sự thật chắc chắn)
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Truth;
+                }
                 return Token::Eq;
             }
             '?' => {
@@ -585,7 +650,18 @@ mod tests {
             assert_eq!(
                 classify(c),
                 CharClass::Arithmetic,
-                "'{c}' phải là Arithmetic"
+                "'{c}' phải là Arithmetic (hypothesis)"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_physical() {
+        for c in ['⧺', '⊖'] {
+            assert_eq!(
+                classify(c),
+                CharClass::Physical,
+                "'{c}' phải là Physical (proven)"
             );
         }
     }
@@ -999,5 +1075,62 @@ mod tests {
         assert!(is_command("learn"));
         let tokens = Lexer::tokenize_all("learn");
         assert_eq!(tokens, vec![Token::Command("learn".into())]);
+    }
+
+    // ── QT3: hypothesis vs physical vs truth ────────────────────────────────
+
+    #[test]
+    fn lex_physical_add() {
+        let tokens = Lexer::tokenize_all("fire ⧺ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Phys(PhysOp::PhysAdd),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_physical_sub() {
+        let tokens = Lexer::tokenize_all("fire ⊖ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Phys(PhysOp::PhysSub),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_truth_double_eq() {
+        let tokens = Lexer::tokenize_all("fire == water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Truth,
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_single_eq_still_works() {
+        let tokens = Lexer::tokenize_all("let x = fire;");
+        assert!(tokens.contains(&Token::Eq));
+        assert!(!tokens.contains(&Token::Truth));
+    }
+
+    #[test]
+    fn physop_roundtrip() {
+        assert_eq!(PhysOp::from_char('⧺'), Some(PhysOp::PhysAdd));
+        assert_eq!(PhysOp::from_char('⊖'), Some(PhysOp::PhysSub));
+        assert_eq!(PhysOp::PhysAdd.as_char(), '⧺');
+        assert_eq!(PhysOp::PhysSub.as_char(), '⊖');
+        assert_eq!(PhysOp::from_char('x'), None);
     }
 }

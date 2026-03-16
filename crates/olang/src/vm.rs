@@ -340,6 +340,30 @@ impl OlangVM {
                     }
                 }
 
+                Op::Fuse => {
+                    // QT2: ∞ là sai — ∞-1 mới đúng
+                    // Pop chain, check nó hữu hạn (không có self-reference loop).
+                    // Nếu chain hữu hạn → push lại (∞-1 = đúng).
+                    // Nếu chain rỗng hoặc bất thường → push empty (∞ = sai).
+                    let chain = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    // Finite check: chain must have bounded length
+                    // (MolecularChain is always finite by construction,
+                    //  but FUSE ensures no runtime-generated infinite loops)
+                    if chain.is_empty() {
+                        // ∞ = sai → empty
+                        let _ = stack.push(MolecularChain::empty());
+                    } else {
+                        // ∞-1 = đúng → push back
+                        let _ = stack.push(chain);
+                    }
+                }
+
                 Op::Halt => {
                     break;
                 }

@@ -17,6 +17,11 @@
 //! | `loop N { ... }`     | Lặp block N lần (N ≤ 65536)                       | ()           |
 //! | `fn f(a,b) { ... }`  | Định nghĩa hàm (inline khi gọi)                   | ()           |
 //! | `f(x, y)`            | Gọi hàm, bind args vào params                     | Chain        |
+//! | `a + b`              | Hypothesis arithmetic (QT3: chưa chứng minh)       | Chain        |
+//! | `a ⧺ b`              | Physical add (QT3: đã chứng minh) + FUSE           | Chain        |
+//! | `a ⊖ b`              | Physical sub (QT3: đã chứng minh) + FUSE           | Chain        |
+//! | `a == b`             | Truth assertion (QT3: sự thật chắc chắn)           | Chain        |
+//! | `fuse`               | QT2: verify chain finite (∞-1 mới đúng)            | ()           |
 //! | `dream`              | Trigger Dream cycle (STM → cluster → QR)           | ()           |
 //! | `stats`              | Xuất system statistics                             | ()           |
 //!
@@ -280,6 +285,16 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             validate_expr(rhs, scope, errors);
         }
 
+        Expr::PhysOp { lhs, rhs, .. } => {
+            validate_expr(lhs, scope, errors);
+            validate_expr(rhs, scope, errors);
+        }
+
+        Expr::Truth { lhs, rhs } => {
+            validate_expr(lhs, scope, errors);
+            validate_expr(rhs, scope, errors);
+        }
+
         Expr::Str(_) => {
             // String literals are always valid
         }
@@ -463,6 +478,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         Stmt::Command(cmd) => match cmd.as_str() {
             "dream" => ctx.emit(Op::Dream),
             "stats" => ctx.emit(Op::Stats),
+            "fuse" => ctx.emit(Op::Fuse),
             _ => ctx.emit(Op::Nop),
         },
 
@@ -591,16 +607,36 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Arith { lhs, op, rhs } => {
-            // Arithmetic: lower both sides, then emit CALL to builtin
+            // QT3: Arithmetic = hypothesis (chưa chứng minh)
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
             let fn_name = match op {
-                crate::alphabet::ArithOp::Add => "__add",
-                crate::alphabet::ArithOp::Sub => "__sub",
-                crate::alphabet::ArithOp::Mul => "__mul",
-                crate::alphabet::ArithOp::Div => "__div",
+                crate::alphabet::ArithOp::Add => "__hyp_add",
+                crate::alphabet::ArithOp::Sub => "__hyp_sub",
+                crate::alphabet::ArithOp::Mul => "__hyp_mul",
+                crate::alphabet::ArithOp::Div => "__hyp_div",
             };
             ctx.emit(Op::Call(fn_name.into()));
+        }
+
+        Expr::PhysOp { lhs, op, rhs } => {
+            // QT3: Physical = proven (đã chứng minh)
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            let fn_name = match op {
+                crate::alphabet::PhysOp::PhysAdd => "__phys_add",
+                crate::alphabet::PhysOp::PhysSub => "__phys_sub",
+            };
+            ctx.emit(Op::Call(fn_name.into()));
+            // FUSE: verify result chain is finite (QT2: ∞-1)
+            ctx.emit(Op::Fuse);
+        }
+
+        Expr::Truth { lhs, rhs } => {
+            // QT3: == = proven truth
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            ctx.emit(Op::Call("__assert_truth".into()));
         }
 
         Expr::Str(s) => {
@@ -823,9 +859,10 @@ mod tests {
 
     #[test]
     fn lower_arithmetic() {
+        // QT3: +/- = hypothesis → __hyp_add
         let stmts = parse("1 + 2").unwrap();
         let prog = lower(&stmts);
-        assert!(prog.ops.contains(&Op::Call("__add".into())));
+        assert!(prog.ops.contains(&Op::Call("__hyp_add".into())));
     }
 
     #[test]
@@ -878,6 +915,63 @@ mod tests {
     #[test]
     fn validate_arithmetic() {
         let stmts = parse("1 + 2").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty());
+    }
+
+    // ── QT3: hypothesis vs physical vs truth ────────────────────────────────
+
+    #[test]
+    fn lower_hypothesis_arithmetic() {
+        // QT3: +/- = hypothesis → __hyp_add
+        let stmts = parse("1 + 2").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Call("__hyp_add".into())));
+    }
+
+    #[test]
+    fn lower_physical_add() {
+        // QT3: ⧺ = proven → __phys_add + FUSE
+        let stmts = parse("fire ⧺ water").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Call("__phys_add".into())));
+        assert!(prog.ops.contains(&Op::Fuse), "Physical ops must FUSE (QT2)");
+    }
+
+    #[test]
+    fn lower_physical_sub() {
+        // QT3: ⊖ = proven → __phys_sub + FUSE
+        let stmts = parse("fire ⊖ water").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Call("__phys_sub".into())));
+        assert!(prog.ops.contains(&Op::Fuse));
+    }
+
+    #[test]
+    fn lower_truth_assertion() {
+        // QT3: == = proven truth
+        let stmts = parse("fire == water").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Call("__assert_truth".into())));
+    }
+
+    #[test]
+    fn lower_fuse_command() {
+        let stmts = parse("fuse").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Fuse));
+    }
+
+    #[test]
+    fn validate_physical_ops() {
+        let stmts = parse("fire ⧺ water").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn validate_truth() {
+        let stmts = parse("fire == water").unwrap();
         let errors = validate(&stmts);
         assert!(errors.is_empty());
     }

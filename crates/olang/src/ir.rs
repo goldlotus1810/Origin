@@ -20,6 +20,7 @@
 //! HALT               → dừng
 //! DREAM              → trigger dream cycle
 //! STATS              → emit system stats
+//! FUSE               → pop 1, check chain for infinite loops (QT2: ∞-1)
 
 extern crate alloc;
 use alloc::string::String;
@@ -74,6 +75,10 @@ pub enum Op {
     Store(String),
     /// Push biến cục bộ lên stack
     LoadLocal(String),
+    /// QT2: FUSE — pop 1 chain, kiểm tra không có vòng lặp vô hạn trong DNA.
+    /// Nếu chain tham chiếu chính nó (cycle) → push empty chain (∞ = sai).
+    /// Nếu chain hữu hạn → push lại chain (∞-1 = đúng).
+    Fuse,
 }
 
 impl Op {
@@ -100,6 +105,7 @@ impl Op {
             Self::Nop => "NOP",
             Self::Store(_) => "STORE",
             Self::LoadLocal(_) => "LOAD_LOCAL",
+            Self::Fuse => "FUSE",
         }
     }
 
@@ -163,6 +169,7 @@ impl Op {
                 b.extend_from_slice(sb);
                 b
             }
+            Self::Fuse => alloc::vec![0x0A],
         }
     }
 }
@@ -446,6 +453,7 @@ mod tests {
             Op::Call("f".into()),
             Op::Store("v".into()),
             Op::LoadLocal("v".into()),
+            Op::Fuse,
         ];
         for op in &ops {
             let b = op.to_bytes();

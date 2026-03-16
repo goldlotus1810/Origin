@@ -49,7 +49,7 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::alphabet::{ArithOp, Lexer, RelOp, Token};
+use crate::alphabet::{ArithOp, Lexer, PhysOp, RelOp, Token};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AST — Abstract Syntax Tree
@@ -124,10 +124,23 @@ pub enum Expr {
         steps: Vec<(RelOp, Expr)>,
     },
 
-    /// `1 + 2`, `3 × 4` — arithmetic (chỉ cho numbers)
+    /// `1 + 2`, `3 × 4` — arithmetic GIẢ THUYẾT (QT3: chưa chứng minh)
     Arith {
         lhs: Box<Expr>,
         op: ArithOp,
+        rhs: Box<Expr>,
+    },
+
+    /// `a ⧺ b`, `a ⊖ b` — vật lý ĐÃ CHỨNG MINH (QT3)
+    PhysOp {
+        lhs: Box<Expr>,
+        op: PhysOp,
+        rhs: Box<Expr>,
+    },
+
+    /// `a == b` — sự thật chắc chắn (QT3)
+    Truth {
+        lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
 
@@ -486,12 +499,12 @@ impl<'a> Parser<'a> {
         self.parse_rel_chain()
     }
 
-    /// rel_chain = compose (REL_OP (compose | '?'))*
+    /// rel_chain = truth (REL_OP (truth | '?'))*
     ///
     /// Single hop → RelEdge or RelQuery.
     /// Multiple hops → Chain (multi-hop path finding).
     fn parse_rel_chain(&mut self) -> Result<Expr, ParseError> {
-        let left = self.parse_compose_expr()?;
+        let left = self.parse_truth_expr()?;
 
         let mut steps: Vec<(RelOp, Expr)> = Vec::new();
 
@@ -510,7 +523,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Expr::Ident("?".to_string())
             } else {
-                self.parse_compose_expr()?
+                self.parse_truth_expr()?
             };
             steps.push((op, rhs));
         }
@@ -539,6 +552,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// truth = compose ('==' compose)?    (QT3: sự thật chắc chắn)
+    fn parse_truth_expr(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_compose_expr()?;
+        if self.check(&Token::Truth) {
+            self.advance();
+            let right = self.parse_compose_expr()?;
+            return Ok(Expr::Truth {
+                lhs: Box::new(left),
+                rhs: Box::new(right),
+            });
+        }
+        Ok(left)
+    }
+
     /// compose = arith ('∘' arith)*
     fn parse_compose_expr(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_arith_expr()?;
@@ -552,18 +579,32 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// arith = primary (ARITH_OP primary)*
+    /// arith = primary ((ARITH_OP | PHYS_OP) primary)*
     fn parse_arith_expr(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_primary()?;
 
-        while let Token::Arith(op) = self.peek() {
-            self.advance();
-            let right = self.parse_primary()?;
-            left = Expr::Arith {
-                lhs: Box::new(left),
-                op,
-                rhs: Box::new(right),
-            };
+        loop {
+            match self.peek() {
+                Token::Arith(op) => {
+                    self.advance();
+                    let right = self.parse_primary()?;
+                    left = Expr::Arith {
+                        lhs: Box::new(left),
+                        op,
+                        rhs: Box::new(right),
+                    };
+                }
+                Token::Phys(op) => {
+                    self.advance();
+                    let right = self.parse_primary()?;
+                    left = Expr::PhysOp {
+                        lhs: Box::new(left),
+                        op,
+                        rhs: Box::new(right),
+                    };
+                }
+                _ => break,
+            }
         }
 
         Ok(left)
@@ -1160,5 +1201,55 @@ mod tests {
     #[test]
     fn parse_let_missing_semi() {
         assert!(parse("let x = fire").is_err());
+    }
+
+    // ── QT3: hypothesis vs physical vs truth ────────────────────────────────
+
+    #[test]
+    fn parse_physical_add() {
+        let stmts = parse("fire ⧺ water").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::PhysOp {
+                lhs: Box::new(Expr::Ident("fire".into())),
+                op: PhysOp::PhysAdd,
+                rhs: Box::new(Expr::Ident("water".into())),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_physical_sub() {
+        let stmts = parse("fire ⊖ water").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::PhysOp {
+                lhs: Box::new(Expr::Ident("fire".into())),
+                op: PhysOp::PhysSub,
+                rhs: Box::new(Expr::Ident("water".into())),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_truth_assertion() {
+        let stmts = parse("fire == water").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::Truth {
+                lhs: Box::new(Expr::Ident("fire".into())),
+                rhs: Box::new(Expr::Ident("water".into())),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_hypothesis_vs_physical() {
+        // QT3: 1 + 2 = hypothesis, fire ⧺ water = proven
+        let hyp = parse("1 + 2").unwrap();
+        assert!(matches!(hyp[0], Stmt::Expr(Expr::Arith { .. })));
+
+        let phys = parse("fire ⧺ water").unwrap();
+        assert!(matches!(phys[0], Stmt::Expr(Expr::PhysOp { .. })));
     }
 }

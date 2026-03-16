@@ -155,6 +155,7 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Nop => "".into(),
         Op::Store(name) => format!("olang_store(\"{}\", pop(&s));", escape(name)),
         Op::LoadLocal(name) => format!("push(&s, olang_load_local(\"{}\"));", escape(name)),
+        Op::Fuse => "/* QT2: FUSE — verify chain finite */ { Chain c = peek(&s); if (c == 0) pop(&s); }".into(),
     })
 }
 
@@ -216,6 +217,7 @@ fn rust_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Jz(t)  => format!("// jz {} (runtime check needed)", t),
         Op::Store(name) => format!("// store local: {}", name),
         Op::LoadLocal(name) => format!("// load local: {}", name),
+        Op::Fuse => "// QT2: FUSE — verify chain finite (∞-1)".into(),
     })
 }
 
@@ -310,6 +312,7 @@ fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileE
         Op::Jz(t) => format!("i64.eqz  br_if {};; jz", t),
         Op::Store(_) => "local.set $local ;; store".into(),
         Op::LoadLocal(_) => "local.get $local ;; load_local".into(),
+        Op::Fuse => ";; QT2: FUSE — verify chain finite".into(),
     })
 }
 
