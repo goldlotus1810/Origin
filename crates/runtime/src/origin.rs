@@ -23,7 +23,9 @@ use silk::walk::ResponseTone;
 use crate::parser::{OlangExpr, OlangParser, ParseResult, RelationOp};
 use olang::ir::{compile_expr, OlangIrExpr};
 use olang::knowtree::KnowTree;
+use olang::molecular::Dimension;
 use olang::registry::Registry;
+use vsdf::body::{body_from_molecule, BodyStore};
 use olang::self_model::SelfModel;
 use olang::separator::parse_to_chains;
 use olang::startup::{boot, chain_to_emoji, resolve_with_cp};
@@ -120,6 +122,8 @@ pub struct HomeRuntime {
     dream_approved_total: u64,
     /// Total L3 concepts created from Dream
     dream_l3_created: u64,
+    /// NodeBody store — chain_hash → SDF + Spline bindings
+    body_store: BodyStore,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -171,6 +175,7 @@ impl HomeRuntime {
             dream_cycles: 0,
             dream_approved_total: 0,
             dream_l3_created: 0,
+            body_store: BodyStore::new(),
         }
     }
 
@@ -1190,6 +1195,24 @@ impl HomeRuntime {
                     self.knowtree.store_sentence(chain, None, &word_hashes, ts);
                 }
             }
+
+            // ── T6b2: NodeBody — tạo/cập nhật SDF + Spline cho chain ──────
+            // Mỗi chain mới → tạo body từ molecule bytes
+            if let Some(mol) = chain.first() {
+                let hash = chain.chain_hash();
+                if self.body_store.get(hash).is_none() {
+                    let body = body_from_molecule(
+                        hash,
+                        mol.shape,
+                        mol.emotion.valence,
+                        mol.emotion.arousal,
+                        mol.time,
+                    );
+                    // Insert into store
+                    let entry = self.body_store.get_or_create(hash);
+                    *entry = body;
+                }
+            }
         }
 
         // ── T6c: Track recent text for reference resolution ────────────────
@@ -1737,6 +1760,26 @@ impl HomeRuntime {
     /// ConversationCurve instability flag.
     pub fn curve_unstable(&self) -> bool {
         self.learning.context().curve().is_unstable()
+    }
+
+    /// BodyStore — read-only access.
+    pub fn body_store(&self) -> &BodyStore {
+        &self.body_store
+    }
+
+    /// BodyStore — mutable access.
+    pub fn body_store_mut(&mut self) -> &mut BodyStore {
+        &mut self.body_store
+    }
+
+    /// Total bodies with SDF shape.
+    pub fn bodies_with_shape(&self) -> usize {
+        self.body_store.bodies_with_shape().count()
+    }
+
+    /// Total bodies in store.
+    pub fn body_count(&self) -> usize {
+        self.body_store.len()
     }
 
     /// Dream cycles completed.

@@ -19,4 +19,5 @@ agents  = { workspace = true }
 isl     = { path = "../isl" }
 memory  = { workspace = true }
 hal     = { workspace = true }
+vsdf    = { workspace = true }
 libm    = { workspace = true }

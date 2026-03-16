@@ -504,6 +504,13 @@ fn bench_runtime_pipeline() {
     println!("  Cache hit rate    : {:.1}%", rt.knowtree().cache_hit_rate() * 100.0);
     println!();
 
+    // BodyStore
+    println!("  ── BodyStore (SDF + Spline) ──");
+    println!("  Total bodies      : {}", rt.body_count());
+    println!("  Bodies with SDF   : {}", rt.bodies_with_shape());
+    println!("  Body RAM          : ~{}KB", rt.body_store().ram_usage() / 1024);
+    println!();
+
     // Dream stats
     println!("  ── Dream ──");
     println!("  Dream cycles      : {}", rt.dream_cycles());
