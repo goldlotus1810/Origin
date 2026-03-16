@@ -1,5 +1,5 @@
 # HomeOS — Kiến Trúc Tổng Thể
-**Ngày:** 2026-03-15 · **Cập nhật:** 2026-03-15
+**Ngày:** 2026-03-15 · **Cập nhật:** 2026-03-16
 **Mục đích:** Bản vẽ cho người sáng tạo — nắm bắt và dẫn hướng
 
 ---
@@ -610,13 +610,16 @@ Tier 3: ESP32 (520KB SRAM)
 | IR + Compiler | ✅ Done | ↑ | C/Rust/WASM targets |
 | vSDF 18 gen | ✅ Done | 82 | ∇f analytical (cần persistence buffer) |
 | FFR Fibonacci | ✅ Done | ↑ | ~89 ô spiral |
-| ISL messaging | ✅ Done | 17 | 4-byte address, AES-256-GCM ready |
+| ISL messaging | ✅ Done | 31 | 4-byte address, AES-256-GCM encryption (feature `encrypt`) |
 | Clone/Worker | ✅ Done | ↑ (olang) | DeviceProfile, export_worker, WorkerPackage |
-| Chief/Worker Agent | ✅ Done | ↑ (agents) | ChiefKind(Home/Vision/Network), WorkerKind(Sensor/Actuator/Camera) |
-| LeoAI | ✅ Done | ↑ (agents) | States: Listening/Learning/Dreaming/Proposing |
+| Chief/Worker Agent | ✅ Done | ↑ (agents) | Domain routing: Home→Sensor/Actuator, Vision→Camera, Network→Network |
+| Chief domain behavior | ✅ Done | ↑ (agents) | Home: automation, Vision: motion aggregation, Network: security levels |
+| Worker profiles | ✅ Done | ↑ (agents) | Camera: motion streak, Network: anomaly EMA, Door: security lock/NACK |
+| LeoAI | ✅ Done | ↑ (agents) | States: Listening/Learning/Dreaming/Proposing, QR write pipeline |
 | Cross-modal fusion | ✅ Done | ↑ (context) | Audio/Image/Bio → EmotionTag |
 | SelfModel | ✅ Done | ↑ (olang) | ○{stats} tự mô tả |
 | Skill trait + ExecContext | ✅ Done | ↑ (agents) | QT4①-⑤: stateless, isolated, via ExecContext |
+| 15 Domain Skills | ✅ Done | ↑ (agents) | LeoAI: Ingest/Similarity/Delta/Cluster/Curator/Merge/Prune/Hebbian/Dream/Proposal; Worker: Sensor/Actuator/Security/Network |
 | 7 Instinct Skills | ✅ Done | ↑ (agents) | Analogy, Abstraction, Causality, Contradiction, Curiosity, Reflection, Honesty |
 | LeoAI × Instincts | ✅ Done | ↑ (agents) | run_instincts() chạy 7 bản năng trên mỗi ingest |
 | SkillProposal | ✅ Done | ↑ (memory) | InsightKind: Causal, Contradiction, Abstraction, Analogy, Curiosity + AAM review_skill |
@@ -627,7 +630,7 @@ Tier 3: ESP32 (520KB SRAM)
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |
 
-**Tổng: 757 tests, 0 clippy warnings, 12 crates**
+**Tổng: 886 tests, 0 failures, 14 crates**
 
 ---
 
@@ -711,4 +714,4 @@ Design lock: KHÔNG — design có thể evolve nếu có bằng chứng mới
 ---
 
 *Bản vẽ này là la bàn. Code là hành trình.*
-*2026-03-15 · HomeOS v3 · 757 tests · 0 warnings*
+*2026-03-16 · HomeOS v3 · 886 tests · 0 failures*

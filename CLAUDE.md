@@ -357,7 +357,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (757 tests)
+# Test toàn bộ (886 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
