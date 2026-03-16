@@ -464,66 +464,58 @@ Worker.process(SensorReading)
 ✅ Agent hierarchy clarify: "2 Agent chief + Workers là tế bào thực thi"
 ```
 
-### Từ Review — Cần implement:
+### Từ Review — Đã implement:
 
 ```
-⚠️ LCA variance — thêm chiều "Extremity" vào LCA output
+✅ LCA variance — lca_with_variance(), lca_many_with_variance()
    Cluster variance cao = khái niệm trừu tượng
    Cluster variance thấp = khái niệm cụ thể
-   → Cần sửa lca.rs: trả thêm f32 variance
 
-⚠️ ConversationCurve window variance — phát hiện "emotional instability"
+✅ ConversationCurve window variance — window_variance(), unstable detection
    variance(N turns) cao + f' đổi chiều → Gentle thay vì Celebratory
-   → Cần sửa curve.rs: thêm window_variance()
 
-⚠️ Cross-layer Silk — "lửa" (L5) ↔ "nguy hiểm" (L4) cần kết nối
-   Giải pháp: cho phép cross-layer với threshold cao hơn Fib[n+2]
-   + phải qua AAM approve → giữ kiến trúc phân tầng
-   → Cần sửa graph.rs: connect_cross_layer() + AAM review
+✅ Cross-layer Silk — co_activate_cross_layer() + Fib[n+2] threshold
+   Caller (LeoAI/Chief) chịu trách nhiệm AAM approve
 
-⚠️ SDF occlusion — persistence buffer
-   Frame t-1 có object A, frame t không thấy → giữ 5 frames
-   Frame t+5 vẫn mất → archive
-   Thấy lại → restore confidence × 0.8
-   → Cần thêm vào vsdf: PersistenceBuffer struct
+✅ SDF occlusion — OcclusionBuffer ring 5 frames
+   is_occluded(), movement_variance(), latest()
 
 ⚠️ Dream cluster α,β,γ cần empirical validation
    α=0.3 (chain_sim), β=0.4 (hebbian), γ=0.3 (co_act)
-   → Configurable, đo F1-score trên 10-20 labeled clusters
+   → Configurable qua DreamConfig, cần A/B testing trên data thực
+```
+
+### Đã giải quyết:
+
+```
+✅ Error Handling Strategy → error.rs: HomeError, PersistResult, Fib retry
+✅ Concurrency Model → concurrency.rs: SyncSession, ConflictStrategy, AP trade-off
+✅ Observability → metrics.rs: RuntimeMetrics, Silk density, STM hit rate
+✅ ISL Encryption → codec.rs: AES-256-GCM (feature "encrypt"), counter nonce
+✅ Domain Chiefs → chief.rs: Home/Vision/Network routing + automation
+✅ Worker Profiles → worker.rs: Camera/Network/Door/Sensor behavior
+✅ 15 Domain Skills → domain_skills.rs: Skill trait QT4 compliant
 ```
 
 ### Thiếu — Cần thiết kế thêm:
 
 ```
-① Error Handling Strategy
-   - Network failure Worker-Chief? → retry 3× + backoff + report ISL Nack
-   - Disk full append-only? → emergency flush STM, compact registry
-   - Corrupt origin.olang? → crash recovery từ last valid record
-   - → Cần: error.rs module hoặc section trong runtime
-
-② Concurrency Model
-   - 2 Worker gửi conflict chain? → AAM quyết định (last-write-wins + timestamp)
-   - Append-only log trên distributed? → lamport clock per device
-   - CAP trade-off: AP (Availability + Partition tolerance)
-   - → Cần: consensus section trong ISL hoặc runtime
-
-③ Versioning & Migration
+① Versioning & Migration
    - MolecularChain 5 → 6 bytes? → version byte trong header
    - origin.olang v0.03 → v0.04? → forward migration script (append-only)
    - Worker chạy version cũ? → negotiation qua ISL handshake
-   - → Cần: migration.rs hoặc version negotiation trong ISL
 
-④ Observability
-   - Metrics: Silk density, Dream frequency, STM hit rate, LCA variance
-   - "Hệ thống khỏe?" → ○{stats} đã có, cần thêm ○{health}
-   - Debug LCA sai? → trace log per-step (disabled by default)
-   - → Cần: metrics module hoặc extend ○{} commands
-
-⑤ Testing Strategy cho Emotion
+② Testing Strategy cho Emotion
    - Emotion chủ quan → cần human evaluation protocol
    - 50 test conversations × expected tone → đo agreement rate
    - Benchmark: word_affect() coverage vs sentiment dataset
-   - → Cần: test fixtures + human eval tooling
+   - bench tool đã có, cần thêm labeled test fixtures
+
+③ HAL Platform Abstraction
+   - RPi 4 (Tier 1): full HomeOS
+   - RPi Zero (Tier 2): L0+L1 only
+   - ESP32 (Tier 3): Worker only
+   - → Cần: hal.rs trait cho disk/network/timer
 ```
 
 ---
@@ -625,7 +617,11 @@ Tier 3: ESP32 (520KB SRAM)
 | SkillProposal | ✅ Done | ↑ (memory) | InsightKind: Causal, Contradiction, Abstraction, Analogy, Curiosity + AAM review_skill |
 | LCA variance | ✅ Done | ↑ (olang) | LcaResult { chain, variance }, lca_with_variance(), lca_many_with_variance() |
 | Window variance | ✅ Done | ↑ (context) | window_variance, unstable detection, Celebratory→Gentle override |
-| Cross-layer Silk | ⬜ Planned | — | Kết nối tầng khác với threshold cao + AAM |
+| Cross-layer Silk | ✅ Done | ↑ (silk) | co_activate_cross_layer(), Fib[n+2] threshold, 4 tests |
+| Error handling | ✅ Done | ↑ (runtime) | HomeError, PersistResult, Fib-based retry delay |
+| Metrics/Observability | ✅ Done | ↑ (runtime) | RuntimeMetrics snapshot, Silk density, STM hit rate |
+| Concurrency model | ✅ Done | ↑ (runtime) | AP trade-off, SyncSession, ConflictStrategy |
+| SDF Occlusion buffer | ✅ Done | ↑ (vsdf) | Ring buffer 5 frames, movement variance, is_occluded() |
 | World rendering | ⬜ Planned | — | vSDF → 3D scene |
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |

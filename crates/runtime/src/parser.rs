@@ -335,7 +335,7 @@ fn token_from_str(s: &str) -> OlangToken {
 
 fn is_command(s: &str) -> bool {
     matches!(s,
-        "dream" | "stats" | "seed L0" | "seed" |
+        "dream" | "stats" | "health" | "seed L0" | "seed" |
         "shutdown" | "reboot" | "status" | "help"
     )
 }

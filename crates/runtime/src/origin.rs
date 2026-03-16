@@ -283,6 +283,29 @@ impl HomeRuntime {
                 Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
             }
 
+            "health" => {
+                let m = self.metrics();
+                let stm_status = if m.stm_observations > 0 { "●" } else { "○" };
+                let silk_status = if m.silk_edges > 0 { "●" } else { "○" };
+                let curve_status = if m.turns > 0 { "●" } else { "○" };
+                let text = alloc::format!(
+                    "Health ○\n\
+                     STM      : {} ({} obs, hit {:.0}%, max_fire {})\n\
+                     Silk     : {} ({} edges, density {:.4})\n\
+                     Curve    : {} (f(x)={:.3}, tone={})\n\
+                     Turns    : {}\n\
+                     Pending  : {} bytes\n\
+                     Saveable : {} edges",
+                    stm_status, m.stm_observations, m.stm_hit_rate * 100.0, m.stm_max_fire,
+                    silk_status, m.silk_edges, m.silk_density,
+                    curve_status, m.fx, m.tone,
+                    m.turns,
+                    m.pending_bytes,
+                    m.saveable_edges,
+                );
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
             "help" => Response {
                 text: String::from(
                     "HomeOS ○{} Commands:\n\
@@ -293,6 +316,7 @@ impl HomeRuntime {
                      ○{term ∂ ctx} — context query\n\
                      ○{dream}      — run Dream cycle\n\
                      ○{stats}      — system statistics\n\
+                     ○{health}     — system health check\n\
                      ○{help}       — this message"
                 ),
                 tone: ResponseTone::Engaged,
@@ -1427,6 +1451,21 @@ mod integration_tests {
         let pf = reader.parse_all().expect("v0.03 records phải parse được");
         assert_eq!(pf.node_count(), 1);
         assert_eq!(pf.nodes[0].chain, chain);
+    }
+
+    // ── 8. Health command ──────────────────────────────────────────────────────
+
+    #[test]
+    fn health_command_returns_diagnostics() {
+        if skip() { return; }
+        let mut rt = HomeRuntime::new(0xE001);
+        let resp = rt.process_text("○{health}", 1000);
+        assert_eq!(resp.kind, ResponseKind::System);
+        assert!(resp.text.contains("Health ○"), "should contain Health header");
+        assert!(resp.text.contains("STM"), "should contain STM status");
+        assert!(resp.text.contains("Silk"), "should contain Silk status");
+        assert!(resp.text.contains("Curve"), "should contain Curve status");
+        assert!(resp.text.contains("Turns"), "should contain Turns");
     }
 
 }

@@ -284,6 +284,48 @@ impl LeoAI {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Domain Skills analysis — knowledge quality assessment
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Chạy domain skills trên STM để đánh giá knowledge quality.
+    ///
+    /// Dùng SimilaritySkill + ClusterSkill + CuratorSkill.
+    /// Kết quả: state["cluster_count"], state["similarity"],
+    ///          state["curated_count"] trong ExecContext.
+    pub fn run_knowledge_analysis(&self, ts: i64) -> ExecContext {
+        use crate::skill::Skill;
+        use crate::domain_skills::{ClusterSkill, CuratorSkill};
+
+        let emotion = self.learning.context().last_emotion();
+        let mut ctx = ExecContext::new(ts, emotion, self.fx());
+
+        // Feed STM observations as input chains
+        let obs_list = self.learning.stm().top_n(20);
+        for obs in &obs_list {
+            ctx.push_input(obs.chain.clone());
+        }
+
+        if ctx.input_chains.len() < 2 {
+            return ctx;
+        }
+
+        // Cluster analysis
+        let cluster = ClusterSkill;
+        let _ = cluster.execute(&mut ctx);
+
+        // Curator sorts by richness
+        // Reset inputs with cluster output for curation
+        let clusters_output = ctx.output_chains.clone();
+        ctx.input_chains = clusters_output;
+        ctx.output_chains.clear();
+
+        let curator = CuratorSkill;
+        let _ = curator.execute(&mut ctx);
+
+        ctx
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Internal
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -468,6 +510,21 @@ mod tests {
         let _ = l.stm_len();
         let _ = l.edge_count();
         // LeoAI chỉ đọc stats, không ghi trực tiếp
+    }
+
+    #[test]
+    fn knowledge_analysis_runs() {
+        let mut l = leo();
+        // Feed several reports for diversity
+        for i in 0..5 {
+            l.ingest(report(-0.3 + i as f32 * 0.1, i as u8 + 1), i as i64 * 1000);
+        }
+        let ctx = l.run_knowledge_analysis(6000);
+        // Should have cluster info if enough observations
+        if l.stm_len() >= 2 {
+            assert!(ctx.get("cluster_count").is_some() || ctx.get("curated_count").is_some(),
+                "Analysis should produce cluster or curation data");
+        }
     }
 
     /// Integration: LeoAI QR writes → OlangReader → verify QR node.
