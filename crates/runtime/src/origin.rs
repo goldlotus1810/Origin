@@ -1394,6 +1394,21 @@ impl HomeRuntime {
         !self.pending_writes.is_empty()
     }
 
+    /// STM observation count — cho benchmark.
+    pub fn stm_len(&self) -> usize {
+        self.learning.stm().len()
+    }
+
+    /// Silk edge count — cho benchmark.
+    pub fn silk_edge_count(&self) -> usize {
+        self.learning.graph().len()
+    }
+
+    /// Silk edges từ hash — cho benchmark.
+    pub fn silk_edges_from(&self, hash: u64) -> usize {
+        self.learning.graph().edges_from(hash).len()
+    }
+
     /// Lấy pending bytes và xóa buffer.
     ///
     /// Caller (server) chịu trách nhiệm:

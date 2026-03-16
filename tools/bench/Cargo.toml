@@ -7,10 +7,15 @@ edition.workspace = true
 name = "bench"
 path = "src/main.rs"
 
+[[bin]]
+name = "chat-bench"
+path = "src/chat_bench.rs"
+
 [dependencies]
 ucd     = { workspace = true }
 olang   = { workspace = true, features = ["std"] }
 agents  = { workspace = true, features = ["std"] }
 runtime = { workspace = true, features = ["std"] }
 silk    = { workspace = true }
+context = { workspace = true }
 vsdf    = { workspace = true }
