@@ -7,12 +7,12 @@
 //! Pattern lặp lại → ĐN → Dream → QR
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
-use silk::edge::EmotionTag;
 use context::emotion::word_affect;
 use olang::ling::apply_modifiers;
+use silk::edge::EmotionTag;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SentenceRecord
@@ -21,8 +21,8 @@ use olang::ling::apply_modifiers;
 /// Một câu đã được phân tích.
 #[derive(Debug, Clone)]
 pub struct SentenceRecord {
-    pub text:      String,
-    pub emotion:   EmotionTag,
+    pub text: String,
+    pub emotion: EmotionTag,
     /// Độ dài câu (số từ)
     pub word_count: usize,
     /// Câu có "emotionally significant" không (|V| > 0.3 hoặc A > 0.6)
@@ -33,7 +33,12 @@ impl SentenceRecord {
     pub fn new(text: String, emotion: EmotionTag) -> Self {
         let word_count = text.split_whitespace().count();
         let significant = emotion.valence.abs() > 0.2 || emotion.arousal > 0.5;
-        Self { text, emotion, word_count, significant }
+        Self {
+            text,
+            emotion,
+            word_count,
+            significant,
+        }
     }
 }
 
@@ -45,7 +50,9 @@ impl SentenceRecord {
 pub struct BookReader;
 
 impl BookReader {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// Đọc văn bản → Vec<SentenceRecord>.
     ///
@@ -54,7 +61,8 @@ impl BookReader {
     /// Trả về top significant sentences.
     pub fn read(&self, text: &str) -> Vec<SentenceRecord> {
         let sentences = split_sentences(text);
-        sentences.into_iter()
+        sentences
+            .into_iter()
             .filter(|s| !s.trim().is_empty() && s.split_whitespace().count() >= 2)
             .map(|s| {
                 let emotion = sentence_emotion(&s);
@@ -65,20 +73,22 @@ impl BookReader {
 
     /// Lọc top-N emotionally significant sentences.
     /// Dùng để nạp vào ĐN.
-    pub fn top_significant<'a>(&self, records: &'a [SentenceRecord], n: usize) -> Vec<&'a SentenceRecord> {
-        let mut scored: Vec<(&SentenceRecord, f32)> = records.iter()
+    pub fn top_significant<'a>(
+        &self,
+        records: &'a [SentenceRecord],
+        n: usize,
+    ) -> Vec<&'a SentenceRecord> {
+        let mut scored: Vec<(&SentenceRecord, f32)> = records
+            .iter()
             .filter(|r| r.significant)
             .map(|r| {
                 // Score = |V| × A × I (emotional weight)
-                let score = r.emotion.valence.abs()
-                    * r.emotion.arousal
-                    * r.emotion.intensity;
+                let score = r.emotion.valence.abs() * r.emotion.arousal * r.emotion.intensity;
                 (r, score)
             })
             .collect();
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1)
-            .unwrap_or(core::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
 
         scored.into_iter().take(n).map(|(r, _)| r).collect()
     }
@@ -89,30 +99,30 @@ impl BookReader {
             return BookStats::default();
         }
         let sig = records.iter().filter(|r| r.significant).count();
-        let avg_v = records.iter().map(|r| r.emotion.valence).sum::<f32>()
-            / records.len() as f32;
-        let avg_a = records.iter().map(|r| r.emotion.arousal).sum::<f32>()
-            / records.len() as f32;
+        let avg_v = records.iter().map(|r| r.emotion.valence).sum::<f32>() / records.len() as f32;
+        let avg_a = records.iter().map(|r| r.emotion.arousal).sum::<f32>() / records.len() as f32;
         BookStats {
-            total_sentences:       records.len(),
+            total_sentences: records.len(),
             significant_sentences: sig,
-            avg_valence:           avg_v,
-            avg_arousal:           avg_a,
+            avg_valence: avg_v,
+            avg_arousal: avg_a,
         }
     }
 }
 
 impl Default for BookReader {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Stats tổng quan của một văn bản.
 #[derive(Debug, Clone, Default)]
 pub struct BookStats {
-    pub total_sentences:       usize,
+    pub total_sentences: usize,
     pub significant_sentences: usize,
-    pub avg_valence:           f32,
-    pub avg_arousal:           f32,
+    pub avg_valence: f32,
+    pub avg_arousal: f32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,7 +147,9 @@ fn sentence_emotion(sentence: &str) -> EmotionTag {
 
     // Lớp 2: word-level
     let words: Vec<&str> = lower.split_whitespace().collect();
-    if words.is_empty() { return sentence_e; }
+    if words.is_empty() {
+        return sentence_e;
+    }
 
     let mut tv = sentence_e.valence;
     let mut ta = sentence_e.arousal;
@@ -157,7 +169,9 @@ fn sentence_emotion(sentence: &str) -> EmotionTag {
         }
     }
 
-    if weight == 0.0 { return EmotionTag::NEUTRAL; }
+    if weight == 0.0 {
+        return EmotionTag::NEUTRAL;
+    }
 
     // Apply linguistic modifiers (negation, amplifier, diminisher, contrast)
     let words_vec: alloc::vec::Vec<&str> = words.to_vec();
@@ -194,64 +208,64 @@ fn topic_inference(lower: &str, words: &[&str]) -> EmotionTag {
     static TOPIC_SIGNALS: &[(&str, f32, f32)] = &[
         // Renewable energy / environment (positive)
         ("hydroélectrique", 0.60, 0.45),
-        ("photovoltaïque",  0.60, 0.45),
-        ("renouvelables",   0.60, 0.45),
-        ("renouvelable",    0.60, 0.45),
-        ("écologiques",     0.60, 0.45),
-        ("écologique",      0.60, 0.45),
-        ("éoliennes",       0.60, 0.45),
-        ("éolienne",        0.60, 0.45),
-        ("solaire",         0.60, 0.45),
-        ("durables",        0.55, 0.40),
-        ("durable",         0.55, 0.40),
-        ("biodiversité",    0.55, 0.40),
-        ("biodiversite",    0.55, 0.40),
+        ("photovoltaïque", 0.60, 0.45),
+        ("renouvelables", 0.60, 0.45),
+        ("renouvelable", 0.60, 0.45),
+        ("écologiques", 0.60, 0.45),
+        ("écologique", 0.60, 0.45),
+        ("éoliennes", 0.60, 0.45),
+        ("éolienne", 0.60, 0.45),
+        ("solaire", 0.60, 0.45),
+        ("durables", 0.55, 0.40),
+        ("durable", 0.55, 0.40),
+        ("biodiversité", 0.55, 0.40),
+        ("biodiversite", 0.55, 0.40),
         // Technology / innovation (positive)
-        ("crowdfunding",    0.55, 0.60),
-        ("innovation",      0.55, 0.55),
-        ("technologie",     0.50, 0.55),
-        ("développeurs",    0.50, 0.55),
-        ("développement",   0.45, 0.50),
+        ("crowdfunding", 0.55, 0.60),
+        ("innovation", 0.55, 0.55),
+        ("technologie", 0.50, 0.55),
+        ("développeurs", 0.50, 0.55),
+        ("développement", 0.45, 0.50),
         // Science / research (positive)
-        ("scientifiques",   0.55, 0.50),
-        ("scientifique",    0.55, 0.50),
-        ("chercheurs",      0.50, 0.50),
-        ("recherche",       0.50, 0.50),
-        ("découverte",      0.55, 0.55),
+        ("scientifiques", 0.55, 0.50),
+        ("scientifique", 0.55, 0.50),
+        ("chercheurs", 0.50, 0.50),
+        ("recherche", 0.50, 0.50),
+        ("découverte", 0.55, 0.55),
         // Health (neutral-positive)
-        ("vaccin",          0.35, 0.55),
-        ("médecin",         0.20, 0.45),
+        ("vaccin", 0.35, 0.55),
+        ("médecin", 0.20, 0.45),
         // Crisis / threat (negative)
-        ("catastrophe",    -0.65, 0.75),
-        ("menacées",       -0.60, 0.70),
-        ("menacés",        -0.60, 0.70),
-        ("extinction",     -0.65, 0.70),
-        ("disparaître",    -0.55, 0.65),
-        ("pollution",      -0.55, 0.60),
-        ("dégradation",    -0.55, 0.60),
+        ("catastrophe", -0.65, 0.75),
+        ("menacées", -0.60, 0.70),
+        ("menacés", -0.60, 0.70),
+        ("extinction", -0.65, 0.70),
+        ("disparaître", -0.55, 0.65),
+        ("pollution", -0.55, 0.60),
+        ("dégradation", -0.55, 0.60),
         // German equivalents
-        ("erneuerbar",      0.60, 0.45),
-        ("photovoltaik",    0.60, 0.45),
-        ("nachhaltig",      0.55, 0.40),
-        ("innovation",      0.55, 0.55),
-        ("wissenschaft",    0.55, 0.50),
-        ("forschung",       0.50, 0.50),
-        ("katastrophe",    -0.65, 0.75),
-        ("bedrohung",      -0.60, 0.70),
-        ("aussterben",     -0.65, 0.70),
+        ("erneuerbar", 0.60, 0.45),
+        ("photovoltaik", 0.60, 0.45),
+        ("nachhaltig", 0.55, 0.40),
+        ("innovation", 0.55, 0.55),
+        ("wissenschaft", 0.55, 0.50),
+        ("forschung", 0.50, 0.50),
+        ("katastrophe", -0.65, 0.75),
+        ("bedrohung", -0.60, 0.70),
+        ("aussterben", -0.65, 0.70),
         // Spanish equivalents
-        ("renovables",      0.60, 0.45),
-        ("sostenible",      0.55, 0.40),
-        ("tecnología",      0.50, 0.55),
-        ("investigación",   0.50, 0.50),
-        ("descubrimiento",  0.55, 0.55),
-        ("catástrofe",     -0.65, 0.75),
-        ("amenaza",        -0.60, 0.70),
+        ("renovables", 0.60, 0.45),
+        ("sostenible", 0.55, 0.40),
+        ("tecnología", 0.50, 0.55),
+        ("investigación", 0.50, 0.50),
+        ("descubrimiento", 0.55, 0.55),
+        ("catástrofe", -0.65, 0.75),
+        ("amenaza", -0.60, 0.70),
     ];
 
     let mut best_v = 0.0f32;
     let mut best_a = 0.5f32;
-    let mut found  = false;
+    let mut found = false;
 
     for &(topic, v, a) in TOPIC_SIGNALS {
         if lower.contains(topic) || words.contains(&topic) {
@@ -259,7 +273,7 @@ fn topic_inference(lower: &str, words: &[&str]) -> EmotionTag {
             if !found || v.abs() > best_v.abs() {
                 best_v = v;
                 best_a = a;
-                found  = true;
+                found = true;
             }
         }
     }
@@ -276,39 +290,74 @@ fn sentence_level_emotion(lower: &str) -> EmotionTag {
     use context::emotion::contains_any;
 
     // Bạo lực / chiến tranh
-    if contains_any(lower, &[
-        "thiệt mạng", "tử vong", "hi sinh", "mất mạng",
-        "giao tranh", "bùng phát", "tấn công", "lực lượng vũ trang",
-        "bốc cháy", "chạy loạn", "không đủ thuốc", "tiếng súng",
-        "bệnh viện dã chiến", "quá tải",
-        "hàng chục", "hàng trăm", "thiệt hại",
-    ]) {
+    if contains_any(
+        lower,
+        &[
+            "thiệt mạng",
+            "tử vong",
+            "hi sinh",
+            "mất mạng",
+            "giao tranh",
+            "bùng phát",
+            "tấn công",
+            "lực lượng vũ trang",
+            "bốc cháy",
+            "chạy loạn",
+            "không đủ thuốc",
+            "tiếng súng",
+            "bệnh viện dã chiến",
+            "quá tải",
+            "hàng chục",
+            "hàng trăm",
+            "thiệt hại",
+        ],
+    ) {
         return EmotionTag::new(-0.75, 0.85, 0.2, 0.85);
     }
 
     // Nỗi đau / mất mát
-    if contains_any(lower, &[
-        "hoang tàn", "người thân ra đi", "cướp đi tất cả",
-        "không bao giờ đói", "mảnh đất đỏ",
-        "rời bỏ nhà", "đêm tối", "bóng đêm",
-        "trẻ em khóc", "người già",
-    ]) {
+    if contains_any(
+        lower,
+        &[
+            "hoang tàn",
+            "người thân ra đi",
+            "cướp đi tất cả",
+            "không bao giờ đói",
+            "mảnh đất đỏ",
+            "rời bỏ nhà",
+            "đêm tối",
+            "bóng đêm",
+            "trẻ em khóc",
+            "người già",
+        ],
+    ) {
         return EmotionTag::new(-0.55, 0.60, 0.3, 0.70);
     }
 
     // Quyết tâm / hy vọng dù khó khăn
-    if contains_any(lower, &[
-        "thề rằng", "dù trời có sập", "sẽ không bao giờ",
-        "bàn tay nắm chặt",
-    ]) {
+    if contains_any(
+        lower,
+        &[
+            "thề rằng",
+            "dù trời có sập",
+            "sẽ không bao giờ",
+            "bàn tay nắm chặt",
+        ],
+    ) {
         return EmotionTag::new(0.25, 0.70, 0.80, 0.75);
     }
 
     // Vẻ đẹp / quyến rũ
-    if contains_any(lower, &[
-        "vẻ quyến rũ", "lấp lánh", "khuôn mặt thanh tú",
-        "trái tim rung động", "đôi mắt",
-    ]) {
+    if contains_any(
+        lower,
+        &[
+            "vẻ quyến rũ",
+            "lấp lánh",
+            "khuôn mặt thanh tú",
+            "trái tim rung động",
+            "đôi mắt",
+        ],
+    ) {
         return EmotionTag::new(0.55, 0.55, 0.60, 0.60);
     }
 
@@ -325,7 +374,9 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
 
-    fn reader() -> BookReader { BookReader::new() }
+    fn reader() -> BookReader {
+        BookReader::new()
+    }
 
     // ── split_sentences ───────────────────────────────────────────────────────
 
@@ -337,9 +388,8 @@ mod tests {
 
     #[test]
     fn split_tieng_viet() {
-        let sents = split_sentences(
-            "Hôm nay tôi mất việc rồi. Buồn quá! Tôi biết làm sao bây giờ?"
-        );
+        let sents =
+            split_sentences("Hôm nay tôi mất việc rồi. Buồn quá! Tôi biết làm sao bây giờ?");
         assert_eq!(sents.len(), 3);
     }
 
@@ -370,9 +420,7 @@ mod tests {
 
     #[test]
     fn read_emotional_sentence() {
-        let records = reader().read(
-            "Hôm nay tôi mất việc rồi. Buồn quá. Không biết làm sao."
-        );
+        let records = reader().read("Hôm nay tôi mất việc rồi. Buồn quá. Không biết làm sao.");
         let has_negative = records.iter().any(|r| r.emotion.valence < 0.0);
         assert!(has_negative, "Câu buồn phải có valence âm");
     }
@@ -387,12 +435,15 @@ mod tests {
     #[test]
     fn top_significant_sorted() {
         let records = alloc::vec![
-            SentenceRecord::new("Tôi rất vui!".to_string(),
-                EmotionTag::new(0.9, 0.8, 0.7, 0.9)),
-            SentenceRecord::new("Ổn thôi.".to_string(),
-                EmotionTag::new(0.1, 0.2, 0.5, 0.2)),
-            SentenceRecord::new("Buồn quá.".to_string(),
-                EmotionTag::new(-0.8, 0.5, 0.2, 0.7)),
+            SentenceRecord::new(
+                "Tôi rất vui!".to_string(),
+                EmotionTag::new(0.9, 0.8, 0.7, 0.9)
+            ),
+            SentenceRecord::new("Ổn thôi.".to_string(), EmotionTag::new(0.1, 0.2, 0.5, 0.2)),
+            SentenceRecord::new(
+                "Buồn quá.".to_string(),
+                EmotionTag::new(-0.8, 0.5, 0.2, 0.7)
+            ),
         ];
 
         let r = reader();
@@ -400,8 +451,7 @@ mod tests {
         assert_eq!(top.len(), 2);
         // "Tôi rất vui!" hoặc "Buồn quá." phải là top (cả 2 có |V| > 0.3)
         let top_texts: Vec<&str> = top.iter().map(|r| r.text.as_str()).collect();
-        assert!(top_texts.contains(&"Tôi rất vui!") ||
-                top_texts.contains(&"Buồn quá."));
+        assert!(top_texts.contains(&"Tôi rất vui!") || top_texts.contains(&"Buồn quá."));
     }
 
     #[test]
@@ -415,19 +465,19 @@ mod tests {
 
     #[test]
     fn significant_flag_neutral_not() {
-        let r = SentenceRecord::new(
-            "Ok.".to_string(),
-            EmotionTag::new(0.0, 0.2, 0.5, 0.2),
-        );
+        let r = SentenceRecord::new("Ok.".to_string(), EmotionTag::new(0.0, 0.2, 0.5, 0.2));
         assert!(!r.significant, "Neutral → not significant");
     }
 
     #[test]
     fn stats_basic() {
         let records = alloc::vec![
-            SentenceRecord::new("Vui lắm!".to_string(),  EmotionTag::new(0.8, 0.7, 0.6, 0.8)),
-            SentenceRecord::new("Buồn nhỉ.".to_string(), EmotionTag::new(-0.6, 0.4, 0.3, 0.5)),
-            SentenceRecord::new("Ổn.".to_string(),        EmotionTag::new(0.0, 0.2, 0.5, 0.2)),
+            SentenceRecord::new("Vui lắm!".to_string(), EmotionTag::new(0.8, 0.7, 0.6, 0.8)),
+            SentenceRecord::new(
+                "Buồn nhỉ.".to_string(),
+                EmotionTag::new(-0.6, 0.4, 0.3, 0.5)
+            ),
+            SentenceRecord::new("Ổn.".to_string(), EmotionTag::new(0.0, 0.2, 0.5, 0.2)),
         ];
         let r2 = reader();
         let stats = r2.stats(&records);
@@ -446,8 +496,16 @@ mod tests {
         // Ít nhất 1 câu significant: "vui quá" hoặc "buồn lắm"
         // significant = |V| > 0.3 OR A > 0.6
         // "vui quá": word_affect(vui)=0.8, word_affect(quá)=0.0 → avg=0.4 > 0.3 ✓
-        let any_sig = records.iter().any(|r| r.emotion.valence.abs() > 0.15 || r.emotion.arousal > 0.5);
-        assert!(any_sig, "Ít nhất 1 câu significant: {:?}",
-            records.iter().map(|r| (r.text.as_str(), r.emotion.valence)).collect::<alloc::vec::Vec<_>>());
+        let any_sig = records
+            .iter()
+            .any(|r| r.emotion.valence.abs() > 0.15 || r.emotion.arousal > 0.5);
+        assert!(
+            any_sig,
+            "Ít nhất 1 câu significant: {:?}",
+            records
+                .iter()
+                .map(|r| (r.text.as_str(), r.emotion.valence))
+                .collect::<alloc::vec::Vec<_>>()
+        );
     }
 }

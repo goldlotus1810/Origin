@@ -21,12 +21,12 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use olang::molecular::MolecularChain;
 use olang::encoder::encode_codepoint;
 use olang::lca::{lca, lca_many};
+use olang::molecular::MolecularChain;
 use silk::edge::EmotionTag;
 
-use crate::skill::{Skill, SkillResult, ExecContext};
+use crate::skill::{ExecContext, Skill, SkillResult};
 
 // ═════════════════════════════════════════════════════════════════════════════
 // LeoAI Skills — Knowledge Processing
@@ -42,7 +42,9 @@ use crate::skill::{Skill, SkillResult, ExecContext};
 pub struct IngestSkill;
 
 impl Skill for IngestSkill {
-    fn name(&self) -> &str { "Ingest" }
+    fn name(&self) -> &str {
+        "Ingest"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         let text = match ctx.get("text") {
@@ -50,7 +52,8 @@ impl Skill for IngestSkill {
             None => return SkillResult::Insufficient,
         };
 
-        let chains: Vec<MolecularChain> = text.chars()
+        let chains: Vec<MolecularChain> = text
+            .chars()
             .filter(|c| !c.is_whitespace() && !c.is_ascii_punctuation())
             .take(64)
             .map(|c| encode_codepoint(c as u32))
@@ -63,7 +66,10 @@ impl Skill for IngestSkill {
 
         let chain = lca_many(&chains);
         ctx.push_output(chain.clone());
-        ctx.set(String::from("ingested_count"), alloc::format!("{}", chains.len()));
+        ctx.set(
+            String::from("ingested_count"),
+            alloc::format!("{}", chains.len()),
+        );
 
         SkillResult::Ok {
             chain,
@@ -84,7 +90,9 @@ impl Skill for IngestSkill {
 pub struct SimilaritySkill;
 
 impl Skill for SimilaritySkill {
-    fn name(&self) -> &str { "Similarity" }
+    fn name(&self) -> &str {
+        "Similarity"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.len() < 2 {
@@ -122,7 +130,9 @@ impl Skill for SimilaritySkill {
 pub struct DeltaSkill;
 
 impl Skill for DeltaSkill {
-    fn name(&self) -> &str { "Delta" }
+    fn name(&self) -> &str {
+        "Delta"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.len() < 2 {
@@ -135,15 +145,19 @@ impl Skill for DeltaSkill {
 
         // Delta = molecules in A not in common
         let common_mols: Vec<_> = common.0.to_vec();
-        let delta_mols: Vec<_> = a.0.iter()
-            .filter(|m| !common_mols.contains(m))
-            .cloned()
-            .collect();
+        let delta_mols: Vec<_> =
+            a.0.iter()
+                .filter(|m| !common_mols.contains(m))
+                .cloned()
+                .collect();
 
         let delta_count = delta_mols.len();
         let delta_chain = MolecularChain(delta_mols);
 
-        ctx.set(String::from("delta_count"), alloc::format!("{}", delta_count));
+        ctx.set(
+            String::from("delta_count"),
+            alloc::format!("{}", delta_count),
+        );
         ctx.push_output(delta_chain.clone());
 
         SkillResult::Ok {
@@ -165,14 +179,17 @@ impl Skill for DeltaSkill {
 pub struct ClusterSkill;
 
 impl Skill for ClusterSkill {
-    fn name(&self) -> &str { "Cluster" }
+    fn name(&self) -> &str {
+        "Cluster"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.len() < 2 {
             return SkillResult::Insufficient;
         }
 
-        let threshold: f32 = ctx.get("cluster_threshold")
+        let threshold: f32 = ctx
+            .get("cluster_threshold")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.3);
 
@@ -181,14 +198,20 @@ impl Skill for ClusterSkill {
         let mut assigned = alloc::vec![false; ctx.input_chains.len()];
 
         for i in 0..ctx.input_chains.len() {
-            if assigned[i] { continue; }
+            if assigned[i] {
+                continue;
+            }
             let mut cluster = alloc::vec![i];
             assigned[i] = true;
 
             for (j, is_assigned) in assigned.iter_mut().enumerate().skip(i + 1) {
-                if *is_assigned { continue; }
+                if *is_assigned {
+                    continue;
+                }
                 let merged = lca(&ctx.input_chains[i], &ctx.input_chains[j]);
-                let max_len = ctx.input_chains[i].0.len()
+                let max_len = ctx.input_chains[i]
+                    .0
+                    .len()
                     .max(ctx.input_chains[j].0.len())
                     .max(1);
                 let sim = merged.0.len() as f32 / max_len as f32;
@@ -202,7 +225,8 @@ impl Skill for ClusterSkill {
 
         // Output: LCA per cluster
         for cluster in &clusters {
-            let chains: Vec<MolecularChain> = cluster.iter()
+            let chains: Vec<MolecularChain> = cluster
+                .iter()
                 .map(|&idx| ctx.input_chains[idx].clone())
                 .collect();
             let representative = lca_many(&chains);
@@ -237,7 +261,9 @@ impl Skill for ClusterSkill {
 pub struct CuratorSkill;
 
 impl Skill for CuratorSkill {
-    fn name(&self) -> &str { "Curator" }
+    fn name(&self) -> &str {
+        "Curator"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.is_empty() {
@@ -247,7 +273,10 @@ impl Skill for CuratorSkill {
         let mut sorted = ctx.input_chains.clone();
         sorted.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
-        ctx.set(String::from("curated_count"), alloc::format!("{}", sorted.len()));
+        ctx.set(
+            String::from("curated_count"),
+            alloc::format!("{}", sorted.len()),
+        );
 
         let best = sorted[0].clone();
         for chain in sorted {
@@ -270,7 +299,9 @@ impl Skill for CuratorSkill {
 pub struct MergeSkill;
 
 impl Skill for MergeSkill {
-    fn name(&self) -> &str { "Merge" }
+    fn name(&self) -> &str {
+        "Merge"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.is_empty() {
@@ -279,7 +310,10 @@ impl Skill for MergeSkill {
 
         let merged = lca_many(&ctx.input_chains);
         ctx.push_output(merged.clone());
-        ctx.set(String::from("merged_from"), alloc::format!("{}", ctx.input_chains.len()));
+        ctx.set(
+            String::from("merged_from"),
+            alloc::format!("{}", ctx.input_chains.len()),
+        );
 
         SkillResult::Ok {
             chain: merged,
@@ -299,19 +333,24 @@ impl Skill for MergeSkill {
 pub struct PruneSkill;
 
 impl Skill for PruneSkill {
-    fn name(&self) -> &str { "Prune" }
+    fn name(&self) -> &str {
+        "Prune"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.is_empty() {
             return SkillResult::Insufficient;
         }
 
-        let min_len: usize = ctx.get("prune_min_len")
+        let min_len: usize = ctx
+            .get("prune_min_len")
             .and_then(|s| s.parse().ok())
             .unwrap_or(2);
 
         let before = ctx.input_chains.len();
-        let kept: Vec<MolecularChain> = ctx.input_chains.iter()
+        let kept: Vec<MolecularChain> = ctx
+            .input_chains
+            .iter()
             .filter(|c| c.0.len() >= min_len)
             .cloned()
             .collect();
@@ -319,7 +358,10 @@ impl Skill for PruneSkill {
 
         ctx.set(String::from("pruned_count"), alloc::format!("{}", pruned));
 
-        let best = kept.first().cloned().unwrap_or_else(|| MolecularChain(Vec::new()));
+        let best = kept
+            .first()
+            .cloned()
+            .unwrap_or_else(|| MolecularChain(Vec::new()));
         for chain in kept {
             ctx.push_output(chain);
         }
@@ -343,31 +385,39 @@ impl Skill for PruneSkill {
 pub struct HebbianSkill;
 
 impl Skill for HebbianSkill {
-    fn name(&self) -> &str { "Hebbian" }
+    fn name(&self) -> &str {
+        "Hebbian"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.len() < 2 {
             return SkillResult::Insufficient;
         }
 
-        let current_weight: f32 = ctx.get("current_weight")
+        let current_weight: f32 = ctx
+            .get("current_weight")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
 
         let reward = ctx.current_emotion.intensity;
         let new_weight = silk::hebbian::hebbian_strengthen(current_weight, reward);
 
-        ctx.set(String::from("new_weight"), alloc::format!("{:.4}", new_weight));
+        ctx.set(
+            String::from("new_weight"),
+            alloc::format!("{:.4}", new_weight),
+        );
 
         // Check promotion
-        let fire_count: u32 = ctx.get("fire_count")
+        let fire_count: u32 = ctx
+            .get("fire_count")
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
-        let depth: usize = ctx.get("depth")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let depth: usize = ctx.get("depth").and_then(|s| s.parse().ok()).unwrap_or(0);
         let should_promote = silk::hebbian::should_promote(new_weight, fire_count, depth);
-        ctx.set(String::from("should_promote"), alloc::format!("{}", should_promote));
+        ctx.set(
+            String::from("should_promote"),
+            alloc::format!("{}", should_promote),
+        );
 
         let chain = lca(&ctx.input_chains[0], &ctx.input_chains[1]);
         ctx.push_output(chain.clone());
@@ -392,7 +442,9 @@ impl Skill for HebbianSkill {
 pub struct DreamSkill;
 
 impl Skill for DreamSkill {
-    fn name(&self) -> &str { "Dream" }
+    fn name(&self) -> &str {
+        "Dream"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.len() < 2 {
@@ -400,12 +452,22 @@ impl Skill for DreamSkill {
         }
 
         // α=0.3 (frequency), β=0.4 (connectivity), γ=0.3 (emotion)
-        let alpha: f32 = ctx.get("dream_alpha").and_then(|s| s.parse().ok()).unwrap_or(0.3);
-        let beta: f32 = ctx.get("dream_beta").and_then(|s| s.parse().ok()).unwrap_or(0.4);
-        let gamma: f32 = ctx.get("dream_gamma").and_then(|s| s.parse().ok()).unwrap_or(0.3);
+        let alpha: f32 = ctx
+            .get("dream_alpha")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.3);
+        let beta: f32 = ctx
+            .get("dream_beta")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.4);
+        let gamma: f32 = ctx
+            .get("dream_gamma")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.3);
 
         let frequency = ctx.input_chains.len() as f32 / 10.0; // normalize
-        let connectivity: f32 = ctx.get("connectivity")
+        let connectivity: f32 = ctx
+            .get("connectivity")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.5);
         let emotion_intensity = ctx.current_emotion.intensity;
@@ -414,7 +476,10 @@ impl Skill for DreamSkill {
         let qualified = score >= 0.5;
 
         ctx.set(String::from("dream_score"), alloc::format!("{:.3}", score));
-        ctx.set(String::from("dream_qualified"), alloc::format!("{}", qualified));
+        ctx.set(
+            String::from("dream_qualified"),
+            alloc::format!("{}", qualified),
+        );
 
         let merged = lca_many(&ctx.input_chains);
         ctx.push_output(merged.clone());
@@ -438,14 +503,17 @@ impl Skill for DreamSkill {
 pub struct ProposalSkill;
 
 impl Skill for ProposalSkill {
-    fn name(&self) -> &str { "Proposal" }
+    fn name(&self) -> &str {
+        "Proposal"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         if ctx.input_chains.is_empty() {
             return SkillResult::Insufficient;
         }
 
-        let qualified = ctx.get("dream_qualified")
+        let qualified = ctx
+            .get("dream_qualified")
             .map(|s| s == "true")
             .unwrap_or(false);
 
@@ -483,7 +551,9 @@ impl Skill for ProposalSkill {
 pub struct SensorSkill;
 
 impl Skill for SensorSkill {
-    fn name(&self) -> &str { "Sensor" }
+    fn name(&self) -> &str {
+        "Sensor"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         let value: f32 = match ctx.get("sensor_value").and_then(|s| s.parse().ok()) {
@@ -494,15 +564,25 @@ impl Skill for SensorSkill {
         // Map sensor value → unicode codepoint range
         // Temperature: 0x2600..0x2604 (weather symbols)
         // Default: 0x25CF (●)
-        let unit: u8 = ctx.get("sensor_unit")
+        let unit: u8 = ctx
+            .get("sensor_unit")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0xFF);
 
         let cp = match unit {
-            0x01 => { // Temperature → thermometer ↔ snowflake
-                if value > 30.0 { 0x2600 } // ☀
-                else if value < 10.0 { 0x2744 } // ❄
-                else { 0x25CF } // ●
+            0x01 => {
+                // Temperature → thermometer ↔ snowflake
+                if value > 30.0 {
+                    0x2600
+                }
+                // ☀
+                else if value < 10.0 {
+                    0x2744
+                }
+                // ❄
+                else {
+                    0x25CF
+                } // ●
             }
             0x04 => 0x27A1, // Motion → ➡
             0x05 => 0x266B, // Sound → ♫
@@ -514,12 +594,21 @@ impl Skill for SensorSkill {
 
         // Emotion from sensor context
         let emotion = if !(5.0..=35.0).contains(&value) {
-            EmotionTag { valence: -0.30, arousal: 0.65, dominance: 0.30, intensity: 0.55 }
+            EmotionTag {
+                valence: -0.30,
+                arousal: 0.65,
+                dominance: 0.30,
+                intensity: 0.55,
+            }
         } else {
             EmotionTag::NEUTRAL
         };
 
-        SkillResult::Ok { chain, emotion, note: alloc::format!("sensor u={:#04x} v={:.1}", unit, value) }
+        SkillResult::Ok {
+            chain,
+            emotion,
+            note: alloc::format!("sensor u={:#04x} v={:.1}", unit, value),
+        }
     }
 }
 
@@ -534,14 +623,17 @@ impl Skill for SensorSkill {
 pub struct ActuatorSkill;
 
 impl Skill for ActuatorSkill {
-    fn name(&self) -> &str { "Actuator" }
+    fn name(&self) -> &str {
+        "Actuator"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         let cmd: u8 = match ctx.get("actuator_cmd").and_then(|s| s.parse().ok()) {
             Some(c) => c,
             None => return SkillResult::Insufficient,
         };
-        let value: u8 = ctx.get("actuator_value")
+        let value: u8 = ctx
+            .get("actuator_value")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
@@ -552,7 +644,10 @@ impl Skill for ActuatorSkill {
         ctx.push_output(chain.clone());
 
         ctx.set(String::from("actuator_executed"), String::from("true"));
-        ctx.set(String::from("actuator_status"), alloc::format!("cmd={:#04x} val={:#04x}", cmd, value));
+        ctx.set(
+            String::from("actuator_status"),
+            alloc::format!("cmd={:#04x} val={:#04x}", cmd, value),
+        );
 
         SkillResult::Ok {
             chain,
@@ -573,14 +668,18 @@ impl Skill for ActuatorSkill {
 pub struct SecuritySkill;
 
 impl Skill for SecuritySkill {
-    fn name(&self) -> &str { "Security" }
+    fn name(&self) -> &str {
+        "Security"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
-        let locked = ctx.get("security_locked")
+        let locked = ctx
+            .get("security_locked")
             .map(|s| s == "true")
             .unwrap_or(false);
 
-        let auth_level: u8 = ctx.get("auth_level")
+        let auth_level: u8 = ctx
+            .get("auth_level")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
@@ -591,7 +690,12 @@ impl Skill for SecuritySkill {
             ctx.push_output(chain.clone());
             return SkillResult::Ok {
                 chain,
-                emotion: EmotionTag { valence: -0.50, arousal: 0.80, dominance: 0.70, intensity: 0.65 },
+                emotion: EmotionTag {
+                    valence: -0.50,
+                    arousal: 0.80,
+                    dominance: 0.70,
+                    intensity: 0.65,
+                },
                 note: String::from("access denied"),
             };
         }
@@ -619,7 +723,9 @@ impl Skill for SecuritySkill {
 pub struct NetworkSkill;
 
 impl Skill for NetworkSkill {
-    fn name(&self) -> &str { "Network" }
+    fn name(&self) -> &str {
+        "Network"
+    }
 
     fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
         let anomaly: f32 = match ctx.get("anomaly_score").and_then(|s| s.parse().ok()) {
@@ -646,8 +752,18 @@ impl Skill for NetworkSkill {
         ctx.push_output(chain.clone());
 
         let emotion = match alert_level {
-            "critical" => EmotionTag { valence: -0.70, arousal: 0.95, dominance: 0.20, intensity: 0.90 },
-            "elevated" => EmotionTag { valence: -0.30, arousal: 0.65, dominance: 0.35, intensity: 0.55 },
+            "critical" => EmotionTag {
+                valence: -0.70,
+                arousal: 0.95,
+                dominance: 0.20,
+                intensity: 0.90,
+            },
+            "elevated" => EmotionTag {
+                valence: -0.30,
+                arousal: 0.65,
+                dominance: 0.35,
+                intensity: 0.55,
+            },
             _ => EmotionTag::NEUTRAL,
         };
 
@@ -795,9 +911,16 @@ mod tests {
     #[test]
     fn hebbian_strengthens() {
         let skill = HebbianSkill;
-        let mut ctx = ExecContext::new(1000,
-            EmotionTag { valence: 0.0, arousal: 0.5, dominance: 0.5, intensity: 0.8 },
-            0.0);
+        let mut ctx = ExecContext::new(
+            1000,
+            EmotionTag {
+                valence: 0.0,
+                arousal: 0.5,
+                dominance: 0.5,
+                intensity: 0.8,
+            },
+            0.0,
+        );
         ctx.push_input(sample_chain());
         ctx.push_input(sample_chain_b());
         ctx.set(String::from("current_weight"), String::from("0.3"));
@@ -812,9 +935,16 @@ mod tests {
     #[test]
     fn dream_scores_cluster() {
         let skill = DreamSkill;
-        let mut ctx = ExecContext::new(1000,
-            EmotionTag { valence: 0.0, arousal: 0.5, dominance: 0.5, intensity: 0.7 },
-            0.0);
+        let mut ctx = ExecContext::new(
+            1000,
+            EmotionTag {
+                valence: 0.0,
+                arousal: 0.5,
+                dominance: 0.5,
+                intensity: 0.7,
+            },
+            0.0,
+        );
         // 5 chains = frequency 0.5 normalized
         for _ in 0..5 {
             ctx.push_input(sample_chain());
@@ -962,16 +1092,28 @@ mod tests {
         // But they don't know about each other — only through ExecContext state
         let dream = DreamSkill;
         let proposal = ProposalSkill;
-        let mut ctx = ExecContext::new(1000,
-            EmotionTag { valence: 0.0, arousal: 0.5, dominance: 0.5, intensity: 0.8 },
-            0.0);
-        for _ in 0..5 { ctx.push_input(sample_chain()); }
+        let mut ctx = ExecContext::new(
+            1000,
+            EmotionTag {
+                valence: 0.0,
+                arousal: 0.5,
+                dominance: 0.5,
+                intensity: 0.8,
+            },
+            0.0,
+        );
+        for _ in 0..5 {
+            ctx.push_input(sample_chain());
+        }
         ctx.set(String::from("connectivity"), String::from("0.9"));
 
         // Dream evaluates
         let _ = dream.execute(&mut ctx);
         // Check if qualified
-        let qualified = ctx.get("dream_qualified").map(|s| s == "true").unwrap_or(false);
+        let qualified = ctx
+            .get("dream_qualified")
+            .map(|s| s == "true")
+            .unwrap_or(false);
 
         if qualified {
             // Reset inputs for proposal

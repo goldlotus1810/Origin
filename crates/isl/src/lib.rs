@@ -16,6 +16,6 @@
 extern crate alloc;
 
 pub mod address;
-pub mod message;
 pub mod codec;
+pub mod message;
 pub mod queue;

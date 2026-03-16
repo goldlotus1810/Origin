@@ -29,7 +29,12 @@ pub enum InputEvent {
     /// Cuộn chuột
     Scroll { delta: i16 },
     /// Touch screen (x, y, pressure, finger_id)
-    Touch { x: u16, y: u16, pressure: u8, finger: u8 },
+    Touch {
+        x: u16,
+        y: u16,
+        pressure: u8,
+        finger: u8,
+    },
     /// Touch kết thúc
     TouchEnd { finger: u8 },
     /// Gesture (pinch, swipe, rotate)
@@ -280,11 +285,17 @@ pub struct MockKeyboard {
 impl MockKeyboard {
     /// PC keyboard.
     pub fn pc() -> Self {
-        Self { events: Vec::new(), layout_name: String::from("us") }
+        Self {
+            events: Vec::new(),
+            layout_name: String::from("us"),
+        }
     }
     /// Mobile soft keyboard.
     pub fn mobile() -> Self {
-        Self { events: Vec::new(), layout_name: String::from("vn_telex") }
+        Self {
+            events: Vec::new(),
+            layout_name: String::from("vn_telex"),
+        }
     }
 }
 
@@ -308,7 +319,10 @@ impl MockDisplay {
     pub fn pc_1080p() -> Self {
         Self {
             display: DisplayInfo {
-                width: 1920, height: 1080, dpi: 96, refresh_hz: 60,
+                width: 1920,
+                height: 1080,
+                dpi: 96,
+                refresh_hz: 60,
                 kind: DisplayKind::Lcd,
             },
         }
@@ -317,7 +331,10 @@ impl MockDisplay {
     pub fn smartphone_oled() -> Self {
         Self {
             display: DisplayInfo {
-                width: 1080, height: 2400, dpi: 420, refresh_hz: 120,
+                width: 1080,
+                height: 2400,
+                dpi: 420,
+                refresh_hz: 120,
                 kind: DisplayKind::Oled,
             },
         }
@@ -326,7 +343,10 @@ impl MockDisplay {
     pub fn led_matrix() -> Self {
         Self {
             display: DisplayInfo {
-                width: 16, height: 8, dpi: 1, refresh_hz: 30,
+                width: 16,
+                height: 8,
+                dpi: 1,
+                refresh_hz: 30,
                 kind: DisplayKind::LedMatrix,
             },
         }
@@ -335,7 +355,10 @@ impl MockDisplay {
     pub fn terminal() -> Self {
         Self {
             display: DisplayInfo {
-                width: 80, height: 24, dpi: 0, refresh_hz: 0,
+                width: 80,
+                height: 24,
+                dpi: 0,
+                refresh_hz: 0,
                 kind: DisplayKind::Terminal,
             },
         }
@@ -343,11 +366,16 @@ impl MockDisplay {
 }
 
 impl DisplayDriver for MockDisplay {
-    fn info(&self) -> DisplayInfo { self.display.clone() }
+    fn info(&self) -> DisplayInfo {
+        self.display.clone()
+    }
     fn write_text(&self, _row: u16, _col: u16, _text: &str) {}
     fn clear(&self) {}
     fn supports_graphics(&self) -> bool {
-        !matches!(self.display.kind, DisplayKind::Terminal | DisplayKind::LedMatrix | DisplayKind::None)
+        !matches!(
+            self.display.kind,
+            DisplayKind::Terminal | DisplayKind::LedMatrix | DisplayKind::None
+        )
     }
 }
 
@@ -360,17 +388,35 @@ pub struct MockAccel {
 impl MockAccel {
     /// Stationary (gravity only: z = 9.8)
     pub fn stationary() -> Self {
-        Self { reading: AccelReading { x: 0.0, y: 0.0, z: 9.8, ts: 0 } }
+        Self {
+            reading: AccelReading {
+                x: 0.0,
+                y: 0.0,
+                z: 9.8,
+                ts: 0,
+            },
+        }
     }
     /// Shaking
     pub fn shaking() -> Self {
-        Self { reading: AccelReading { x: 5.0, y: -3.0, z: 12.0, ts: 0 } }
+        Self {
+            reading: AccelReading {
+                x: 5.0,
+                y: -3.0,
+                z: 12.0,
+                ts: 0,
+            },
+        }
     }
 }
 
 impl AccelDriver for MockAccel {
-    fn read(&self) -> Option<AccelReading> { Some(self.reading) }
-    fn sample_rate(&self) -> u16 { 100 }
+    fn read(&self) -> Option<AccelReading> {
+        Some(self.reading)
+    }
+    fn sample_rate(&self) -> u16 {
+        100
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -448,7 +494,10 @@ mod tests {
 
     #[test]
     fn input_event_key() {
-        let ev = InputEvent::Key { code: 0x1B, pressed: true }; // ESC
+        let ev = InputEvent::Key {
+            code: 0x1B,
+            pressed: true,
+        }; // ESC
         match ev {
             InputEvent::Key { code, pressed } => {
                 assert_eq!(code, 0x1B);
@@ -460,9 +509,19 @@ mod tests {
 
     #[test]
     fn input_event_touch() {
-        let ev = InputEvent::Touch { x: 540, y: 1200, pressure: 128, finger: 0 };
+        let ev = InputEvent::Touch {
+            x: 540,
+            y: 1200,
+            pressure: 128,
+            finger: 0,
+        };
         match ev {
-            InputEvent::Touch { x, y, pressure, finger } => {
+            InputEvent::Touch {
+                x,
+                y,
+                pressure,
+                finger,
+            } => {
                 assert_eq!(x, 540);
                 assert_eq!(y, 1200);
                 assert_eq!(pressure, 128);
@@ -484,8 +543,11 @@ mod tests {
     #[test]
     fn gps_location_struct() {
         let loc = GpsLocation {
-            lat: 10.762622, lon: 106.660172, alt: 10.0,
-            accuracy: 5.0, ts: 1000,
+            lat: 10.762622,
+            lon: 106.660172,
+            alt: 10.0,
+            accuracy: 5.0,
+            ts: 1000,
         };
         assert!((loc.lat - 10.762622).abs() < 0.0001);
         assert!((loc.lon - 106.660172).abs() < 0.0001);
@@ -493,13 +555,20 @@ mod tests {
 
     #[test]
     fn proximity_near() {
-        let prox = ProximityReading { distance_cm: 0.5, is_near: true, ts: 1000 };
+        let prox = ProximityReading {
+            distance_cm: 0.5,
+            is_near: true,
+            ts: 1000,
+        };
         assert!(prox.is_near);
     }
 
     #[test]
     fn light_reading() {
-        let light = LightReading { lux: 500.0, ts: 1000 };
+        let light = LightReading {
+            lux: 500.0,
+            ts: 1000,
+        };
         assert_eq!(light.lux, 500.0);
     }
 }

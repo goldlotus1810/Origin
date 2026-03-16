@@ -12,7 +12,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::arch::PlatformProfile;
-use crate::platform::{HalPlatform, DeviceStatus};
+use crate::platform::{DeviceStatus, HalPlatform};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ProbeStatus — trạng thái probe tổng hợp
@@ -39,13 +39,13 @@ pub enum ProbeStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VulnerabilitySeverity {
     /// Thông tin (không nguy hiểm)
-    Info    = 0,
+    Info = 0,
     /// Cảnh báo nhẹ
-    Low     = 1,
+    Low = 1,
     /// Trung bình
-    Medium  = 2,
+    Medium = 2,
     /// Cao — cần xử lý
-    High    = 3,
+    High = 3,
     /// Nghiêm trọng — cần xử lý ngay
     Critical = 4,
 }
@@ -110,7 +110,9 @@ pub struct ProbeResult {
 impl ProbeResult {
     /// Có vấn đề nghiêm trọng không.
     pub fn has_critical(&self) -> bool {
-        self.vulnerabilities.iter().any(|v| v.severity >= VulnerabilitySeverity::High)
+        self.vulnerabilities
+            .iter()
+            .any(|v| v.severity >= VulnerabilitySeverity::High)
     }
 
     /// Tổng số lỗ hổng.
@@ -199,7 +201,11 @@ impl SystemProbe {
                     vulnerabilities.push(VulnerabilityReport {
                         severity: VulnerabilitySeverity::Low,
                         category: VulnerabilityCategory::DeviceUnresponsive,
-                        description: alloc::format!("Thiết bị không xác định: {} ({})", dev.name, dev.id),
+                        description: alloc::format!(
+                            "Thiết bị không xác định: {} ({})",
+                            dev.name,
+                            dev.id
+                        ),
                         recommendation: String::from("Probe lại sau hoặc kiểm tra driver"),
                         component: dev.id.clone(),
                     });
@@ -223,10 +229,15 @@ impl SystemProbe {
         }
 
         // Determine overall status
-        let status = if vulnerabilities.iter().any(|v| v.severity >= VulnerabilitySeverity::Critical) {
+        let status = if vulnerabilities
+            .iter()
+            .any(|v| v.severity >= VulnerabilitySeverity::Critical)
+        {
             ProbeStatus::Critical
         } else if devices_error > 0
-            || vulnerabilities.iter().any(|v| v.severity >= VulnerabilitySeverity::High)
+            || vulnerabilities
+                .iter()
+                .any(|v| v.severity >= VulnerabilitySeverity::High)
         {
             ProbeStatus::Warning
         } else {
@@ -276,7 +287,9 @@ mod tests {
         let platform = MockPlatform::esp32();
         let result = SystemProbe::scan(&platform, 1000);
         // ESP32 (Xtensa) không có crypto extension
-        let has_crypto_warn = result.vulnerabilities.iter()
+        let has_crypto_warn = result
+            .vulnerabilities
+            .iter()
             .any(|v| v.category == VulnerabilityCategory::WeakConfig);
         assert!(has_crypto_warn, "ESP32 phải cảnh báo no crypto");
     }

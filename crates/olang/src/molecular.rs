@@ -19,21 +19,21 @@ use alloc::vec::Vec;
 #[repr(u8)]
 pub enum ShapeBase {
     /// ● U+25CF Sphere
-    Sphere    = 0x01,
+    Sphere = 0x01,
     /// ▬ U+25AC Capsule
-    Capsule   = 0x02,
+    Capsule = 0x02,
     /// ■ U+25A0 Box
-    Box       = 0x03,
+    Box = 0x03,
     /// ▲ U+25B2 Cone
-    Cone      = 0x04,
+    Cone = 0x04,
     /// ○ U+25CB Torus
-    Torus     = 0x05,
+    Torus = 0x05,
     /// ∪ U+222A Union
-    Union     = 0x06,
+    Union = 0x06,
     /// ∩ U+2229 Intersect
     Intersect = 0x07,
     /// ∖ U+2216 Subtract
-    Subtract  = 0x08,
+    Subtract = 0x08,
 }
 
 impl ShapeBase {
@@ -48,12 +48,14 @@ impl ShapeBase {
             0x06 => Some(Self::Union),
             0x07 => Some(Self::Intersect),
             0x08 => Some(Self::Subtract),
-            _    => None,
+            _ => None,
         }
     }
 
     /// Byte value.
-    pub fn as_byte(self) -> u8 { self as u8 }
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 /// Chiều quan hệ — từ RELATION group (Math Operators 2200..22FF).
@@ -61,19 +63,19 @@ impl ShapeBase {
 #[repr(u8)]
 pub enum RelationBase {
     /// ∈ U+2208 Member
-    Member      = 0x01,
+    Member = 0x01,
     /// ⊂ U+2282 Subset
-    Subset      = 0x02,
+    Subset = 0x02,
     /// ≡ U+2261 Equiv
-    Equiv       = 0x03,
+    Equiv = 0x03,
     /// ⊥ U+22A5 Orthogonal
-    Orthogonal  = 0x04,
+    Orthogonal = 0x04,
     /// ∘ U+2218 Compose
-    Compose     = 0x05,
+    Compose = 0x05,
     /// → U+2192 Causes
-    Causes      = 0x06,
+    Causes = 0x06,
     /// ≈ U+2248 Similar
-    Similar     = 0x07,
+    Similar = 0x07,
     /// ← U+2190 DerivedFrom
     DerivedFrom = 0x08,
 }
@@ -90,12 +92,14 @@ impl RelationBase {
             0x06 => Some(Self::Causes),
             0x07 => Some(Self::Similar),
             0x08 => Some(Self::DerivedFrom),
-            _    => None,
+            _ => None,
         }
     }
 
     /// Byte value.
-    pub fn as_byte(self) -> u8 { self as u8 }
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 /// Chiều cảm xúc — từ EMOTICON group (fill level + dynamics).
@@ -109,7 +113,10 @@ pub struct EmotionDim {
 
 impl EmotionDim {
     /// Trung lập.
-    pub const NEUTRAL: Self = Self { valence: 0x7F, arousal: 0x80 };
+    pub const NEUTRAL: Self = Self {
+        valence: 0x7F,
+        arousal: 0x80,
+    };
 }
 
 /// Chiều thời gian — từ MUSICAL group (note duration).
@@ -117,13 +124,13 @@ impl EmotionDim {
 #[repr(u8)]
 pub enum TimeDim {
     /// 𝅝 Whole note — Largo
-    Static  = 0x01,
+    Static = 0x01,
     /// 𝅗 Half note — Adagio
-    Slow    = 0x02,
+    Slow = 0x02,
     /// ♩ Quarter note — Andante
-    Medium  = 0x03,
+    Medium = 0x03,
     /// ♪ Eighth note — Allegro
-    Fast    = 0x04,
+    Fast = 0x04,
     /// 16th note — Presto
     Instant = 0x05,
 }
@@ -137,12 +144,14 @@ impl TimeDim {
             0x03 => Some(Self::Medium),
             0x04 => Some(Self::Fast),
             0x05 => Some(Self::Instant),
-            _    => None,
+            _ => None,
         }
     }
 
     /// Byte value.
-    pub fn as_byte(self) -> u8 { self as u8 }
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,13 +167,13 @@ impl TimeDim {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Molecule {
     /// Chiều hình dạng (Shape byte)
-    pub shape:    ShapeBase,
+    pub shape: ShapeBase,
     /// Chiều quan hệ (Relation byte)
     pub relation: RelationBase,
     /// Chiều cảm xúc (Valence + Arousal bytes)
-    pub emotion:  EmotionDim,
+    pub emotion: EmotionDim,
     /// Chiều thời gian (Time byte)
-    pub time:     TimeDim,
+    pub time: TimeDim,
 }
 
 impl Molecule {
@@ -182,25 +191,38 @@ impl Molecule {
     /// Deserialize từ 5 bytes.
     pub fn from_bytes(b: &[u8; 5]) -> Option<Self> {
         Some(Self {
-            shape:    ShapeBase::from_byte(b[0])?,
+            shape: ShapeBase::from_byte(b[0])?,
             relation: RelationBase::from_byte(b[1])?,
-            emotion:  EmotionDim { valence: b[2], arousal: b[3] },
-            time:     TimeDim::from_byte(b[4])?,
+            emotion: EmotionDim {
+                valence: b[2],
+                arousal: b[3],
+            },
+            time: TimeDim::from_byte(b[4])?,
         })
     }
 
     /// Điểm tương đồng giữa 2 molecules ∈ [0, 5].
     pub fn match_score(&self, other: &Self) -> u8 {
         let mut s = 0u8;
-        if self.shape    == other.shape    { s += 1; }
-        if self.relation == other.relation { s += 1; }
-        if self.time     == other.time     { s += 1; }
+        if self.shape == other.shape {
+            s += 1;
+        }
+        if self.relation == other.relation {
+            s += 1;
+        }
+        if self.time == other.time {
+            s += 1;
+        }
         // Valence: gần nhau trong [-32, +32] → điểm
         let vd = self.emotion.valence.abs_diff(other.emotion.valence);
-        if vd < 32 { s += 1; }
+        if vd < 32 {
+            s += 1;
+        }
         // Arousal tương tự
         let ad = self.emotion.arousal.abs_diff(other.emotion.arousal);
-        if ad < 32 { s += 1; }
+        if ad < 32 {
+            s += 1;
+        }
         s
     }
 }
@@ -221,19 +243,29 @@ pub struct MolecularChain(pub Vec<Molecule>);
 
 impl MolecularChain {
     /// Chain rỗng.
-    pub fn empty() -> Self { Self(Vec::new()) }
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
 
     /// Chain từ 1 molecule.
-    pub fn single(m: Molecule) -> Self { Self(alloc::vec![m]) }
+    pub fn single(m: Molecule) -> Self {
+        Self(alloc::vec![m])
+    }
 
     /// Số molecules.
-    pub fn len(&self) -> usize { self.0.len() }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 
     /// Chain có rỗng không.
-    pub fn is_empty(&self) -> bool { self.0.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 
     /// Molecule đầu tiên.
-    pub fn first(&self) -> Option<&Molecule> { self.0.first() }
+    pub fn first(&self) -> Option<&Molecule> {
+        self.0.first()
+    }
 
     /// Serialize → bytes (len × 5).
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -246,7 +278,9 @@ impl MolecularChain {
 
     /// Deserialize từ bytes (phải là bội số của 5).
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        if !b.len().is_multiple_of(5) { return None; }
+        if !b.len().is_multiple_of(5) {
+            return None;
+        }
         let mut ms = Vec::with_capacity(b.len() / 5);
         for chunk in b.chunks_exact(5) {
             let arr: [u8; 5] = chunk.try_into().unwrap();
@@ -265,7 +299,9 @@ impl MolecularChain {
     /// Dựa trên structural overlap (shape + relation match).
     /// O(n×m) — chains ngắn trong thực tế (1-10 molecules).
     pub fn similarity(&self, other: &Self) -> f32 {
-        if self.is_empty() || other.is_empty() { return 0.0; }
+        if self.is_empty() || other.is_empty() {
+            return 0.0;
+        }
         let mut overlap = 0usize;
         for a in &self.0 {
             for b in &other.0 {
@@ -282,14 +318,20 @@ impl MolecularChain {
     ///
     /// score = 0.3×shape + 0.2×relation + 0.5×emotion_proximity
     pub fn similarity_full(&self, other: &Self) -> f32 {
-        if self.is_empty() || other.is_empty() { return 0.0; }
+        if self.is_empty() || other.is_empty() {
+            return 0.0;
+        }
         let n = self.0.len().min(other.0.len());
         let mut total = 0.0f32;
         for i in 0..n {
             let a = &self.0[i];
             let b = &other.0[i];
-            let shape_m = if a.shape    == b.shape    { 1.0f32 } else { 0.0 };
-            let rel_m   = if a.relation == b.relation { 1.0f32 } else { 0.0 };
+            let shape_m = if a.shape == b.shape { 1.0f32 } else { 0.0 };
+            let rel_m = if a.relation == b.relation {
+                1.0f32
+            } else {
+                0.0
+            };
             let vd = a.emotion.valence.abs_diff(b.emotion.valence) as f32;
             let ad = a.emotion.arousal.abs_diff(b.emotion.arousal) as f32;
             let emo_sim = 1.0 - (vd + ad) / 510.0;
@@ -306,7 +348,9 @@ impl MolecularChain {
     }
 
     /// Thêm molecule vào cuối.
-    pub fn push(&mut self, m: Molecule) { self.0.push(m); }
+    pub fn push(&mut self, m: Molecule) {
+        self.0.push(m);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,10 +365,13 @@ mod tests {
     /// Production code dùng encoder::encode_codepoint().
     fn test_mol(shape: u8, relation: u8, v: u8, a: u8, t: u8) -> Molecule {
         Molecule {
-            shape:    ShapeBase::from_byte(shape).unwrap(),
+            shape: ShapeBase::from_byte(shape).unwrap(),
             relation: RelationBase::from_byte(relation).unwrap(),
-            emotion:  EmotionDim { valence: v, arousal: a },
-            time:     TimeDim::from_byte(t).unwrap(),
+            emotion: EmotionDim {
+                valence: v,
+                arousal: a,
+            },
+            time: TimeDim::from_byte(t).unwrap(),
         }
     }
 
@@ -431,5 +478,7 @@ mod tests {
 }
 
 impl Default for MolecularChain {
-    fn default() -> Self { MolecularChain::empty() }
+    fn default() -> Self {
+        MolecularChain::empty()
+    }
 }

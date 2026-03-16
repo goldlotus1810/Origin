@@ -4,11 +4,11 @@
 //! Tạo NGAY khi có input — không chờ Dream.
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
-use silk::edge::EmotionTag;
 use crate::emotion::{IntentKind, IntentModifier};
+use silk::edge::EmotionTag;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModalitySource — nguồn input
@@ -34,85 +34,85 @@ pub enum ModalitySource {
 /// Input thô từ người dùng hoặc thiết bị.
 #[derive(Debug, Clone)]
 pub struct RawInput {
-    pub text:         Option<String>,
-    pub modality:     ModalitySource,
-    pub audio_pitch:  Option<f32>,   // Hz
-    pub audio_energy: Option<f32>,   // [0,1]
+    pub text: Option<String>,
+    pub modality: ModalitySource,
+    pub audio_pitch: Option<f32>,  // Hz
+    pub audio_energy: Option<f32>, // [0,1]
     pub image_affect: Option<EmotionTag>,
     pub sensor_value: Option<f32>,
-    pub timestamp:    i64,
+    pub timestamp: i64,
 }
 
 impl RawInput {
     pub fn text(s: &str, ts: i64) -> Self {
         Self {
-            text:         Some(String::from(s)),
-            modality:     ModalitySource::Text,
-            audio_pitch:  None,
+            text: Some(String::from(s)),
+            modality: ModalitySource::Text,
+            audio_pitch: None,
             audio_energy: None,
             image_affect: None,
             sensor_value: None,
-            timestamp:    ts,
+            timestamp: ts,
         }
     }
 
     pub fn audio(pitch: f32, energy: f32, ts: i64) -> Self {
         Self {
-            text:         None,
-            modality:     ModalitySource::Audio,
-            audio_pitch:  Some(pitch),
+            text: None,
+            modality: ModalitySource::Audio,
+            audio_pitch: Some(pitch),
             audio_energy: Some(energy),
             image_affect: None,
             sensor_value: None,
-            timestamp:    ts,
+            timestamp: ts,
         }
     }
 
     pub fn text_with_audio(s: &str, pitch: f32, energy: f32, ts: i64) -> Self {
         Self {
-            text:         Some(String::from(s)),
-            modality:     ModalitySource::Audio,
-            audio_pitch:  Some(pitch),
+            text: Some(String::from(s)),
+            modality: ModalitySource::Audio,
+            audio_pitch: Some(pitch),
             audio_energy: Some(energy),
             image_affect: None,
             sensor_value: None,
-            timestamp:    ts,
+            timestamp: ts,
         }
     }
 
     pub fn sensor(value: f32, ts: i64) -> Self {
         Self {
-            text:         None,
-            modality:     ModalitySource::Sensor,
-            audio_pitch:  None,
+            text: None,
+            modality: ModalitySource::Sensor,
+            audio_pitch: None,
             audio_energy: None,
             image_affect: None,
             sensor_value: Some(value),
-            timestamp:    ts,
+            timestamp: ts,
         }
     }
 
     pub fn image(affect: EmotionTag, ts: i64) -> Self {
         Self {
-            text:         None,
-            modality:     ModalitySource::Image,
-            audio_pitch:  None,
+            text: None,
+            modality: ModalitySource::Image,
+            audio_pitch: None,
             audio_energy: None,
             image_affect: Some(affect),
             sensor_value: None,
-            timestamp:    ts,
+            timestamp: ts,
         }
     }
 
     pub fn system(ts: i64) -> Self {
         Self {
-            text:         None,
-            modality:     ModalitySource::System,
-            audio_pitch:  None,
+            text: None,
+            modality: ModalitySource::System,
+            audio_pitch: None,
             audio_energy: None,
             image_affect: None,
             sensor_value: None,
-            timestamp:    ts,
+            timestamp: ts,
         }
     }
 }
@@ -128,27 +128,27 @@ impl RawInput {
 #[derive(Debug, Clone)]
 pub struct ContextSnapshot {
     /// Turn index trong session
-    pub turn_index:   u32,
+    pub turn_index: u32,
     /// Text thô (nếu có)
-    pub raw_text:     Option<String>,
+    pub raw_text: Option<String>,
     /// phrase_hashes — chain hashes của các phrases
     pub phrase_hashes: Vec<u64>,
     /// EmotionTag tổng hợp
-    pub affect:       EmotionTag,
+    pub affect: EmotionTag,
     /// Intent
-    pub intent:       IntentKind,
+    pub intent: IntentKind,
     /// Modifier
-    pub modifier:     IntentModifier,
+    pub modifier: IntentModifier,
     /// Nguồn input
-    pub modality:     ModalitySource,
+    pub modality: ModalitySource,
     /// Audio pitch nếu có
-    pub audio_pitch:  Option<f32>,
+    pub audio_pitch: Option<f32>,
     /// Audio energy nếu có
     pub audio_energy: Option<f32>,
     /// Timestamp (ns)
-    pub timestamp:    i64,
+    pub timestamp: i64,
     /// Session ID
-    pub session_id:   u64,
+    pub session_id: u64,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -9,13 +9,18 @@ mod tests {
     use crate::origin::{HomeRuntime, ResponseKind};
     use silk::walk::ResponseTone;
 
-    fn rt() -> HomeRuntime { HomeRuntime::new(0xEEEE) }
+    fn rt() -> HomeRuntime {
+        HomeRuntime::new(0xEEEE)
+    }
 
     /// Helper: assert tone nằm trong danh sách chấp nhận được.
     fn assert_tone_in(tone: ResponseTone, allowed: &[ResponseTone], ctx: &str) {
         assert!(
             allowed.contains(&tone),
-            "[{}] tone {:?} không nằm trong {:?}", ctx, tone, allowed,
+            "[{}] tone {:?} không nằm trong {:?}",
+            ctx,
+            tone,
+            allowed,
         );
     }
 
@@ -28,8 +33,15 @@ mod tests {
         let mut rt = rt();
         let r = rt.process_text("tôi buồn vì mất việc", 1000);
         assert_eq!(r.kind, ResponseKind::Natural);
-        assert_tone_in(r.tone, &[ResponseTone::Supportive, ResponseTone::Gentle, ResponseTone::Pause],
-            "buồn vì mất việc");
+        assert_tone_in(
+            r.tone,
+            &[
+                ResponseTone::Supportive,
+                ResponseTone::Gentle,
+                ResponseTone::Pause,
+            ],
+            "buồn vì mất việc",
+        );
     }
 
     #[test]
@@ -88,10 +100,17 @@ mod tests {
         rt.process_text("vẫn buồn lắm", 2000);
         let r = rt.process_text("không vui được", 3000);
         // Sustained negative → any non-Celebratory tone acceptable
-        assert_tone_in(r.tone,
-            &[ResponseTone::Supportive, ResponseTone::Gentle, ResponseTone::Pause,
-              ResponseTone::Reinforcing, ResponseTone::Engaged],
-            "buồn dai dẳng");
+        assert_tone_in(
+            r.tone,
+            &[
+                ResponseTone::Supportive,
+                ResponseTone::Gentle,
+                ResponseTone::Pause,
+                ResponseTone::Reinforcing,
+                ResponseTone::Engaged,
+            ],
+            "buồn dai dẳng",
+        );
     }
 
     #[test]
@@ -215,8 +234,10 @@ mod tests {
         let mut rt = rt();
         let r = rt.process_text("tôi muốn tự tử", 1000);
         assert_eq!(r.kind, ResponseKind::Crisis);
-        assert!(r.text.contains("1800") || r.text.contains("741741"),
-            "Crisis phải có helpline");
+        assert!(
+            r.text.contains("1800") || r.text.contains("741741"),
+            "Crisis phải có helpline"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -312,8 +333,15 @@ mod tests {
         rt.process_text("hôm nay vui lắm", 1000);
         rt.process_text("nhưng rồi nghe tin buồn", 2000);
         let r = rt.process_text("buồn quá", 3000);
-        assert_tone_in(r.tone, &[ResponseTone::Supportive, ResponseTone::Gentle, ResponseTone::Pause],
-            "vui rồi buồn");
+        assert_tone_in(
+            r.tone,
+            &[
+                ResponseTone::Supportive,
+                ResponseTone::Gentle,
+                ResponseTone::Pause,
+            ],
+            "vui rồi buồn",
+        );
     }
 
     #[test]
@@ -355,14 +383,24 @@ mod tests {
     fn t43_long_conversation() {
         let mut rt = rt();
         let texts = [
-            "xin chào", "hôm nay tôi đi làm", "mệt lắm",
-            "nhưng sếp khen", "vui phết", "tối nay đi ăn với bạn",
-            "cuộc sống ok", "cảm ơn nhé",
+            "xin chào",
+            "hôm nay tôi đi làm",
+            "mệt lắm",
+            "nhưng sếp khen",
+            "vui phết",
+            "tối nay đi ăn với bạn",
+            "cuộc sống ok",
+            "cảm ơn nhé",
         ];
         for (i, t) in texts.iter().enumerate() {
             let r = rt.process_text(t, (i as i64 + 1) * 1000);
-            assert_eq!(r.kind, ResponseKind::Natural,
-                "Turn {} ('{}') phải Natural", i, t);
+            assert_eq!(
+                r.kind,
+                ResponseKind::Natural,
+                "Turn {} ('{}') phải Natural",
+                i,
+                t
+            );
         }
         // After 8 turns, should have STM observations
         // Verify learning happened via metrics
@@ -387,8 +425,15 @@ mod tests {
         rt.process_text("rất buồn", 4000);
         let r = rt.process_text("buồn lắm", 5000);
         // Gradual decline → Supportive/Gentle
-        assert_tone_in(r.tone, &[ResponseTone::Supportive, ResponseTone::Gentle, ResponseTone::Pause],
-            "gradual decline");
+        assert_tone_in(
+            r.tone,
+            &[
+                ResponseTone::Supportive,
+                ResponseTone::Gentle,
+                ResponseTone::Pause,
+            ],
+            "gradual decline",
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────

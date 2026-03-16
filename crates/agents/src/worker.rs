@@ -18,7 +18,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 use isl::address::ISLAddress;
-use isl::message::{ISLMessage, ISLFrame, MsgType};
+use isl::message::{ISLFrame, ISLMessage, MsgType};
 use silk::edge::EmotionTag;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,11 +30,11 @@ use silk::edge::EmotionTag;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum WorkerKind {
-    Sensor   = 0x01, // đọc sensor
+    Sensor = 0x01,   // đọc sensor
     Actuator = 0x02, // điều khiển thiết bị
-    Camera   = 0x03, // xử lý hình ảnh
-    Network  = 0x04, // mạng/bảo mật
-    Generic  = 0xFF,
+    Camera = 0x03,   // xử lý hình ảnh
+    Network = 0x04,  // mạng/bảo mật
+    Generic = 0xFF,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,8 +61,8 @@ pub enum WorkerState {
 #[derive(Debug, Clone)]
 pub struct SensorReading {
     pub sensor_id: u8,
-    pub value:     f32,
-    pub unit:      SensorUnit,
+    pub value: f32,
+    pub unit: SensorUnit,
     pub timestamp: i64,
 }
 
@@ -72,13 +72,13 @@ pub struct SensorReading {
 #[repr(u8)]
 pub enum SensorUnit {
     Temperature = 0x01, // °C
-    Humidity    = 0x02, // %
-    Light       = 0x03, // lux
-    Motion      = 0x04, // 0/1
-    Sound       = 0x05, // dB
-    Distance    = 0x06, // cm
-    Pressure    = 0x07, // hPa
-    Custom      = 0xFF,
+    Humidity = 0x02,    // %
+    Light = 0x03,       // lux
+    Motion = 0x04,      // 0/1
+    Sound = 0x05,       // dB
+    Distance = 0x06,    // cm
+    Pressure = 0x07,    // hPa
+    Custom = 0xFF,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ pub enum WorkerEvent {
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct WorkerReport {
-    pub frame:   ISLFrame,
+    pub frame: ISLFrame,
     pub emotion: EmotionTag, // cảm xúc của sự kiện (VD: nhiệt độ cao → arousal cao)
 }
 
@@ -128,14 +128,14 @@ pub struct WorkerReport {
 ///   Network  = L0 + NetworkSkill + ImmunitySkill
 #[allow(missing_docs)]
 pub struct Worker {
-    pub addr:    ISLAddress,
-    pub chief:   ISLAddress,
-    pub kind:    WorkerKind,
-    pub state:   WorkerState,
+    pub addr: ISLAddress,
+    pub chief: ISLAddress,
+    pub kind: WorkerKind,
+    pub state: WorkerState,
     /// Outbox — chờ gửi lên Chief
-    pub outbox:  Vec<WorkerReport>,
+    pub outbox: Vec<WorkerReport>,
     /// Event count
-    pub events:  u32,
+    pub events: u32,
     /// Door worker: security locked state
     pub security_locked: bool,
     /// Network worker: cumulative anomaly score
@@ -148,8 +148,10 @@ impl Worker {
     /// Tạo Worker mới.
     pub fn new(addr: ISLAddress, chief: ISLAddress, kind: WorkerKind) -> Self {
         Self {
-            addr, chief, kind,
-            state:  WorkerState::Sleeping,
+            addr,
+            chief,
+            kind,
+            state: WorkerState::Sleeping,
             outbox: Vec::new(),
             events: 0,
             security_locked: false,
@@ -178,10 +180,16 @@ impl Worker {
             WorkerEvent::ISLCommand(msg) => {
                 self.process_command(msg, ts);
             }
-            WorkerEvent::CameraFrame { motion_score, brightness } => {
+            WorkerEvent::CameraFrame {
+                motion_score,
+                brightness,
+            } => {
                 self.process_camera(motion_score, brightness, ts);
             }
-            WorkerEvent::NetworkPacket { bytes_in, anomaly_score } => {
+            WorkerEvent::NetworkPacket {
+                bytes_in,
+                anomaly_score,
+            } => {
                 self.process_network(bytes_in, anomaly_score, ts);
             }
             WorkerEvent::Tick { ts } => {
@@ -202,7 +210,9 @@ impl Worker {
     }
 
     /// Có reports chờ gửi không.
-    pub fn has_reports(&self) -> bool { !self.outbox.is_empty() }
+    pub fn has_reports(&self) -> bool {
+        !self.outbox.is_empty()
+    }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
@@ -211,18 +221,18 @@ impl Worker {
         let payload = encode_sensor_payload(&reading);
         let emotion = sensor_emotion(&reading);
 
-        let msg   = ISLMessage::with_payload(
-            self.addr, self.chief, MsgType::ChainPayload, payload
-        );
+        let msg = ISLMessage::with_payload(self.addr, self.chief, MsgType::ChainPayload, payload);
         // Body = sensor metadata: [sensor_id, unit, value_hi, value_lo]
-        let body  = encode_sensor_body(&reading);
+        let body = encode_sensor_body(&reading);
         let frame = ISLFrame::with_body(msg, body);
 
         self.outbox.push(WorkerReport { frame, emotion });
     }
 
     fn process_command(&mut self, cmd: ISLMessage, _ts: i64) {
-        if cmd.msg_type != MsgType::ActuatorCmd { return; }
+        if cmd.msg_type != MsgType::ActuatorCmd {
+            return;
+        }
 
         // Door worker: security check trước khi thực thi
         if self.kind == WorkerKind::Actuator && self.security_locked {
@@ -231,7 +241,12 @@ impl Worker {
             let frame = ISLFrame::bare(nack);
             self.outbox.push(WorkerReport {
                 frame,
-                emotion: EmotionTag { valence: -0.50, arousal: 0.60, dominance: 0.80, intensity: 0.50 },
+                emotion: EmotionTag {
+                    valence: -0.50,
+                    arousal: 0.60,
+                    dominance: 0.80,
+                    intensity: 0.50,
+                },
             });
             return;
         }
@@ -249,7 +264,9 @@ impl Worker {
     /// Profile: L0 + FFR + vSDF + InverseRenderSkill
     /// Worker gửi motion chain (molecular) — KHÔNG raw pixels.
     fn process_camera(&mut self, motion_score: f32, brightness: f32, ts: i64) {
-        if self.kind != WorkerKind::Camera { return; }
+        if self.kind != WorkerKind::Camera {
+            return;
+        }
 
         // Track motion streak
         if motion_score > 0.3 {
@@ -260,11 +277,13 @@ impl Worker {
 
         // Chỉ gửi report khi có motion đáng kể (threshold: score > 0.3)
         // Silent by default — không gửi frame rỗng
-        if motion_score <= 0.3 { return; }
+        if motion_score <= 0.3 {
+            return;
+        }
 
         let payload = [
-            self.addr.index,        // camera id
-            0x04,                      // unit = Motion
+            self.addr.index,              // camera id
+            0x04,                         // unit = Motion
             (motion_score * 255.0) as u8, // quantized motion
         ];
         let msg = ISLMessage::with_payload(self.addr, self.chief, MsgType::ChainPayload, payload);
@@ -272,7 +291,7 @@ impl Worker {
         // Body: motion_score(f32) + brightness(f32) + streak(u32) + timestamp(i64)
         let mut body = Vec::with_capacity(20);
         body.push(self.addr.index); // sensor_id
-        body.push(0x04);              // unit = Motion
+        body.push(0x04); // unit = Motion
         body.extend_from_slice(&motion_score.to_be_bytes());
         body.extend_from_slice(&brightness.to_be_bytes());
         body.extend_from_slice(&self.motion_streak.to_be_bytes());
@@ -281,9 +300,19 @@ impl Worker {
 
         let emotion = if self.motion_streak > 5 {
             // Sustained motion → higher urgency
-            EmotionTag { valence: -0.20, arousal: 0.85, dominance: 0.40, intensity: 0.75 }
+            EmotionTag {
+                valence: -0.20,
+                arousal: 0.85,
+                dominance: 0.40,
+                intensity: 0.75,
+            }
         } else {
-            EmotionTag { valence: 0.0, arousal: 0.60, dominance: 0.50, intensity: 0.45 }
+            EmotionTag {
+                valence: 0.0,
+                arousal: 0.60,
+                dominance: 0.50,
+                intensity: 0.45,
+            }
         };
 
         self.outbox.push(WorkerReport { frame, emotion });
@@ -296,7 +325,9 @@ impl Worker {
     /// anomaly_score > 0.4 → report to Chief
     /// anomaly_score ≤ 0.4 → silent
     fn process_network(&mut self, bytes_in: u32, anomaly_score: f32, _ts: i64) {
-        if self.kind != WorkerKind::Network { return; }
+        if self.kind != WorkerKind::Network {
+            return;
+        }
 
         // Accumulate anomaly (exponential moving average)
         self.anomaly_accumulator = self.anomaly_accumulator * 0.7 + anomaly_score * 0.3;
@@ -307,7 +338,12 @@ impl Worker {
             let frame = ISLFrame::bare(msg);
             self.outbox.push(WorkerReport {
                 frame,
-                emotion: EmotionTag { valence: -0.70, arousal: 0.95, dominance: 0.20, intensity: 0.90 },
+                emotion: EmotionTag {
+                    valence: -0.70,
+                    arousal: 0.95,
+                    dominance: 0.20,
+                    intensity: 0.90,
+                },
             });
             return;
         }
@@ -319,7 +355,8 @@ impl Worker {
                 0xFF, // network unit
                 (anomaly_score * 255.0) as u8,
             ];
-            let msg = ISLMessage::with_payload(self.addr, self.chief, MsgType::ChainPayload, payload);
+            let msg =
+                ISLMessage::with_payload(self.addr, self.chief, MsgType::ChainPayload, payload);
             let mut body = Vec::with_capacity(12);
             body.push(self.addr.index);
             body.push(0xFF);
@@ -329,7 +366,12 @@ impl Worker {
 
             self.outbox.push(WorkerReport {
                 frame,
-                emotion: EmotionTag { valence: -0.30, arousal: 0.65, dominance: 0.35, intensity: 0.55 },
+                emotion: EmotionTag {
+                    valence: -0.30,
+                    arousal: 0.65,
+                    dominance: 0.35,
+                    intensity: 0.55,
+                },
             });
         }
         // ≤ 0.4 → silent (no report)
@@ -371,13 +413,13 @@ fn encode_sensor_body(r: &SensorReading) -> Vec<u8> {
 fn quantize_value(val: f32, unit: SensorUnit) -> u8 {
     let (min, max) = match unit {
         SensorUnit::Temperature => (-40.0, 85.0),
-        SensorUnit::Humidity    => (0.0, 100.0),
-        SensorUnit::Light       => (0.0, 10000.0),
-        SensorUnit::Motion      => (0.0, 1.0),
-        SensorUnit::Sound       => (0.0, 120.0),
-        SensorUnit::Distance    => (0.0, 500.0),
-        SensorUnit::Pressure    => (800.0, 1200.0),
-        SensorUnit::Custom      => (0.0, 255.0),
+        SensorUnit::Humidity => (0.0, 100.0),
+        SensorUnit::Light => (0.0, 10000.0),
+        SensorUnit::Motion => (0.0, 1.0),
+        SensorUnit::Sound => (0.0, 120.0),
+        SensorUnit::Distance => (0.0, 500.0),
+        SensorUnit::Pressure => (800.0, 1200.0),
+        SensorUnit::Custom => (0.0, 255.0),
     };
     let norm = ((val - min) / (max - min)).clamp(0.0, 1.0);
     (norm * 255.0) as u8
@@ -394,16 +436,36 @@ fn sensor_emotion(r: &SensorReading) -> EmotionTag {
         SensorUnit::Temperature => {
             let temp = r.value;
             if temp > 35.0 {
-                EmotionTag { valence: -0.30, arousal: 0.70, dominance: 0.30, intensity: 0.55 }
+                EmotionTag {
+                    valence: -0.30,
+                    arousal: 0.70,
+                    dominance: 0.30,
+                    intensity: 0.55,
+                }
             } else if temp < 10.0 {
-                EmotionTag { valence: -0.20, arousal: 0.60, dominance: 0.30, intensity: 0.45 }
+                EmotionTag {
+                    valence: -0.20,
+                    arousal: 0.60,
+                    dominance: 0.30,
+                    intensity: 0.45,
+                }
             } else {
-                EmotionTag { valence: 0.10, arousal: 0.30, dominance: 0.60, intensity: 0.15 }
+                EmotionTag {
+                    valence: 0.10,
+                    arousal: 0.30,
+                    dominance: 0.60,
+                    intensity: 0.15,
+                }
             }
         }
         SensorUnit::Motion => {
             if r.value > 0.5 {
-                EmotionTag { valence: 0.0, arousal: 0.75, dominance: 0.50, intensity: 0.60 }
+                EmotionTag {
+                    valence: 0.0,
+                    arousal: 0.75,
+                    dominance: 0.50,
+                    intensity: 0.60,
+                }
             } else {
                 EmotionTag::NEUTRAL
             }
@@ -411,9 +473,19 @@ fn sensor_emotion(r: &SensorReading) -> EmotionTag {
         SensorUnit::Sound => {
             let db = r.value;
             if db > 80.0 {
-                EmotionTag { valence: -0.40, arousal: 0.85, dominance: 0.25, intensity: 0.70 }
+                EmotionTag {
+                    valence: -0.40,
+                    arousal: 0.85,
+                    dominance: 0.25,
+                    intensity: 0.70,
+                }
             } else if db > 60.0 {
-                EmotionTag { valence: -0.10, arousal: 0.50, dominance: 0.50, intensity: 0.30 }
+                EmotionTag {
+                    valence: -0.10,
+                    arousal: 0.50,
+                    dominance: 0.50,
+                    intensity: 0.30,
+                }
             } else {
                 EmotionTag::NEUTRAL
             }
@@ -443,9 +515,9 @@ pub enum HardwareStatus {
 #[derive(Debug, Clone)]
 pub struct DriverProbeResult {
     /// Loại Worker
-    pub kind:     WorkerKind,
+    pub kind: WorkerKind,
     /// Trạng thái
-    pub status:   HardwareStatus,
+    pub status: HardwareStatus,
     /// Tên driver / device ID
     pub device_id: alloc::string::String,
     /// Capabilities: sensor units hỗ trợ, actuator types, etc.
@@ -470,11 +542,11 @@ impl Worker {
     /// Hiện tại: report từ internal state (software probe).
     pub fn probe_hardware(&self, ts: i64) -> DriverProbeResult {
         let device_id = match self.kind {
-            WorkerKind::Sensor   => alloc::format!("sensor@{}", self.addr),
+            WorkerKind::Sensor => alloc::format!("sensor@{}", self.addr),
             WorkerKind::Actuator => alloc::format!("actuator@{}", self.addr),
-            WorkerKind::Camera   => alloc::format!("camera@{}", self.addr),
-            WorkerKind::Network  => alloc::format!("network@{}", self.addr),
-            WorkerKind::Generic  => alloc::format!("generic@{}", self.addr),
+            WorkerKind::Camera => alloc::format!("camera@{}", self.addr),
+            WorkerKind::Network => alloc::format!("network@{}", self.addr),
+            WorkerKind::Generic => alloc::format!("generic@{}", self.addr),
         };
 
         let capabilities = match self.kind {
@@ -486,9 +558,9 @@ impl Worker {
                 SensorUnit::Sound as u8,
             ],
             WorkerKind::Actuator => alloc::vec![0x01, 0x02], // on/off, dim
-            WorkerKind::Camera   => alloc::vec![0x01],       // video stream
-            WorkerKind::Network  => alloc::vec![0x01, 0x02], // monitor, firewall
-            WorkerKind::Generic  => alloc::vec![],
+            WorkerKind::Camera => alloc::vec![0x01],         // video stream
+            WorkerKind::Network => alloc::vec![0x01, 0x02],  // monitor, firewall
+            WorkerKind::Generic => alloc::vec![],
         };
 
         let status = match self.state {
@@ -509,10 +581,10 @@ impl Worker {
     pub fn probe_report(&self, ts: i64) -> WorkerReport {
         let probe = self.probe_hardware(ts);
         let status_byte = match probe.status {
-            HardwareStatus::Ready       => 0x01,
+            HardwareStatus::Ready => 0x01,
             HardwareStatus::Unreachable => 0x02,
-            HardwareStatus::Error(c)    => 0x80 | c,
-            HardwareStatus::Unknown     => 0x00,
+            HardwareStatus::Error(c) => 0x80 | c,
+            HardwareStatus::Unknown => 0x00,
         };
 
         let mut body = Vec::new();
@@ -604,10 +676,10 @@ impl Worker {
     pub fn probe_report_hal(&self, platform: &dyn hal::HalPlatform, ts: i64) -> WorkerReport {
         let probe = self.probe_with_hal(platform, ts);
         let status_byte = match probe.status {
-            HardwareStatus::Ready       => 0x01,
+            HardwareStatus::Ready => 0x01,
             HardwareStatus::Unreachable => 0x02,
-            HardwareStatus::Error(c)    => 0x80 | c,
-            HardwareStatus::Unknown     => 0x00,
+            HardwareStatus::Error(c) => 0x80 | c,
+            HardwareStatus::Unknown => 0x00,
         };
 
         let mut body = Vec::new();
@@ -632,25 +704,26 @@ impl Worker {
     /// Tên loại Worker.
     fn kind_name(&self) -> &'static str {
         match self.kind {
-            WorkerKind::Sensor   => "sensor",
+            WorkerKind::Sensor => "sensor",
             WorkerKind::Actuator => "actuator",
-            WorkerKind::Camera   => "camera",
-            WorkerKind::Network  => "network",
-            WorkerKind::Generic  => "generic",
+            WorkerKind::Camera => "camera",
+            WorkerKind::Network => "network",
+            WorkerKind::Generic => "generic",
         }
     }
 
     /// Kiểm tra status từ danh sách devices của platform.
     fn check_device_status(&self, devices: &[hal::DeviceDescriptor]) -> HardwareStatus {
         let target_type = match self.kind {
-            WorkerKind::Sensor   => hal::DeviceType::Sensor,
+            WorkerKind::Sensor => hal::DeviceType::Sensor,
             WorkerKind::Actuator => hal::DeviceType::Actuator,
-            WorkerKind::Camera   => hal::DeviceType::Camera,
-            WorkerKind::Network  => hal::DeviceType::Network,
-            WorkerKind::Generic  => return HardwareStatus::Unknown,
+            WorkerKind::Camera => hal::DeviceType::Camera,
+            WorkerKind::Network => hal::DeviceType::Network,
+            WorkerKind::Generic => return HardwareStatus::Unknown,
         };
 
-        let relevant: Vec<&hal::DeviceDescriptor> = devices.iter()
+        let relevant: Vec<&hal::DeviceDescriptor> = devices
+            .iter()
             .filter(|d| d.device_type == target_type)
             .collect();
 
@@ -659,8 +732,12 @@ impl Worker {
         }
 
         // Nếu tất cả error → Error, nếu có ít nhất 1 Ready → Ready
-        let any_ready = relevant.iter().any(|d| d.status == hal::DeviceStatus::Ready);
-        let any_error = relevant.iter().any(|d| d.status == hal::DeviceStatus::Error);
+        let any_ready = relevant
+            .iter()
+            .any(|d| d.status == hal::DeviceStatus::Ready);
+        let any_error = relevant
+            .iter()
+            .any(|d| d.status == hal::DeviceStatus::Error);
 
         if any_ready {
             HardwareStatus::Ready
@@ -680,15 +757,24 @@ impl Worker {
 mod tests {
     use super::*;
 
-    fn chief() -> ISLAddress { ISLAddress::new(0, 0, 0, 0) }
-    fn waddr() -> ISLAddress { ISLAddress::new(1, 5, 0, 1) }
+    fn chief() -> ISLAddress {
+        ISLAddress::new(0, 0, 0, 0)
+    }
+    fn waddr() -> ISLAddress {
+        ISLAddress::new(1, 5, 0, 1)
+    }
 
     fn worker() -> Worker {
         Worker::new(waddr(), chief(), WorkerKind::Sensor)
     }
 
     fn temp_reading(val: f32) -> SensorReading {
-        SensorReading { sensor_id: 1, value: val, unit: SensorUnit::Temperature, timestamp: 1000 }
+        SensorReading {
+            sensor_id: 1,
+            value: val,
+            unit: SensorUnit::Temperature,
+            timestamp: 1000,
+        }
     }
 
     // ── Worker state ──────────────────────────────────────────────────────────
@@ -704,7 +790,11 @@ mod tests {
     fn worker_sleeps_after_event() {
         let mut w = worker();
         w.process(WorkerEvent::SensorData(temp_reading(25.0)), 1000);
-        assert_eq!(w.state, WorkerState::Sleeping, "Worker sleep ngay sau khi xử lý");
+        assert_eq!(
+            w.state,
+            WorkerState::Sleeping,
+            "Worker sleep ngay sau khi xử lý"
+        );
     }
 
     #[test]
@@ -730,7 +820,7 @@ mod tests {
         w.process(WorkerEvent::SensorData(temp_reading(22.0)), 1000);
         let report = &w.outbox[0];
         assert_eq!(report.frame.header.from, waddr(), "from = worker addr");
-        assert_eq!(report.frame.header.to,   chief(), "to   = chief addr");
+        assert_eq!(report.frame.header.to, chief(), "to   = chief addr");
     }
 
     #[test]
@@ -746,7 +836,7 @@ mod tests {
     #[test]
     fn sensor_emotion_hot() {
         let reading = temp_reading(40.0); // nóng
-        let emo     = sensor_emotion(&reading);
+        let emo = sensor_emotion(&reading);
         assert!(emo.arousal > 0.5, "Nóng → arousal cao: {}", emo.arousal);
         assert!(emo.valence < 0.0, "Nóng → valence âm: {}", emo.valence);
     }
@@ -754,13 +844,22 @@ mod tests {
     #[test]
     fn sensor_emotion_normal_temp() {
         let reading = temp_reading(22.0); // bình thường
-        let emo     = sensor_emotion(&reading);
-        assert!(emo.intensity < 0.3, "Bình thường → intensity thấp: {}", emo.intensity);
+        let emo = sensor_emotion(&reading);
+        assert!(
+            emo.intensity < 0.3,
+            "Bình thường → intensity thấp: {}",
+            emo.intensity
+        );
     }
 
     #[test]
     fn sensor_emotion_motion() {
-        let r = SensorReading { sensor_id: 2, value: 1.0, unit: SensorUnit::Motion, timestamp: 1 };
+        let r = SensorReading {
+            sensor_id: 2,
+            value: 1.0,
+            unit: SensorUnit::Motion,
+            timestamp: 1,
+        };
         let e = sensor_emotion(&r);
         assert!(e.arousal > 0.5, "Chuyển động → arousal cao: {}", e.arousal);
     }
@@ -771,7 +870,7 @@ mod tests {
     fn quantize_temperature_range() {
         // -40°C → 0, 85°C → 255
         assert_eq!(quantize_value(-40.0, SensorUnit::Temperature), 0);
-        assert_eq!(quantize_value(85.0,  SensorUnit::Temperature), 255);
+        assert_eq!(quantize_value(85.0, SensorUnit::Temperature), 255);
         // 22.5°C ≈ giữa
         let mid = quantize_value(22.5, SensorUnit::Temperature);
         assert!(mid > 100 && mid < 155, "22.5°C ≈ giữa: {}", mid);
@@ -779,9 +878,9 @@ mod tests {
 
     #[test]
     fn quantize_humidity() {
-        assert_eq!(quantize_value(0.0,   SensorUnit::Humidity), 0);
+        assert_eq!(quantize_value(0.0, SensorUnit::Humidity), 0);
         assert_eq!(quantize_value(100.0, SensorUnit::Humidity), 255);
-        assert_eq!(quantize_value(50.0,  SensorUnit::Humidity), 127);
+        assert_eq!(quantize_value(50.0, SensorUnit::Humidity), 127);
     }
 
     // ── Flush ─────────────────────────────────────────────────────────────────
@@ -800,7 +899,7 @@ mod tests {
 
     #[test]
     fn actuator_command_creates_ack() {
-        let mut w   = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
         let cmd_msg = ISLMessage::actuator(chief(), waddr(), 0x01, 0xFF);
         w.process(WorkerEvent::ISLCommand(cmd_msg), 1000);
         assert!(w.has_reports(), "ActuatorCmd → ACK report");
@@ -816,7 +915,7 @@ mod tests {
         let mut w = worker();
         w.process(WorkerEvent::SensorData(temp_reading(22.0)), 1000);
         let report = w.flush().into_iter().next().unwrap();
-        let bytes  = report.frame.to_bytes();
+        let bytes = report.frame.to_bytes();
         // 12B header + 2B len + 14B body = 28B total
         assert_eq!(bytes.len(), 28, "Wire size: {}", bytes.len());
         // So sánh với JSON: {"sensor_id":1,"value":22.0,"unit":"Temperature","timestamp":1000}
@@ -829,7 +928,13 @@ mod tests {
     #[test]
     fn camera_reports_on_motion() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
-        w.process(WorkerEvent::CameraFrame { motion_score: 0.8, brightness: 100.0 }, 1000);
+        w.process(
+            WorkerEvent::CameraFrame {
+                motion_score: 0.8,
+                brightness: 100.0,
+            },
+            1000,
+        );
         assert!(w.has_reports(), "Motion > 0.3 → report");
         assert_eq!(w.motion_streak, 1);
     }
@@ -837,7 +942,13 @@ mod tests {
     #[test]
     fn camera_silent_no_motion() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
-        w.process(WorkerEvent::CameraFrame { motion_score: 0.1, brightness: 50.0 }, 1000);
+        w.process(
+            WorkerEvent::CameraFrame {
+                motion_score: 0.1,
+                brightness: 50.0,
+            },
+            1000,
+        );
         assert!(!w.has_reports(), "Motion ≤ 0.3 → silent");
         assert_eq!(w.motion_streak, 0);
     }
@@ -846,11 +957,23 @@ mod tests {
     fn camera_motion_streak_tracking() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
         for i in 0..3 {
-            w.process(WorkerEvent::CameraFrame { motion_score: 0.6, brightness: 80.0 }, i * 100);
+            w.process(
+                WorkerEvent::CameraFrame {
+                    motion_score: 0.6,
+                    brightness: 80.0,
+                },
+                i * 100,
+            );
         }
         assert_eq!(w.motion_streak, 3);
         // Break streak
-        w.process(WorkerEvent::CameraFrame { motion_score: 0.1, brightness: 80.0 }, 400);
+        w.process(
+            WorkerEvent::CameraFrame {
+                motion_score: 0.1,
+                brightness: 80.0,
+            },
+            400,
+        );
         assert_eq!(w.motion_streak, 0);
     }
 
@@ -858,12 +981,21 @@ mod tests {
     fn camera_sustained_motion_high_urgency() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
         for i in 0..7 {
-            w.process(WorkerEvent::CameraFrame { motion_score: 0.8, brightness: 90.0 }, i * 100);
+            w.process(
+                WorkerEvent::CameraFrame {
+                    motion_score: 0.8,
+                    brightness: 90.0,
+                },
+                i * 100,
+            );
         }
         assert!(w.motion_streak > 5, "Streak > 5");
         let reports = w.flush();
         let last = &reports[reports.len() - 1];
-        assert!(last.emotion.arousal > 0.80, "Sustained motion → high arousal");
+        assert!(
+            last.emotion.arousal > 0.80,
+            "Sustained motion → high arousal"
+        );
     }
 
     // ── Network worker ───────────────────────────────────────────────────────
@@ -871,25 +1003,51 @@ mod tests {
     #[test]
     fn network_emergency_on_high_anomaly() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
-        w.process(WorkerEvent::NetworkPacket { bytes_in: 1000, anomaly_score: 0.9 }, 1000);
+        w.process(
+            WorkerEvent::NetworkPacket {
+                bytes_in: 1000,
+                anomaly_score: 0.9,
+            },
+            1000,
+        );
         assert!(w.has_reports());
         let report = &w.outbox[0];
-        assert_eq!(report.frame.header.msg_type, MsgType::Emergency, "High anomaly → Emergency");
+        assert_eq!(
+            report.frame.header.msg_type,
+            MsgType::Emergency,
+            "High anomaly → Emergency"
+        );
     }
 
     #[test]
     fn network_report_moderate_anomaly() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
-        w.process(WorkerEvent::NetworkPacket { bytes_in: 500, anomaly_score: 0.5 }, 1000);
+        w.process(
+            WorkerEvent::NetworkPacket {
+                bytes_in: 500,
+                anomaly_score: 0.5,
+            },
+            1000,
+        );
         assert!(w.has_reports());
         let report = &w.outbox[0];
-        assert_eq!(report.frame.header.msg_type, MsgType::ChainPayload, "Moderate → report");
+        assert_eq!(
+            report.frame.header.msg_type,
+            MsgType::ChainPayload,
+            "Moderate → report"
+        );
     }
 
     #[test]
     fn network_silent_low_anomaly() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
-        w.process(WorkerEvent::NetworkPacket { bytes_in: 100, anomaly_score: 0.2 }, 1000);
+        w.process(
+            WorkerEvent::NetworkPacket {
+                bytes_in: 100,
+                anomaly_score: 0.2,
+            },
+            1000,
+        );
         assert!(!w.has_reports(), "Low anomaly → silent");
     }
 
@@ -897,9 +1055,24 @@ mod tests {
     fn network_anomaly_accumulator() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
         // EMA: acc = acc * 0.7 + score * 0.3
-        w.process(WorkerEvent::NetworkPacket { bytes_in: 100, anomaly_score: 0.5 }, 1000);
-        assert!((w.anomaly_accumulator - 0.15).abs() < 0.01, "acc = 0*0.7 + 0.5*0.3 = 0.15");
-        w.process(WorkerEvent::NetworkPacket { bytes_in: 100, anomaly_score: 0.5 }, 2000);
+        w.process(
+            WorkerEvent::NetworkPacket {
+                bytes_in: 100,
+                anomaly_score: 0.5,
+            },
+            1000,
+        );
+        assert!(
+            (w.anomaly_accumulator - 0.15).abs() < 0.01,
+            "acc = 0*0.7 + 0.5*0.3 = 0.15"
+        );
+        w.process(
+            WorkerEvent::NetworkPacket {
+                bytes_in: 100,
+                anomaly_score: 0.5,
+            },
+            2000,
+        );
         // 0.15*0.7 + 0.5*0.3 = 0.105 + 0.15 = 0.255
         assert!((w.anomaly_accumulator - 0.255).abs() < 0.01);
     }
@@ -934,14 +1107,26 @@ mod tests {
     #[test]
     fn sensor_ignores_camera_event() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
-        w.process(WorkerEvent::CameraFrame { motion_score: 0.9, brightness: 100.0 }, 1000);
+        w.process(
+            WorkerEvent::CameraFrame {
+                motion_score: 0.9,
+                brightness: 100.0,
+            },
+            1000,
+        );
         assert!(!w.has_reports(), "Sensor worker ignores CameraFrame");
     }
 
     #[test]
     fn sensor_ignores_network_event() {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
-        w.process(WorkerEvent::NetworkPacket { bytes_in: 1000, anomaly_score: 0.9 }, 1000);
+        w.process(
+            WorkerEvent::NetworkPacket {
+                bytes_in: 1000,
+                anomaly_score: 0.9,
+            },
+            1000,
+        );
         assert!(!w.has_reports(), "Sensor worker ignores NetworkPacket");
     }
 
@@ -953,7 +1138,10 @@ mod tests {
         let probe = w.probe_hardware(1000);
         assert_eq!(probe.status, HardwareStatus::Ready);
         assert_eq!(probe.kind, WorkerKind::Sensor);
-        assert!(!probe.capabilities.is_empty(), "Sensor phải khai báo capabilities");
+        assert!(
+            !probe.capabilities.is_empty(),
+            "Sensor phải khai báo capabilities"
+        );
         assert!(probe.device_id.contains("sensor"), "Device ID chứa loại");
     }
 

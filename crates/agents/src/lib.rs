@@ -13,13 +13,13 @@
 
 extern crate alloc;
 
-pub mod encoder;
-pub mod learning;
 pub mod book;
-pub mod gate;
-pub mod skill;
-pub mod domain_skills;
-pub mod worker;
 pub mod chief;
-pub mod leo;
+pub mod domain_skills;
+pub mod encoder;
+pub mod gate;
 pub mod instinct;
+pub mod learning;
+pub mod leo;
+pub mod skill;
+pub mod worker;

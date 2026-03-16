@@ -19,8 +19,8 @@
 //! Khi render: walk_up → L4 SDF base → apply delta chain.
 
 extern crate alloc;
+use crate::sdf::{sdf, SdfKind, SdfParams, Vec3};
 use alloc::vec::Vec;
-use crate::sdf::{SdfKind, SdfParams, Vec3, sdf};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SdfDelta — sự khác biệt so với node cha
@@ -33,11 +33,11 @@ use crate::sdf::{SdfKind, SdfParams, Vec3, sdf};
 #[derive(Debug, Clone, PartialEq)]
 pub struct SdfDelta {
     /// Đổi loại hình học (hiếm)
-    pub kind:    Option<SdfKind>,
+    pub kind: Option<SdfKind>,
     /// Scale toàn bộ (>1 = lớn hơn)
-    pub scale:   Option<f32>,
+    pub scale: Option<f32>,
     /// Dịch chuyển tâm
-    pub offset:  Option<Vec3>,
+    pub offset: Option<Vec3>,
     /// Thay đổi r (additive)
     pub r_delta: Option<f32>,
     /// Thay đổi h (additive)
@@ -47,24 +47,40 @@ pub struct SdfDelta {
 impl SdfDelta {
     /// Không thay đổi gì.
     pub const IDENTITY: Self = Self {
-        kind: None, scale: None, offset: None, r_delta: None, h_delta: None,
+        kind: None,
+        scale: None,
+        offset: None,
+        r_delta: None,
+        h_delta: None,
     };
 
     pub fn scale(factor: f32) -> Self {
-        Self { scale: Some(factor), ..Self::IDENTITY }
+        Self {
+            scale: Some(factor),
+            ..Self::IDENTITY
+        }
     }
 
     pub fn translate(offset: Vec3) -> Self {
-        Self { offset: Some(offset), ..Self::IDENTITY }
+        Self {
+            offset: Some(offset),
+            ..Self::IDENTITY
+        }
     }
 
     pub fn r_add(dr: f32) -> Self {
-        Self { r_delta: Some(dr), ..Self::IDENTITY }
+        Self {
+            r_delta: Some(dr),
+            ..Self::IDENTITY
+        }
     }
 
     pub fn is_identity(&self) -> bool {
-        self.kind.is_none() && self.scale.is_none() &&
-        self.offset.is_none() && self.r_delta.is_none() && self.h_delta.is_none()
+        self.kind.is_none()
+            && self.scale.is_none()
+            && self.offset.is_none()
+            && self.r_delta.is_none()
+            && self.h_delta.is_none()
     }
 
     /// Bytes khi encode — compact.
@@ -74,7 +90,7 @@ impl SdfDelta {
         + self.scale.map_or(0, |_| 4)                     // scale: f32
         + self.offset.map_or(0, |_| 12)                   // Vec3: 3×f32
         + self.r_delta.map_or(0, |_| 4)                   // r_delta: f32
-        + self.h_delta.map_or(0, |_| 4)                   // h_delta: f32
+        + self.h_delta.map_or(0, |_| 4) // h_delta: f32
     }
 }
 
@@ -89,25 +105,33 @@ impl SdfDelta {
 #[derive(Debug, Clone)]
 pub struct DeltaChain {
     /// L4 base — SDF đầy đủ
-    pub base_kind:   SdfKind,
+    pub base_kind: SdfKind,
     pub base_params: SdfParams,
     /// Deltas theo thứ tự L5, L6, ...
-    pub deltas:      Vec<SdfDelta>,
+    pub deltas: Vec<SdfDelta>,
 }
 
 impl DeltaChain {
     /// Tạo từ L4 base SDF.
     pub fn from_base(kind: SdfKind, params: SdfParams) -> Self {
-        Self { base_kind: kind, base_params: params, deltas: Vec::new() }
+        Self {
+            base_kind: kind,
+            base_params: params,
+            deltas: Vec::new(),
+        }
     }
 
     /// Thêm delta (bỏ qua identity).
     pub fn push(&mut self, d: SdfDelta) {
-        if !d.is_identity() { self.deltas.push(d); }
+        if !d.is_identity() {
+            self.deltas.push(d);
+        }
     }
 
     /// Độ sâu: 0 = chỉ L4, 1 = L5, 2 = L6...
-    pub fn depth(&self) -> usize { self.deltas.len() }
+    pub fn depth(&self) -> usize {
+        self.deltas.len()
+    }
 
     /// Tổng bytes lưu trữ.
     ///
@@ -124,25 +148,33 @@ impl DeltaChain {
 
     /// % tiết kiệm so với full storage.
     pub fn savings_pct(&self) -> f32 {
-        if self.deltas.is_empty() { return 0.0; }
-        let full  = self.full_storage() as f32;
+        if self.deltas.is_empty() {
+            return 0.0;
+        }
+        let full = self.full_storage() as f32;
         let delta = self.delta_storage() as f32;
         (full - delta) / full * 100.0
     }
 
     /// Resolve: apply tất cả deltas → (SdfKind, SdfParams) cuối.
     pub fn resolve(&self) -> (SdfKind, SdfParams) {
-        let mut kind   = self.base_kind;
+        let mut kind = self.base_kind;
         let mut params = self.base_params;
 
         for d in &self.deltas {
-            if let Some(k) = d.kind  { kind = k; }
+            if let Some(k) = d.kind {
+                kind = k;
+            }
             if let Some(s) = d.scale {
                 params.r = (params.r * s).max(0.001);
                 params.h = (params.h * s).max(0.001);
             }
-            if let Some(dr) = d.r_delta { params.r = (params.r + dr).max(0.001); }
-            if let Some(dh) = d.h_delta { params.h = (params.h + dh).max(0.001); }
+            if let Some(dr) = d.r_delta {
+                params.r = (params.r + dr).max(0.001);
+            }
+            if let Some(dh) = d.h_delta {
+                params.h = (params.h + dh).max(0.001);
+            }
         }
 
         (kind, params)
@@ -152,7 +184,9 @@ impl DeltaChain {
     pub fn evaluate(&self, p: Vec3) -> f32 {
         let mut offset = Vec3::new(0.0, 0.0, 0.0);
         for d in &self.deltas {
-            if let Some(off) = d.offset { offset = offset.add(off); }
+            if let Some(off) = d.offset {
+                offset = offset.add(off);
+            }
         }
         let (kind, params) = self.resolve();
         sdf(kind, p.sub(offset), &params)
@@ -179,9 +213,9 @@ impl NodeSdf {
     /// Bytes lưu trữ.
     pub fn storage_bytes(&self) -> usize {
         match self {
-            NodeSdf::Full  { .. }  => 32,
-            NodeSdf::Delta(d)      => d.encoded_bytes(),
-            NodeSdf::None          => 0,
+            NodeSdf::Full { .. } => 32,
+            NodeSdf::Delta(d) => d.encoded_bytes(),
+            NodeSdf::None => 0,
         }
     }
 
@@ -190,7 +224,7 @@ impl NodeSdf {
         match layer {
             0..=4 => "Full (L0-L4: SDF đầy đủ)",
             5..=6 => "Delta (L5-L6: delta ~20B)",
-            _     => "Delta (L7+: delta of delta ~10B)",
+            _ => "Delta (L7+: delta of delta ~10B)",
         }
     }
 }
@@ -206,7 +240,12 @@ impl NodeSdf {
 pub fn earth_delta_chain() -> DeltaChain {
     let mut chain = DeltaChain::from_base(
         SdfKind::Sphere,
-        SdfParams { r: 1.0, h: 0.0, r2: 0.0, b: Vec3::new(1.0, 1.0, 1.0) }, // Planet L4 base
+        SdfParams {
+            r: 1.0,
+            h: 0.0,
+            r2: 0.0,
+            b: Vec3::new(1.0, 1.0, 1.0),
+        }, // Planet L4 base
     );
     // Earth: lớn hơn nhiều (normalized units)
     chain.push(SdfDelta::scale(6371.0));
@@ -217,7 +256,12 @@ pub fn earth_delta_chain() -> DeltaChain {
 pub fn mars_delta_chain() -> DeltaChain {
     let mut chain = DeltaChain::from_base(
         SdfKind::Sphere,
-        SdfParams { r: 1.0, h: 0.0, r2: 0.0, b: Vec3::new(1.0, 1.0, 1.0) },
+        SdfParams {
+            r: 1.0,
+            h: 0.0,
+            r2: 0.0,
+            b: Vec3::new(1.0, 1.0, 1.0),
+        },
     );
     chain.push(SdfDelta::scale(3389.0)); // Mars nhỏ hơn Earth
     chain
@@ -227,9 +271,18 @@ pub fn mars_delta_chain() -> DeltaChain {
 pub fn labrador_delta_chain() -> DeltaChain {
     let mut chain = DeltaChain::from_base(
         SdfKind::Capsule,
-        SdfParams { r: 0.3, h: 0.6, r2: 0.0, b: Vec3::new(0.3, 0.3, 0.3) }, // Dog L4 base
+        SdfParams {
+            r: 0.3,
+            h: 0.6,
+            r2: 0.0,
+            b: Vec3::new(0.3, 0.3, 0.3),
+        }, // Dog L4 base
     );
-    chain.push(SdfDelta { scale: Some(1.3), r_delta: Some(0.05), ..SdfDelta::IDENTITY });
+    chain.push(SdfDelta {
+        scale: Some(1.3),
+        r_delta: Some(0.05),
+        ..SdfDelta::IDENTITY
+    });
     chain
 }
 
@@ -244,7 +297,12 @@ mod tests {
     fn planet_base() -> DeltaChain {
         DeltaChain::from_base(
             SdfKind::Sphere,
-            SdfParams { r: 1.0, h: 0.0, r2: 0.0, b: Vec3::new(1.0, 1.0, 1.0) },
+            SdfParams {
+                r: 1.0,
+                h: 0.0,
+                r2: 0.0,
+                b: Vec3::new(1.0, 1.0, 1.0),
+            },
         )
     }
 
@@ -259,15 +317,21 @@ mod tests {
     #[test]
     fn delta_smaller_than_full() {
         let d = SdfDelta::scale(2.0);
-        assert!(d.encoded_bytes() < 32, "Delta {} < full 32B", d.encoded_bytes());
+        assert!(
+            d.encoded_bytes() < 32,
+            "Delta {} < full 32B",
+            d.encoded_bytes()
+        );
     }
 
     #[test]
     fn delta_with_all_fields_still_compact() {
         let d = SdfDelta {
-            kind: Some(SdfKind::Sphere), scale: Some(1.5),
+            kind: Some(SdfKind::Sphere),
+            scale: Some(1.5),
             offset: Some(Vec3::new(1.0, 0.0, 0.0)),
-            r_delta: Some(0.1), h_delta: Some(0.2),
+            r_delta: Some(0.1),
+            h_delta: Some(0.2),
         };
         // 1 + 1 + 4 + 12 + 4 + 4 = 26B vs 32B full
         assert_eq!(d.encoded_bytes(), 26);
@@ -294,7 +358,7 @@ mod tests {
     #[test]
     fn earth_larger_than_mars() {
         let earth = earth_delta_chain();
-        let mars  = mars_delta_chain();
+        let mars = mars_delta_chain();
         let (_, ep) = earth.resolve();
         let (_, mp) = mars.resolve();
         assert!(ep.r > mp.r, "Earth {} > Mars {}", ep.r, mp.r);
@@ -313,18 +377,34 @@ mod tests {
     #[test]
     fn delta_storage_less_than_full() {
         let mut chain = planet_base();
-        chain.push(SdfDelta::scale(6371.0));    // Earth L5
-        chain.push(SdfDelta::r_add(0.5));       // Earth@2024 L6
+        chain.push(SdfDelta::scale(6371.0)); // Earth L5
+        chain.push(SdfDelta::r_add(0.5)); // Earth@2024 L6
 
         let delta = chain.delta_storage();
-        let full  = chain.full_storage();
+        let full = chain.full_storage();
         assert!(delta < full, "Delta {} < Full {}", delta, full);
-        assert!(chain.savings_pct() > 0.0, "Tiết kiệm: {:.1}%", chain.savings_pct());
+        assert!(
+            chain.savings_pct() > 0.0,
+            "Tiết kiệm: {:.1}%",
+            chain.savings_pct()
+        );
     }
 
     #[test]
     fn l4_base_is_full_l5_is_delta() {
-        assert_eq!(NodeSdf::Full { kind: SdfKind::Sphere, params: SdfParams { r: 1.0, h: 0.0, r2: 0.0, b: Vec3::new(1.0, 1.0, 1.0) } }.storage_bytes(), 32);
+        assert_eq!(
+            NodeSdf::Full {
+                kind: SdfKind::Sphere,
+                params: SdfParams {
+                    r: 1.0,
+                    h: 0.0,
+                    r2: 0.0,
+                    b: Vec3::new(1.0, 1.0, 1.0)
+                }
+            }
+            .storage_bytes(),
+            32
+        );
         assert!(NodeSdf::Delta(SdfDelta::scale(2.0)).storage_bytes() < 32);
         assert_eq!(NodeSdf::None.storage_bytes(), 0);
     }
@@ -354,9 +434,9 @@ mod tests {
     #[test]
     fn evaluate_inside_vs_outside() {
         let chain = earth_delta_chain();
-        let inside  = chain.evaluate(Vec3::new(0.0, 0.0, 0.0));   // tâm
+        let inside = chain.evaluate(Vec3::new(0.0, 0.0, 0.0)); // tâm
         let outside = chain.evaluate(Vec3::new(10000.0, 0.0, 0.0)); // ngoài
-        assert!(inside  < 0.0, "Bên trong < 0: {}", inside);
+        assert!(inside < 0.0, "Bên trong < 0: {}", inside);
         assert!(outside > 0.0, "Bên ngoài > 0: {}", outside);
     }
 
@@ -364,7 +444,12 @@ mod tests {
     fn labrador_bigger_than_base_dog() {
         let base_dog = DeltaChain::from_base(
             SdfKind::Capsule,
-            SdfParams { r: 0.3, h: 0.6, r2: 0.0, b: Vec3::new(0.3, 0.3, 0.3) },
+            SdfParams {
+                r: 0.3,
+                h: 0.6,
+                r2: 0.0,
+                b: Vec3::new(0.3, 0.3, 0.3),
+            },
         );
         let labrador = labrador_delta_chain();
         let (_, bp) = base_dog.resolve();

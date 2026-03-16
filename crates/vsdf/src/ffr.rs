@@ -17,9 +17,7 @@
 
 extern crate alloc;
 
-use olang::molecular::{
-    MolecularChain, Molecule, ShapeBase, RelationBase, EmotionDim, TimeDim,
-};
+use olang::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase, ShapeBase, TimeDim};
 
 /// Fibonacci(n) mod 2^64 — dùng u64 để tránh overflow.
 pub fn fib64(n: u64) -> u64 {
@@ -42,12 +40,12 @@ pub fn fib64(n: u64) -> u64 {
 /// Một điểm trên xoắn ốc Fibonacci 5D.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FfrPoint {
-    pub index:    u64,
-    pub shape:    u8,    // 0..6
-    pub relation: u8,    // 0..7
-    pub valence:  u8,    // 0..255
-    pub arousal:  u8,    // 0..255
-    pub time:     u8,    // 0..4
+    pub index: u64,
+    pub shape: u8,    // 0..6
+    pub relation: u8, // 0..7
+    pub valence: u8,  // 0..255
+    pub arousal: u8,  // 0..255
+    pub time: u8,     // 0..4
 }
 
 impl FfrPoint {
@@ -60,24 +58,27 @@ impl FfrPoint {
         let f4 = fib64(n.wrapping_add(4));
 
         Self {
-            index:    n,
-            shape:    (f0 % 7) as u8,
+            index: n,
+            shape: (f0 % 7) as u8,
             relation: (f1 % 8) as u8,
-            valence:  (f2 % 256) as u8,
-            arousal:  (f3 % 256) as u8,
-            time:     (f4 % 5) as u8,
+            valence: (f2 % 256) as u8,
+            arousal: (f3 % 256) as u8,
+            time: (f4 % 5) as u8,
         }
     }
 
     /// Convert sang Molecule.
     pub fn to_molecule(&self) -> Option<Molecule> {
-        let shape    = ShapeBase::from_byte(self.shape + 1)?; // +1: 0x01..0x07
+        let shape = ShapeBase::from_byte(self.shape + 1)?; // +1: 0x01..0x07
         let relation = RelationBase::from_byte(self.relation + 1)?; // +1: 0x01..0x08
-        let time     = TimeDim::from_byte(self.time + 1)?;    // +1: 0x01..0x05
+        let time = TimeDim::from_byte(self.time + 1)?; // +1: 0x01..0x05
         Some(Molecule {
             shape,
             relation,
-            emotion: EmotionDim { valence: self.valence, arousal: self.arousal },
+            emotion: EmotionDim {
+                valence: self.valence,
+                arousal: self.arousal,
+            },
             time,
         })
     }
@@ -105,8 +106,8 @@ pub fn ffr_chain(start: u64, n: usize) -> MolecularChain {
 /// Scan range [0..max_index] và tìm điểm có Molecule gần nhất.
 /// Trả về (best_index, similarity).
 pub fn ffr_nearest(target: &Molecule, max_index: u64) -> (u64, f32) {
-    let mut best_idx  = 0u64;
-    let mut best_sim  = -1.0f32;
+    let mut best_idx = 0u64;
+    let mut best_sim = -1.0f32;
 
     // Sample theo bước Fibonacci để efficient hơn linear scan
     let step = if max_index > 1000 { fib64(10) } else { 1 };
@@ -131,11 +132,15 @@ pub fn ffr_nearest(target: &Molecule, max_index: u64) -> (u64, f32) {
 /// Similarity giữa 2 Molecules — dùng cho FFR nearest search.
 fn molecule_similarity(a: &Molecule, b: &Molecule) -> f32 {
     let shape_match = if a.shape == b.shape { 1.0f32 } else { 0.0 };
-    let rel_match   = if a.relation == b.relation { 1.0f32 } else { 0.0 };
+    let rel_match = if a.relation == b.relation {
+        1.0f32
+    } else {
+        0.0
+    };
 
     let dv = (a.emotion.valence as f32 - b.emotion.valence as f32) / 255.0;
     let da = (a.emotion.arousal as f32 - b.emotion.arousal as f32) / 255.0;
-    let emo_sim = 1.0 - libm::sqrtf(dv*dv + da*da) * 0.5;
+    let emo_sim = 1.0 - libm::sqrtf(dv * dv + da * da) * 0.5;
 
     let time_match = if a.time == b.time { 1.0f32 } else { 0.5 };
 
@@ -179,9 +184,9 @@ mod tests {
     fn ffr_point_bounded() {
         for n in [0u64, 1, 5, 10, 100, 1000] {
             let p = FfrPoint::at(n);
-            assert!(p.shape    < 7,   "shape in [0..6]");
-            assert!(p.relation < 8,   "relation in [0..7]");
-            assert!(p.time     < 5,   "time in [0..4]");
+            assert!(p.shape < 7, "shape in [0..6]");
+            assert!(p.relation < 8, "relation in [0..7]");
+            assert!(p.time < 5, "time in [0..4]");
         }
     }
 
@@ -235,16 +240,24 @@ mod tests {
     #[test]
     fn ffr_coverage() {
         // 100 điểm đầu phải cover đủ shape/relation variants
-        let mut shapes    = [false; 7];
+        let mut shapes = [false; 7];
         let mut relations = [false; 8];
         for n in 0..100u64 {
             let p = FfrPoint::at(n);
-            shapes[p.shape as usize]    = true;
+            shapes[p.shape as usize] = true;
             relations[p.relation as usize] = true;
         }
-        let shapes_covered    = shapes.iter().filter(|&&v| v).count();
+        let shapes_covered = shapes.iter().filter(|&&v| v).count();
         let relations_covered = relations.iter().filter(|&&v| v).count();
-        assert!(shapes_covered    >= 5, "Ít nhất 5/7 shapes covered: {}", shapes_covered);
-        assert!(relations_covered >= 6, "Ít nhất 6/8 relations covered: {}", relations_covered);
+        assert!(
+            shapes_covered >= 5,
+            "Ít nhất 5/7 shapes covered: {}",
+            shapes_covered
+        );
+        assert!(
+            relations_covered >= 6,
+            "Ít nhất 6/8 relations covered: {}",
+            relations_covered
+        );
     }
 }

@@ -22,8 +22,8 @@
 //! STATS              → emit system stats
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
 
@@ -76,70 +76,70 @@ impl Op {
     /// Tên opcode (cho debugging).
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Push(_)  => "PUSH",
-            Self::Load(_)  => "LOAD",
-            Self::Lca      => "LCA",
-            Self::Edge(_)  => "EDGE",
+            Self::Push(_) => "PUSH",
+            Self::Load(_) => "LOAD",
+            Self::Lca => "LCA",
+            Self::Edge(_) => "EDGE",
             Self::Query(_) => "QUERY",
-            Self::Emit     => "EMIT",
-            Self::Call(_)  => "CALL",
-            Self::Ret      => "RET",
-            Self::Jmp(_)   => "JMP",
-            Self::Jz(_)    => "JZ",
-            Self::Dup      => "DUP",
-            Self::Pop      => "POP",
-            Self::Swap     => "SWAP",
-            Self::Loop(_)  => "LOOP",
-            Self::Halt     => "HALT",
-            Self::Dream    => "DREAM",
-            Self::Stats    => "STATS",
-            Self::Nop      => "NOP",
+            Self::Emit => "EMIT",
+            Self::Call(_) => "CALL",
+            Self::Ret => "RET",
+            Self::Jmp(_) => "JMP",
+            Self::Jz(_) => "JZ",
+            Self::Dup => "DUP",
+            Self::Pop => "POP",
+            Self::Swap => "SWAP",
+            Self::Loop(_) => "LOOP",
+            Self::Halt => "HALT",
+            Self::Dream => "DREAM",
+            Self::Stats => "STATS",
+            Self::Nop => "NOP",
         }
     }
 
     /// Serialize → bytes (compact).
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
-            Self::Nop      => alloc::vec![0x00],
-            Self::Lca      => alloc::vec![0x01],
-            Self::Emit     => alloc::vec![0x02],
-            Self::Ret      => alloc::vec![0x03],
-            Self::Dup      => alloc::vec![0x04],
-            Self::Pop      => alloc::vec![0x05],
-            Self::Swap     => alloc::vec![0x06],
-            Self::Halt     => alloc::vec![0x07],
-            Self::Dream    => alloc::vec![0x08],
-            Self::Stats    => alloc::vec![0x09],
-            Self::Edge(r)  => alloc::vec![0x10, *r],
+            Self::Nop => alloc::vec![0x00],
+            Self::Lca => alloc::vec![0x01],
+            Self::Emit => alloc::vec![0x02],
+            Self::Ret => alloc::vec![0x03],
+            Self::Dup => alloc::vec![0x04],
+            Self::Pop => alloc::vec![0x05],
+            Self::Swap => alloc::vec![0x06],
+            Self::Halt => alloc::vec![0x07],
+            Self::Dream => alloc::vec![0x08],
+            Self::Stats => alloc::vec![0x09],
+            Self::Edge(r) => alloc::vec![0x10, *r],
             Self::Query(r) => alloc::vec![0x11, *r],
-            Self::Loop(n)  => {
+            Self::Loop(n) => {
                 let mut b = alloc::vec![0x20];
                 b.extend_from_slice(&n.to_le_bytes());
                 b
             }
-            Self::Jmp(i)   => {
+            Self::Jmp(i) => {
                 let mut b = alloc::vec![0x21];
                 b.extend_from_slice(&(*i as u32).to_le_bytes());
                 b
             }
-            Self::Jz(i)    => {
+            Self::Jz(i) => {
                 let mut b = alloc::vec![0x22];
                 b.extend_from_slice(&(*i as u32).to_le_bytes());
                 b
             }
-            Self::Push(c)  => {
+            Self::Push(c) => {
                 let cb = c.to_bytes();
                 let mut b = alloc::vec![0x30, cb.len() as u8];
                 b.extend_from_slice(&cb);
                 b
             }
-            Self::Load(s)  => {
+            Self::Load(s) => {
                 let sb = s.as_bytes();
                 let mut b = alloc::vec![0x31, sb.len() as u8];
                 b.extend_from_slice(sb);
                 b
             }
-            Self::Call(s)  => {
+            Self::Call(s) => {
                 let sb = s.as_bytes();
                 let mut b = alloc::vec![0x32, sb.len() as u8];
                 b.extend_from_slice(sb);
@@ -157,14 +157,17 @@ impl Op {
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
 pub struct OlangProgram {
-    pub ops:  Vec<Op>,
+    pub ops: Vec<Op>,
     pub name: String,
 }
 
 #[allow(missing_docs)]
 impl OlangProgram {
     pub fn new(name: &str) -> Self {
-        Self { ops: Vec::new(), name: name.into() }
+        Self {
+            ops: Vec::new(),
+            name: name.into(),
+        }
     }
 
     pub fn push_op(&mut self, op: Op) -> &mut Self {
@@ -172,8 +175,12 @@ impl OlangProgram {
         self
     }
 
-    pub fn len(&self) -> usize { self.ops.len() }
-    pub fn is_empty(&self) -> bool { self.ops.is_empty() }
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
 
     /// Serialize toàn bộ program → bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -203,11 +210,18 @@ pub enum OlangIrExpr {
     /// ○{🔥 ∘ 💧} — compose (LCA)
     Compose(String, String),
     /// ○{🔥 ∈ ?} — relation query
-    Relation { subject: String, rel: u8, object: Option<String> },
+    Relation {
+        subject: String,
+        rel: u8,
+        object: Option<String>,
+    },
     /// Direct chain push (e.g. ZWJ sequence already encoded)
     Push(crate::molecular::MolecularChain),
     /// ZWJ sequence: preserve original codepoints for display
-    ZwjDisplay { original: alloc::string::String, chain: crate::molecular::MolecularChain },
+    ZwjDisplay {
+        original: alloc::string::String,
+        chain: crate::molecular::MolecularChain,
+    },
     /// ○{dream} — system command
     Command(String),
     /// Pipeline
@@ -226,7 +240,11 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             prog.push_op(Op::Lca);
         }
 
-        OlangIrExpr::Relation { subject, rel, object } => {
+        OlangIrExpr::Relation {
+            subject,
+            rel,
+            object,
+        } => {
             prog.push_op(Op::Load(subject.clone()));
             if let Some(obj) = object {
                 prog.push_op(Op::Load(obj.clone()));
@@ -243,13 +261,17 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             prog.push_op(Op::Push(chain.clone()));
         }
 
-        OlangIrExpr::Command(cmd) => {
-            match cmd.as_str() {
-                "dream" => { prog.push_op(Op::Dream); }
-                "stats" => { prog.push_op(Op::Stats); }
-                _       => { prog.push_op(Op::Nop);   }
+        OlangIrExpr::Command(cmd) => match cmd.as_str() {
+            "dream" => {
+                prog.push_op(Op::Dream);
             }
-        }
+            "stats" => {
+                prog.push_op(Op::Stats);
+            }
+            _ => {
+                prog.push_op(Op::Nop);
+            }
+        },
 
         OlangIrExpr::Pipeline(exprs) => {
             for e in exprs {
@@ -328,10 +350,10 @@ mod tests {
     fn program_push_ops() {
         let mut p = OlangProgram::new("test");
         p.push_op(Op::Load("fire".into()))
-         .push_op(Op::Load("water".into()))
-         .push_op(Op::Lca)
-         .push_op(Op::Emit)
-         .push_op(Op::Halt);
+            .push_op(Op::Load("water".into()))
+            .push_op(Op::Lca)
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
         assert_eq!(p.len(), 5);
     }
 
@@ -387,11 +409,23 @@ mod tests {
     fn all_opcodes_serialize() {
         // Verify tất cả opcodes serialize không panic
         let ops = alloc::vec![
-            Op::Nop, Op::Lca, Op::Emit, Op::Ret, Op::Dup,
-            Op::Pop, Op::Swap, Op::Halt, Op::Dream, Op::Stats,
-            Op::Edge(0x01), Op::Query(0x06),
-            Op::Loop(3), Op::Jmp(0), Op::Jz(0),
-            Op::Load("x".into()), Op::Call("f".into()),
+            Op::Nop,
+            Op::Lca,
+            Op::Emit,
+            Op::Ret,
+            Op::Dup,
+            Op::Pop,
+            Op::Swap,
+            Op::Halt,
+            Op::Dream,
+            Op::Stats,
+            Op::Edge(0x01),
+            Op::Query(0x06),
+            Op::Loop(3),
+            Op::Jmp(0),
+            Op::Jz(0),
+            Op::Load("x".into()),
+            Op::Call("f".into()),
         ];
         for op in &ops {
             let b = op.to_bytes();

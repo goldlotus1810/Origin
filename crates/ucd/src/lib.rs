@@ -63,14 +63,12 @@ pub fn decode_hash(_hash: u64) -> Option<u32> {
 #[cfg(feature = "reverse-index")]
 pub fn bucket_cps(shape: u8, relation: u8) -> &'static [u32] {
     // Binary search trong CP_BUCKET_INDEX
-    let idx = CP_BUCKET_INDEX.binary_search_by(|&(s, r, _, _)| {
-        (s, r).cmp(&(shape, relation))
-    });
+    let idx = CP_BUCKET_INDEX.binary_search_by(|&(s, r, _, _)| (s, r).cmp(&(shape, relation)));
     match idx {
         Ok(i) => {
             let (_, _, offset, count) = CP_BUCKET_INDEX[i];
             let start = offset as usize;
-            let end   = start + count as usize;
+            let end = start + count as usize;
             &CP_BUCKET_DATA[start..end]
         }
         Err(_) => &[],
@@ -149,20 +147,32 @@ mod tests {
 
     #[test]
     fn lookup_fire() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let e = lookup(0x1F525).expect("🔥 FIRE phải có trong UCD");
         assert_eq!(e.cp, 0x1F525);
         assert_eq!(e.group, 0x03, "FIRE thuộc EMOTICON group");
         assert_eq!(e.shape, 0x01, "FIRE shape = Sphere");
         assert_eq!(e.relation, 0x01, "FIRE relation = Member");
-        assert!(e.valence >= 0xC0, "FIRE valence phải cao, got 0x{:02X}", e.valence);
-        assert!(e.arousal >= 0xC0, "FIRE arousal phải cao, got 0x{:02X}", e.arousal);
+        assert!(
+            e.valence >= 0xC0,
+            "FIRE valence phải cao, got 0x{:02X}",
+            e.valence
+        );
+        assert!(
+            e.arousal >= 0xC0,
+            "FIRE arousal phải cao, got 0x{:02X}",
+            e.arousal
+        );
         assert_eq!(e.time, 0x04, "FIRE time = Fast");
     }
 
     #[test]
     fn lookup_sphere_sdf() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let e = lookup(0x25CF).expect("● BLACK CIRCLE phải có");
         assert_eq!(e.shape, 0x01, "● = Sphere = 0x01");
         assert_eq!(e.group, 0x01, "Geometric Shapes = SDF group");
@@ -171,14 +181,18 @@ mod tests {
 
     #[test]
     fn lookup_torus_sdf() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let e = lookup(0x25CB).expect("○ WHITE CIRCLE phải có");
         assert_eq!(e.shape, 0x05, "○ = Torus = 0x05");
     }
 
     #[test]
     fn lookup_member_relation() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let e = lookup(0x2208).expect("∈ ELEMENT OF phải có");
         assert_eq!(e.relation, 0x01, "∈ = Member = 0x01");
         assert_eq!(e.time, 0x01, "Math relation = Static");
@@ -186,7 +200,9 @@ mod tests {
 
     #[test]
     fn lookup_arrow_causes() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let e = lookup(0x2192).expect("→ RIGHTWARDS ARROW phải có");
         assert_eq!(e.relation, 0x06, "→ = Causes = 0x06");
         assert_eq!(e.time, 0x05, "Arrow = Instant");
@@ -194,7 +210,9 @@ mod tests {
 
     #[test]
     fn lookup_pi_math() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         // π = U+03C0 — không thuộc 5 nhóm → None
         // Nhưng ∂ = U+2202 thuộc Math Operators
         let e = lookup(0x2202).expect("∂ PARTIAL DIFFERENTIAL phải có");
@@ -204,7 +222,9 @@ mod tests {
 
     #[test]
     fn lookup_musical_note() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         // Musical Symbols thật sự ở 1D100..1D1FF
         // 𝄞 MUSICAL SYMBOL G CLEF = U+1D11E
         if let Some(e) = lookup(0x1D11E) {
@@ -217,7 +237,9 @@ mod tests {
 
     #[test]
     fn lookup_droplet() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let e = lookup(0x1F4A7).expect("💧 DROPLET phải có");
         assert_eq!(e.group, 0x03, "DROPLET = EMOTICON");
         assert!(e.valence >= 0x80, "DROPLET valence moderate+");
@@ -233,18 +255,27 @@ mod tests {
 
     #[test]
     fn table_not_empty() {
-        if table_len() == 0 { return; }
-        assert!(table_len() > 1000,
-            "UCD table phải có >1000 entries, got {}", table_len());
+        if table_len() == 0 {
+            return;
+        }
+        assert!(
+            table_len() > 1000,
+            "UCD table phải có >1000 entries, got {}",
+            table_len()
+        );
     }
 
     #[test]
     fn table_sorted_by_cp() {
         // Bắt buộc cho binary_search
         for i in 1..UCD_TABLE.len() {
-            assert!(UCD_TABLE[i-1].cp < UCD_TABLE[i].cp,
+            assert!(
+                UCD_TABLE[i - 1].cp < UCD_TABLE[i].cp,
                 "UCD_TABLE phải sorted: 0x{:05X} >= 0x{:05X} tại index {}",
-                UCD_TABLE[i-1].cp, UCD_TABLE[i].cp, i);
+                UCD_TABLE[i - 1].cp,
+                UCD_TABLE[i].cp,
+                i
+            );
         }
     }
 
@@ -253,7 +284,9 @@ mod tests {
     #[test]
     #[cfg(feature = "reverse-index")]
     fn decode_hash_fire() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let e = lookup(0x1F525).unwrap();
         let decoded = decode_hash(e.hash);
         // Có thể decode ra cp khác nếu hash collision
@@ -265,8 +298,11 @@ mod tests {
     #[cfg(feature = "reverse-index")]
     fn hash_to_cp_sorted() {
         for i in 1..HASH_TO_CP.len() {
-            assert!(HASH_TO_CP[i-1].0 < HASH_TO_CP[i].0,
-                "HASH_TO_CP phải sorted tại index {}", i);
+            assert!(
+                HASH_TO_CP[i - 1].0 < HASH_TO_CP[i].0,
+                "HASH_TO_CP phải sorted tại index {}",
+                i
+            );
         }
     }
 
@@ -281,15 +317,17 @@ mod tests {
     #[test]
     #[cfg(feature = "reverse-index")]
     fn bucket_sphere_member() {
-        if table_len() == 0 { return; }
+        if table_len() == 0 {
+            return;
+        }
         let cps = bucket_cps(0x01, 0x01); // Sphere + Member
-        // EMOTICON group nhiều nodes Sphere+Member
+                                          // EMOTICON group nhiều nodes Sphere+Member
         assert!(!cps.is_empty(), "bucket (Sphere, Member) phải có entries");
         // Mọi cp trong bucket phải có shape=Sphere, relation=Member
         for &cp in cps {
             if let Some(e) = lookup(cp) {
-                assert_eq!(e.shape,    0x01, "cp 0x{:05X} phải Sphere",    cp);
-                assert_eq!(e.relation, 0x01, "cp 0x{:05X} phải Member",   cp);
+                assert_eq!(e.shape, 0x01, "cp 0x{:05X} phải Sphere", cp);
+                assert_eq!(e.relation, 0x01, "cp 0x{:05X} phải Member", cp);
             }
         }
     }
@@ -317,7 +355,11 @@ mod tests {
 
     #[test]
     fn relation_primitives_count() {
-        assert_eq!(RELATION_PRIMITIVES.len(), 8, "Phải có đúng 8 RELATION primitives");
+        assert_eq!(
+            RELATION_PRIMITIVES.len(),
+            8,
+            "Phải có đúng 8 RELATION primitives"
+        );
     }
 
     #[test]
@@ -333,30 +375,35 @@ mod tests {
         assert!(is_relation_primitive(0x2208), "∈ = RELATION primitive");
         assert!(is_relation_primitive(0x2192), "→ = RELATION primitive");
         assert!(is_relation_primitive(0x2190), "← = RELATION primitive");
-        assert!(!is_relation_primitive(0x25CF), "● không phải RELATION primitive");
+        assert!(
+            !is_relation_primitive(0x25CF),
+            "● không phải RELATION primitive"
+        );
     }
 
     // ── Convenience functions ───────────────────────────────────────────────
 
     #[test]
     fn convenience_fns_fire() {
-        if table_len() == 0 { return; }
-        assert_eq!(shape_of(0x1F525),    0x01);
+        if table_len() == 0 {
+            return;
+        }
+        assert_eq!(shape_of(0x1F525), 0x01);
         assert_eq!(relation_of(0x1F525), 0x01);
         assert!(valence_of(0x1F525) >= 0xC0);
         assert!(arousal_of(0x1F525) >= 0xC0);
-        assert_eq!(time_of(0x1F525),     0x04);
-        assert_eq!(group_of(0x1F525),    0x03);
+        assert_eq!(time_of(0x1F525), 0x04);
+        assert_eq!(group_of(0x1F525), 0x03);
     }
 
     #[test]
     fn convenience_fns_unknown_default() {
         // cp không trong UCD → default values
-        assert_eq!(shape_of(0x0041),    0x01); // Sphere default
+        assert_eq!(shape_of(0x0041), 0x01); // Sphere default
         assert_eq!(relation_of(0x0041), 0x01); // Member default
-        assert_eq!(valence_of(0x0041),  0x80); // neutral
-        assert_eq!(arousal_of(0x0041),  0x80); // moderate
-        assert_eq!(time_of(0x0041),     0x03); // Medium
-        assert_eq!(group_of(0x0041),    0x00); // no group
+        assert_eq!(valence_of(0x0041), 0x80); // neutral
+        assert_eq!(arousal_of(0x0041), 0x80); // moderate
+        assert_eq!(time_of(0x0041), 0x03); // Medium
+        assert_eq!(group_of(0x0041), 0x00); // no group
     }
 }

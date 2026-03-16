@@ -27,29 +27,29 @@ use alloc::vec::Vec;
 #[repr(u8)]
 pub enum BridgeMsg {
     /// Text input from browser
-    TextInput       = 0x01,
+    TextInput = 0x01,
     /// Olang expression from browser
-    OlangInput      = 0x02,
+    OlangInput = 0x02,
     /// Audio features from browser (Web Audio API)
-    AudioInput      = 0x03,
+    AudioInput = 0x03,
     /// Response from HomeOS → browser
-    Response        = 0x10,
+    Response = 0x10,
     /// Emotion update event (push)
-    EmotionUpdate   = 0x11,
+    EmotionUpdate = 0x11,
     /// Dream result event (push)
-    DreamResult     = 0x12,
+    DreamResult = 0x12,
     /// Silk change event (push)
-    SilkUpdate      = 0x13,
+    SilkUpdate = 0x13,
     /// Scene update (3D world changed)
-    SceneUpdate     = 0x14,
+    SceneUpdate = 0x14,
     /// System stats
-    Stats           = 0x20,
+    Stats = 0x20,
     /// Health check
-    Health          = 0x21,
+    Health = 0x21,
     /// Ping/Pong
-    Ping            = 0xFE,
+    Ping = 0xFE,
     /// Pong
-    Pong            = 0xFF,
+    Pong = 0xFF,
 }
 
 impl BridgeMsg {
@@ -67,11 +67,13 @@ impl BridgeMsg {
             0x21 => Some(Self::Health),
             0xFE => Some(Self::Ping),
             0xFF => Some(Self::Pong),
-            _    => None,
+            _ => None,
         }
     }
 
-    pub fn as_byte(self) -> u8 { self as u8 }
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 /// Magic bytes for bridge frames.
@@ -119,10 +121,14 @@ impl BridgeFrame {
     }
 
     /// Create ping frame.
-    pub fn ping() -> Self { Self::new(BridgeMsg::Ping, Vec::new()) }
+    pub fn ping() -> Self {
+        Self::new(BridgeMsg::Ping, Vec::new())
+    }
 
     /// Create pong frame.
-    pub fn pong() -> Self { Self::new(BridgeMsg::Pong, Vec::new()) }
+    pub fn pong() -> Self {
+        Self::new(BridgeMsg::Pong, Vec::new())
+    }
 
     /// Encode frame → bytes (for WebSocket binary message).
     ///
@@ -139,14 +145,18 @@ impl BridgeFrame {
 
     /// Decode bytes → frame.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 5 { return None; }
+        if bytes.len() < 5 {
+            return None;
+        }
         if bytes[0] != BRIDGE_MAGIC[0] || bytes[1] != BRIDGE_MAGIC[1] {
             return None;
         }
         let msg_type = BridgeMsg::from_byte(bytes[2])?;
         let len = u16::from_be_bytes([bytes[3], bytes[4]]) as usize;
-        if bytes.len() < 5 + len { return None; }
-        let payload = bytes[5..5+len].to_vec();
+        if bytes.len() < 5 + len {
+            return None;
+        }
+        let payload = bytes[5..5 + len].to_vec();
         Some(Self { msg_type, payload })
     }
 
@@ -156,7 +166,9 @@ impl BridgeFrame {
     }
 
     /// Frame size in bytes.
-    pub fn size(&self) -> usize { 5 + self.payload.len() }
+    pub fn size(&self) -> usize {
+        5 + self.payload.len()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,12 +187,16 @@ pub struct EventStream {
 
 impl EventStream {
     pub fn new(max_pending: usize) -> Self {
-        Self { events: Vec::new(), max_pending }
+        Self {
+            events: Vec::new(),
+            max_pending,
+        }
     }
 
     /// Push emotion update.
     pub fn push_emotion(&mut self, valence: f32, arousal: f32, fx: f32) {
-        self.events.push(BridgeFrame::emotion_update(valence, arousal, fx));
+        self.events
+            .push(BridgeFrame::emotion_update(valence, arousal, fx));
         self.auto_flush();
     }
 
@@ -217,7 +233,9 @@ impl EventStream {
     }
 
     /// Pending count.
-    pub fn pending(&self) -> usize { self.events.len() }
+    pub fn pending(&self) -> usize {
+        self.events.len()
+    }
 
     /// Auto-flush: drop oldest if too many pending.
     fn auto_flush(&mut self) {
@@ -231,7 +249,9 @@ impl EventStream {
 }
 
 impl Default for EventStream {
-    fn default() -> Self { Self::new(64) }
+    fn default() -> Self {
+        Self::new(64)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

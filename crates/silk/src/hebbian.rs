@@ -80,7 +80,9 @@ pub fn hebbian_strengthen(weight: f32, reward: f32) -> f32 {
 /// Số 24h periods = elapsed_ns / NS_PER_DAY
 /// weight × φ⁻¹^periods
 pub fn hebbian_decay(weight: f32, elapsed_ns: i64) -> f32 {
-    if elapsed_ns <= 0 { return weight; }
+    if elapsed_ns <= 0 {
+        return weight;
+    }
     let days = elapsed_ns as f32 / NS_PER_DAY as f32;
     // weight × φ⁻¹^days
     let factor = libm::powf(PHI_INV, days);
@@ -90,11 +92,7 @@ pub fn hebbian_decay(weight: f32, elapsed_ns: i64) -> f32 {
 /// Blend emotion của edge với emotion mới.
 ///
 /// Edge "nhớ" cảm xúc — emotion mới blend vào với weight = intensity.
-pub fn blend_emotion(
-    current: EmotionTag,
-    new_emotion: EmotionTag,
-    intensity: f32,
-) -> EmotionTag {
+pub fn blend_emotion(current: EmotionTag, new_emotion: EmotionTag, intensity: f32) -> EmotionTag {
     current.blend(new_emotion, 1.0 - intensity) // new blends in
 }
 
@@ -141,9 +139,12 @@ mod tests {
     #[test]
     fn should_promote_boundary() {
         // Chính xác boundary
-        assert!(should_promote(0.7, fib(3), 3), "Boundary: weight=0.7, fire=Fib[3]");
+        assert!(
+            should_promote(0.7, fib(3), 3),
+            "Boundary: weight=0.7, fire=Fib[3]"
+        );
         assert!(!should_promote(0.699, fib(3), 3), "Below weight threshold");
-        assert!(!should_promote(0.7, fib(3)-1, 3), "Below fire threshold");
+        assert!(!should_promote(0.7, fib(3) - 1, 3), "Below fire threshold");
     }
 
     // ── Hebbian strengthen ───────────────────────────────────────────────────
@@ -174,10 +175,12 @@ mod tests {
     #[test]
     fn strengthen_high_weight_slow() {
         // weight cao → tăng chậm hơn
-        let delta_low  = hebbian_strengthen(0.1, 1.0) - 0.1;
+        let delta_low = hebbian_strengthen(0.1, 1.0) - 0.1;
         let delta_high = hebbian_strengthen(0.9, 1.0) - 0.9;
-        assert!(delta_low > delta_high,
-            "Weight thấp tăng nhanh hơn weight cao");
+        assert!(
+            delta_low > delta_high,
+            "Weight thấp tăng nhanh hơn weight cao"
+        );
     }
 
     // ── Hebbian decay ────────────────────────────────────────────────────────
@@ -194,8 +197,12 @@ mod tests {
     fn decay_one_day_phi_inv() {
         let w0 = 1.0f32;
         let w1 = hebbian_decay(w0, NS_PER_DAY);
-        assert!((w1 - PHI_INV).abs() < 0.001,
-            "Sau 1 ngày: weight × φ⁻¹ ≈ {}, got {}", PHI_INV, w1);
+        assert!(
+            (w1 - PHI_INV).abs() < 0.001,
+            "Sau 1 ngày: weight × φ⁻¹ ≈ {}, got {}",
+            PHI_INV,
+            w1
+        );
     }
 
     #[test]
@@ -210,8 +217,12 @@ mod tests {
         let w0 = 1.0f32;
         let w7 = hebbian_decay(w0, NS_PER_DAY * 7); // 1 tuần
         let expected = libm::powf(PHI_INV, 7.0);
-        assert!((w7 - expected).abs() < 0.001,
-            "7 ngày: w7={} ≈ φ⁻⁷={}", w7, expected);
+        assert!(
+            (w7 - expected).abs() < 0.001,
+            "7 ngày: w7={} ≈ φ⁻⁷={}",
+            w7,
+            expected
+        );
     }
 
     #[test]
@@ -233,8 +244,11 @@ mod tests {
         let current = EmotionTag::new(0.0, 0.0, 0.5, 0.5);
         let new_emo = EmotionTag::new(1.0, 1.0, 0.5, 0.5);
         let blended = blend_emotion(current, new_emo, 0.9);
-        assert!(blended.valence > 0.5,
-            "High intensity → new_emo dominates: val={}", blended.valence);
+        assert!(
+            blended.valence > 0.5,
+            "High intensity → new_emo dominates: val={}",
+            blended.valence
+        );
     }
 
     #[test]
@@ -243,7 +257,10 @@ mod tests {
         let current = EmotionTag::new(-1.0, 0.0, 0.5, 0.5);
         let new_emo = EmotionTag::new(1.0, 1.0, 0.5, 0.5);
         let blended = blend_emotion(current, new_emo, 0.1);
-        assert!(blended.valence < 0.0,
-            "Low intensity → current dominates: val={}", blended.valence);
+        assert!(
+            blended.valence < 0.0,
+            "Low intensity → current dominates: val={}",
+            blended.valence
+        );
     }
 }

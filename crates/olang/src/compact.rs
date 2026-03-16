@@ -40,11 +40,11 @@
 //!   - Có thể reconstruct Full Molecule từ Compact + parent chain
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
-use crate::molecular::{Molecule, MolecularChain, ShapeBase, RelationBase, EmotionDim, TimeDim};
 use crate::hash::fnv1a;
+use crate::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase, ShapeBase, TimeDim};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DeltaMolecule — chỉ lưu diff từ parent
@@ -165,10 +165,14 @@ impl DeltaMolecule {
 
     /// Deserialize từ bytes.
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        if b.is_empty() { return None; }
+        if b.is_empty() {
+            return None;
+        }
         let mask = b[0];
         let expected_len = mask.count_ones() as usize;
-        if b.len() < 1 + expected_len { return None; }
+        if b.len() < 1 + expected_len {
+            return None;
+        }
         let data = b[1..1 + expected_len].to_vec();
         Some(Self { mask, data })
     }
@@ -255,31 +259,39 @@ impl ChainDictionary {
 
     /// Lookup hash → dictionary ID.
     pub fn lookup_hash(&self, hash: u64) -> Option<u32> {
-        self.entries.iter().position(|e| e.hash == hash).map(|i| i as u32)
+        self.entries
+            .iter()
+            .position(|e| e.hash == hash)
+            .map(|i| i as u32)
     }
 
     /// Số entries.
-    pub fn len(&self) -> usize { self.entries.len() }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
 
     /// Dictionary rỗng?
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 
     /// Prune: xóa 25% entries ít dùng nhất.
     fn prune(&mut self) {
-        if self.entries.len() < 4 { return; }
+        if self.entries.len() < 4 {
+            return;
+        }
 
         // Sort by usage (ascending) → remove bottom 25%
-        let mut indexed: Vec<(usize, u32)> = self.entries.iter()
+        let mut indexed: Vec<(usize, u32)> = self
+            .entries
+            .iter()
             .enumerate()
             .map(|(i, e)| (i, e.usage_count))
             .collect();
         indexed.sort_by_key(|&(_, count)| count);
 
         let remove_count = self.entries.len() / 4;
-        let to_remove: Vec<usize> = indexed.iter()
-            .take(remove_count)
-            .map(|&(i, _)| i)
-            .collect();
+        let to_remove: Vec<usize> = indexed.iter().take(remove_count).map(|&(i, _)| i).collect();
 
         // Remove in reverse order to keep indices valid
         let mut to_remove_sorted = to_remove;
@@ -312,19 +324,23 @@ impl ChainDictionary {
 
     /// Decode variable-length bytes → dictionary ID.
     pub fn decode_id(bytes: &[u8]) -> Option<(u32, usize)> {
-        if bytes.is_empty() { return None; }
+        if bytes.is_empty() {
+            return None;
+        }
         let first = bytes[0];
         if first < 0x80 {
             Some((first as u32, 1))
         } else if first < 0xC0 {
-            if bytes.len() < 2 { return None; }
+            if bytes.len() < 2 {
+                return None;
+            }
             let id = ((first as u32 & 0x3F) << 8) | bytes[1] as u32;
             Some((id + 0x80, 2))
         } else {
-            if bytes.len() < 3 { return None; }
-            let id = ((first as u32 & 0x3F) << 16)
-                   | ((bytes[1] as u32) << 8)
-                   | bytes[2] as u32;
+            if bytes.len() < 3 {
+                return None;
+            }
+            let id = ((first as u32 & 0x3F) << 16) | ((bytes[1] as u32) << 8) | bytes[2] as u32;
             Some((id + 0x4080, 3))
         }
     }
@@ -339,13 +355,13 @@ impl ChainDictionary {
 #[repr(u8)]
 pub enum CompactKind {
     /// Full molecule (L0-L1): giữ nguyên 5 bytes
-    Full       = 0x00,
+    Full = 0x00,
     /// Delta từ parent: bitmask + changed bytes
-    Delta      = 0x01,
+    Delta = 0x01,
     /// Dictionary reference: variable-length ID
-    DictRef    = 0x02,
+    DictRef = 0x02,
     /// Duplicate: chỉ hash (đã tồn tại)
-    Dedup      = 0x03,
+    Dedup = 0x03,
 }
 
 /// Compact node — đại diện nén của 1 knowledge node.
@@ -426,7 +442,8 @@ impl CompactNode {
         }
 
         // 3. Dictionary reference (chain mới, nhưng đã register)
-        if dict_id < 0x4080 { // 2 bytes hoặc ít hơn
+        if dict_id < 0x4080 {
+            // 2 bytes hoặc ít hơn
             return Self {
                 hash,
                 parent_hash: parent.map_or(0, |p| p.chain_hash()),
@@ -457,12 +474,12 @@ impl CompactNode {
         dict: &ChainDictionary,
     ) -> Option<MolecularChain> {
         match self.kind {
-            CompactKind::Full => {
-                MolecularChain::from_bytes(&self.data)
-            }
+            CompactKind::Full => MolecularChain::from_bytes(&self.data),
             CompactKind::Delta => {
                 let parent_chain = parent?;
-                if parent_chain.is_empty() { return None; }
+                if parent_chain.is_empty() {
+                    return None;
+                }
                 let delta = DeltaMolecule::from_bytes(&self.data)?;
                 let parent_mol = &parent_chain.0[0];
                 let child_mol = delta.decode(parent_mol)?;
@@ -502,7 +519,9 @@ impl CompactNode {
 
     /// Deserialize từ bytes.
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        if b.len() < 28 { return None; } // minimum header
+        if b.len() < 28 {
+            return None;
+        } // minimum header
         let kind = match b[0] {
             0x00 => CompactKind::Full,
             0x01 => CompactKind::Delta,
@@ -515,9 +534,18 @@ impl CompactNode {
         let layer = b[17];
         let created_at = i64::from_be_bytes(b[18..26].try_into().ok()?);
         let data_len = u16::from_be_bytes(b[26..28].try_into().ok()?) as usize;
-        if b.len() < 28 + data_len { return None; }
+        if b.len() < 28 + data_len {
+            return None;
+        }
         let data = b[28..28 + data_len].to_vec();
-        Some(Self { hash, parent_hash, layer, kind, data, created_at })
+        Some(Self {
+            hash,
+            parent_hash,
+            layer,
+            kind,
+            data,
+            created_at,
+        })
     }
 }
 
@@ -637,7 +665,9 @@ impl CompactPage {
 
     /// Thêm node.
     pub fn push_node(&mut self, node: CompactNode) -> bool {
-        if self.is_full() { return false; }
+        if self.is_full() {
+            return false;
+        }
         self.nodes.push(node);
         true
     }
@@ -760,7 +790,8 @@ impl SilkPruner {
 
     /// Prune edges: chỉ giữ strong ones.
     pub fn prune(edges: &[(u64, u64, f32, RelationBase)], threshold: f32) -> Vec<CompactEdge> {
-        edges.iter()
+        edges
+            .iter()
             .filter(|&&(_, _, w, _)| w >= threshold)
             .map(|&(from, to, w, rel)| CompactEdge::encode(from, to, w, rel))
             .collect()
@@ -813,7 +844,11 @@ pub struct LayerIndex {
 impl LayerIndex {
     /// Tạo index rỗng.
     pub fn new(layer: u8) -> Self {
-        Self { layer, entries: Vec::new(), bloom: [0u8; 256] }
+        Self {
+            layer,
+            entries: Vec::new(),
+            bloom: [0u8; 256],
+        }
     }
 
     /// Thêm entry.
@@ -829,7 +864,8 @@ impl LayerIndex {
 
         // Insert sorted
         let pos = self.entries.partition_point(|e| e.hash_lo < hash_lo);
-        self.entries.insert(pos, PageIndexEntry { hash_lo, page_id });
+        self.entries
+            .insert(pos, PageIndexEntry { hash_lo, page_id });
     }
 
     /// Bloom filter check — nhanh, false positive OK.
@@ -844,18 +880,25 @@ impl LayerIndex {
 
     /// Tìm page_id chứa hash (binary search).
     pub fn find_page(&self, hash: u64) -> Option<u32> {
-        if !self.maybe_contains(hash) { return None; }
+        if !self.maybe_contains(hash) {
+            return None;
+        }
         let hash_lo = (hash & 0xFFFFFFFF) as u32;
-        self.entries.binary_search_by_key(&hash_lo, |e| e.hash_lo)
+        self.entries
+            .binary_search_by_key(&hash_lo, |e| e.hash_lo)
             .ok()
             .map(|i| self.entries[i].page_id)
     }
 
     /// Số entries.
-    pub fn len(&self) -> usize { self.entries.len() }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
 
     /// Rỗng?
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 
     /// Size in RAM (bytes).
     ///
@@ -916,13 +959,19 @@ impl PageCache {
     }
 
     /// Cache cho PC.
-    pub fn for_pc() -> Self { Self::new(CacheCapacity::PC) }
+    pub fn for_pc() -> Self {
+        Self::new(CacheCapacity::PC)
+    }
 
     /// Cache cho mobile.
-    pub fn for_mobile() -> Self { Self::new(CacheCapacity::MOBILE) }
+    pub fn for_mobile() -> Self {
+        Self::new(CacheCapacity::MOBILE)
+    }
 
     /// Cache cho embedded.
-    pub fn for_embedded() -> Self { Self::new(CacheCapacity::EMBEDDED) }
+    pub fn for_embedded() -> Self {
+        Self::new(CacheCapacity::EMBEDDED)
+    }
 
     /// Get page from cache (hit). Returns None if not cached (miss).
     pub fn get(&mut self, page_id: u32) -> Option<&CompactPage> {
@@ -955,7 +1004,9 @@ impl PageCache {
         // Cache full → evict LRU
         let evicted = if self.pages.len() >= self.capacity {
             // Find least recently used
-            let lru_idx = self.pages.iter()
+            let lru_idx = self
+                .pages
+                .iter()
                 .enumerate()
                 .min_by_key(|(_, e)| e.2)
                 .map(|(i, _)| i)
@@ -971,15 +1022,21 @@ impl PageCache {
     }
 
     /// Số pages hiện tại.
-    pub fn len(&self) -> usize { self.pages.len() }
+    pub fn len(&self) -> usize {
+        self.pages.len()
+    }
 
     /// Cache rỗng?
-    pub fn is_empty(&self) -> bool { self.pages.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.pages.is_empty()
+    }
 
     /// Hit rate (0.0 .. 1.0).
     pub fn hit_rate(&self) -> f32 {
         let total = self.hits + self.misses;
-        if total == 0 { return 0.0; }
+        if total == 0 {
+            return 0.0;
+        }
         self.hits as f32 / total as f32
     }
 
@@ -992,7 +1049,8 @@ impl PageCache {
     pub fn stats(&self) -> String {
         alloc::format!(
             "PageCache: {}/{} pages | {:.1}% hit rate | ~{}KB RAM",
-            self.len(), self.capacity,
+            self.len(),
+            self.capacity,
             self.hit_rate() * 100.0,
             self.ram_usage() / 1024,
         )
@@ -1172,7 +1230,8 @@ impl TieredStore {
         }
 
         // Get or create page
-        let mut page = self.take_page(page_id)
+        let mut page = self
+            .take_page(page_id)
             .unwrap_or_else(|| CompactPage::new(page_id, layer));
 
         if page.is_full() {
@@ -1204,11 +1263,19 @@ impl TieredStore {
     }
 
     /// Store compact edge.
-    pub fn store_edge(&mut self, from: u64, to: u64, weight: f32, relation: RelationBase, layer: u8) {
+    pub fn store_edge(
+        &mut self,
+        from: u64,
+        to: u64,
+        weight: f32,
+        relation: RelationBase,
+        layer: u8,
+    ) {
         let edge = CompactEdge::encode(from, to, weight, relation);
 
         let page_id = self.current_page_for_layer(layer);
-        let mut page = self.take_page(page_id)
+        let mut page = self
+            .take_page(page_id)
             .unwrap_or_else(|| CompactPage::new(page_id, layer));
 
         page.push_edge(edge);
@@ -1240,10 +1307,14 @@ impl TieredStore {
     }
 
     /// Total nodes stored across all tiers.
-    pub fn total_nodes(&self) -> u64 { self.total_nodes }
+    pub fn total_nodes(&self) -> u64 {
+        self.total_nodes
+    }
 
     /// Total edges stored.
-    pub fn total_edges(&self) -> u64 { self.total_edges }
+    pub fn total_edges(&self) -> u64 {
+        self.total_edges
+    }
 
     /// Estimated RAM usage (bytes).
     pub fn ram_usage(&self) -> usize {
@@ -1264,7 +1335,8 @@ impl TieredStore {
             "TieredStore: {} nodes + {} edges\n\
              RAM: ~{}KB | Disk: ~{}KB\n\
              {}",
-            self.total_nodes, self.total_edges,
+            self.total_nodes,
+            self.total_edges,
             self.ram_usage() / 1024,
             self.disk_usage() / 1024,
             self.cache.stats(),
@@ -1317,7 +1389,9 @@ impl TieredStore {
         let node = page.nodes.iter().find(|n| n.hash == hash)?.clone();
 
         // 4. Collect outgoing edges from this page
-        let edges: Vec<CompactEdge> = page.edges.iter()
+        let edges: Vec<CompactEdge> = page
+            .edges
+            .iter()
             .filter(|e| e.from_hash == (hash & 0xFFFFFFFF) as u32)
             .cloned()
             .collect();
@@ -1332,7 +1406,8 @@ impl TieredStore {
                     neighbors.push(NeighborInfo {
                         node: neighbor,
                         weight: edge.weight_f32(),
-                        relation: RelationBase::from_byte(edge.relation).unwrap_or(RelationBase::Member),
+                        relation: RelationBase::from_byte(edge.relation)
+                            .unwrap_or(RelationBase::Member),
                     });
                 }
             }
@@ -1348,12 +1423,18 @@ impl TieredStore {
 
     /// Find node by truncated hash (4 bytes) — searches current layer first,
     /// then adjacent layers.
-    fn find_node_by_truncated_hash(&mut self, hash_lo: u32, preferred_layer: u8) -> Option<CompactNode> {
+    fn find_node_by_truncated_hash(
+        &mut self,
+        hash_lo: u32,
+        preferred_layer: u8,
+    ) -> Option<CompactNode> {
         // Search preferred layer first
         let layers: Vec<u8> = {
             let mut l = alloc::vec![preferred_layer];
             // Also check adjacent layers (silk can cross layers)
-            if preferred_layer > 0 { l.push(preferred_layer - 1); }
+            if preferred_layer > 0 {
+                l.push(preferred_layer - 1);
+            }
             l.push(preferred_layer + 1);
             l
         };
@@ -1366,7 +1447,9 @@ impl TieredStore {
                         self.load_page_from_cold(page_id);
                     }
                     if let Some(page) = self.cache.get(page_id) {
-                        if let Some(node) = page.nodes.iter()
+                        if let Some(node) = page
+                            .nodes
+                            .iter()
                             .find(|n| (n.hash & 0xFFFFFFFF) as u32 == hash_lo)
                         {
                             return Some(node.clone());
@@ -1428,13 +1511,16 @@ impl TieredStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molecular::{ShapeBase, RelationBase, EmotionDim, TimeDim};
+    use crate::molecular::{EmotionDim, RelationBase, ShapeBase, TimeDim};
 
     fn test_mol(shape: u8, rel: u8, v: u8, a: u8, t: u8) -> Molecule {
         Molecule {
             shape: ShapeBase::from_byte(shape).unwrap(),
             relation: RelationBase::from_byte(rel).unwrap(),
-            emotion: EmotionDim { valence: v, arousal: a },
+            emotion: EmotionDim {
+                valence: v,
+                arousal: a,
+            },
             time: TimeDim::from_byte(t).unwrap(),
         }
     }
@@ -1452,7 +1538,7 @@ mod tests {
     #[test]
     fn delta_one_field_changed() {
         let parent = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let child  = test_mol(0x01, 0x01, 0xC0, 0x80, 0x03); // valence changed
+        let child = test_mol(0x01, 0x01, 0xC0, 0x80, 0x03); // valence changed
         let delta = DeltaMolecule::encode(&parent, &child);
         assert_eq!(delta.mask, 0x04, "Only valence bit set");
         assert_eq!(delta.size(), 2, "1 bitmask + 1 changed byte");
@@ -1461,7 +1547,7 @@ mod tests {
     #[test]
     fn delta_all_fields_changed() {
         let parent = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let child  = test_mol(0x02, 0x06, 0xC0, 0x40, 0x05);
+        let child = test_mol(0x02, 0x06, 0xC0, 0x40, 0x05);
         let delta = DeltaMolecule::encode(&parent, &child);
         assert_eq!(delta.mask, 0x1F, "All 5 bits set");
         assert_eq!(delta.size(), 6, "1 bitmask + 5 changed bytes");
@@ -1470,7 +1556,7 @@ mod tests {
     #[test]
     fn delta_roundtrip() {
         let parent = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let child  = test_mol(0x01, 0x06, 0xC0, 0x80, 0x03); // relation + valence
+        let child = test_mol(0x01, 0x06, 0xC0, 0x80, 0x03); // relation + valence
         let delta = DeltaMolecule::encode(&parent, &child);
         let decoded = delta.decode(&parent).unwrap();
         assert_eq!(decoded, child);
@@ -1479,7 +1565,7 @@ mod tests {
     #[test]
     fn delta_bytes_roundtrip() {
         let parent = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let child  = test_mol(0x02, 0x01, 0x80, 0xFF, 0x03);
+        let child = test_mol(0x02, 0x01, 0x80, 0xFF, 0x03);
         let delta = DeltaMolecule::encode(&parent, &child);
         let bytes = delta.to_bytes();
         let decoded = DeltaMolecule::from_bytes(&bytes).unwrap();
@@ -1490,9 +1576,13 @@ mod tests {
     fn delta_savings_typical() {
         // Typical L2 node: chỉ khác emotion valence từ parent
         let parent = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let child  = test_mol(0x01, 0x01, 0x90, 0x80, 0x03);
+        let child = test_mol(0x01, 0x01, 0x90, 0x80, 0x03);
         let delta = DeltaMolecule::encode(&parent, &child);
-        assert!(delta.size() < 5, "Delta {} bytes < Full 5 bytes", delta.size());
+        assert!(
+            delta.size() < 5,
+            "Delta {} bytes < Full 5 bytes",
+            delta.size()
+        );
     }
 
     // ── ChainDictionary ──────────────────────────────────────────────────────
@@ -1572,7 +1662,7 @@ mod tests {
     #[test]
     fn compact_node_delta_encoding() {
         let parent = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
-        let child  = MolecularChain::single(test_mol(0x01, 0x01, 0x90, 0x80, 0x03));
+        let child = MolecularChain::single(test_mol(0x01, 0x01, 0x90, 0x80, 0x03));
         let mut dict = ChainDictionary::new(100);
         dict.register(&parent); // pre-register parent
         let node = CompactNode::encode(&child, Some(&parent), &mut dict, 2, 1000);
@@ -1593,7 +1683,7 @@ mod tests {
     #[test]
     fn compact_node_decode_delta() {
         let parent = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
-        let child  = MolecularChain::single(test_mol(0x01, 0x01, 0xC0, 0x80, 0x03));
+        let child = MolecularChain::single(test_mol(0x01, 0x01, 0xC0, 0x80, 0x03));
         let mut dict = ChainDictionary::new(100);
         dict.register(&parent);
         let node = CompactNode::encode(&child, Some(&parent), &mut dict, 2, 1000);
@@ -1628,8 +1718,10 @@ mod tests {
     #[test]
     fn compact_edge_size() {
         let edge = CompactEdge::encode(
-            0xDEADBEEF12345678, 0xCAFEBABE87654321,
-            0.75, RelationBase::Causes,
+            0xDEADBEEF12345678,
+            0xCAFEBABE87654321,
+            0.75,
+            RelationBase::Causes,
         );
         let bytes = edge.to_bytes();
         assert_eq!(bytes.len(), 10, "CompactEdge = 10 bytes (vs 46 full)");
@@ -1638,8 +1730,10 @@ mod tests {
     #[test]
     fn compact_edge_roundtrip() {
         let edge = CompactEdge::encode(
-            0x1234567890ABCDEF, 0xFEDCBA0987654321,
-            0.85, RelationBase::Similar,
+            0x1234567890ABCDEF,
+            0xFEDCBA0987654321,
+            0.85,
+            RelationBase::Similar,
         );
         let bytes = edge.to_bytes();
         let decoded = CompactEdge::from_bytes(&bytes);
@@ -1653,7 +1747,11 @@ mod tests {
     fn compact_edge_weight_quantization() {
         let edge = CompactEdge::encode(1, 2, 0.5, RelationBase::Member);
         let restored = edge.weight_f32();
-        assert!((restored - 0.5).abs() < 0.005, "Weight quantization ~0.5: {}", restored);
+        assert!(
+            (restored - 0.5).abs() < 0.005,
+            "Weight quantization ~0.5: {}",
+            restored
+        );
     }
 
     // ── CompactPage ──────────────────────────────────────────────────────────
@@ -1926,6 +2024,10 @@ mod tests {
 
         // Edge compression: 10 bytes vs 46 bytes → 78% savings
         let edge_ratio = 10.0f32 / 46.0;
-        assert!(edge_ratio < 0.25, "Edge compression ratio {:.2} < 0.25", edge_ratio);
+        assert!(
+            edge_ratio < 0.25,
+            "Edge compression ratio {:.2} < 0.25",
+            edge_ratio
+        );
     }
 }

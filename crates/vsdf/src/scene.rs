@@ -10,12 +10,12 @@
 //! Export: SceneGraph → JSON (for browser/WebGL) or binary (for native)
 
 extern crate alloc;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::format;
 
-use crate::sdf::{SdfKind, SdfParams, Vec3, sdf};
 use crate::physics::gradient;
+use crate::sdf::{sdf, SdfKind, SdfParams, Vec3};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Transform — vị trí + scale + rotation
@@ -40,7 +40,11 @@ impl Transform {
     };
 
     pub fn at(x: f32, y: f32, z: f32) -> Self {
-        Self { position: Vec3::new(x, y, z), scale: 1.0, rotation_y: 0.0 }
+        Self {
+            position: Vec3::new(x, y, z),
+            scale: 1.0,
+            rotation_y: 0.0,
+        }
     }
 
     pub fn with_scale(mut self, s: f32) -> Self {
@@ -83,7 +87,9 @@ impl Transform {
 }
 
 impl Default for Transform {
-    fn default() -> Self { Self::IDENTITY }
+    fn default() -> Self {
+        Self::IDENTITY
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,19 +112,63 @@ pub struct Material {
 }
 
 impl Material {
-    pub const DEFAULT: Self = Self { r: 0.8, g: 0.8, b: 0.8, alpha: 1.0, roughness: 0.5, emission: 0.0 };
-    pub const RED: Self     = Self { r: 0.9, g: 0.2, b: 0.2, alpha: 1.0, roughness: 0.4, emission: 0.0 };
-    pub const GREEN: Self   = Self { r: 0.2, g: 0.9, b: 0.2, alpha: 1.0, roughness: 0.4, emission: 0.0 };
-    pub const BLUE: Self    = Self { r: 0.2, g: 0.4, b: 0.9, alpha: 1.0, roughness: 0.3, emission: 0.0 };
-    pub const GOLD: Self    = Self { r: 0.9, g: 0.7, b: 0.2, alpha: 1.0, roughness: 0.2, emission: 0.1 };
+    pub const DEFAULT: Self = Self {
+        r: 0.8,
+        g: 0.8,
+        b: 0.8,
+        alpha: 1.0,
+        roughness: 0.5,
+        emission: 0.0,
+    };
+    pub const RED: Self = Self {
+        r: 0.9,
+        g: 0.2,
+        b: 0.2,
+        alpha: 1.0,
+        roughness: 0.4,
+        emission: 0.0,
+    };
+    pub const GREEN: Self = Self {
+        r: 0.2,
+        g: 0.9,
+        b: 0.2,
+        alpha: 1.0,
+        roughness: 0.4,
+        emission: 0.0,
+    };
+    pub const BLUE: Self = Self {
+        r: 0.2,
+        g: 0.4,
+        b: 0.9,
+        alpha: 1.0,
+        roughness: 0.3,
+        emission: 0.0,
+    };
+    pub const GOLD: Self = Self {
+        r: 0.9,
+        g: 0.7,
+        b: 0.2,
+        alpha: 1.0,
+        roughness: 0.2,
+        emission: 0.1,
+    };
 
     pub fn rgb(r: f32, g: f32, b: f32) -> Self {
-        Self { r, g, b, alpha: 1.0, roughness: 0.5, emission: 0.0 }
+        Self {
+            r,
+            g,
+            b,
+            alpha: 1.0,
+            roughness: 0.5,
+            emission: 0.0,
+        }
     }
 }
 
 impl Default for Material {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,24 +264,51 @@ impl SceneGraph {
     }
 
     /// Add node → returns ID.
-    pub fn add(&mut self, kind: SdfKind, params: SdfParams, transform: Transform, material: Material) -> NodeId {
+    pub fn add(
+        &mut self,
+        kind: SdfKind,
+        params: SdfParams,
+        transform: Transform,
+        material: Material,
+    ) -> NodeId {
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(SceneNode {
-            id, kind, params, transform, material,
-            parent: 0, chain_hash: 0, visible: true,
+            id,
+            kind,
+            params,
+            transform,
+            material,
+            parent: 0,
+            chain_hash: 0,
+            visible: true,
             label: String::new(),
         });
         id
     }
 
     /// Add node with chain hash (from MolecularChain).
-    pub fn add_from_chain(&mut self, kind: SdfKind, params: SdfParams, transform: Transform, material: Material, chain_hash: u64, label: String) -> NodeId {
+    pub fn add_from_chain(
+        &mut self,
+        kind: SdfKind,
+        params: SdfParams,
+        transform: Transform,
+        material: Material,
+        chain_hash: u64,
+        label: String,
+    ) -> NodeId {
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(SceneNode {
-            id, kind, params, transform, material,
-            parent: 0, chain_hash, visible: true, label,
+            id,
+            kind,
+            params,
+            transform,
+            material,
+            parent: 0,
+            chain_hash,
+            visible: true,
+            label,
         });
         id
     }
@@ -254,16 +331,18 @@ impl SceneGraph {
     }
 
     /// Total nodes.
-    pub fn len(&self) -> usize { self.nodes.len() }
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
 
     /// Empty?
-    pub fn is_empty(&self) -> bool { self.nodes.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
 
     /// Visible nodes sorted front-to-back for rendering.
     pub fn render_list(&self) -> Vec<&SceneNode> {
-        let mut visible: Vec<&SceneNode> = self.nodes.iter()
-            .filter(|n| n.visible)
-            .collect();
+        let mut visible: Vec<&SceneNode> = self.nodes.iter().filter(|n| n.visible).collect();
 
         // Sort by distance to camera (front-to-back → minimize overdraw)
         let cam = self.camera_pos;
@@ -285,7 +364,9 @@ impl SceneGraph {
         let steps = 64u32;
 
         for _ in 0..steps {
-            if t > max_dist { break; }
+            if t > max_dist {
+                break;
+            }
 
             let p = Vec3::new(
                 ray_origin.x + ray_dir.x * t,
@@ -298,7 +379,9 @@ impl SceneGraph {
             let mut min_id = 0u32;
 
             for node in &self.nodes {
-                if !node.visible { continue; }
+                if !node.visible {
+                    continue;
+                }
                 let d = node.sdf_at(p);
                 if d < min_d {
                     min_d = d;
@@ -329,7 +412,9 @@ impl SceneGraph {
         let mut json = String::from("{\"nodes\":[");
 
         for (i, node) in self.nodes.iter().enumerate() {
-            if i > 0 { json.push(','); }
+            if i > 0 {
+                json.push(',');
+            }
             json.push_str(&node_to_json(node));
         }
 
@@ -337,8 +422,12 @@ impl SceneGraph {
             "],\"camera\":{{\"x\":{:.3},\"y\":{:.3},\"z\":{:.3}}},\
              \"light\":{{\"x\":{:.3},\"y\":{:.3},\"z\":{:.3}}},\
              \"ambient\":{:.3}}}",
-            self.camera_pos.x, self.camera_pos.y, self.camera_pos.z,
-            self.light_dir.x, self.light_dir.y, self.light_dir.z,
+            self.camera_pos.x,
+            self.camera_pos.y,
+            self.camera_pos.z,
+            self.light_dir.x,
+            self.light_dir.y,
+            self.light_dir.z,
             self.ambient,
         ));
 
@@ -376,13 +465,17 @@ impl SceneGraph {
             "Scene: {} nodes ({} visible) | camera ({:.1},{:.1},{:.1})",
             self.nodes.len(),
             self.nodes.iter().filter(|n| n.visible).count(),
-            self.camera_pos.x, self.camera_pos.y, self.camera_pos.z,
+            self.camera_pos.x,
+            self.camera_pos.y,
+            self.camera_pos.z,
         )
     }
 }
 
 impl Default for SceneGraph {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -391,7 +484,7 @@ fn distance_sq(a: Vec3, b: Vec3) -> f32 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     let dz = a.z - b.z;
-    dx*dx + dy*dy + dz*dz
+    dx * dx + dy * dy + dz * dz
 }
 
 fn node_to_json(node: &SceneNode) -> String {
@@ -400,11 +493,19 @@ fn node_to_json(node: &SceneNode) -> String {
          \"scale\":{:.3},\"rot\":{:.3},\
          \"color\":[{:.2},{:.2},{:.2}],\"alpha\":{:.2},\
          \"visible\":{},\"hash\":\"0x{:016X}\"}}",
-        node.id, node.kind.as_byte(),
-        node.transform.position.x, node.transform.position.y, node.transform.position.z,
-        node.transform.scale, node.transform.rotation_y,
-        node.material.r, node.material.g, node.material.b, node.material.alpha,
-        node.visible, node.chain_hash,
+        node.id,
+        node.kind.as_byte(),
+        node.transform.position.x,
+        node.transform.position.y,
+        node.transform.position.z,
+        node.transform.scale,
+        node.transform.rotation_y,
+        node.material.r,
+        node.material.g,
+        node.material.b,
+        node.material.alpha,
+        node.visible,
+        node.chain_hash,
     )
 }
 
@@ -443,11 +544,18 @@ mod tests {
 
     #[test]
     fn transform_roundtrip() {
-        let t = Transform::at(1.0, 2.0, 3.0).with_scale(1.5).with_rotation(0.5);
+        let t = Transform::at(1.0, 2.0, 3.0)
+            .with_scale(1.5)
+            .with_rotation(0.5);
         let p = Vec3::new(5.0, 3.0, 1.0);
         let local = t.world_to_local(p);
         let world = t.local_to_world(local);
-        assert!((world.x - p.x).abs() < 0.01, "Roundtrip X: {} vs {}", world.x, p.x);
+        assert!(
+            (world.x - p.x).abs() < 0.01,
+            "Roundtrip X: {} vs {}",
+            world.x,
+            p.x
+        );
         assert!((world.y - p.y).abs() < 0.01, "Roundtrip Y");
         assert!((world.z - p.z).abs() < 0.01, "Roundtrip Z");
     }
@@ -455,7 +563,12 @@ mod tests {
     #[test]
     fn scene_add_and_get() {
         let mut scene = SceneGraph::new();
-        let id = scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::IDENTITY, Material::RED);
+        let id = scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::IDENTITY,
+            Material::RED,
+        );
         assert_eq!(scene.len(), 1);
         assert!(scene.get(id).is_some());
         assert_eq!(scene.get(id).unwrap().kind, SdfKind::Sphere);
@@ -464,7 +577,12 @@ mod tests {
     #[test]
     fn scene_remove() {
         let mut scene = SceneGraph::new();
-        let id = scene.add(SdfKind::Box, SdfParams::sphere(1.0), Transform::IDENTITY, Material::DEFAULT);
+        let id = scene.add(
+            SdfKind::Box,
+            SdfParams::sphere(1.0),
+            Transform::IDENTITY,
+            Material::DEFAULT,
+        );
         scene.remove(id);
         assert_eq!(scene.len(), 0);
     }
@@ -474,9 +592,19 @@ mod tests {
         let mut scene = SceneGraph::new();
         scene.camera_pos = Vec3::new(0.0, 0.0, 10.0);
         // Far node
-        scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::at(0.0, 0.0, -5.0), Material::RED);
+        scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::at(0.0, 0.0, -5.0),
+            Material::RED,
+        );
         // Near node
-        scene.add(SdfKind::Box, SdfParams::sphere(1.0), Transform::at(0.0, 0.0, 8.0), Material::BLUE);
+        scene.add(
+            SdfKind::Box,
+            SdfParams::sphere(1.0),
+            Transform::at(0.0, 0.0, 8.0),
+            Material::BLUE,
+        );
 
         let list = scene.render_list();
         assert_eq!(list.len(), 2);
@@ -490,8 +618,10 @@ mod tests {
     fn scene_node_sdf() {
         let mut scene = SceneGraph::new();
         let id = scene.add(
-            SdfKind::Sphere, SdfParams::sphere(1.0),
-            Transform::at(0.0, 0.0, 0.0), Material::DEFAULT,
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::at(0.0, 0.0, 0.0),
+            Material::DEFAULT,
         );
         let node = scene.get(id).unwrap();
         // Point on surface → sdf ≈ 0
@@ -505,7 +635,12 @@ mod tests {
     #[test]
     fn scene_to_json() {
         let mut scene = SceneGraph::new();
-        scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::IDENTITY, Material::RED);
+        scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::IDENTITY,
+            Material::RED,
+        );
         let json = scene.to_json();
         assert!(json.contains("\"nodes\""), "JSON has nodes");
         assert!(json.contains("\"camera\""), "JSON has camera");
@@ -515,16 +650,30 @@ mod tests {
     #[test]
     fn scene_to_bytes() {
         let mut scene = SceneGraph::new();
-        scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::IDENTITY, Material::DEFAULT);
+        scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::IDENTITY,
+            Material::DEFAULT,
+        );
         let bytes = scene.to_bytes();
         assert_eq!(&bytes[0..4], b"SCNE", "Magic");
-        assert_eq!(u32::from_be_bytes(bytes[4..8].try_into().unwrap()), 1, "1 node");
+        assert_eq!(
+            u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
+            1,
+            "1 node"
+        );
     }
 
     #[test]
     fn scene_ray_hit_sphere() {
         let mut scene = SceneGraph::new();
-        scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::at(0.0, 0.0, 0.0), Material::RED);
+        scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::at(0.0, 0.0, 0.0),
+            Material::RED,
+        );
 
         // Ray from (0,0,5) pointing towards origin
         let hit = scene.ray_hit(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0), 10.0);
@@ -537,7 +686,12 @@ mod tests {
     #[test]
     fn scene_ray_miss() {
         let mut scene = SceneGraph::new();
-        scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::at(0.0, 0.0, 0.0), Material::RED);
+        scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::at(0.0, 0.0, 0.0),
+            Material::RED,
+        );
 
         // Ray going away from sphere
         let hit = scene.ray_hit(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 1.0), 10.0);
@@ -547,8 +701,18 @@ mod tests {
     #[test]
     fn scene_hierarchy() {
         let mut scene = SceneGraph::new();
-        let parent = scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::IDENTITY, Material::DEFAULT);
-        let child = scene.add(SdfKind::Box, SdfParams::sphere(0.5), Transform::at(2.0, 0.0, 0.0), Material::RED);
+        let parent = scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::IDENTITY,
+            Material::DEFAULT,
+        );
+        let child = scene.add(
+            SdfKind::Box,
+            SdfParams::sphere(0.5),
+            Transform::at(2.0, 0.0, 0.0),
+            Material::RED,
+        );
         scene.set_parent(child, parent);
         assert_eq!(scene.get(child).unwrap().parent, parent);
     }
@@ -556,7 +720,12 @@ mod tests {
     #[test]
     fn scene_summary() {
         let mut scene = SceneGraph::new();
-        scene.add(SdfKind::Sphere, SdfParams::sphere(1.0), Transform::IDENTITY, Material::DEFAULT);
+        scene.add(
+            SdfKind::Sphere,
+            SdfParams::sphere(1.0),
+            Transform::IDENTITY,
+            Material::DEFAULT,
+        );
         let s = scene.summary();
         assert!(s.contains("1 nodes"), "{}", s);
     }

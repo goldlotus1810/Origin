@@ -8,15 +8,15 @@
 
 extern crate alloc;
 
-pub mod emotion;
-pub mod intent;
-pub mod phrase;
-pub mod curve;
-pub mod snapshot;
-pub mod engine;
 pub mod context;
-pub mod infer;
+pub mod curve;
+pub mod emotion;
+pub mod engine;
 pub mod fusion;
-pub mod word_guide;
+pub mod infer;
+pub mod intent;
 pub mod modality;
+pub mod phrase;
+pub mod snapshot;
 pub mod template;
+pub mod word_guide;

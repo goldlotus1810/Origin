@@ -15,8 +15,8 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::tier::HardwareTier;
 use crate::arch::Architecture;
+use crate::tier::HardwareTier;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PlatformBridge — trait cho platform-specific code
@@ -55,10 +55,14 @@ pub trait PlatformBridge {
     fn haptic(&self, _pattern: HapticPattern) {}
 
     /// Get display DPI.
-    fn display_dpi(&self) -> f32 { 96.0 }
+    fn display_dpi(&self) -> f32 {
+        96.0
+    }
 
     /// Network available?
-    fn network_available(&self) -> bool { true }
+    fn network_available(&self) -> bool {
+        true
+    }
 }
 
 /// Log level.
@@ -140,12 +144,18 @@ impl DesktopBridge {
 }
 
 impl Default for DesktopBridge {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PlatformBridge for DesktopBridge {
-    fn name(&self) -> &str { "Desktop" }
-    fn tier(&self) -> HardwareTier { self.tier }
+    fn name(&self) -> &str {
+        "Desktop"
+    }
+    fn tier(&self) -> HardwareTier {
+        self.tier
+    }
 
     #[cfg(feature = "std")]
     fn timestamp_ms(&self) -> i64 {
@@ -156,7 +166,9 @@ impl PlatformBridge for DesktopBridge {
     }
 
     #[cfg(not(feature = "std"))]
-    fn timestamp_ms(&self) -> i64 { 0 }
+    fn timestamp_ms(&self) -> i64 {
+        0
+    }
 
     #[cfg(feature = "std")]
     fn read_file(&self, path: &str) -> Option<Vec<u8>> {
@@ -164,7 +176,9 @@ impl PlatformBridge for DesktopBridge {
     }
 
     #[cfg(not(feature = "std"))]
-    fn read_file(&self, _path: &str) -> Option<Vec<u8>> { None }
+    fn read_file(&self, _path: &str) -> Option<Vec<u8>> {
+        None
+    }
 
     #[cfg(feature = "std")]
     fn write_file(&self, path: &str, data: &[u8]) -> bool {
@@ -172,7 +186,9 @@ impl PlatformBridge for DesktopBridge {
     }
 
     #[cfg(not(feature = "std"))]
-    fn write_file(&self, _path: &str, _data: &[u8]) -> bool { false }
+    fn write_file(&self, _path: &str, _data: &[u8]) -> bool {
+        false
+    }
 
     fn notify(&self, _title: &str, _body: &str) {}
 
@@ -184,7 +200,9 @@ impl PlatformBridge for DesktopBridge {
     #[cfg(not(feature = "std"))]
     fn log(&self, _level: LogLevel, _msg: &str) {}
 
-    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> { None }
+    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> {
+        None
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -211,20 +229,36 @@ impl AndroidBridge {
     }
 
     /// Package name.
-    pub fn package(&self) -> &str { &self.package_name }
+    pub fn package(&self) -> &str {
+        &self.package_name
+    }
 }
 
 impl PlatformBridge for AndroidBridge {
-    fn name(&self) -> &str { "Android" }
-    fn tier(&self) -> HardwareTier { self.tier }
-    fn timestamp_ms(&self) -> i64 { 0 } // JNI: System.currentTimeMillis()
-    fn read_file(&self, _path: &str) -> Option<Vec<u8>> { None } // JNI: FileInputStream
-    fn write_file(&self, _path: &str, _data: &[u8]) -> bool { false }
+    fn name(&self) -> &str {
+        "Android"
+    }
+    fn tier(&self) -> HardwareTier {
+        self.tier
+    }
+    fn timestamp_ms(&self) -> i64 {
+        0
+    } // JNI: System.currentTimeMillis()
+    fn read_file(&self, _path: &str) -> Option<Vec<u8>> {
+        None
+    } // JNI: FileInputStream
+    fn write_file(&self, _path: &str, _data: &[u8]) -> bool {
+        false
+    }
     fn notify(&self, _title: &str, _body: &str) {} // JNI: NotificationManager
     fn log(&self, _level: LogLevel, _msg: &str) {} // JNI: android.util.Log
-    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> { None } // JNI: SensorManager
+    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> {
+        None
+    } // JNI: SensorManager
     fn haptic(&self, _pattern: HapticPattern) {} // JNI: Vibrator
-    fn display_dpi(&self) -> f32 { 320.0 } // typical Android DPI
+    fn display_dpi(&self) -> f32 {
+        320.0
+    } // typical Android DPI
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,20 +285,36 @@ impl IosBridge {
     }
 
     /// Bundle ID.
-    pub fn bundle(&self) -> &str { &self.bundle_id }
+    pub fn bundle(&self) -> &str {
+        &self.bundle_id
+    }
 }
 
 impl PlatformBridge for IosBridge {
-    fn name(&self) -> &str { "iOS" }
-    fn tier(&self) -> HardwareTier { self.tier }
-    fn timestamp_ms(&self) -> i64 { 0 } // C: CFAbsoluteTimeGetCurrent()
-    fn read_file(&self, _path: &str) -> Option<Vec<u8>> { None }
-    fn write_file(&self, _path: &str, _data: &[u8]) -> bool { false }
+    fn name(&self) -> &str {
+        "iOS"
+    }
+    fn tier(&self) -> HardwareTier {
+        self.tier
+    }
+    fn timestamp_ms(&self) -> i64 {
+        0
+    } // C: CFAbsoluteTimeGetCurrent()
+    fn read_file(&self, _path: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn write_file(&self, _path: &str, _data: &[u8]) -> bool {
+        false
+    }
     fn notify(&self, _title: &str, _body: &str) {} // C: UNUserNotificationCenter
     fn log(&self, _level: LogLevel, _msg: &str) {} // C: os_log
-    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> { None } // C: CMMotionManager
+    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> {
+        None
+    } // C: CMMotionManager
     fn haptic(&self, _pattern: HapticPattern) {} // C: UIImpactFeedbackGenerator
-    fn display_dpi(&self) -> f32 { 326.0 } // iPhone Retina
+    fn display_dpi(&self) -> f32 {
+        326.0
+    } // iPhone Retina
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -279,31 +329,58 @@ pub struct EmbeddedBridge {
 
 impl EmbeddedBridge {
     pub fn esp32() -> Self {
-        Self { tier: HardwareTier::Worker, board_name: String::from("ESP32") }
+        Self {
+            tier: HardwareTier::Worker,
+            board_name: String::from("ESP32"),
+        }
     }
 
     pub fn raspberry_pi() -> Self {
-        Self { tier: HardwareTier::Full, board_name: String::from("Raspberry Pi") }
+        Self {
+            tier: HardwareTier::Full,
+            board_name: String::from("Raspberry Pi"),
+        }
     }
 
     pub fn riscv_mcu() -> Self {
-        Self { tier: HardwareTier::Sensor, board_name: String::from("RISC-V MCU") }
+        Self {
+            tier: HardwareTier::Sensor,
+            board_name: String::from("RISC-V MCU"),
+        }
     }
 
-    pub fn board(&self) -> &str { &self.board_name }
+    pub fn board(&self) -> &str {
+        &self.board_name
+    }
 }
 
 impl PlatformBridge for EmbeddedBridge {
-    fn name(&self) -> &str { &self.board_name }
-    fn tier(&self) -> HardwareTier { self.tier }
-    fn timestamp_ms(&self) -> i64 { 0 } // HAL: timer register
-    fn read_file(&self, _path: &str) -> Option<Vec<u8>> { None } // SPI Flash / SD card
-    fn write_file(&self, _path: &str, _data: &[u8]) -> bool { false }
+    fn name(&self) -> &str {
+        &self.board_name
+    }
+    fn tier(&self) -> HardwareTier {
+        self.tier
+    }
+    fn timestamp_ms(&self) -> i64 {
+        0
+    } // HAL: timer register
+    fn read_file(&self, _path: &str) -> Option<Vec<u8>> {
+        None
+    } // SPI Flash / SD card
+    fn write_file(&self, _path: &str, _data: &[u8]) -> bool {
+        false
+    }
     fn notify(&self, _title: &str, _body: &str) {} // LED blink / buzzer
     fn log(&self, _level: LogLevel, _msg: &str) {} // UART serial
-    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> { None } // I2C/SPI sensor
-    fn display_dpi(&self) -> f32 { 72.0 } // small display / e-ink
-    fn network_available(&self) -> bool { false } // WiFi optional
+    fn read_sensor(&self, _sensor_id: &str) -> Option<f32> {
+        None
+    } // I2C/SPI sensor
+    fn display_dpi(&self) -> f32 {
+        72.0
+    } // small display / e-ink
+    fn network_available(&self) -> bool {
+        false
+    } // WiFi optional
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

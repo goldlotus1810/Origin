@@ -4,8 +4,8 @@
 //! Snapshot tức thời — không giữ state riêng.
 
 extern crate alloc;
-use alloc::string::String;
 use alloc::format;
+use alloc::string::String;
 
 /// Snapshot metrics cho observability.
 #[derive(Debug, Clone)]

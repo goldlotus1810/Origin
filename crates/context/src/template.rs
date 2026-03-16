@@ -16,8 +16,8 @@
 //!   Phase 3: Toàn bộ lexicon từ Node storage (no hardcode)
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use silk::edge::EmotionTag;
 
@@ -29,13 +29,13 @@ use silk::edge::EmotionTag;
 #[derive(Debug, Clone)]
 pub struct DynamicWordEntry {
     /// Từ (có thể là từ mới học được)
-    pub word:      String,
+    pub word: String,
     /// Emotion values
-    pub valence:   f32,
-    pub arousal:   f32,
+    pub valence: f32,
+    pub arousal: f32,
     pub dominance: f32,
     /// Nguồn: built-in hoặc learned
-    pub source:    WordSource,
+    pub source: WordSource,
     /// Số lần được co-activate (fire count) — từ Silk
     pub fire_count: u32,
 }
@@ -67,7 +67,9 @@ pub struct DynamicLexicon {
 impl DynamicLexicon {
     /// Tạo mới — chỉ có built-in.
     pub fn new() -> Self {
-        Self { learned: Vec::new() }
+        Self {
+            learned: Vec::new(),
+        }
     }
 
     /// Thêm từ mới đã học được.
@@ -79,27 +81,31 @@ impl DynamicLexicon {
             existing.fire_count += 1;
             // Update emotion qua moving average
             let w = 1.0 / (existing.fire_count as f32 + 1.0);
-            existing.valence   = existing.valence   * (1.0 - w) + valence   * w;
-            existing.arousal   = existing.arousal   * (1.0 - w) + arousal   * w;
+            existing.valence = existing.valence * (1.0 - w) + valence * w;
+            existing.arousal = existing.arousal * (1.0 - w) + arousal * w;
             existing.dominance = existing.dominance * (1.0 - w) + dominance * w;
             return;
         }
 
         self.learned.push(DynamicWordEntry {
-            word:       String::from(word),
+            word: String::from(word),
             valence,
             arousal,
             dominance,
-            source:     WordSource::Learned,
+            source: WordSource::Learned,
             fire_count: 1,
         });
     }
 
     /// Tổng số từ learned.
-    pub fn learned_count(&self) -> usize { self.learned.len() }
+    pub fn learned_count(&self) -> usize {
+        self.learned.len()
+    }
 
     /// Iterator over learned words.
-    pub fn learned_words(&self) -> &[DynamicWordEntry] { &self.learned }
+    pub fn learned_words(&self) -> &[DynamicWordEntry] {
+        &self.learned
+    }
 
     /// Tìm từ trong learned lexicon.
     pub fn find_learned(&self, word: &str) -> Option<&DynamicWordEntry> {
@@ -111,8 +117,10 @@ impl DynamicLexicon {
         // 1. Learned (ưu tiên — đã adapted theo context)
         if let Some(e) = self.find_learned(word) {
             return Some(EmotionTag {
-                valence: e.valence, arousal: e.arousal,
-                dominance: e.dominance, intensity: e.valence.abs(),
+                valence: e.valence,
+                arousal: e.arousal,
+                dominance: e.dominance,
+                intensity: e.valence.abs(),
             });
         }
 
@@ -122,7 +130,11 @@ impl DynamicLexicon {
     }
 }
 
-impl Default for DynamicLexicon { fn default() -> Self { Self::new() } }
+impl Default for DynamicLexicon {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KeywordTemplate — extensible keyword tables
@@ -155,7 +167,9 @@ pub struct KeywordTemplate {
 impl KeywordTemplate {
     /// Tạo mới.
     pub fn new() -> Self {
-        Self { keywords: Vec::new() }
+        Self {
+            keywords: Vec::new(),
+        }
     }
 
     /// Thêm keyword mới.
@@ -167,26 +181,37 @@ impl KeywordTemplate {
 
     /// Tìm keywords theo category.
     pub fn by_category(&self, cat: KeywordCategory) -> Vec<&str> {
-        self.keywords.iter()
+        self.keywords
+            .iter()
             .filter(|(_, c)| *c == cat)
             .map(|(w, _)| w.as_str())
             .collect()
     }
 
     /// Số learned keywords.
-    pub fn len(&self) -> usize { self.keywords.len() }
+    pub fn len(&self) -> usize {
+        self.keywords.len()
+    }
 
     /// Rỗng?
-    pub fn is_empty(&self) -> bool { self.keywords.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.keywords.is_empty()
+    }
 
     /// Kiểm tra text chứa keyword nào thuộc category.
     pub fn contains_category(&self, text: &str, cat: KeywordCategory) -> bool {
         let lo = text.to_lowercase();
-        self.keywords.iter().any(|(w, c)| *c == cat && lo.contains(w.as_str()))
+        self.keywords
+            .iter()
+            .any(|(w, c)| *c == cat && lo.contains(w.as_str()))
     }
 }
 
-impl Default for KeywordTemplate { fn default() -> Self { Self::new() } }
+impl Default for KeywordTemplate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests

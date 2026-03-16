@@ -15,14 +15,14 @@
 //!   NetworkChief — quản lý Worker network/security
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
+use crate::worker::WorkerKind;
 use isl::address::ISLAddress;
-use isl::message::{ISLMessage, ISLFrame, MsgType};
+use isl::message::{ISLFrame, ISLMessage, MsgType};
 use isl::queue::ISLQueue;
 use silk::edge::EmotionTag;
-use crate::worker::WorkerKind;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ChiefKind
@@ -54,8 +54,8 @@ impl ChiefKind {
     ///   General → tất cả
     pub fn accepts(&self, worker: WorkerKind) -> bool {
         match self {
-            ChiefKind::Home    => matches!(worker, WorkerKind::Sensor | WorkerKind::Actuator),
-            ChiefKind::Vision  => matches!(worker, WorkerKind::Camera),
+            ChiefKind::Home => matches!(worker, WorkerKind::Sensor | WorkerKind::Actuator),
+            ChiefKind::Vision => matches!(worker, WorkerKind::Camera),
             ChiefKind::Network => matches!(worker, WorkerKind::Network),
             ChiefKind::General => true,
         }
@@ -80,10 +80,10 @@ pub enum ChiefState {
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct WorkerInfo {
-    pub addr:       ISLAddress,
-    pub kind_byte:  u8,    // WorkerKind as u8
-    pub last_seen:  i64,   // timestamp
-    pub alive:      bool,
+    pub addr: ISLAddress,
+    pub kind_byte: u8,  // WorkerKind as u8
+    pub last_seen: i64, // timestamp
+    pub alive: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,9 +95,9 @@ pub struct WorkerInfo {
 #[derive(Debug, Clone)]
 pub struct IngestedReport {
     pub from_worker: ISLAddress,
-    pub emotion:     EmotionTag,
-    pub payload:     Vec<u8>,   // body đã decode
-    pub timestamp:   i64,
+    pub emotion: EmotionTag,
+    pub payload: Vec<u8>, // body đã decode
+    pub timestamp: i64,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,20 +113,20 @@ pub struct IngestedReport {
 ///   General — pass-through, no domain logic
 #[allow(missing_docs)]
 pub struct Chief {
-    pub addr:    ISLAddress,
-    pub aam:     ISLAddress,  // AAM address
-    pub leo:     ISLAddress,  // LeoAI address
-    pub kind:    ChiefKind,
-    pub state:   ChiefState,
+    pub addr: ISLAddress,
+    pub aam: ISLAddress, // AAM address
+    pub leo: ISLAddress, // LeoAI address
+    pub kind: ChiefKind,
+    pub state: ChiefState,
     /// Workers đã đăng ký
     pub workers: BTreeMap<u32, WorkerInfo>, // key = addr.to_u32()
     /// Inbox từ Workers
-    inbox:       ISLQueue,
+    inbox: ISLQueue,
     /// Outbox → LeoAI
-    pub outbox:  Vec<IngestedReport>,
+    pub outbox: Vec<IngestedReport>,
     /// Outbox → Workers (commands)
-    cmd_queue:   Vec<ISLFrame>,
-    pub events:  u32,
+    cmd_queue: Vec<ISLFrame>,
+    pub events: u32,
     // ── Domain-specific state ────────────────────────────────────────────────
     /// NetworkChief: security alert level (0=normal, 1=elevated, 2=critical).
     pub security_level: u8,
@@ -139,16 +139,19 @@ pub struct Chief {
 impl Chief {
     pub fn new(addr: ISLAddress, aam: ISLAddress, leo: ISLAddress, kind: ChiefKind) -> Self {
         Self {
-            addr, aam, leo, kind,
-            state:    ChiefState::Sleeping,
-            workers:  BTreeMap::new(),
-            inbox:    ISLQueue::new(),
-            outbox:   Vec::new(),
+            addr,
+            aam,
+            leo,
+            kind,
+            state: ChiefState::Sleeping,
+            workers: BTreeMap::new(),
+            inbox: ISLQueue::new(),
+            outbox: Vec::new(),
             cmd_queue: Vec::new(),
-            events:   0,
+            events: 0,
             security_level: 0,
-            motion_events:  0,
-            last_temp:      None,
+            motion_events: 0,
+            last_temp: None,
         }
     }
 
@@ -161,9 +164,15 @@ impl Chief {
         if !self.kind.accepts(worker_kind) {
             return false;
         }
-        self.workers.insert(addr.to_u32(), WorkerInfo {
-            addr, kind_byte, last_seen: ts, alive: true,
-        });
+        self.workers.insert(
+            addr.to_u32(),
+            WorkerInfo {
+                addr,
+                kind_byte,
+                last_seen: ts,
+                alive: true,
+            },
+        );
         true
     }
 
@@ -176,14 +185,14 @@ impl Chief {
 
     /// Nhận ISLFrame đầy đủ (header + body).
     pub fn receive_frame(&mut self, frame: ISLFrame, ts: i64) {
-        self.state  = ChiefState::Processing;
+        self.state = ChiefState::Processing;
         self.events += 1;
 
         // Cập nhật last_seen cho worker
         let key = frame.header.from.to_u32();
         if let Some(w) = self.workers.get_mut(&key) {
             w.last_seen = ts;
-            w.alive     = true;
+            w.alive = true;
         }
 
         // Xử lý theo msg_type
@@ -193,8 +202,8 @@ impl Chief {
                 self.outbox.push(IngestedReport {
                     from_worker: frame.header.from,
                     emotion,
-                    payload:     frame.body.clone(),
-                    timestamp:   ts,
+                    payload: frame.body.clone(),
+                    timestamp: ts,
                 });
                 // Domain-specific post-processing
                 self.domain_process(&frame.body, ts);
@@ -204,9 +213,7 @@ impl Chief {
             }
             MsgType::Emergency => {
                 // Emergency → forward lên AAM
-                let alert = ISLFrame::bare(
-                    ISLMessage::emergency(self.addr, 0xEE)
-                );
+                let alert = ISLFrame::bare(ISLMessage::emergency(self.addr, 0xEE));
                 self.cmd_queue.push(alert);
                 // NetworkChief: escalate security level ngay
                 if self.kind == ChiefKind::Network {
@@ -223,7 +230,7 @@ impl Chief {
     ///
     /// AAM → Chief → Worker (không được đi tắt AAM → Worker)
     pub fn forward_command(&mut self, target: ISLAddress, cmd: u8, value: u8) {
-        let msg   = ISLMessage::actuator(self.addr, target, cmd, value);
+        let msg = ISLMessage::actuator(self.addr, target, cmd, value);
         let frame = ISLFrame::bare(msg);
         self.cmd_queue.push(frame);
     }
@@ -274,9 +281,13 @@ impl Chief {
     ///   temp > 35°C → command tất cả Actuator workers: ON cooling
     ///   temp < 10°C → command tất cả Actuator workers: ON heating
     fn home_process(&mut self, body: &[u8]) {
-        if body.len() < 6 { return; }
+        if body.len() < 6 {
+            return;
+        }
         let unit_byte = body[1];
-        if unit_byte != 0x01 { return; } // only Temperature
+        if unit_byte != 0x01 {
+            return;
+        } // only Temperature
         let val = f32::from_be_bytes([body[2], body[3], body[4], body[5]]);
         self.last_temp = Some(val);
 
@@ -290,7 +301,9 @@ impl Chief {
 
     /// VisionChief: count motion events.
     fn vision_process(&mut self, body: &[u8]) {
-        if body.len() < 6 { return; }
+        if body.len() < 6 {
+            return;
+        }
         let unit_byte = body[1];
         // Motion sensor (0x04) hoặc camera frame with motion
         if unit_byte == 0x04 {
@@ -303,7 +316,9 @@ impl Chief {
 
     /// NetworkChief: assess security from network events.
     fn network_process(&mut self, body: &[u8]) {
-        if body.len() < 6 { return; }
+        if body.len() < 6 {
+            return;
+        }
         // Network anomaly detection heuristic:
         // High arousal + negative valence from network worker → elevate security
         let emotion = decode_emotion_from_body(body);
@@ -314,7 +329,9 @@ impl Chief {
 
     /// Command tất cả Actuator workers đã đăng ký.
     fn command_all_actuators(&mut self, cmd: u8, value: u8) {
-        let actuator_addrs: Vec<ISLAddress> = self.workers.values()
+        let actuator_addrs: Vec<ISLAddress> = self
+            .workers
+            .values()
             .filter(|w| w.alive && w.kind_byte == WorkerKind::Actuator as u8)
             .map(|w| w.addr)
             .collect();
@@ -345,38 +362,72 @@ fn worker_kind_from_byte(b: u8) -> WorkerKind {
         0x02 => WorkerKind::Actuator,
         0x03 => WorkerKind::Camera,
         0x04 => WorkerKind::Network,
-        _    => WorkerKind::Generic,
+        _ => WorkerKind::Generic,
     }
 }
 
 /// Decode EmotionTag từ body bytes (từ Worker encode).
 /// Body format: [sensor_id(1), unit(1), f32(4), i64(8)] = 14 bytes
 fn decode_emotion_from_body(body: &[u8]) -> EmotionTag {
-    if body.len() < 6 { return EmotionTag::NEUTRAL; }
+    if body.len() < 6 {
+        return EmotionTag::NEUTRAL;
+    }
     let unit_byte = body[1];
     let val_bytes = [body[2], body[3], body[4], body[5]];
     let val = f32::from_be_bytes(val_bytes);
 
     // Map unit + value → EmotionTag (mirror của worker::sensor_emotion)
     match unit_byte {
-        0x01 => { // Temperature
+        0x01 => {
+            // Temperature
             if val > 35.0 {
-                EmotionTag { valence: -0.30, arousal: 0.70, dominance: 0.30, intensity: 0.55 }
+                EmotionTag {
+                    valence: -0.30,
+                    arousal: 0.70,
+                    dominance: 0.30,
+                    intensity: 0.55,
+                }
             } else if val < 10.0 {
-                EmotionTag { valence: -0.20, arousal: 0.60, dominance: 0.30, intensity: 0.45 }
+                EmotionTag {
+                    valence: -0.20,
+                    arousal: 0.60,
+                    dominance: 0.30,
+                    intensity: 0.45,
+                }
             } else {
-                EmotionTag { valence: 0.10, arousal: 0.30, dominance: 0.60, intensity: 0.15 }
+                EmotionTag {
+                    valence: 0.10,
+                    arousal: 0.30,
+                    dominance: 0.60,
+                    intensity: 0.15,
+                }
             }
         }
-        0x04 => { // Motion
+        0x04 => {
+            // Motion
             if val > 0.5 {
-                EmotionTag { valence: 0.0, arousal: 0.75, dominance: 0.50, intensity: 0.60 }
-            } else { EmotionTag::NEUTRAL }
+                EmotionTag {
+                    valence: 0.0,
+                    arousal: 0.75,
+                    dominance: 0.50,
+                    intensity: 0.60,
+                }
+            } else {
+                EmotionTag::NEUTRAL
+            }
         }
-        0x05 => { // Sound
+        0x05 => {
+            // Sound
             if val > 80.0 {
-                EmotionTag { valence: -0.40, arousal: 0.85, dominance: 0.25, intensity: 0.70 }
-            } else { EmotionTag::NEUTRAL }
+                EmotionTag {
+                    valence: -0.40,
+                    arousal: 0.85,
+                    dominance: 0.25,
+                    intensity: 0.70,
+                }
+            } else {
+                EmotionTag::NEUTRAL
+            }
         }
         _ => EmotionTag::NEUTRAL,
     }
@@ -390,17 +441,25 @@ fn decode_emotion_from_body(body: &[u8]) -> EmotionTag {
 mod tests {
     use super::*;
 
-    fn aam()   -> ISLAddress { ISLAddress::new(0, 0, 0, 0) }
-    fn leo()   -> ISLAddress { ISLAddress::new(0, 0, 0, 1) }
-    fn chief() -> ISLAddress { ISLAddress::new(1, 0, 0, 0) }
-    fn worker_addr(i: u8) -> ISLAddress { ISLAddress::new(2, 0, 0, i) }
+    fn aam() -> ISLAddress {
+        ISLAddress::new(0, 0, 0, 0)
+    }
+    fn leo() -> ISLAddress {
+        ISLAddress::new(0, 0, 0, 1)
+    }
+    fn chief() -> ISLAddress {
+        ISLAddress::new(1, 0, 0, 0)
+    }
+    fn worker_addr(i: u8) -> ISLAddress {
+        ISLAddress::new(2, 0, 0, i)
+    }
 
     fn make_chief() -> Chief {
         Chief::new(chief(), aam(), leo(), ChiefKind::Home)
     }
 
     fn sensor_frame(from: ISLAddress, to: ISLAddress, temp: f32, ts: i64) -> ISLFrame {
-        let msg  = ISLMessage::with_payload(from, to, MsgType::ChainPayload, [1, 1, 0]);
+        let msg = ISLMessage::with_payload(from, to, MsgType::ChainPayload, [1, 1, 0]);
         // Body: sensor_id(1) + unit(1=temp) + f32(4) + i64(8)
         let mut body = alloc::vec![1u8, 0x01]; // sensor_id=1, unit=Temperature
         body.extend_from_slice(&temp.to_be_bytes());
@@ -426,17 +485,35 @@ mod tests {
     #[test]
     fn domain_routing_rejects_wrong_kind() {
         let mut home = Chief::new(chief(), aam(), leo(), ChiefKind::Home);
-        assert!(!home.register_worker(worker_addr(1), 0x03, 1000), "Camera → Home = rejected");
-        assert!(!home.register_worker(worker_addr(2), 0x04, 1000), "Network → Home = rejected");
+        assert!(
+            !home.register_worker(worker_addr(1), 0x03, 1000),
+            "Camera → Home = rejected"
+        );
+        assert!(
+            !home.register_worker(worker_addr(2), 0x04, 1000),
+            "Network → Home = rejected"
+        );
         assert_eq!(home.alive_count(), 0);
 
         let mut vision = Chief::new(chief(), aam(), leo(), ChiefKind::Vision);
-        assert!(vision.register_worker(worker_addr(1), 0x03, 1000), "Camera → Vision = OK");
-        assert!(!vision.register_worker(worker_addr(2), 0x01, 1000), "Sensor → Vision = rejected");
+        assert!(
+            vision.register_worker(worker_addr(1), 0x03, 1000),
+            "Camera → Vision = OK"
+        );
+        assert!(
+            !vision.register_worker(worker_addr(2), 0x01, 1000),
+            "Sensor → Vision = rejected"
+        );
 
         let mut net = Chief::new(chief(), aam(), leo(), ChiefKind::Network);
-        assert!(net.register_worker(worker_addr(1), 0x04, 1000), "Network → Network = OK");
-        assert!(!net.register_worker(worker_addr(2), 0x01, 1000), "Sensor → Network = rejected");
+        assert!(
+            net.register_worker(worker_addr(1), 0x04, 1000),
+            "Network → Network = OK"
+        );
+        assert!(
+            !net.register_worker(worker_addr(2), 0x01, 1000),
+            "Sensor → Network = rejected"
+        );
     }
 
     #[test]
@@ -472,14 +549,14 @@ mod tests {
 
     #[test]
     fn forward_command_to_worker() {
-        let mut c  = make_chief();
+        let mut c = make_chief();
         let target = worker_addr(3);
         c.forward_command(target, 0x01, 0xFF); // ON command
 
         let cmds = c.drain_commands();
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0].header.to,       target);
-        assert_eq!(cmds[0].header.from,     chief());
+        assert_eq!(cmds[0].header.to, target);
+        assert_eq!(cmds[0].header.from, chief());
         assert_eq!(cmds[0].header.msg_type, MsgType::ActuatorCmd);
     }
 
@@ -487,7 +564,7 @@ mod tests {
     fn aam_to_worker_via_chief() {
         // AAM không được ra lệnh trực tiếp cho Worker
         // AAM → Chief → Worker
-        let mut c  = make_chief();
+        let mut c = make_chief();
         let target = worker_addr(1);
         // AAM gửi command đến Chief (simulate)
         let aam_cmd = ISLMessage::actuator(aam(), chief(), 0x01, 0x00);
@@ -498,8 +575,12 @@ mod tests {
         c.forward_command(target, 0x01, 0x00);
         let cmds = c.drain_commands();
 
-        assert_eq!(cmds[0].header.from, chief(), "Command phải từ Chief, không phải AAM");
-        assert_eq!(cmds[0].header.to,   target);
+        assert_eq!(
+            cmds[0].header.from,
+            chief(),
+            "Command phải từ Chief, không phải AAM"
+        );
+        assert_eq!(cmds[0].header.to, target);
     }
 
     #[test]
@@ -539,7 +620,7 @@ mod tests {
     #[test]
     fn home_chief_automation_hot() {
         let mut c = make_chief(); // Home kind
-        // Đăng ký actuator worker
+                                  // Đăng ký actuator worker
         assert!(c.register_worker(worker_addr(5), 0x02, 1000)); // Actuator
 
         // Gửi temp > 35°C → phải tạo command cho actuators
@@ -547,7 +628,10 @@ mod tests {
         c.receive_frame(frame, 2000);
 
         let cmds = c.drain_commands();
-        assert!(!cmds.is_empty(), "Nóng > 35°C → HomeChief phải command actuator");
+        assert!(
+            !cmds.is_empty(),
+            "Nóng > 35°C → HomeChief phải command actuator"
+        );
         assert_eq!(cmds[0].header.msg_type, MsgType::ActuatorCmd);
         assert_eq!(cmds[0].header.to, worker_addr(5));
     }
@@ -613,7 +697,8 @@ mod tests {
         assert_eq!(c.motion_events, 0);
 
         // Gửi motion sensor data (unit=0x04, value > 0.5)
-        let msg = ISLMessage::with_payload(worker_addr(1), chief(), MsgType::ChainPayload, [2, 4, 0]);
+        let msg =
+            ISLMessage::with_payload(worker_addr(1), chief(), MsgType::ChainPayload, [2, 4, 0]);
         let motion_val: f32 = 1.0;
         let mut body = alloc::vec![2u8, 0x04]; // sensor_id=2, unit=Motion
         body.extend_from_slice(&motion_val.to_be_bytes());

@@ -20,18 +20,24 @@ extern crate alloc;
 extern crate std;
 
 pub mod arch;
+pub mod driver;
+pub mod ffi;
 pub mod platform;
 pub mod probe;
 pub mod security;
-pub mod driver;
 pub mod tier;
-pub mod ffi;
 
 // Re-export core types
 pub use arch::{Architecture, ChipsetLayout, CpuInfo, MemoryInfo, PlatformProfile};
-pub use platform::{HalPlatform, PlatformCapability, DeviceDescriptor, DeviceType, DeviceStatus, MockPlatform};
-pub use probe::{SystemProbe, ProbeResult, ProbeStatus, VulnerabilityReport, VulnerabilitySeverity};
-pub use security::{SecurityScanner, ProcessInfo, NetworkConnection, ConnectionStatus, ThreatLevel};
-pub use driver::{InputEvent, DisplayInfo, DisplayKind, AudioInfo};
+pub use driver::{AudioInfo, DisplayInfo, DisplayKind, InputEvent};
+pub use ffi::{FfiConfig, FfiResponse, PlatformBridge};
+pub use platform::{
+    DeviceDescriptor, DeviceStatus, DeviceType, HalPlatform, MockPlatform, PlatformCapability,
+};
+pub use probe::{
+    ProbeResult, ProbeStatus, SystemProbe, VulnerabilityReport, VulnerabilitySeverity,
+};
+pub use security::{
+    ConnectionStatus, NetworkConnection, ProcessInfo, SecurityScanner, ThreatLevel,
+};
 pub use tier::{HardwareTier, TierConfig};
-pub use ffi::{PlatformBridge, FfiResponse, FfiConfig};

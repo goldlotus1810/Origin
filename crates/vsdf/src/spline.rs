@@ -35,12 +35,22 @@ pub struct BezierSegment {
 impl BezierSegment {
     /// Tạo đoạn phẳng tại giá trị val.
     pub fn flat(val: f32) -> Self {
-        Self { p0: val, p1: val, p2: val, p3: val }
+        Self {
+            p0: val,
+            p1: val,
+            p2: val,
+            p3: val,
+        }
     }
 
     /// Tạo đoạn linear từ a đến b.
     pub fn linear(a: f32, b: f32) -> Self {
-        Self { p0: a, p1: a + (b - a) / 3.0, p2: a + 2.0 * (b - a) / 3.0, p3: b }
+        Self {
+            p0: a,
+            p1: a + (b - a) / 3.0,
+            p2: a + 2.0 * (b - a) / 3.0,
+            p3: b,
+        }
     }
 
     /// Evaluate tại t ∈ [0, 1].
@@ -48,13 +58,10 @@ impl BezierSegment {
     /// Dùng De Casteljau — numerically stable.
     #[inline]
     pub fn evaluate(self, t: f32) -> f32 {
-        let u  = 1.0 - t;
+        let u = 1.0 - t;
         let t2 = t * t;
         let u2 = u * u;
-        u2 * u * self.p0
-            + 3.0 * u2 * t * self.p1
-            + 3.0 * u * t2 * self.p2
-            + t2 * t * self.p3
+        u2 * u * self.p0 + 3.0 * u2 * t * self.p1 + 3.0 * u * t2 * self.p2 + t2 * t * self.p3
     }
 
     /// Đạo hàm tại t — tốc độ thay đổi.
@@ -62,8 +69,8 @@ impl BezierSegment {
     pub fn derivative(self, t: f32) -> f32 {
         let u = 1.0 - t;
         3.0 * (u * u * (self.p1 - self.p0)
-             + 2.0 * u * t * (self.p2 - self.p1)
-             + t * t * (self.p3 - self.p2))
+            + 2.0 * u * t * (self.p2 - self.p1)
+            + t * t * (self.p3 - self.p2))
     }
 }
 
@@ -83,7 +90,9 @@ pub struct VectorSpline {
 
 impl VectorSpline {
     pub fn new() -> Self {
-        Self { segments: Vec::new() }
+        Self {
+            segments: Vec::new(),
+        }
     }
 
     /// Spline phẳng tại giá trị val.
@@ -111,13 +120,17 @@ impl VectorSpline {
     pub fn evaluate(&self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         let n = self.segments.len();
-        if n == 0 { return 0.0; }
-        if n == 1 { return self.segments[0].evaluate(t); }
+        if n == 0 {
+            return 0.0;
+        }
+        if n == 1 {
+            return self.segments[0].evaluate(t);
+        }
 
         // Map t → segment index + local t
         let scaled = t * n as f32;
-        let idx    = (scaled as usize).min(n - 1);
-        let local  = scaled - idx as f32;
+        let idx = (scaled as usize).min(n - 1);
+        let local = scaled - idx as f32;
         self.segments[idx].evaluate(local)
     }
 
@@ -125,37 +138,47 @@ impl VectorSpline {
     pub fn derivative(&self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         let n = self.segments.len();
-        if n == 0 { return 0.0; }
+        if n == 0 {
+            return 0.0;
+        }
         let scaled = t * n as f32;
-        let idx    = (scaled as usize).min(n - 1);
-        let local  = scaled - idx as f32;
+        let idx = (scaled as usize).min(n - 1);
+        let local = scaled - idx as f32;
         // Chain rule: d/dt = d/d_local × d_local/dt = deriv × n
         self.segments[idx].derivative(local) * n as f32
     }
 
     /// Giá trị tối đa trong spline.
     pub fn max_val(&self) -> f32 {
-        self.segments.iter()
+        self.segments
+            .iter()
             .flat_map(|s| [s.p0, s.p1, s.p2, s.p3])
             .fold(f32::NEG_INFINITY, f32::max)
     }
 
     /// Giá trị tối thiểu.
     pub fn min_val(&self) -> f32 {
-        self.segments.iter()
+        self.segments
+            .iter()
             .flat_map(|s| [s.p0, s.p1, s.p2, s.p3])
             .fold(f32::INFINITY, f32::min)
     }
 
     /// Số segments.
-    pub fn len(&self) -> usize { self.segments.len() }
+    pub fn len(&self) -> usize {
+        self.segments.len()
+    }
 
     /// Rỗng?
-    pub fn is_empty(&self) -> bool { self.segments.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
 }
 
 impl Default for VectorSpline {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,7 +194,7 @@ impl Default for VectorSpline {
 #[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SliHeader {
-    pub layer:    u8,
+    pub layer: u8,
     pub n_splines: u8,
 }
 
@@ -222,7 +245,12 @@ mod tests {
     #[test]
     fn bezier_custom() {
         // Cong lên ở giữa
-        let seg = BezierSegment { p0: 0.0, p1: 0.8, p2: 0.8, p3: 0.0 };
+        let seg = BezierSegment {
+            p0: 0.0,
+            p1: 0.8,
+            p2: 0.8,
+            p3: 0.0,
+        };
         let mid = seg.evaluate(0.5);
         assert!(mid > 0.4, "Cong lên giữa: {} > 0.4", mid);
         assert!((seg.evaluate(0.0)).abs() < 1e-5);
@@ -232,7 +260,7 @@ mod tests {
     #[test]
     fn bezier_derivative_linear() {
         let seg = BezierSegment::linear(0.0, 1.0);
-        let d   = seg.derivative(0.5);
+        let d = seg.derivative(0.5);
         // Derivative của linear ≈ hằng số 1.0
         assert!((d - 1.0).abs() < 0.05, "Linear deriv ≈ 1.0: {}", d);
     }
@@ -289,7 +317,12 @@ mod tests {
     #[test]
     fn spline_max_min() {
         let mut s = VectorSpline::new();
-        s.push(BezierSegment { p0: -0.5, p1: 0.8, p2: 0.3, p3: 0.1 });
+        s.push(BezierSegment {
+            p0: -0.5,
+            p1: 0.8,
+            p2: 0.3,
+            p3: 0.1,
+        });
         assert!(s.max_val() >= 0.8);
         assert!(s.min_val() <= -0.5);
     }
@@ -310,16 +343,26 @@ mod tests {
         // Mô phỏng ánh sáng một ngày: 0 sáng → peak giữa trưa → 0 tối
         // t=0: 0h, t=1: 24h
         let mut s = VectorSpline::new();
-        s.push(BezierSegment { p0: 0.0, p1: 0.0, p2: 1.0, p3: 1.0 }); // sáng sớm
-        s.push(BezierSegment { p0: 1.0, p1: 1.0, p2: 0.0, p3: 0.0 }); // chiều tối
+        s.push(BezierSegment {
+            p0: 0.0,
+            p1: 0.0,
+            p2: 1.0,
+            p3: 1.0,
+        }); // sáng sớm
+        s.push(BezierSegment {
+            p0: 1.0,
+            p1: 1.0,
+            p2: 0.0,
+            p3: 0.0,
+        }); // chiều tối
 
-        let dawn  = s.evaluate(0.0);
-        let noon  = s.evaluate(0.5);
-        let dusk  = s.evaluate(1.0);
+        let dawn = s.evaluate(0.0);
+        let noon = s.evaluate(0.5);
+        let dusk = s.evaluate(1.0);
 
-        assert!(dawn  < 0.1,  "Rạng sáng: {}", dawn);
-        assert!(noon  > 0.8,  "Giữa trưa: {}", noon);
-        assert!(dusk  < 0.1,  "Chập tối:  {}", dusk);
+        assert!(dawn < 0.1, "Rạng sáng: {}", dawn);
+        assert!(noon > 0.8, "Giữa trưa: {}", noon);
+        assert!(dusk < 0.1, "Chập tối:  {}", dusk);
     }
 
     #[test]

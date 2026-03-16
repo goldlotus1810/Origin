@@ -10,8 +10,8 @@
 //! Skill = hàm thuần (input → output), tất cả context qua ExecContext.
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use olang::molecular::MolecularChain;
 use silk::edge::EmotionTag;
@@ -25,9 +25,9 @@ use silk::edge::EmotionTag;
 pub enum SkillResult {
     /// Thành công — có chain output.
     Ok {
-        chain:   MolecularChain,
+        chain: MolecularChain,
         emotion: EmotionTag,
-        note:    String,
+        note: String,
     },
     /// Không đủ data — BlackCurtain (QT18: im lặng khi không biết).
     Insufficient,
@@ -36,7 +36,9 @@ pub enum SkillResult {
 }
 
 impl SkillResult {
-    pub fn is_ok(&self) -> bool { matches!(self, SkillResult::Ok { .. }) }
+    pub fn is_ok(&self) -> bool {
+        matches!(self, SkillResult::Ok { .. })
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,7 +80,8 @@ impl ExecContext {
 
     /// Đọc state value.
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.state.iter()
+        self.state
+            .iter()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
     }
@@ -139,7 +142,9 @@ mod tests {
     struct EchoSkill;
 
     impl Skill for EchoSkill {
-        fn name(&self) -> &str { "Echo" }
+        fn name(&self) -> &str {
+            "Echo"
+        }
 
         fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
             if ctx.input_chains.is_empty() {
@@ -159,10 +164,13 @@ mod tests {
     struct CountSkill;
 
     impl Skill for CountSkill {
-        fn name(&self) -> &str { "Count" }
+        fn name(&self) -> &str {
+            "Count"
+        }
 
         fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
-            let count = ctx.get("count")
+            let count = ctx
+                .get("count")
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(0);
             ctx.set(String::from("count"), alloc::format!("{}", count + 1));

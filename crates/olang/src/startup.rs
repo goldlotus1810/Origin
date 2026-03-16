@@ -10,14 +10,14 @@
 //! Stage 7: Manifest — scan registry → SystemManifest (biết mình có gì)
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
-use crate::molecular::MolecularChain;
 use crate::encoder::encode_codepoint;
-use crate::registry::Registry;
-use crate::reader::{OlangReader, ParseError};
 use crate::lca::lca;
+use crate::molecular::MolecularChain;
+use crate::reader::{OlangReader, ParseError};
+use crate::registry::Registry;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BootResult
@@ -27,24 +27,24 @@ use crate::lca::lca;
 #[derive(Debug)]
 #[allow(missing_docs)]
 pub struct BootResult {
-    pub registry:    Registry,
-    pub node_count:  usize,
+    pub registry: Registry,
+    pub node_count: usize,
     pub alias_count: usize,
-    pub stage:       BootStage,
-    pub errors:      Vec<String>,
+    pub stage: BootStage,
+    pub errors: Vec<String>,
     /// SystemManifest — hệ thống biết mình đang có gì sau boot.
-    pub manifest:    SystemManifest,
+    pub manifest: SystemManifest,
 }
 
 /// Stage boot đã đạt được.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(missing_docs)]
 pub enum BootStage {
-    Raw      = 0,
+    Raw = 0,
     SelfInit = 1,
-    AxiomLoad= 2,
+    AxiomLoad = 2,
     UcdReady = 3,
-    Loaded   = 4,
+    Loaded = 4,
     Verified = 5,
 }
 
@@ -69,7 +69,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     // Stage 0: Raw — không làm gì
     // Stage 1: Self Init — ○(∅)==○
     let mut registry = Registry::new();
-    let mut stage    = BootStage::SelfInit;
+    let mut stage = BootStage::SelfInit;
 
     // Stage 2: Axiom Load — seed 4 axiom nodes
     // Dùng UCD nếu có, không thì bỏ qua
@@ -89,7 +89,9 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     if let Some(bytes) = file_bytes {
         if !bytes.is_empty() {
             match load_from_bytes(bytes, &mut registry) {
-                Ok(()) => { stage = BootStage::Loaded; }
+                Ok(()) => {
+                    stage = BootStage::Loaded;
+                }
                 Err(e) => {
                     errors.push(alloc::format!("Load error: {:?}", e));
                 }
@@ -100,18 +102,29 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     // Stage 5 + 6: Verify ○(x)==x
     if stage >= BootStage::UcdReady {
         match verify_identity(&registry) {
-            Ok(()) => { stage = BootStage::Verified; }
-            Err(e) => { errors.push(e); }
+            Ok(()) => {
+                stage = BootStage::Verified;
+            }
+            Err(e) => {
+                errors.push(e);
+            }
         }
     }
 
-    let node_count  = registry.len();
+    let node_count = registry.len();
     let alias_count = registry.alias_count();
 
     // Stage 7: Manifest — scan registry → phân loại nodes
     let manifest = SystemManifest::scan(&registry);
 
-    BootResult { registry, node_count, alias_count, stage, errors, manifest }
+    BootResult {
+        registry,
+        node_count,
+        alias_count,
+        stage,
+        errors,
+        manifest,
+    }
 }
 
 /// Boot từ hư không — ○(∅)==○.
@@ -195,7 +208,9 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<(), ParseErr
 ///
 /// Lấy một chain từ registry → LCA(x, x) == x.
 fn verify_identity(_registry: &Registry) -> Result<(), String> {
-    if ucd::table_len() == 0 { return Ok(()); } // skip nếu không có UCD
+    if ucd::table_len() == 0 {
+        return Ok(());
+    } // skip nếu không có UCD
 
     // Test với origin node
     let origin = encode_codepoint(0x25CB);
@@ -271,78 +286,141 @@ pub fn resolve(name: &str, registry: &Registry) -> MolecularChain {
 /// Dùng khi registry không có chain raw (chỉ có hash).
 pub static ALIAS_CODEPOINTS: &[(&str, u32)] = &[
     // fire
-    ("fire", 0x1F525), ("lửa", 0x1F525), ("lua", 0x1F525),
-    ("feu", 0x1F525),  ("fuego", 0x1F525),
+    ("fire", 0x1F525),
+    ("lửa", 0x1F525),
+    ("lua", 0x1F525),
+    ("feu", 0x1F525),
+    ("fuego", 0x1F525),
     // water
-    ("water", 0x1F4A7), ("nước", 0x1F4A7), ("nuoc", 0x1F4A7),
+    ("water", 0x1F4A7),
+    ("nước", 0x1F4A7),
+    ("nuoc", 0x1F4A7),
     ("eau", 0x1F4A7),
     // cold
-    ("cold", 0x2744), ("lạnh", 0x2744), ("lanh", 0x2744),
+    ("cold", 0x2744),
+    ("lạnh", 0x2744),
+    ("lanh", 0x2744),
     // sun
-    ("sun", 0x2600), ("warm", 0x1F31E),
+    ("sun", 0x2600),
+    ("warm", 0x1F31E),
     // mind
-    ("mind", 0x1F9E0), ("brain", 0x1F9E0), ("tâm trí", 0x1F9E0),
+    ("mind", 0x1F9E0),
+    ("brain", 0x1F9E0),
+    ("tâm trí", 0x1F9E0),
     // heart
-    ("heart", 0x2764), ("tim", 0x2764), ("trái tim", 0x2764),
+    ("heart", 0x2764),
+    ("tim", 0x2764),
+    ("trái tim", 0x2764),
     // origin
-    ("origin", 0x25CB), ("○", 0x25CB),
+    ("origin", 0x25CB),
+    ("○", 0x25CB),
     // math
-    ("∘", 0x2218), ("compose", 0x2218),
-    ("∈", 0x2208), ("member", 0x2208),
-    ("∅", 0x2205), ("empty", 0x2205),
+    ("∘", 0x2218),
+    ("compose", 0x2218),
+    ("∈", 0x2208),
+    ("member", 0x2208),
+    ("∅", 0x2205),
+    ("empty", 0x2205),
     // joy / sadness / tired / anger / fear
-    ("vui", 0x1F60A), ("happy", 0x1F60A), ("joy", 0x1F60A),
+    ("vui", 0x1F60A),
+    ("happy", 0x1F60A),
+    ("joy", 0x1F60A),
     ("hạnh phúc", 0x1F60A),
     // French
-    ("heureux", 0x1F60A), ("joie", 0x1F60A), ("joyeux", 0x1F60A),
-    ("triste", 0x1F614), ("malheureux", 0x1F614),
-    ("amour", 0x2764), ("famille", 0x1F46A),
-    ("excellent", 0x2B50), ("parfait", 0x2B50),
-    ("terrible", 0x1F4A9), ("horrible", 0x1F4A9),
-    ("fatigué", 0x1F634), ("épuisé", 0x1F634),
-    // German
-    ("glücklich", 0x1F60A), ("fröhlich", 0x1F60A), ("schön", 0x1F60A),
-    ("traurig", 0x1F614), ("unglücklich", 0x1F614),
-    ("liebe", 0x2764), ("mögen", 0x2764),
-    ("familie", 0x1F46A), ("wunderbar", 0x2B50), ("perfekt", 0x2B50),
-    ("schrecklich", 0x1F4A9), ("schlecht", 0x1F4A9),
-    ("müde", 0x1F634), ("erschöpft", 0x1F634),
-    ("angst", 0x1F628), ("wütend", 0x1F621),
-    // Spanish
-    ("feliz", 0x1F60A), ("alegre", 0x1F60A), ("contento", 0x1F60A),
+    ("heureux", 0x1F60A),
+    ("joie", 0x1F60A),
+    ("joyeux", 0x1F60A),
     ("triste", 0x1F614),
-    ("amor", 0x2764), ("querer", 0x2764),
-    ("familia", 0x1F46A), ("hogar", 0x1F46A),
-    ("excelente", 0x2B50), ("perfecto", 0x2B50),
-    ("terrible", 0x1F4A9), ("malo", 0x1F4A9), ("peor", 0x1F4A9),
-    ("cansado", 0x1F634), ("agotado", 0x1F634),
-    ("miedo", 0x1F628), ("enojado", 0x1F621),
+    ("malheureux", 0x1F614),
+    ("amour", 0x2764),
+    ("famille", 0x1F46A),
+    ("excellent", 0x2B50),
+    ("parfait", 0x2B50),
+    ("terrible", 0x1F4A9),
+    ("horrible", 0x1F4A9),
+    ("fatigué", 0x1F634),
+    ("épuisé", 0x1F634),
+    // German
+    ("glücklich", 0x1F60A),
+    ("fröhlich", 0x1F60A),
+    ("schön", 0x1F60A),
+    ("traurig", 0x1F614),
+    ("unglücklich", 0x1F614),
+    ("liebe", 0x2764),
+    ("mögen", 0x2764),
+    ("familie", 0x1F46A),
+    ("wunderbar", 0x2B50),
+    ("perfekt", 0x2B50),
+    ("schrecklich", 0x1F4A9),
+    ("schlecht", 0x1F4A9),
+    ("müde", 0x1F634),
+    ("erschöpft", 0x1F634),
+    ("angst", 0x1F628),
+    ("wütend", 0x1F621),
+    // Spanish
+    ("feliz", 0x1F60A),
+    ("alegre", 0x1F60A),
+    ("contento", 0x1F60A),
+    ("triste", 0x1F614),
+    ("amor", 0x2764),
+    ("querer", 0x2764),
+    ("familia", 0x1F46A),
+    ("hogar", 0x1F46A),
+    ("excelente", 0x2B50),
+    ("perfecto", 0x2B50),
+    ("terrible", 0x1F4A9),
+    ("malo", 0x1F4A9),
+    ("peor", 0x1F4A9),
+    ("cansado", 0x1F634),
+    ("agotado", 0x1F634),
+    ("miedo", 0x1F628),
+    ("enojado", 0x1F621),
     // Italian
-    ("buon", 0x1F60A), ("bellissimo", 0x1F60A), ("felice", 0x1F60A),
+    ("buon", 0x1F60A),
+    ("bellissimo", 0x1F60A),
+    ("felice", 0x1F60A),
     ("famiglia", 0x1F46A),
     // Portuguese
-    ("feliz", 0x1F60A), ("alegre", 0x1F60A),
-    ("familia", 0x1F46A), ("lar", 0x1F46A),
+    ("feliz", 0x1F60A),
+    ("alegre", 0x1F60A),
+    ("familia", 0x1F46A),
+    ("lar", 0x1F46A),
     ("triste", 0x1F614),
-    ("amor", 0x2764), ("amar", 0x2764),
+    ("amor", 0x2764),
+    ("amar", 0x2764),
     // Vietnamese
-    ("buồn", 0x1F614), ("sad", 0x1F614), ("buồn bã", 0x1F614),
-    ("mệt", 0x1F634), ("tired", 0x1F634), ("mệt mỏi", 0x1F634),
-    ("giận", 0x1F621), ("angry", 0x1F621), ("tức", 0x1F621),
-    ("sợ", 0x1F628), ("scared", 0x1F628), ("lo", 0x1F628),
-    ("yêu", 0x2764), ("love", 0x2764),
+    ("buồn", 0x1F614),
+    ("sad", 0x1F614),
+    ("buồn bã", 0x1F614),
+    ("mệt", 0x1F634),
+    ("tired", 0x1F634),
+    ("mệt mỏi", 0x1F634),
+    ("giận", 0x1F621),
+    ("angry", 0x1F621),
+    ("tức", 0x1F621),
+    ("sợ", 0x1F628),
+    ("scared", 0x1F628),
+    ("lo", 0x1F628),
+    ("yêu", 0x2764),
+    ("love", 0x2764),
     ("gia đình", 0x1F46A),
-    ("tuyệt", 0x2B50), ("great", 0x2B50), ("xuất sắc", 0x2B50),
-    ("tệ", 0x1F4A9), ("bad", 0x1F4A9),
-    ("đau", 0x1F915), ("pain", 0x1F915),
+    ("tuyệt", 0x2B50),
+    ("great", 0x2B50),
+    ("xuất sắc", 0x2B50),
+    ("tệ", 0x1F4A9),
+    ("bad", 0x1F4A9),
+    ("đau", 0x1F915),
+    ("pain", 0x1F915),
     ("cô đơn", 0x1F614),
     // danger / alert
-    ("danger", 0x26A0), ("nguy hiểm", 0x26A0),
+    ("danger", 0x26A0),
+    ("nguy hiểm", 0x26A0),
     // yes / no
-    ("yes", 0x2705), ("có", 0x2705),
-    ("no", 0x274C), ("không", 0x274C),
+    ("yes", 0x2705),
+    ("có", 0x2705),
+    ("no", 0x274C),
+    ("không", 0x274C),
 ];
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SystemManifest — hệ thống biết mình đang có gì
@@ -373,13 +451,13 @@ pub enum NodeCategory {
 #[derive(Debug, Clone)]
 pub struct ManifestEntry {
     /// Chain hash
-    pub hash:     u64,
+    pub hash: u64,
     /// Tầng
-    pub layer:    u8,
+    pub layer: u8,
     /// Nhóm chức năng
     pub category: NodeCategory,
     /// Tên alias (nếu có)
-    pub alias:    Option<String>,
+    pub alias: Option<String>,
 }
 
 /// SystemManifest — bản đồ toàn bộ nodes đã biết, phân loại sẵn.
@@ -401,10 +479,10 @@ impl SystemManifest {
             for reg_entry in registry.entries_in_layer(layer) {
                 let category = classify_node(reg_entry.chain_hash, layer, registry);
                 entries.push(ManifestEntry {
-                    hash:     reg_entry.chain_hash,
+                    hash: reg_entry.chain_hash,
                     layer,
                     category,
-                    alias:    find_alias(reg_entry.chain_hash, registry),
+                    alias: find_alias(reg_entry.chain_hash, registry),
                 });
             }
         }
@@ -423,10 +501,14 @@ impl SystemManifest {
     }
 
     /// Tổng entries.
-    pub fn len(&self) -> usize { self.entries.len() }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
 
     /// Manifest rỗng?
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 
     /// Summary text — hệ thống tự mô tả.
     pub fn summary(&self) -> String {
@@ -477,40 +559,77 @@ fn classify_node(hash: u64, layer: u8, registry: &Registry) -> NodeCategory {
 /// Phân loại theo alias name.
 fn classify_by_alias(alias: &str, layer: u8) -> NodeCategory {
     // Axiom keywords
-    if layer == 0 && matches!(alias, "○" | "origin" | "∅" | "empty" | "∘" | "compose" | "∈" | "instance" | "member") {
+    if layer == 0
+        && matches!(
+            alias,
+            "○" | "origin" | "∅" | "empty" | "∘" | "compose" | "∈" | "instance" | "member"
+        )
+    {
         return NodeCategory::Axiom;
     }
 
     // Emotion keywords (bao gồm cả emoji aliases)
     static EMOTION_KW: &[&str] = &[
-        "joy", "sad", "happy", "angry", "fear", "love", "pain", "tired",
-        "vui", "buồn", "giận", "sợ", "yêu", "đau", "mệt",
-        "heart", "tim", "cô đơn", "lonely",
+        "joy",
+        "sad",
+        "happy",
+        "angry",
+        "fear",
+        "love",
+        "pain",
+        "tired",
+        "vui",
+        "buồn",
+        "giận",
+        "sợ",
+        "yêu",
+        "đau",
+        "mệt",
+        "heart",
+        "tim",
+        "cô đơn",
+        "lonely",
     ];
     for kw in EMOTION_KW {
-        if alias.contains(kw) { return NodeCategory::Emotion; }
+        if alias.contains(kw) {
+            return NodeCategory::Emotion;
+        }
     }
 
     // Device keywords
     static DEVICE_KW: &[&str] = &[
-        "light", "đèn", "door", "cửa", "sensor", "camera",
-        "temperature", "nhiệt", "house", "shelter", "nhà",
+        "light",
+        "đèn",
+        "door",
+        "cửa",
+        "sensor",
+        "camera",
+        "temperature",
+        "nhiệt",
+        "house",
+        "shelter",
+        "nhà",
     ];
     for kw in DEVICE_KW {
-        if alias.contains(kw) { return NodeCategory::Device; }
+        if alias.contains(kw) {
+            return NodeCategory::Device;
+        }
     }
 
     // Command keywords
     static CMD_KW: &[&str] = &[
-        "open", "close", "stop", "move", "yes", "no",
-        "mở", "đóng", "dừng",
+        "open", "close", "stop", "move", "yes", "no", "mở", "đóng", "dừng",
     ];
     for kw in CMD_KW {
-        if alias == *kw { return NodeCategory::Command; }
+        if alias == *kw {
+            return NodeCategory::Command;
+        }
     }
 
     // L0 non-axiom = base concepts
-    if layer == 0 { return NodeCategory::Axiom; }
+    if layer == 0 {
+        return NodeCategory::Axiom;
+    }
     // L1+ without clear category = Knowledge
     NodeCategory::Knowledge
 }
@@ -559,15 +678,22 @@ pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
             let cp = ucd::decode_hash(single.chain_hash()).unwrap_or_else(|| {
                 // Fallback: bucket search với relation=Member + emotion match
                 let cands = ucd::bucket_cps(mol.shape.as_byte(), 0x01);
-                if cands.is_empty() { 0x25CB }
-                else { best_in_bucket(cands, mol.emotion.valence, mol.emotion.arousal) }
+                if cands.is_empty() {
+                    0x25CB
+                } else {
+                    best_in_bucket(cands, mol.emotion.valence, mol.emotion.arousal)
+                }
             });
-            if let Some(c) = char::from_u32(cp) { zwj_s.push(c); }
+            if let Some(c) = char::from_u32(cp) {
+                zwj_s.push(c);
+            }
             if i < chain.len() - 1 {
                 zwj_s.push('‍'); // ZWJ
             }
         }
-        if !zwj_s.is_empty() { return zwj_s; }
+        if !zwj_s.is_empty() {
+            return zwj_s;
+        }
     }
 
     let hash = chain.chain_hash();
@@ -586,8 +712,8 @@ pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
     }
 
     // 3. Bucket search: emotion distance
-    let mol      = &chain.0[0];
-    let shape    = mol.shape.as_byte();
+    let mol = &chain.0[0];
+    let shape = mol.shape.as_byte();
     let relation = mol.relation.as_byte();
     let v_target = mol.emotion.valence;
     let a_target = mol.emotion.arousal;
@@ -605,7 +731,9 @@ pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
                 break;
             }
         }
-        if found == 0 { return "○".to_string(); }
+        if found == 0 {
+            return "○".to_string();
+        }
         found
     };
 
@@ -613,7 +741,7 @@ pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
 }
 
 fn best_in_bucket(candidates: &[u32], v_target: u8, a_target: u8) -> u32 {
-    let mut best_cp   = candidates[0];
+    let mut best_cp = candidates[0];
     let mut best_dist = u32::MAX;
     for &cp in candidates.iter().take(24) {
         let v = ucd::valence_of(cp);
@@ -621,7 +749,10 @@ fn best_in_bucket(candidates: &[u32], v_target: u8, a_target: u8) -> u32 {
         let dv = (v as i32 - v_target as i32).unsigned_abs();
         let da = (a as i32 - a_target as i32).unsigned_abs();
         let dist = dv * dv + da * da;
-        if dist < best_dist { best_dist = dist; best_cp = cp; }
+        if dist < best_dist {
+            best_dist = dist;
+            best_cp = cp;
+        }
     }
     best_cp
 }
@@ -635,7 +766,6 @@ fn cp_to_str(cp: u32) -> alloc::string::String {
         alloc::format!("U+{:04X}", cp)
     }
 }
-
 
 /// Resolve alias → (chain, codepoint) — codepoint từ ALIAS_CODEPOINTS hoặc Registry.
 ///
@@ -703,55 +833,80 @@ pub fn resolve_with_cp(name: &str, registry: &Registry) -> (MolecularChain, Opti
 mod tests {
     use super::*;
 
-    fn skip() -> bool { ucd::table_len() == 0 }
+    fn skip() -> bool {
+        ucd::table_len() == 0
+    }
 
     #[test]
     fn boot_empty_ok() {
         let result = boot_empty();
-        assert!(result.stage >= BootStage::SelfInit,
-            "Boot empty phải reach SelfInit");
+        assert!(
+            result.stage >= BootStage::SelfInit,
+            "Boot empty phải reach SelfInit"
+        );
         // Registry rỗng = hợp lệ (○(∅)==○)
-        assert!(result.errors.is_empty() || !result.is_ok() || true,
-            "Boot empty không crash");
+        assert!(
+            result.errors.is_empty() || !result.is_ok() || true,
+            "Boot empty không crash"
+        );
     }
 
     #[test]
     fn boot_with_ucd_reaches_verified() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
-        assert!(result.stage >= BootStage::Verified,
-            "Boot với UCD phải reach Verified: {:?}", result.errors);
-        assert!(result.errors.is_empty(),
-            "Không có errors: {:?}", result.errors);
+        assert!(
+            result.stage >= BootStage::Verified,
+            "Boot với UCD phải reach Verified: {:?}",
+            result.errors
+        );
+        assert!(
+            result.errors.is_empty(),
+            "Không có errors: {:?}",
+            result.errors
+        );
     }
 
     #[test]
     fn boot_seeds_axioms() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
         // Registry phải có origin node
-        assert!(result.registry.lookup_name("○").is_some(),
-            "○ phải có trong registry sau boot");
+        assert!(
+            result.registry.lookup_name("○").is_some(),
+            "○ phải có trong registry sau boot"
+        );
         assert!(result.registry.lookup_name("origin").is_some());
-        assert!(result.registry.lookup_name("∘").is_some(),
-            "∘ (compose) phải có");
-        assert!(result.registry.lookup_name("∈").is_some(),
-            "∈ (member) phải có");
+        assert!(
+            result.registry.lookup_name("∘").is_some(),
+            "∘ (compose) phải có"
+        );
+        assert!(
+            result.registry.lookup_name("∈").is_some(),
+            "∈ (member) phải có"
+        );
     }
 
     #[test]
     fn boot_axiom_identity() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // Verify: LCA(○,○)==○
         let origin = encode_codepoint(0x25CB);
         let lca_result = lca(&origin, &origin);
-        assert_eq!(lca_result, origin,
-            "○(x)==x: LCA(○,○) phải == ○");
+        assert_eq!(lca_result, origin, "○(x)==x: LCA(○,○) phải == ○");
     }
 
     #[test]
     fn boot_from_seeded_file() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // Tạo mini file với 1 node
         use crate::writer::OlangWriter;
         let chain = encode_codepoint(0x1F525); // 🔥
@@ -761,10 +916,15 @@ mod tests {
         let bytes = w.into_bytes();
 
         let result = boot(Some(&bytes));
-        assert!(result.stage >= BootStage::Loaded,
-            "Boot từ file hợp lệ phải reach Loaded: {:?}", result.errors);
-        assert!(result.registry.lookup_name("fire").is_some(),
-            "Alias 'fire' phải được load");
+        assert!(
+            result.stage >= BootStage::Loaded,
+            "Boot từ file hợp lệ phải reach Loaded: {:?}",
+            result.errors
+        );
+        assert!(
+            result.registry.lookup_name("fire").is_some(),
+            "Alias 'fire' phải được load"
+        );
     }
 
     #[test]
@@ -773,25 +933,28 @@ mod tests {
         let bad_bytes = [0x00u8; 20];
         let result = boot(Some(&bad_bytes));
         // Không panic, chỉ report error
-        assert!(result.stage >= BootStage::SelfInit,
-            "Boot từ file xấu không crash");
+        assert!(
+            result.stage >= BootStage::SelfInit,
+            "Boot từ file xấu không crash"
+        );
     }
 
     #[test]
     fn boot_stage_ordering() {
-        assert!(BootStage::SelfInit  < BootStage::AxiomLoad);
+        assert!(BootStage::SelfInit < BootStage::AxiomLoad);
         assert!(BootStage::AxiomLoad < BootStage::UcdReady);
-        assert!(BootStage::UcdReady  < BootStage::Loaded);
-        assert!(BootStage::Loaded    < BootStage::Verified);
+        assert!(BootStage::UcdReady < BootStage::Loaded);
+        assert!(BootStage::Loaded < BootStage::Verified);
     }
 
     #[test]
     fn resolve_single_emoji() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let registry = Registry::new();
         let chain = resolve("🔥", &registry);
-        assert!(!chain.is_empty(),
-            "resolve('🔥') phải trả non-empty chain");
+        assert!(!chain.is_empty(), "resolve('🔥') phải trả non-empty chain");
         assert_eq!(chain, encode_codepoint(0x1F525));
     }
 
@@ -799,13 +962,14 @@ mod tests {
     fn resolve_unknown_returns_empty() {
         let registry = Registry::new();
         let chain = resolve("xyz_unknown_abc", &registry);
-        assert!(chain.is_empty(),
-            "Unknown alias → empty chain");
+        assert!(chain.is_empty(), "Unknown alias → empty chain");
     }
 
     #[test]
     fn resolve_origin_symbol() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let registry = Registry::new();
         let chain = resolve("○", &registry);
         assert!(!chain.is_empty(), "○ → non-empty chain");
@@ -823,17 +987,23 @@ mod tests {
 
     #[test]
     fn manifest_after_boot() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
         assert!(!result.manifest.is_empty(), "Boot manifest không rỗng");
         // Axiom nodes phải có
-        assert!(result.manifest.count_by_category(NodeCategory::Axiom) > 0,
-            "Boot phải có axiom nodes");
+        assert!(
+            result.manifest.count_by_category(NodeCategory::Axiom) > 0,
+            "Boot phải có axiom nodes"
+        );
     }
 
     #[test]
     fn manifest_by_category() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
         let axioms = result.manifest.by_category(NodeCategory::Axiom);
         assert!(!axioms.is_empty(), "Phải có axiom entries");
@@ -844,7 +1014,9 @@ mod tests {
 
     #[test]
     fn manifest_summary_has_categories() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
         let summary = result.manifest.summary();
         assert!(summary.contains("SystemManifest"), "Summary header");
@@ -855,7 +1027,9 @@ mod tests {
 
     #[test]
     fn manifest_from_seeded_file() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         use crate::writer::OlangWriter;
         // Seed a fire node + alias
         let chain = encode_codepoint(0x1F525);

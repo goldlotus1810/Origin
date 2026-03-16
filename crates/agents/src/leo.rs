@@ -16,13 +16,13 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use isl::address::ISLAddress;
-use isl::message::{ISLMessage, ISLFrame, MsgType};
+use isl::message::{ISLFrame, ISLMessage, MsgType};
 
 use crate::chief::IngestedReport;
-use crate::learning::LearningLoop;
 use crate::encoder::ContentInput;
-use crate::skill::ExecContext;
 use crate::instinct::innate_instincts;
+use crate::learning::LearningLoop;
+use crate::skill::ExecContext;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LeoState
@@ -44,10 +44,10 @@ pub enum LeoState {
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct LeoPendingProposal {
-    pub chain_hash:  u64,
-    pub fire_count:  u32,
-    pub confidence:  f32,
-    pub timestamp:   i64,
+    pub chain_hash: u64,
+    pub fire_count: u32,
+    pub confidence: f32,
+    pub timestamp: i64,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,18 +58,18 @@ pub struct LeoPendingProposal {
 ///
 /// Dùng LearningLoop để học — không implement learning logic riêng.
 pub struct LeoAI {
-    pub addr:      ISLAddress,
-    pub aam_addr:  ISLAddress,
-    pub state:     LeoState,
+    pub addr: ISLAddress,
+    pub aam_addr: ISLAddress,
+    pub state: LeoState,
 
     /// LearningLoop — cánh tay học của LeoAI
-    pub learning:  LearningLoop,
+    pub learning: LearningLoop,
 
     /// Proposals chờ AAM xác nhận
-    pub pending:   Vec<LeoPendingProposal>,
+    pub pending: Vec<LeoPendingProposal>,
 
     /// Outbox → AAM
-    outbox:        Vec<ISLFrame>,
+    outbox: Vec<ISLFrame>,
 
     /// QT9: bytes chờ ghi disk — caller drain và flush.
     pending_writes: Vec<u8>,
@@ -78,8 +78,8 @@ pub struct LeoAI {
     qr_promoted: u32,
 
     /// Stats
-    pub ingested:  u32,
-    pub dreamed:   u32,
+    pub ingested: u32,
+    pub dreamed: u32,
     last_event_ts: i64,
     dream_interval: u32, // số turns giữa các dream cycle
 }
@@ -94,15 +94,15 @@ impl LeoAI {
         Self {
             addr,
             aam_addr,
-            state:          LeoState::Listening,
-            learning:       LearningLoop::new(0x1E0A1), // stable session id
-            pending:        Vec::new(),
-            outbox:         Vec::new(),
+            state: LeoState::Listening,
+            learning: LearningLoop::new(0x1E0A1), // stable session id
+            pending: Vec::new(),
+            outbox: Vec::new(),
             pending_writes: Vec::new(),
-            qr_promoted:    0,
-            ingested:       0,
-            dreamed:        0,
-            last_event_ts:  0,
+            qr_promoted: 0,
+            ingested: 0,
+            dreamed: 0,
+            last_event_ts: 0,
             dream_interval: DEFAULT_DREAM_INTERVAL,
         }
     }
@@ -116,20 +116,27 @@ impl LeoAI {
     /// LearningLoop tự lo encode + STM + Silk + co_activate.
     /// LeoAI chỉ điều phối khi nào feed, khi nào dream.
     pub fn ingest(&mut self, report: IngestedReport, ts: i64) {
-        self.state         = LeoState::Learning;
+        self.state = LeoState::Learning;
         self.last_event_ts = ts;
-        self.ingested     += 1;
+        self.ingested += 1;
 
         // Tạo text từ payload để LearningLoop xử lý
         // Format: "sensor:{sensor_id} val:{quantized}"
         let text = if report.payload.len() >= 3 {
-            alloc::format!("sensor:{} unit:{} val:{}",
-                report.payload[0], report.payload[1], report.payload[2])
+            alloc::format!(
+                "sensor:{} unit:{} val:{}",
+                report.payload[0],
+                report.payload[1],
+                report.payload[2]
+            )
         } else {
             alloc::string::String::from("event")
         };
 
-        let input = ContentInput::Text { content: text, timestamp: ts };
+        let input = ContentInput::Text {
+            content: text,
+            timestamp: ts,
+        };
         let result = self.learning.process_one(input);
 
         // Chạy 7 bản năng bẩm sinh trên kết quả encode
@@ -155,7 +162,7 @@ impl LeoAI {
     ///
     /// Tìm observations đủ điều kiện → tạo proposal → gửi AAM xác nhận.
     pub fn run_dream(&mut self, ts: i64) {
-        self.state    = LeoState::Dreaming;
+        self.state = LeoState::Dreaming;
         self.dreamed += 1;
 
         // Dream candidates: observations có fire trong Silk ≥ threshold
@@ -165,7 +172,12 @@ impl LeoAI {
             let fire = self.learning.graph().edges_from(hash).len() as u32;
             if fire >= 3 {
                 let conf = (fire as f32 / 10.0).min(0.95);
-                let p = LeoPendingProposal { chain_hash: hash, fire_count: fire, confidence: conf, timestamp: ts };
+                let p = LeoPendingProposal {
+                    chain_hash: hash,
+                    fire_count: fire,
+                    confidence: conf,
+                    timestamp: ts,
+                };
                 // Đóng gói gửi AAM
                 let frame = self.make_proposal_frame(&p);
                 self.outbox.push(frame);
@@ -178,8 +190,12 @@ impl LeoAI {
 
     /// Thử dream nếu đã idle đủ lâu.
     pub fn try_dream_if_idle(&mut self, now: i64) {
-        if self.learning.stm().len() < 3 { return; }
-        if now - self.last_event_ts < DREAM_IDLE_NS { return; }
+        if self.learning.stm().len() < 3 {
+            return;
+        }
+        if now - self.last_event_ts < DREAM_IDLE_NS {
+            return;
+        }
         self.run_dream(now);
     }
 
@@ -233,14 +249,26 @@ impl LeoAI {
     // Stats
     // ─────────────────────────────────────────────────────────────────────────
 
-    pub fn stm_len(&self)    -> usize { self.learning.stm().len() }
-    pub fn edge_count(&self) -> usize { self.learning.graph().len() }
-    pub fn fx(&self)         -> f32   { self.learning.context().fx() }
-    pub fn pending_count(&self) -> usize { self.pending.len() }
-    pub fn qr_count(&self)  -> u32   { self.qr_promoted }
+    pub fn stm_len(&self) -> usize {
+        self.learning.stm().len()
+    }
+    pub fn edge_count(&self) -> usize {
+        self.learning.graph().len()
+    }
+    pub fn fx(&self) -> f32 {
+        self.learning.context().fx()
+    }
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+    pub fn qr_count(&self) -> u32 {
+        self.qr_promoted
+    }
 
     /// Có bytes chờ ghi disk?
-    pub fn has_pending_writes(&self) -> bool { !self.pending_writes.is_empty() }
+    pub fn has_pending_writes(&self) -> bool {
+        !self.pending_writes.is_empty()
+    }
 
     /// Drain pending writes — caller flush to disk.
     pub fn drain_pending_writes(&mut self) -> Vec<u8> {
@@ -293,8 +321,8 @@ impl LeoAI {
     /// Kết quả: state["cluster_count"], state["similarity"],
     ///          state["curated_count"] trong ExecContext.
     pub fn run_knowledge_analysis(&self, ts: i64) -> ExecContext {
-        use crate::skill::Skill;
         use crate::domain_skills::{ClusterSkill, CuratorSkill};
+        use crate::skill::Skill;
 
         let emotion = self.learning.context().last_emotion();
         let mut ctx = ExecContext::new(ts, emotion, self.fx());
@@ -330,10 +358,11 @@ impl LeoAI {
     // ─────────────────────────────────────────────────────────────────────────
 
     fn make_proposal_frame(&self, p: &LeoPendingProposal) -> ISLFrame {
-        let conf_q   = (p.confidence * 255.0) as u8;
+        let conf_q = (p.confidence * 255.0) as u8;
         let fire_low = (p.fire_count & 0xFF) as u8;
         let msg = ISLMessage::with_payload(
-            self.addr, self.aam_addr,
+            self.addr,
+            self.aam_addr,
             MsgType::Propose,
             [0x02, conf_q, fire_low], // 0x02 = PromoteQR
         );
@@ -348,22 +377,35 @@ impl LeoAI {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chief::IngestedReport;
     use isl::address::ISLAddress;
     use silk::edge::EmotionTag;
-    use crate::chief::IngestedReport;
 
-    fn leo_addr() -> ISLAddress { ISLAddress::new(0, 0, 0, 2) }
-    fn aam_addr()  -> ISLAddress { ISLAddress::new(0, 0, 0, 0) }
-    fn worker()    -> ISLAddress { ISLAddress::new(2, 0, 0, 1) }
+    fn leo_addr() -> ISLAddress {
+        ISLAddress::new(0, 0, 0, 2)
+    }
+    fn aam_addr() -> ISLAddress {
+        ISLAddress::new(0, 0, 0, 0)
+    }
+    fn worker() -> ISLAddress {
+        ISLAddress::new(2, 0, 0, 1)
+    }
 
-    fn leo() -> LeoAI { LeoAI::new(leo_addr(), aam_addr()) }
+    fn leo() -> LeoAI {
+        LeoAI::new(leo_addr(), aam_addr())
+    }
 
     fn report(v: f32, idx: u8) -> IngestedReport {
         IngestedReport {
             from_worker: worker(),
-            emotion:     EmotionTag { valence: v, arousal: 0.5, dominance: 0.5, intensity: v.abs() },
-            payload:     alloc::vec![1u8, 0x01, idx, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            timestamp:   (idx as i64) * 1000,
+            emotion: EmotionTag {
+                valence: v,
+                arousal: 0.5,
+                dominance: 0.5,
+                intensity: v.abs(),
+            },
+            payload: alloc::vec![1u8, 0x01, idx, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            timestamp: (idx as i64) * 1000,
         }
     }
 
@@ -418,16 +460,25 @@ mod tests {
         for i in 0..10 {
             l.ingest(report(-0.5, i as u8 + 1), i as i64 * 1000);
         }
-        assert!(l.edge_count() > 0, "Silk edges sau nhiều ingest: {}", l.edge_count());
+        assert!(
+            l.edge_count() > 0,
+            "Silk edges sau nhiều ingest: {}",
+            l.edge_count()
+        );
     }
 
     #[test]
     fn proposal_goes_to_aam() {
-        let p = LeoPendingProposal { chain_hash: 0xABCD, fire_count: 5, confidence: 0.8, timestamp: 1000 };
+        let p = LeoPendingProposal {
+            chain_hash: 0xABCD,
+            fire_count: 5,
+            confidence: 0.8,
+            timestamp: 1000,
+        };
         let l = leo();
         let frame = l.make_proposal_frame(&p);
         assert_eq!(frame.header.msg_type, MsgType::Propose);
-        assert_eq!(frame.header.to,   aam_addr());
+        assert_eq!(frame.header.to, aam_addr());
         assert_eq!(frame.header.from, leo_addr());
         // payload: [kind=0x02, conf_q, fire_low]
         assert_eq!(frame.header.payload[0], 0x02);
@@ -436,7 +487,12 @@ mod tests {
     #[test]
     fn flush_outbox_clears() {
         let mut l = leo();
-        let p = LeoPendingProposal { chain_hash: 1, fire_count: 5, confidence: 0.8, timestamp: 0 };
+        let p = LeoPendingProposal {
+            chain_hash: 1,
+            fire_count: 5,
+            confidence: 0.8,
+            timestamp: 0,
+        };
         l.outbox.push(l.make_proposal_frame(&p));
         let out = l.flush_outbox();
         assert_eq!(out.len(), 1);
@@ -446,10 +502,16 @@ mod tests {
     #[test]
     fn aam_approved_clears_pending() {
         let mut l = leo();
-        let p = LeoPendingProposal { chain_hash: 0x1, fire_count: 5, confidence: 0.8, timestamp: 0 };
+        let p = LeoPendingProposal {
+            chain_hash: 0x1,
+            fire_count: 5,
+            confidence: 0.8,
+            timestamp: 0,
+        };
         l.pending.push(p);
         // AAM gửi Approved với index=0
-        let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        let approved =
+            ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
         l.receive_aam_decision(approved, 1000);
         assert_eq!(l.pending_count(), 0, "Approved → xóa khỏi pending");
     }
@@ -466,11 +528,15 @@ mod tests {
 
         // Tạo pending proposal cho hash đó
         l.pending.push(LeoPendingProposal {
-            chain_hash: hash, fire_count: 5, confidence: 0.8, timestamp: 1000,
+            chain_hash: hash,
+            fire_count: 5,
+            confidence: 0.8,
+            timestamp: 1000,
         });
 
         // AAM Approved
-        let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        let approved =
+            ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
         l.receive_aam_decision(approved, 2000);
 
         // QR đã promote
@@ -491,9 +557,13 @@ mod tests {
         let stm_before = l.stm_len();
 
         l.pending.push(LeoPendingProposal {
-            chain_hash: hash, fire_count: 5, confidence: 0.8, timestamp: 1000,
+            chain_hash: hash,
+            fire_count: 5,
+            confidence: 0.8,
+            timestamp: 1000,
         });
-        let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        let approved =
+            ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
         l.receive_aam_decision(approved, 2000);
 
         // STM observation đã bị remove sau promote
@@ -522,8 +592,10 @@ mod tests {
         let ctx = l.run_knowledge_analysis(6000);
         // Should have cluster info if enough observations
         if l.stm_len() >= 2 {
-            assert!(ctx.get("cluster_count").is_some() || ctx.get("curated_count").is_some(),
-                "Analysis should produce cluster or curation data");
+            assert!(
+                ctx.get("cluster_count").is_some() || ctx.get("curated_count").is_some(),
+                "Analysis should produce cluster or curation data"
+            );
         }
     }
 
@@ -535,9 +607,13 @@ mod tests {
         let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
 
         l.pending.push(LeoPendingProposal {
-            chain_hash: hash, fire_count: 5, confidence: 0.8, timestamp: 1000,
+            chain_hash: hash,
+            fire_count: 5,
+            confidence: 0.8,
+            timestamp: 1000,
         });
-        let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        let approved =
+            ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
         l.receive_aam_decision(approved, 2000);
 
         let bytes = l.drain_pending_writes();

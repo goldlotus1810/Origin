@@ -13,10 +13,9 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::edge::{SilkEdge, EdgeKind, EmotionTag};
+use crate::edge::{EdgeKind, EmotionTag, SilkEdge};
 use crate::hebbian::{
-    hebbian_strengthen, hebbian_decay, blend_emotion,
-    should_promote, fib, PROMOTE_WEIGHT,
+    blend_emotion, fib, hebbian_decay, hebbian_strengthen, should_promote, PROMOTE_WEIGHT,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,12 +38,10 @@ impl SilkGraph {
     // ── Insert / Connect ─────────────────────────────────────────────────────
 
     /// Thêm structural edge (weight=1.0, bất biến).
-    pub fn connect_structural(
-        &mut self,
-        from: u64, to: u64,
-        kind: EdgeKind, ts: i64,
-    ) {
-        if self.find_edge(from, to, kind).is_some() { return; }
+    pub fn connect_structural(&mut self, from: u64, to: u64, kind: EdgeKind, ts: i64) {
+        if self.find_edge(from, to, kind).is_some() {
+            return;
+        }
         let edge = SilkEdge::structural(from, to, kind, ts);
         self.insert_sorted(edge);
     }
@@ -53,21 +50,14 @@ impl SilkGraph {
     ///
     /// Nếu edge đã có → Hebbian strengthen.
     /// Nếu chưa có → tạo mới với weight thấp.
-    pub fn co_activate(
-        &mut self,
-        from:    u64,
-        to:      u64,
-        emotion: EmotionTag,
-        reward:  f32,
-        ts:      i64,
-    ) {
+    pub fn co_activate(&mut self, from: u64, to: u64, emotion: EmotionTag, reward: f32, ts: i64) {
         let key = (from, to, EdgeKind::Assoc.as_byte());
 
         if let Some(idx) = self.find_edge_idx(from, to, EdgeKind::Assoc) {
             // Edge đã có → strengthen
             let e = &mut self.edges[idx];
-            e.weight     = hebbian_strengthen(e.weight, reward);
-            e.emotion    = blend_emotion(e.emotion, emotion, emotion.intensity);
+            e.weight = hebbian_strengthen(e.weight, reward);
+            e.emotion = blend_emotion(e.emotion, emotion, emotion.intensity);
             e.fire_count = e.fire_count.saturating_add(1);
             e.updated_at = ts;
         } else {
@@ -90,7 +80,8 @@ impl SilkGraph {
     #[allow(clippy::too_many_arguments)]
     pub fn co_activate_cross_layer(
         &mut self,
-        from: u64, to: u64,
+        from: u64,
+        to: u64,
         layers: (u8, u8),
         emotion: EmotionTag,
         reward: f32,
@@ -110,8 +101,8 @@ impl SilkGraph {
         // Check existing edge
         if let Some(idx) = self.find_edge_idx(from, to, EdgeKind::Assoc) {
             let e = &mut self.edges[idx];
-            e.weight     = hebbian_strengthen(e.weight, reward);
-            e.emotion    = blend_emotion(e.emotion, emotion, emotion.intensity);
+            e.weight = hebbian_strengthen(e.weight, reward);
+            e.emotion = blend_emotion(e.emotion, emotion, emotion.intensity);
             e.fire_count = e.fire_count.saturating_add(1);
             e.updated_at = ts;
 
@@ -137,38 +128,40 @@ impl SilkGraph {
             }
         }
         // Xóa edges đã quá yếu (weight < 0.01)
-        self.edges.retain(|e| !e.kind.is_associative() || e.weight >= 0.01);
+        self.edges
+            .retain(|e| !e.kind.is_associative() || e.weight >= 0.01);
     }
 
     // ── Lookup ───────────────────────────────────────────────────────────────
 
     /// Tìm edge bằng (from, to, kind).
     pub fn find_edge(&self, from: u64, to: u64, kind: EdgeKind) -> Option<&SilkEdge> {
-        self.find_edge_idx(from, to, kind)
-            .map(|i| &self.edges[i])
+        self.find_edge_idx(from, to, kind).map(|i| &self.edges[i])
     }
 
     /// Tất cả edges từ một node.
     pub fn edges_from(&self, from: u64) -> Vec<&SilkEdge> {
-        self.edges.iter()
-            .filter(|e| e.from_hash == from)
-            .collect()
+        self.edges.iter().filter(|e| e.from_hash == from).collect()
     }
 
     /// Tất cả edges đến một node.
     pub fn edges_to(&self, to: u64) -> Vec<&SilkEdge> {
-        self.edges.iter()
-            .filter(|e| e.to_hash == to)
-            .collect()
+        self.edges.iter().filter(|e| e.to_hash == to).collect()
     }
 
     /// Neighbors của một node (cả 2 chiều).
     pub fn neighbors(&self, hash: u64) -> Vec<u64> {
-        let mut ns: Vec<u64> = self.edges.iter()
+        let mut ns: Vec<u64> = self
+            .edges
+            .iter()
             .filter_map(|e| {
-                if e.from_hash == hash { Some(e.to_hash) }
-                else if e.to_hash == hash { Some(e.from_hash) }
-                else { None }
+                if e.from_hash == hash {
+                    Some(e.to_hash)
+                } else if e.to_hash == hash {
+                    Some(e.from_hash)
+                } else {
+                    None
+                }
             })
             .collect();
         ns.sort_unstable();
@@ -189,23 +182,22 @@ impl SilkGraph {
     ///
     /// score = 0.4 × hebbian_weight + 0.3 × co_activation_ratio
     /// (chain_similarity được tính bên ngoài bởi LCA engine)
-    pub fn cluster_score_partial(
-        &self,
-        hash_a: u64,
-        hash_b: u64,
-        max_fire_count: u32,
-    ) -> f32 {
-        let weight = self.assoc_weight(hash_a, hash_b)
+    pub fn cluster_score_partial(&self, hash_a: u64, hash_b: u64, max_fire_count: u32) -> f32 {
+        let weight = self
+            .assoc_weight(hash_a, hash_b)
             .max(self.assoc_weight(hash_b, hash_a));
 
-        let fire = self.find_edge(hash_a, hash_b, EdgeKind::Assoc)
+        let fire = self
+            .find_edge(hash_a, hash_b, EdgeKind::Assoc)
             .or_else(|| self.find_edge(hash_b, hash_a, EdgeKind::Assoc))
             .map(|e| e.fire_count)
             .unwrap_or(0);
 
         let fire_ratio = if max_fire_count > 0 {
             fire as f32 / max_fire_count as f32
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         0.4 * weight + 0.3 * fire_ratio
     }
@@ -213,25 +205,21 @@ impl SilkGraph {
     /// Tìm candidates cần promote tại một tầng (Dream input).
     ///
     /// Trả về Vec<(hash_a, hash_b, score)> sorted by score desc.
-    pub fn promote_candidates(
-        &self,
-        depth: usize,
-    ) -> Vec<(u64, u64, f32)> {
-        let max_fire = self.edges.iter()
+    pub fn promote_candidates(&self, depth: usize) -> Vec<(u64, u64, f32)> {
+        let max_fire = self
+            .edges
+            .iter()
             .filter(|e| e.kind.is_associative())
             .map(|e| e.fire_count)
             .max()
             .unwrap_or(1);
 
-        let mut candidates: Vec<(u64, u64, f32)> = self.edges.iter()
-            .filter(|e| {
-                e.kind.is_associative()
-                    && should_promote(e.weight, e.fire_count, depth)
-            })
+        let mut candidates: Vec<(u64, u64, f32)> = self
+            .edges
+            .iter()
+            .filter(|e| e.kind.is_associative() && should_promote(e.weight, e.fire_count, depth))
             .map(|e| {
-                let score = self.cluster_score_partial(
-                    e.from_hash, e.to_hash, max_fire,
-                );
+                let score = self.cluster_score_partial(e.from_hash, e.to_hash, max_fire);
                 (e.from_hash, e.to_hash, score)
             })
             .collect();
@@ -248,14 +236,21 @@ impl SilkGraph {
         self.edges.iter()
     }
 
-    pub fn len(&self) -> usize { self.edges.len() }
+    pub fn len(&self) -> usize {
+        self.edges.len()
+    }
 
     /// Graph có rỗng không.
-    pub fn is_empty(&self) -> bool { self.edges.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty()
+    }
 
     /// Số associative edges.
     pub fn assoc_count(&self) -> usize {
-        self.edges.iter().filter(|e| e.kind.is_associative()).count()
+        self.edges
+            .iter()
+            .filter(|e| e.kind.is_associative())
+            .count()
     }
 
     /// Số structural edges.
@@ -288,7 +283,9 @@ impl SilkGraph {
 }
 
 impl Default for SilkGraph {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -359,10 +356,15 @@ mod tests {
         let high_emotion = emo(-0.8, 0.95);
         g.co_activate(0xF1BE_u64, 0xDA4E_u64, high_emotion, 1.0, 1000);
 
-        let e = g.find_edge(0xF1BE_u64, 0xDA4E_u64, EdgeKind::Assoc).unwrap();
+        let e = g
+            .find_edge(0xF1BE_u64, 0xDA4E_u64, EdgeKind::Assoc)
+            .unwrap();
         // Edge phải mang màu cảm xúc của khoảnh khắc đó
-        assert!(e.emotion.arousal > 0.5,
-            "Edge mang arousal cao của khoảnh khắc: a={}", e.emotion.arousal);
+        assert!(
+            e.emotion.arousal > 0.5,
+            "Edge mang arousal cao của khoảnh khắc: a={}",
+            e.emotion.arousal
+        );
     }
 
     #[test]
@@ -379,8 +381,12 @@ mod tests {
         g.decay_all(86_400_000_000_000); // 1 ngày
         let w_after = g.assoc_weight(0xA, 0xB);
 
-        assert!(w_after < w_before,
-            "Decay phải giảm weight: {} → {}", w_before, w_after);
+        assert!(
+            w_after < w_before,
+            "Decay phải giảm weight: {} → {}",
+            w_before,
+            w_after
+        );
     }
 
     #[test]
@@ -418,8 +424,10 @@ mod tests {
 
         // fib(1) = 1 → depth=1 dễ promote nhất
         let candidates = g.promote_candidates(1);
-        assert!(!candidates.is_empty(),
-            "Sau 100 co-activations phải có candidates");
+        assert!(
+            !candidates.is_empty(),
+            "Sau 100 co-activations phải có candidates"
+        );
     }
 
     #[test]
@@ -433,15 +441,19 @@ mod tests {
         }
         let score2 = g.cluster_score_partial(0xA, 0xB, 10);
 
-        assert!(score2 > score1,
-            "Thêm co-activation → score tăng: {} → {}", score1, score2);
+        assert!(
+            score2 > score1,
+            "Thêm co-activation → score tăng: {} → {}",
+            score1,
+            score2
+        );
     }
 
     #[test]
     fn edges_from_correct() {
         let mut g = SilkGraph::new();
-        g.connect_structural(0xA, 0xB, EdgeKind::Member,  0);
-        g.connect_structural(0xA, 0xC, EdgeKind::Causes,  0);
+        g.connect_structural(0xA, 0xB, EdgeKind::Member, 0);
+        g.connect_structural(0xA, 0xC, EdgeKind::Causes, 0);
         g.connect_structural(0xB, 0xA, EdgeKind::Similar, 0);
 
         let from_a = g.edges_from(0xA);
@@ -472,9 +484,7 @@ mod tests {
         let mut g = SilkGraph::new();
         // L3→L5: diff=2, threshold=Fib[4]=5
         for i in 0..100 {
-            let ok = g.co_activate_cross_layer(
-                0xA, 0xB, (3, 5), emo(-0.5, 0.7), 1.0, i * 1000,
-            );
+            let ok = g.co_activate_cross_layer(0xA, 0xB, (3, 5), emo(-0.5, 0.7), 1.0, i * 1000);
             if ok {
                 // Must have fire_count >= 5 AND weight >= 0.7
                 let e = g.find_edge(0xA, 0xB, EdgeKind::Assoc).unwrap();
@@ -497,7 +507,7 @@ mod tests {
     fn multiple_edge_kinds_same_pair() {
         let mut g = SilkGraph::new();
         // Cùng 1 cặp node có thể có nhiều loại edge khác nhau
-        g.connect_structural(0xA, 0xB, EdgeKind::Member,  0);
+        g.connect_structural(0xA, 0xB, EdgeKind::Member, 0);
         g.connect_structural(0xA, 0xB, EdgeKind::Similar, 0);
         g.co_activate(0xA, 0xB, emo(0.0, 0.5), 0.5, 0);
 

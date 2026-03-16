@@ -22,25 +22,25 @@ use alloc::vec::Vec;
 #[repr(u8)]
 pub enum Architecture {
     /// x86 32-bit (Intel/AMD — PC/Server)
-    X86     = 0x01,
+    X86 = 0x01,
     /// x86-64 / AMD64 (PC/Server/Workstation)
-    X86_64  = 0x02,
+    X86_64 = 0x02,
     /// ARM 32-bit (ARMv7 — di động cũ, embedded)
-    Arm32   = 0x03,
+    Arm32 = 0x03,
     /// ARM 64-bit / AArch64 (ARMv8+ — smartphone, Apple M-series, Graviton)
-    Arm64   = 0x04,
+    Arm64 = 0x04,
     /// RISC-V 32-bit (mã nguồn mở — embedded, IoT)
     RiscV32 = 0x05,
     /// RISC-V 64-bit (mã nguồn mở — server, workstation)
     RiscV64 = 0x06,
     /// MIPS (router, embedded legacy)
-    Mips    = 0x07,
+    Mips = 0x07,
     /// Xtensa (ESP32 — IoT/smart home)
-    Xtensa  = 0x08,
+    Xtensa = 0x08,
     /// ARM Thumb/Cortex-M (MCU: STM32, nRF52, RP2040)
-    Thumb   = 0x09,
+    Thumb = 0x09,
     /// WebAssembly (browser runtime)
-    Wasm    = 0x0A,
+    Wasm = 0x0A,
     /// Không xác định
     Unknown = 0xFF,
 }
@@ -50,35 +50,62 @@ impl Architecture {
     #[allow(clippy::needless_return)]
     pub fn detect() -> Self {
         #[cfg(target_arch = "x86")]
-        { return Architecture::X86; }
+        {
+            return Architecture::X86;
+        }
         #[cfg(target_arch = "x86_64")]
-        { return Architecture::X86_64; }
+        {
+            return Architecture::X86_64;
+        }
         #[cfg(target_arch = "arm")]
-        { return Architecture::Arm32; }
+        {
+            return Architecture::Arm32;
+        }
         #[cfg(target_arch = "aarch64")]
-        { return Architecture::Arm64; }
+        {
+            return Architecture::Arm64;
+        }
         #[cfg(target_arch = "riscv32")]
-        { return Architecture::RiscV32; }
+        {
+            return Architecture::RiscV32;
+        }
         #[cfg(target_arch = "riscv64")]
-        { return Architecture::RiscV64; }
+        {
+            return Architecture::RiscV64;
+        }
         #[cfg(target_arch = "mips")]
-        { return Architecture::Mips; }
+        {
+            return Architecture::Mips;
+        }
         #[cfg(target_arch = "wasm32")]
-        { return Architecture::Wasm; }
+        {
+            return Architecture::Wasm;
+        }
         #[cfg(not(any(
-            target_arch = "x86", target_arch = "x86_64",
-            target_arch = "arm", target_arch = "aarch64",
-            target_arch = "riscv32", target_arch = "riscv64",
-            target_arch = "mips", target_arch = "wasm32",
+            target_arch = "x86",
+            target_arch = "x86_64",
+            target_arch = "arm",
+            target_arch = "aarch64",
+            target_arch = "riscv32",
+            target_arch = "riscv64",
+            target_arch = "mips",
+            target_arch = "wasm32",
         )))]
-        { Architecture::Unknown }
+        {
+            Architecture::Unknown
+        }
     }
 
     /// Bit-width: 32 hay 64.
     pub fn bits(&self) -> u8 {
         match self {
-            Self::X86 | Self::Arm32 | Self::RiscV32 | Self::Mips
-            | Self::Xtensa | Self::Thumb | Self::Wasm => 32,
+            Self::X86
+            | Self::Arm32
+            | Self::RiscV32
+            | Self::Mips
+            | Self::Xtensa
+            | Self::Thumb
+            | Self::Wasm => 32,
             Self::X86_64 | Self::Arm64 | Self::RiscV64 => 64,
             Self::Unknown => 0,
         }
@@ -89,7 +116,7 @@ impl Architecture {
         match self {
             Self::X86 | Self::X86_64 | Self::Arm64 | Self::RiscV64 => true,
             Self::Arm32 | Self::RiscV32 => true, // thường có, tuỳ variant
-            Self::Thumb | Self::Xtensa => false,  // MCU: soft-float thường
+            Self::Thumb | Self::Xtensa => false, // MCU: soft-float thường
             Self::Mips | Self::Wasm => true,
             Self::Unknown => false,
         }
@@ -98,8 +125,14 @@ impl Architecture {
     /// Endianness mặc định.
     pub fn is_little_endian(&self) -> bool {
         match self {
-            Self::X86 | Self::X86_64 | Self::Arm32 | Self::Arm64
-            | Self::RiscV32 | Self::RiscV64 | Self::Thumb | Self::Wasm => true,
+            Self::X86
+            | Self::X86_64
+            | Self::Arm32
+            | Self::Arm64
+            | Self::RiscV32
+            | Self::RiscV64
+            | Self::Thumb
+            | Self::Wasm => true,
             Self::Mips | Self::Xtensa => false, // MIPS: big-endian mặc định
             Self::Unknown => true,
         }
@@ -108,16 +141,16 @@ impl Architecture {
     /// Tên hiển thị.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::X86     => "x86",
-            Self::X86_64  => "x86-64",
-            Self::Arm32   => "ARM32 (ARMv7)",
-            Self::Arm64   => "ARM64 (AArch64)",
+            Self::X86 => "x86",
+            Self::X86_64 => "x86-64",
+            Self::Arm32 => "ARM32 (ARMv7)",
+            Self::Arm64 => "ARM64 (AArch64)",
             Self::RiscV32 => "RISC-V 32",
             Self::RiscV64 => "RISC-V 64",
-            Self::Mips    => "MIPS",
-            Self::Xtensa  => "Xtensa (ESP32)",
-            Self::Thumb   => "ARM Cortex-M (Thumb)",
-            Self::Wasm    => "WebAssembly",
+            Self::Mips => "MIPS",
+            Self::Xtensa => "Xtensa (ESP32)",
+            Self::Thumb => "ARM Cortex-M (Thumb)",
+            Self::Wasm => "WebAssembly",
             Self::Unknown => "Unknown",
         }
     }
@@ -152,16 +185,16 @@ impl ChipsetLayout {
     /// Infer chipset layout từ architecture.
     pub fn from_arch(arch: Architecture) -> Self {
         match arch {
-            Architecture::X86     => ChipsetLayout::NorthSouth, // legacy PC
-            Architecture::X86_64  => ChipsetLayout::Pch,        // modern PC
-            Architecture::Arm32   => ChipsetLayout::Soc,        // mobile SoC
-            Architecture::Arm64   => ChipsetLayout::Soc,        // modern mobile/server SoC
-            Architecture::RiscV32 => ChipsetLayout::Mcu,        // embedded RISC-V
-            Architecture::RiscV64 => ChipsetLayout::Soc,        // server RISC-V
-            Architecture::Mips    => ChipsetLayout::Soc,        // router SoC
-            Architecture::Xtensa  => ChipsetLayout::Mcu,        // ESP32
-            Architecture::Thumb   => ChipsetLayout::Mcu,        // Cortex-M MCU
-            Architecture::Wasm    => ChipsetLayout::Virtual,    // browser
+            Architecture::X86 => ChipsetLayout::NorthSouth, // legacy PC
+            Architecture::X86_64 => ChipsetLayout::Pch,     // modern PC
+            Architecture::Arm32 => ChipsetLayout::Soc,      // mobile SoC
+            Architecture::Arm64 => ChipsetLayout::Soc,      // modern mobile/server SoC
+            Architecture::RiscV32 => ChipsetLayout::Mcu,    // embedded RISC-V
+            Architecture::RiscV64 => ChipsetLayout::Soc,    // server RISC-V
+            Architecture::Mips => ChipsetLayout::Soc,       // router SoC
+            Architecture::Xtensa => ChipsetLayout::Mcu,     // ESP32
+            Architecture::Thumb => ChipsetLayout::Mcu,      // Cortex-M MCU
+            Architecture::Wasm => ChipsetLayout::Virtual,   // browser
             Architecture::Unknown => ChipsetLayout::Unknown,
         }
     }
@@ -170,11 +203,11 @@ impl ChipsetLayout {
     pub fn name(&self) -> &'static str {
         match self {
             Self::NorthSouth => "Traditional (Northbridge/Southbridge)",
-            Self::Pch        => "Platform Controller Hub (PCH)",
-            Self::Soc        => "System-on-Chip (SoC)",
-            Self::Mcu        => "Microcontroller Unit (MCU)",
-            Self::Virtual    => "Virtual/Emulated",
-            Self::Unknown    => "Unknown",
+            Self::Pch => "Platform Controller Hub (PCH)",
+            Self::Soc => "System-on-Chip (SoC)",
+            Self::Mcu => "Microcontroller Unit (MCU)",
+            Self::Virtual => "Virtual/Emulated",
+            Self::Unknown => "Unknown",
         }
     }
 }
@@ -235,12 +268,18 @@ pub struct MemoryInfo {
 impl MemoryInfo {
     /// Unknown memory.
     pub fn unknown() -> Self {
-        Self { total_bytes: 0, available_bytes: 0, storage_bytes: 0 }
+        Self {
+            total_bytes: 0,
+            available_bytes: 0,
+            storage_bytes: 0,
+        }
     }
 
     /// Tỷ lệ sử dụng RAM (0.0 .. 1.0).
     pub fn usage_ratio(&self) -> f32 {
-        if self.total_bytes == 0 { return 0.0; }
+        if self.total_bytes == 0 {
+            return 0.0;
+        }
         let used = self.total_bytes.saturating_sub(self.available_bytes);
         (used as f32) / (self.total_bytes as f32)
     }
@@ -289,7 +328,11 @@ impl PlatformProfile {
             "{} ({}) | {} | {}MB RAM | {} peripherals",
             self.cpu.arch.name(),
             self.chipset.name(),
-            if self.os.is_empty() { "unknown-os" } else { &self.os },
+            if self.os.is_empty() {
+                "unknown-os"
+            } else {
+                &self.os
+            },
             self.memory.total_bytes / (1024 * 1024),
             self.peripherals.len(),
         )
@@ -323,7 +366,12 @@ mod tests {
     fn arch_detect_not_unknown() {
         let arch = Architecture::detect();
         // Trên test runner (x86_64 hoặc aarch64), phải detect được
-        assert_ne!(arch, Architecture::Unknown, "Phải detect được arch: {:?}", arch);
+        assert_ne!(
+            arch,
+            Architecture::Unknown,
+            "Phải detect được arch: {:?}",
+            arch
+        );
     }
 
     #[test]
@@ -350,17 +398,38 @@ mod tests {
         assert!(Architecture::X86_64.is_little_endian());
         assert!(Architecture::Arm64.is_little_endian());
         assert!(Architecture::RiscV64.is_little_endian());
-        assert!(!Architecture::Mips.is_little_endian(), "MIPS big-endian mặc định");
+        assert!(
+            !Architecture::Mips.is_little_endian(),
+            "MIPS big-endian mặc định"
+        );
     }
 
     #[test]
     fn chipset_from_arch() {
-        assert_eq!(ChipsetLayout::from_arch(Architecture::X86_64), ChipsetLayout::Pch);
-        assert_eq!(ChipsetLayout::from_arch(Architecture::Arm64), ChipsetLayout::Soc);
-        assert_eq!(ChipsetLayout::from_arch(Architecture::Xtensa), ChipsetLayout::Mcu);
-        assert_eq!(ChipsetLayout::from_arch(Architecture::Wasm), ChipsetLayout::Virtual);
-        assert_eq!(ChipsetLayout::from_arch(Architecture::RiscV32), ChipsetLayout::Mcu);
-        assert_eq!(ChipsetLayout::from_arch(Architecture::RiscV64), ChipsetLayout::Soc);
+        assert_eq!(
+            ChipsetLayout::from_arch(Architecture::X86_64),
+            ChipsetLayout::Pch
+        );
+        assert_eq!(
+            ChipsetLayout::from_arch(Architecture::Arm64),
+            ChipsetLayout::Soc
+        );
+        assert_eq!(
+            ChipsetLayout::from_arch(Architecture::Xtensa),
+            ChipsetLayout::Mcu
+        );
+        assert_eq!(
+            ChipsetLayout::from_arch(Architecture::Wasm),
+            ChipsetLayout::Virtual
+        );
+        assert_eq!(
+            ChipsetLayout::from_arch(Architecture::RiscV32),
+            ChipsetLayout::Mcu
+        );
+        assert_eq!(
+            ChipsetLayout::from_arch(Architecture::RiscV64),
+            ChipsetLayout::Soc
+        );
     }
 
     #[test]
@@ -417,7 +486,11 @@ mod tests {
         assert!(s.contains("ARM64"), "Summary chứa arch: {}", s);
         assert!(s.contains("SoC"), "Summary chứa chipset: {}", s);
         assert!(s.contains("android"), "Summary chứa OS: {}", s);
-        assert!(s.contains("3 peripherals"), "Summary chứa peripheral count: {}", s);
+        assert!(
+            s.contains("3 peripherals"),
+            "Summary chứa peripheral count: {}",
+            s
+        );
     }
 
     #[test]
@@ -445,11 +518,16 @@ mod tests {
     #[test]
     fn all_arch_names_non_empty() {
         let archs = [
-            Architecture::X86, Architecture::X86_64,
-            Architecture::Arm32, Architecture::Arm64,
-            Architecture::RiscV32, Architecture::RiscV64,
-            Architecture::Mips, Architecture::Xtensa,
-            Architecture::Thumb, Architecture::Wasm,
+            Architecture::X86,
+            Architecture::X86_64,
+            Architecture::Arm32,
+            Architecture::Arm64,
+            Architecture::RiscV32,
+            Architecture::RiscV64,
+            Architecture::Mips,
+            Architecture::Xtensa,
+            Architecture::Thumb,
+            Architecture::Wasm,
             Architecture::Unknown,
         ];
         for a in archs {
@@ -460,9 +538,12 @@ mod tests {
     #[test]
     fn all_chipset_names_non_empty() {
         let layouts = [
-            ChipsetLayout::NorthSouth, ChipsetLayout::Pch,
-            ChipsetLayout::Soc, ChipsetLayout::Mcu,
-            ChipsetLayout::Virtual, ChipsetLayout::Unknown,
+            ChipsetLayout::NorthSouth,
+            ChipsetLayout::Pch,
+            ChipsetLayout::Soc,
+            ChipsetLayout::Mcu,
+            ChipsetLayout::Virtual,
+            ChipsetLayout::Unknown,
         ];
         for l in layouts {
             assert!(!l.name().is_empty(), "{:?} must have name", l);

@@ -55,65 +55,188 @@ impl IntentKind {
     /// Detect intent từ text UTF-8.
     pub fn detect(text: &str) -> Self {
         // Crisis — ưu tiên tuyệt đối
-        if contains_any(text, &[
-            "muốn chết", "không muốn sống", "tự tử", "biến mất mãi",
-            "want to die", "kill myself", "end my life",
-        ]) { return Self::Crisis; }
+        if contains_any(
+            text,
+            &[
+                "muốn chết",
+                "không muốn sống",
+                "tự tử",
+                "biến mất mãi",
+                "want to die",
+                "kill myself",
+                "end my life",
+            ],
+        ) {
+            return Self::Crisis;
+        }
 
         // Command — từ điều khiển
-        if contains_any(text, &[
-            "tắt", "bật", "mở", "đóng", "điều chỉnh", "chạy", "dừng",
-            "turn off", "turn on", "open", "close", "set ",
-        ]) { return Self::Command; }
+        if contains_any(
+            text,
+            &[
+                "tắt",
+                "bật",
+                "mở",
+                "đóng",
+                "điều chỉnh",
+                "chạy",
+                "dừng",
+                "turn off",
+                "turn on",
+                "open",
+                "close",
+                "set ",
+            ],
+        ) {
+            return Self::Command;
+        }
 
         // Heal — cần hỗ trợ
-        if contains_any(text, &[
-            "mệt", "buồn", "chán", "khó quá", "cô đơn", "tôi cần",
-            "tired", "sad", "depressed", "help me", "lonely",
-        ]) { return Self::Heal; }
+        if contains_any(
+            text,
+            &[
+                "mệt",
+                "buồn",
+                "chán",
+                "khó quá",
+                "cô đơn",
+                "tôi cần",
+                "tired",
+                "sad",
+                "depressed",
+                "help me",
+                "lonely",
+            ],
+        ) {
+            return Self::Heal;
+        }
 
         // Learn — hỏi thông tin
-        if contains_any(text, &[
-            "là gì", "tại sao", "giải thích", "cho biết", "như thế nào",
-            "what is", "why ", "how ", "explain", "?",
-        ]) { return Self::Learn; }
+        if contains_any(
+            text,
+            &[
+                "là gì",
+                "tại sao",
+                "giải thích",
+                "cho biết",
+                "như thế nào",
+                "what is",
+                "why ",
+                "how ",
+                "explain",
+                "?",
+            ],
+        ) {
+            return Self::Learn;
+        }
 
         // Manipulate
-        if contains_any(text, &[
-            "làm người khác tin", "thao túng", "khiến người ta",
-            "viết tin giả", "tạo thông tin sai", "đóng giả", "lừa",
-            "manipulate", "fake news", "deceive", "impersonate",
-        ]) { return Self::Manipulate; }
+        if contains_any(
+            text,
+            &[
+                "làm người khác tin",
+                "thao túng",
+                "khiến người ta",
+                "viết tin giả",
+                "tạo thông tin sai",
+                "đóng giả",
+                "lừa",
+                "manipulate",
+                "fake news",
+                "deceive",
+                "impersonate",
+            ],
+        ) {
+            return Self::Manipulate;
+        }
 
         // Risk
-        if contains_any(text, &[
-            "làm hại", "trả thù", "không ai phát hiện", "xóa dấu vết",
-            "dangerous", "harm someone", "get revenge",
-        ]) { return Self::Risk; }
+        if contains_any(
+            text,
+            &[
+                "làm hại",
+                "trả thù",
+                "không ai phát hiện",
+                "xóa dấu vết",
+                "dangerous",
+                "harm someone",
+                "get revenge",
+            ],
+        ) {
+            return Self::Risk;
+        }
 
         // Technical
-        if contains_any(text, &[
-            "code", "api", "implement", "bug", "error", "compile",
-            "function", "library", "framework", "debug",
-        ]) { return Self::Technical; }
+        if contains_any(
+            text,
+            &[
+                "code",
+                "api",
+                "implement",
+                "bug",
+                "error",
+                "compile",
+                "function",
+                "library",
+                "framework",
+                "debug",
+            ],
+        ) {
+            return Self::Technical;
+        }
 
         // Research
-        if contains_any(text, &[
-            "nghiên cứu", "phân tích", "so sánh", "dữ liệu", "bằng chứng",
-            "research", "analyze", "compare", "data", "evidence",
-        ]) { return Self::Research; }
+        if contains_any(
+            text,
+            &[
+                "nghiên cứu",
+                "phân tích",
+                "so sánh",
+                "dữ liệu",
+                "bằng chứng",
+                "research",
+                "analyze",
+                "compare",
+                "data",
+                "evidence",
+            ],
+        ) {
+            return Self::Research;
+        }
 
         // Creative
-        if contains_any(text, &[
-            "viết truyện", "sáng tác", "kịch bản", "nhân vật", "tiểu thuyết",
-            "write a story", "fiction", "screenplay", "character",
-        ]) { return Self::Creative; }
+        if contains_any(
+            text,
+            &[
+                "viết truyện",
+                "sáng tác",
+                "kịch bản",
+                "nhân vật",
+                "tiểu thuyết",
+                "write a story",
+                "fiction",
+                "screenplay",
+                "character",
+            ],
+        ) {
+            return Self::Creative;
+        }
 
         // Inform
-        if contains_any(text, &[
-            "bài báo", "viết bài", "báo cáo", "thuyết trình",
-            "write an article", "report", "presentation",
-        ]) { return Self::Inform; }
+        if contains_any(
+            text,
+            &[
+                "bài báo",
+                "viết bài",
+                "báo cáo",
+                "thuyết trình",
+                "write an article",
+                "report",
+                "presentation",
+            ],
+        ) {
+            return Self::Inform;
+        }
 
         Self::Chat
     }
@@ -127,13 +250,13 @@ impl IntentKind {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IntentModifier {
     /// Mức độ khẩn cấp ∈ [0, 1]
-    pub urgency:    f32,
+    pub urgency: f32,
     /// Mức độ lịch sự ∈ [0, 1]
     pub politeness: f32,
     /// Mức độ stress ∈ [0, 1]
-    pub stress:     f32,
+    pub stress: f32,
     /// Hedge (không chắc) ∈ [0, 1]
-    pub hedge:      f32,
+    pub hedge: f32,
 }
 
 impl IntentModifier {
@@ -141,29 +264,49 @@ impl IntentModifier {
     pub fn detect(text: &str) -> Self {
         let upper = text.chars().filter(|c| c.is_uppercase()).count();
         let total = text.chars().filter(|c| c.is_alphabetic()).count();
-        let stress = if total > 0 { (upper as f32 / total as f32).min(1.0) } else { 0.0 };
+        let stress = if total > 0 {
+            (upper as f32 / total as f32).min(1.0)
+        } else {
+            0.0
+        };
 
-        let urgency = if contains_any(text, &["ngay", "ngay bây giờ", "gấp", "urgent", "!!!"]) {
+        let urgency = if contains_any(text, &["ngay", "ngay bây giờ", "gấp", "urgent", "!!!"])
+        {
             0.8
-        } else if text.contains('!') { 0.4 } else { 0.0 };
+        } else if text.contains('!') {
+            0.4
+        } else {
+            0.0
+        };
 
-        let politeness = if contains_any(text, &["làm ơn", "xin ", "please", "could you", "cảm ơn"]) {
+        let politeness = if contains_any(text, &["làm ơn", "xin ", "please", "could you", "cảm ơn"])
+        {
             0.7
-        } else { 0.2 };
+        } else {
+            0.2
+        };
 
-        let hedge = if contains_any(text, &["có lẽ", "không biết", "maybe", "perhaps", "might"]) {
+        let hedge = if contains_any(text, &["có lẽ", "không biết", "maybe", "perhaps", "might"])
+        {
             0.6
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
-        Self { urgency, politeness, stress, hedge }
+        Self {
+            urgency,
+            politeness,
+            stress,
+            hedge,
+        }
     }
 
     /// Áp dụng modifier vào EmotionTag.
     pub fn apply(&self, mut emo: EmotionTag) -> EmotionTag {
-        emo.arousal   = (emo.arousal   + self.urgency    * 0.3).min(1.0);
-        emo.valence   = (emo.valence   - self.stress     * 0.2).max(-1.0);
+        emo.arousal = (emo.arousal + self.urgency * 0.3).min(1.0);
+        emo.valence = (emo.valence - self.stress * 0.2).max(-1.0);
         emo.dominance = (emo.dominance + self.politeness * 0.1).min(1.0);
-        emo.intensity = (emo.intensity - self.hedge      * 0.2).max(0.0);
+        emo.intensity = (emo.intensity - self.hedge * 0.2).max(0.0);
         emo
     }
 }
@@ -620,7 +763,6 @@ static WORD_AFFECT_TABLE: &[(&str, f32, f32)] = &[
     ("自然", 0.55f32, 0.4f32),
     ("地球", 0.55f32, 0.4f32),
     ("自然", 0.55f32, 0.4f32),
-
     // ── L3 Topic clusters ─────────────────────────────────────────────
     ("solaire", 0.6f32, 0.45f32),
     ("éolienne", 0.6f32, 0.45f32),
@@ -737,22 +879,26 @@ static WORD_AFFECT_TABLE: &[(&str, f32, f32)] = &[
     ("champion", 0.65f32, 0.8f32),
     ("competition", 0.65f32, 0.8f32),
     ("tournament", 0.65f32, 0.8f32),
-
 ];
-
 
 /// Tính EmotionTag base cho câu từ các từ.
 pub fn sentence_base_affect(words: &[&str]) -> EmotionTag {
-    if words.is_empty() { return EmotionTag::NEUTRAL; }
-    let mut tv = 0.0f32; let mut ta = 0.0f32;
-    let mut td = 0.0f32; let mut ti = 0.0f32;
+    if words.is_empty() {
+        return EmotionTag::NEUTRAL;
+    }
+    let mut tv = 0.0f32;
+    let mut ta = 0.0f32;
+    let mut td = 0.0f32;
+    let mut ti = 0.0f32;
     for &w in words {
         let e = word_affect(w);
-        tv += e.valence; ta += e.arousal;
-        td += e.dominance; ti += e.intensity;
+        tv += e.valence;
+        ta += e.arousal;
+        td += e.dominance;
+        ti += e.intensity;
     }
     let n = words.len() as f32;
-    EmotionTag::new(tv/n, ta/n, td/n, ti/n)
+    EmotionTag::new(tv / n, ta / n, td / n, ti / n)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -762,28 +908,28 @@ pub fn sentence_base_affect(words: &[&str]) -> EmotionTag {
 /// Blend text EmotionTag với audio signals.
 /// Text mâu thuẫn audio → audio thắng.
 pub fn blend_with_audio(
-    text:          EmotionTag,
+    text: EmotionTag,
     audio_valence: f32,
-    audio_energy:  f32,
-    audio_pitch:   f32,
+    audio_energy: f32,
+    audio_pitch: f32,
 ) -> EmotionTag {
     let conflict = (text.valence > 0.05 && audio_valence < -0.10)
-                || (text.valence < -0.05 && audio_valence > 0.10);
+        || (text.valence < -0.05 && audio_valence > 0.10);
     let pitch_anomaly = audio_pitch < 150.0 && audio_pitch > 50.0;
 
     if conflict || pitch_anomaly {
         EmotionTag {
-            valence:   audio_valence,
-            arousal:   text.arousal.max(audio_energy),
+            valence: audio_valence,
+            arousal: text.arousal.max(audio_energy),
             dominance: text.dominance * 0.6,
             intensity: text.intensity.max(audio_energy),
         }
     } else {
         EmotionTag {
-            valence:   text.valence   * 0.6 + audio_valence * 0.4,
-            arousal:   text.arousal   * 0.6 + audio_energy  * 0.4,
+            valence: text.valence * 0.6 + audio_valence * 0.4,
+            arousal: text.arousal * 0.6 + audio_energy * 0.4,
             dominance: text.dominance,
-            intensity: text.intensity * 0.7 + audio_energy  * 0.3,
+            intensity: text.intensity * 0.7 + audio_energy * 0.3,
         }
     }
 }
@@ -809,48 +955,194 @@ pub fn contains_any(text: &str, needles: &[&str]) -> bool {
 /// Mỗi group pattern → (v, a, d). Average các groups match.
 pub fn bootstrap_affect(text: &str) -> EmotionTag {
     static GROUPS: &[(&[&str], f32, f32, f32)] = &[
-        (&["chết","thi thể","mất mạng","hi sinh","dead","death","died"],  -0.80, 0.60, 0.20),
-        (&["chiến tranh","bom","súng","cháy","hỗn loạn","war","bomb","chaos"], -0.75, 0.80, 0.30),
-        (&["đau buồn","khóc","nước mắt","tuyệt vọng","sobbing","crying","despair"], -0.70, 0.50, 0.25),
-        (&["sợ hãi","hoảng","run rẩy","terrified","panic","horrified"],   -0.60, 0.75, 0.25),
-        (&["đói","nghèo","khổ cực","hoang tàn","hunger","poverty","ruins"], -0.55, 0.45, 0.25),
-        (&["cô đơn","một mình","bị bỏ rơi","lonely","alone","abandoned"], -0.50, 0.30, 0.25),
-        (&["tức giận","phẫn nộ","căm ghét","furious","rage","hatred"],    -0.40, 0.85, 0.70),
-        (&["yêu","thương","hạnh phúc","vui mừng","love","happy","joyful"],  0.70, 0.55, 0.65),
-        (&["hy vọng","quyết tâm","kiên cường","hope","resilient","persevere"], 0.50, 0.55, 0.70),
-        (&["bình yên","yên tĩnh","an toàn","peaceful","calm","safe"],      0.50, 0.20, 0.60),
+        (
+            &[
+                "chết",
+                "thi thể",
+                "mất mạng",
+                "hi sinh",
+                "dead",
+                "death",
+                "died",
+            ],
+            -0.80,
+            0.60,
+            0.20,
+        ),
+        (
+            &[
+                "chiến tranh",
+                "bom",
+                "súng",
+                "cháy",
+                "hỗn loạn",
+                "war",
+                "bomb",
+                "chaos",
+            ],
+            -0.75,
+            0.80,
+            0.30,
+        ),
+        (
+            &[
+                "đau buồn",
+                "khóc",
+                "nước mắt",
+                "tuyệt vọng",
+                "sobbing",
+                "crying",
+                "despair",
+            ],
+            -0.70,
+            0.50,
+            0.25,
+        ),
+        (
+            &[
+                "sợ hãi",
+                "hoảng",
+                "run rẩy",
+                "terrified",
+                "panic",
+                "horrified",
+            ],
+            -0.60,
+            0.75,
+            0.25,
+        ),
+        (
+            &[
+                "đói",
+                "nghèo",
+                "khổ cực",
+                "hoang tàn",
+                "hunger",
+                "poverty",
+                "ruins",
+            ],
+            -0.55,
+            0.45,
+            0.25,
+        ),
+        (
+            &[
+                "cô đơn",
+                "một mình",
+                "bị bỏ rơi",
+                "lonely",
+                "alone",
+                "abandoned",
+            ],
+            -0.50,
+            0.30,
+            0.25,
+        ),
+        (
+            &[
+                "tức giận",
+                "phẫn nộ",
+                "căm ghét",
+                "furious",
+                "rage",
+                "hatred",
+            ],
+            -0.40,
+            0.85,
+            0.70,
+        ),
+        (
+            &[
+                "yêu",
+                "thương",
+                "hạnh phúc",
+                "vui mừng",
+                "love",
+                "happy",
+                "joyful",
+            ],
+            0.70,
+            0.55,
+            0.65,
+        ),
+        (
+            &[
+                "hy vọng",
+                "quyết tâm",
+                "kiên cường",
+                "hope",
+                "resilient",
+                "persevere",
+            ],
+            0.50,
+            0.55,
+            0.70,
+        ),
+        (
+            &[
+                "bình yên",
+                "yên tĩnh",
+                "an toàn",
+                "peaceful",
+                "calm",
+                "safe",
+            ],
+            0.50,
+            0.20,
+            0.60,
+        ),
     ];
     let lo = text.to_lowercase();
     let (mut sv, mut sa, mut sd, mut n) = (0.0f32, 0.0f32, 0.0f32, 0u32);
     for &(pats, v, a, d) in GROUPS {
         for &p in pats {
-            if lo.contains(p) { sv += v; sa += a; sd += d; n += 1; break; }
+            if lo.contains(p) {
+                sv += v;
+                sa += a;
+                sd += d;
+                n += 1;
+                break;
+            }
         }
     }
-    if n == 0 { return EmotionTag { valence: 0.0, arousal: 0.40, dominance: 0.50, intensity: 0.10 }; }
+    if n == 0 {
+        return EmotionTag {
+            valence: 0.0,
+            arousal: 0.40,
+            dominance: 0.50,
+            intensity: 0.10,
+        };
+    }
     let nf = n as f32;
-    let v = (sv/nf).clamp(-0.95, 0.95);
-    let a = (sa/nf).clamp(0.10, 0.95);
-    let d = (sd/nf).clamp(0.10, 0.95);
-    let intensity = (v.abs()*0.7 + (a-0.5).abs()*0.3).clamp(0.0, 0.95);
-    EmotionTag { valence: v, arousal: a, dominance: d, intensity }
+    let v = (sv / nf).clamp(-0.95, 0.95);
+    let a = (sa / nf).clamp(0.10, 0.95);
+    let d = (sd / nf).clamp(0.10, 0.95);
+    let intensity = (v.abs() * 0.7 + (a - 0.5).abs() * 0.3).clamp(0.0, 0.95);
+    EmotionTag {
+        valence: v,
+        arousal: a,
+        dominance: d,
+        intensity,
+    }
 }
 
 pub fn sentence_affect(text: &str) -> EmotionTag {
-    use olang::ling::apply_modifiers;
     use crate::infer::detect_tense;
+    use olang::ling::apply_modifiers;
     let words: alloc::vec::Vec<&str> = text.split_whitespace().collect();
     let base = sentence_base_affect(&words);
     let (mod_v, _) = apply_modifiers(&words, base.valence, base.arousal);
     let mut result = EmotionTag {
-        valence:   mod_v.clamp(-1.0, 1.0),
-        arousal:   base.arousal,
+        valence: mod_v.clamp(-1.0, 1.0),
+        arousal: base.arousal,
         dominance: base.dominance,
         intensity: base.intensity,
     };
     if result.valence.abs() < 0.10 && result.intensity < 0.15 {
         let boot = bootstrap_affect(text);
-        if boot.intensity > 0.15 { result = boot; }
+        if boot.intensity > 0.15 {
+            result = boot;
+        }
     }
     // Scale intensity theo tense: sắp xảy ra → nhẹ hơn đang xảy ra
     let tense = detect_tense(text);
@@ -865,12 +1157,18 @@ mod tests {
     #[test]
     fn intent_crisis_tieng_viet() {
         assert_eq!(IntentKind::detect("tôi muốn chết"), IntentKind::Crisis);
-        assert_eq!(IntentKind::detect("không muốn sống nữa"), IntentKind::Crisis);
+        assert_eq!(
+            IntentKind::detect("không muốn sống nữa"),
+            IntentKind::Crisis
+        );
     }
 
     #[test]
     fn intent_command_tieng_viet() {
-        assert_eq!(IntentKind::detect("tắt đèn phòng khách"), IntentKind::Command);
+        assert_eq!(
+            IntentKind::detect("tắt đèn phòng khách"),
+            IntentKind::Command
+        );
         assert_eq!(IntentKind::detect("mở cửa sổ"), IntentKind::Command);
     }
 
@@ -889,8 +1187,14 @@ mod tests {
 
     #[test]
     fn intent_english() {
-        assert_eq!(IntentKind::detect("turn off the lights"), IntentKind::Command);
-        assert_eq!(IntentKind::detect("what is photosynthesis?"), IntentKind::Learn);
+        assert_eq!(
+            IntentKind::detect("turn off the lights"),
+            IntentKind::Command
+        );
+        assert_eq!(
+            IntentKind::detect("what is photosynthesis?"),
+            IntentKind::Learn
+        );
         assert_eq!(IntentKind::detect("i feel so sad today"), IntentKind::Heal);
     }
 
@@ -914,16 +1218,16 @@ mod tests {
 
     #[test]
     fn word_affect_tieng_viet() {
-        assert!(word_affect("vui").valence > 0.5,  "vui → positive");
+        assert!(word_affect("vui").valence > 0.5, "vui → positive");
         assert!(word_affect("buồn").valence < -0.5, "buồn → negative");
-        assert!(word_affect("sợ").valence   < -0.5, "sợ → negative");
-        assert!(word_affect("mệt").valence  < -0.3, "mệt → negative");
+        assert!(word_affect("sợ").valence < -0.5, "sợ → negative");
+        assert!(word_affect("mệt").valence < -0.3, "mệt → negative");
     }
 
     #[test]
     fn word_affect_english() {
-        assert!(word_affect("happy").valence  > 0.5);
-        assert!(word_affect("sad").valence    < -0.5);
+        assert!(word_affect("happy").valence > 0.5);
+        assert!(word_affect("sad").valence < -0.5);
         assert!(word_affect("afraid").valence < -0.5);
     }
 
@@ -931,14 +1235,22 @@ mod tests {
     fn blend_audio_conflict() {
         let text = EmotionTag::new(0.7, 0.5, 0.6, 0.7);
         let blended = blend_with_audio(text, -0.4, 0.3, 130.0);
-        assert!(blended.valence < 0.0, "Audio thắng khi conflict: {}", blended.valence);
+        assert!(
+            blended.valence < 0.0,
+            "Audio thắng khi conflict: {}",
+            blended.valence
+        );
     }
 
     #[test]
     fn blend_audio_pitch_anomaly() {
         let text = EmotionTag::new(0.1, 0.3, 0.5, 0.3);
         let blended = blend_with_audio(text, -0.5, 0.4, 120.0);
-        assert!(blended.valence < 0.0, "Pitch thấp → override: {}", blended.valence);
+        assert!(
+            blended.valence < 0.0,
+            "Pitch thấp → override: {}",
+            blended.valence
+        );
     }
 
     #[test]

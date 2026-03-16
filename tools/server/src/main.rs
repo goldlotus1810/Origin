@@ -5,10 +5,10 @@
 //!
 //! ○(∅) == ○ — boot từ hư không.
 
-use std::io::{self, BufRead, Write};
 use std::fs::OpenOptions;
+use std::io::{self, BufRead, Write};
 
-use runtime::origin::{HomeRuntime, now_ns};
+use runtime::origin::{now_ns, HomeRuntime};
 
 const OLANG_FILE: &str = "origin.olang";
 
@@ -33,10 +33,14 @@ fn main() {
             Ok(reader) => {
                 let (_pf, info) = reader.parse_recoverable();
                 if let Some(ref err) = info.error {
-                    eprintln!("[boot] WARNING: origin.olang corrupt at byte {}: {:?}",
-                        info.last_good_offset, err);
-                    eprintln!("[boot] Recovered {} records from {} bytes",
-                        info.records_recovered, info.total_bytes);
+                    eprintln!(
+                        "[boot] WARNING: origin.olang corrupt at byte {}: {:?}",
+                        info.last_good_offset, err
+                    );
+                    eprintln!(
+                        "[boot] Recovered {} records from {} bytes",
+                        info.records_recovered, info.total_bytes
+                    );
                 }
             }
             Err(e) => {
@@ -51,7 +55,7 @@ fn main() {
         HomeRuntime::new(session_id)
     };
 
-    let stdin  = io::stdin();
+    let stdin = io::stdin();
     let stdout = io::stdout();
 
     loop {
@@ -67,12 +71,19 @@ fn main() {
         match stdin.lock().read_line(&mut line) {
             Ok(0) => break, // EOF
             Ok(_) => {}
-            Err(e) => { eprintln!("Read error: {}", e); break; }
+            Err(e) => {
+                eprintln!("Read error: {}", e);
+                break;
+            }
         }
 
         let input = line.trim();
-        if input.is_empty() { continue; }
-        if input == "exit" || input == "quit" { break; }
+        if input.is_empty() {
+            continue;
+        }
+        if input == "exit" || input == "quit" {
+            break;
+        }
 
         // Process
         let ts = now_ns();
@@ -98,16 +109,23 @@ fn main() {
 
     // Stats khi thoát
     println!();
-    println!("○ Session ended · {} turns · f(x)={:.3}",
-        rt.turn_count(), rt.fx());
+    println!(
+        "○ Session ended · {} turns · f(x)={:.3}",
+        rt.turn_count(),
+        rt.fx()
+    );
 }
 
 /// Flush pending writes từ runtime → origin.olang.
 fn flush_pending(rt: &mut HomeRuntime) {
-    if !rt.has_pending_writes() { return; }
+    if !rt.has_pending_writes() {
+        return;
+    }
 
     let bytes = rt.drain_pending_writes();
-    if bytes.is_empty() { return; }
+    if bytes.is_empty() {
+        return;
+    }
 
     match append_to_file(OLANG_FILE, &bytes) {
         Ok(()) => {
@@ -121,10 +139,7 @@ fn flush_pending(rt: &mut HomeRuntime) {
 
 /// Append bytes vào file (tạo mới nếu chưa có).
 fn append_to_file(path: &str, bytes: &[u8]) -> io::Result<()> {
-    let mut f = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut f = OpenOptions::new().create(true).append(true).open(path)?;
     f.write_all(bytes)?;
     f.flush()?;
     Ok(())

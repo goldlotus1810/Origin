@@ -4,11 +4,13 @@
 //! Dùng để: startup (rebuild Registry), crash recovery (replay).
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
-use crate::writer::{MAGIC, VERSION, VERSION_V03, HEADER_SIZE, RT_NODE, RT_EDGE, RT_ALIAS, RT_AMEND};
+use crate::writer::{
+    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_EDGE, RT_NODE, VERSION, VERSION_V03,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsed records
@@ -18,10 +20,10 @@ use crate::writer::{MAGIC, VERSION, VERSION_V03, HEADER_SIZE, RT_NODE, RT_EDGE, 
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
 pub struct ParsedNode {
-    pub chain:       MolecularChain,
-    pub layer:       u8,
-    pub is_qr:       bool,
-    pub timestamp:   i64,
+    pub chain: MolecularChain,
+    pub layer: u8,
+    pub is_qr: bool,
+    pub timestamp: i64,
     pub file_offset: u64,
 }
 
@@ -29,10 +31,10 @@ pub struct ParsedNode {
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
 pub struct ParsedEdge {
-    pub from_hash:   u64,
-    pub to_hash:     u64,
-    pub edge_type:   u8,
-    pub timestamp:   i64,
+    pub from_hash: u64,
+    pub to_hash: u64,
+    pub edge_type: u8,
+    pub timestamp: i64,
     pub file_offset: u64,
 }
 
@@ -40,9 +42,9 @@ pub struct ParsedEdge {
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
 pub struct ParsedAlias {
-    pub name:        String,
-    pub chain_hash:  u64,
-    pub timestamp:   i64,
+    pub name: String,
+    pub chain_hash: u64,
+    pub timestamp: i64,
     pub file_offset: u64,
 }
 
@@ -53,9 +55,9 @@ pub struct ParsedAmend {
     /// Offset của record bị supersede.
     pub target_offset: u64,
     /// Lý do amend.
-    pub reason:        String,
-    pub timestamp:     i64,
-    pub file_offset:   u64,
+    pub reason: String,
+    pub timestamp: i64,
+    pub file_offset: u64,
 }
 
 /// Lỗi khi parse.
@@ -81,15 +83,19 @@ pub enum ParseError {
 
 /// Parser cho origin.olang.
 pub struct OlangReader<'a> {
-    data:       &'a [u8],
+    data: &'a [u8],
     created_at: i64,
 }
 
 impl<'a> OlangReader<'a> {
     /// Parse header và tạo reader.
     pub fn new(data: &'a [u8]) -> Result<Self, ParseError> {
-        if data.len() < HEADER_SIZE { return Err(ParseError::TooShort); }
-        if data[0..4] != MAGIC   { return Err(ParseError::BadMagic); }
+        if data.len() < HEADER_SIZE {
+            return Err(ParseError::TooShort);
+        }
+        if data[0..4] != MAGIC {
+            return Err(ParseError::BadMagic);
+        }
         // Accept both v0.03 and v0.04 (backward compatible)
         if data[4] != VERSION && data[4] != VERSION_V03 {
             return Err(ParseError::UnsupportedVersion);
@@ -100,14 +106,16 @@ impl<'a> OlangReader<'a> {
     }
 
     /// Timestamp khi file được tạo.
-    pub fn created_at(&self) -> i64 { self.created_at }
+    pub fn created_at(&self) -> i64 {
+        self.created_at
+    }
 
     /// Parse tất cả records (v0.03 + v0.04 compatible).
     pub fn parse_all(&self) -> Result<ParsedFile, ParseError> {
-        let mut nodes:   Vec<ParsedNode>  = Vec::new();
-        let mut edges:   Vec<ParsedEdge>  = Vec::new();
+        let mut nodes: Vec<ParsedNode> = Vec::new();
+        let mut edges: Vec<ParsedEdge> = Vec::new();
         let mut aliases: Vec<ParsedAlias> = Vec::new();
-        let mut amends:  Vec<ParsedAmend> = Vec::new();
+        let mut amends: Vec<ParsedAmend> = Vec::new();
 
         let mut pos = HEADER_SIZE;
 
@@ -119,7 +127,9 @@ impl<'a> OlangReader<'a> {
             match rt {
                 RT_NODE => {
                     // [chain_len: u8][chain: N×5][layer: u8][is_qr: u8][ts: 8]
-                    if pos + 1 > self.data.len() { return Err(ParseError::Truncated); }
+                    if pos + 1 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
                     let chain_len = self.data[pos] as usize;
                     pos += 1;
 
@@ -128,59 +138,105 @@ impl<'a> OlangReader<'a> {
                         return Err(ParseError::Truncated);
                     }
 
-                    let chain_bytes = &self.data[pos..pos+chain_bytes_len];
-                    let chain = MolecularChain::from_bytes(chain_bytes)
-                        .ok_or(ParseError::InvalidChain)?;
+                    let chain_bytes = &self.data[pos..pos + chain_bytes_len];
+                    let chain =
+                        MolecularChain::from_bytes(chain_bytes).ok_or(ParseError::InvalidChain)?;
                     pos += chain_bytes_len;
 
-                    let layer = self.data[pos]; pos += 1;
-                    let is_qr = self.data[pos] != 0; pos += 1;
-                    let ts    = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap());
+                    let layer = self.data[pos];
+                    pos += 1;
+                    let is_qr = self.data[pos] != 0;
+                    pos += 1;
+                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
                     pos += 8;
 
-                    nodes.push(ParsedNode { chain, layer, is_qr, timestamp: ts, file_offset: record_offset });
+                    nodes.push(ParsedNode {
+                        chain,
+                        layer,
+                        is_qr,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
                 }
 
                 RT_EDGE => {
                     // [from: 8][to: 8][type: 1][ts: 8] = 25 bytes
-                    if pos + 25 > self.data.len() { return Err(ParseError::Truncated); }
+                    if pos + 25 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
 
-                    let from = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let to   = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let et   = self.data[pos]; pos += 1;
-                    let ts   = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
+                    let from = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let to = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let et = self.data[pos];
+                    pos += 1;
+                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
 
-                    edges.push(ParsedEdge { from_hash: from, to_hash: to, edge_type: et, timestamp: ts, file_offset: record_offset });
+                    edges.push(ParsedEdge {
+                        from_hash: from,
+                        to_hash: to,
+                        edge_type: et,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
                 }
 
                 RT_ALIAS => {
                     // [name_len: u8][name: N][hash: 8][ts: 8]
-                    if pos + 1 > self.data.len() { return Err(ParseError::Truncated); }
-                    let name_len = self.data[pos] as usize; pos += 1;
+                    if pos + 1 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let name_len = self.data[pos] as usize;
+                    pos += 1;
 
-                    if pos + name_len + 8 + 8 > self.data.len() { return Err(ParseError::Truncated); }
+                    if pos + name_len + 8 + 8 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
 
-                    let name_bytes = &self.data[pos..pos+name_len]; pos += name_len;
+                    let name_bytes = &self.data[pos..pos + name_len];
+                    pos += name_len;
                     let name = String::from_utf8_lossy(name_bytes).into_owned();
-                    let hash = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let ts   = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
+                    let hash = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
 
-                    aliases.push(ParsedAlias { name, chain_hash: hash, timestamp: ts, file_offset: record_offset });
+                    aliases.push(ParsedAlias {
+                        name,
+                        chain_hash: hash,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
                 }
 
                 RT_AMEND => {
                     // [target_offset: 8][reason_len: u8][reason: N][ts: 8]
-                    if pos + 8 + 1 > self.data.len() { return Err(ParseError::Truncated); }
-                    let target = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let reason_len = self.data[pos] as usize; pos += 1;
+                    if pos + 8 + 1 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let target = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let reason_len = self.data[pos] as usize;
+                    pos += 1;
 
-                    if pos + reason_len + 8 > self.data.len() { return Err(ParseError::Truncated); }
+                    if pos + reason_len + 8 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
 
-                    let reason_bytes = &self.data[pos..pos+reason_len]; pos += reason_len;
+                    let reason_bytes = &self.data[pos..pos + reason_len];
+                    pos += reason_len;
                     let reason = String::from_utf8_lossy(reason_bytes).into_owned();
-                    let ts = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
+                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
 
-                    amends.push(ParsedAmend { target_offset: target, reason, timestamp: ts, file_offset: record_offset });
+                    amends.push(ParsedAmend {
+                        target_offset: target,
+                        reason,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
                 }
 
                 other => return Err(ParseError::UnknownRecordType(other)),
@@ -191,7 +247,14 @@ impl<'a> OlangReader<'a> {
         let amended_offsets: alloc::collections::BTreeSet<u64> =
             amends.iter().map(|a| a.target_offset).collect();
 
-        Ok(ParsedFile { nodes, edges, aliases, amends, amended_offsets, created_at: self.created_at })
+        Ok(ParsedFile {
+            nodes,
+            edges,
+            aliases,
+            amends,
+            amended_offsets,
+            created_at: self.created_at,
+        })
     }
 }
 
@@ -215,10 +278,10 @@ impl<'a> OlangReader<'a> {
     /// Dùng khi boot sau crash hoặc disk corruption.
     /// UnknownRecordType → dừng parse (vì không biết record length).
     pub fn parse_recoverable(&self) -> (ParsedFile, RecoveryInfo) {
-        let mut nodes:   Vec<ParsedNode>  = Vec::new();
-        let mut edges:   Vec<ParsedEdge>  = Vec::new();
+        let mut nodes: Vec<ParsedNode> = Vec::new();
+        let mut edges: Vec<ParsedEdge> = Vec::new();
         let mut aliases: Vec<ParsedAlias> = Vec::new();
-        let mut amends:  Vec<ParsedAmend> = Vec::new();
+        let mut amends: Vec<ParsedAmend> = Vec::new();
 
         let mut pos = HEADER_SIZE;
         let mut error = None;
@@ -230,63 +293,120 @@ impl<'a> OlangReader<'a> {
 
             match rt {
                 RT_NODE => {
-                    if pos + 1 > self.data.len() { error = Some(ParseError::Truncated); break; }
+                    if pos + 1 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
                     let chain_len = self.data[pos] as usize;
                     pos += 1;
 
                     let chain_bytes_len = chain_len * 5;
                     if pos + chain_bytes_len + 1 + 1 + 8 > self.data.len() {
-                        error = Some(ParseError::Truncated); break;
+                        error = Some(ParseError::Truncated);
+                        break;
                     }
 
-                    let chain_bytes = &self.data[pos..pos+chain_bytes_len];
+                    let chain_bytes = &self.data[pos..pos + chain_bytes_len];
                     match MolecularChain::from_bytes(chain_bytes) {
                         Some(chain) => {
                             pos += chain_bytes_len;
-                            let layer = self.data[pos]; pos += 1;
-                            let is_qr = self.data[pos] != 0; pos += 1;
-                            let ts    = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap());
+                            let layer = self.data[pos];
+                            pos += 1;
+                            let is_qr = self.data[pos] != 0;
+                            pos += 1;
+                            let ts =
+                                i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
                             pos += 8;
-                            nodes.push(ParsedNode { chain, layer, is_qr, timestamp: ts, file_offset: record_offset });
+                            nodes.push(ParsedNode {
+                                chain,
+                                layer,
+                                is_qr,
+                                timestamp: ts,
+                                file_offset: record_offset,
+                            });
                         }
                         None => {
-                            error = Some(ParseError::InvalidChain); break;
+                            error = Some(ParseError::InvalidChain);
+                            break;
                         }
                     }
                 }
 
                 RT_EDGE => {
-                    if pos + 25 > self.data.len() { error = Some(ParseError::Truncated); break; }
+                    if pos + 25 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
 
-                    let from = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let to   = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let et   = self.data[pos]; pos += 1;
-                    let ts   = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    edges.push(ParsedEdge { from_hash: from, to_hash: to, edge_type: et, timestamp: ts, file_offset: record_offset });
+                    let from = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let to = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let et = self.data[pos];
+                    pos += 1;
+                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    edges.push(ParsedEdge {
+                        from_hash: from,
+                        to_hash: to,
+                        edge_type: et,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
                 }
 
                 RT_ALIAS => {
-                    if pos + 1 > self.data.len() { error = Some(ParseError::Truncated); break; }
-                    let name_len = self.data[pos] as usize; pos += 1;
+                    if pos + 1 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let name_len = self.data[pos] as usize;
+                    pos += 1;
 
-                    if pos + name_len + 8 + 8 > self.data.len() { error = Some(ParseError::Truncated); break; }
+                    if pos + name_len + 8 + 8 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
 
-                    let name_bytes = &self.data[pos..pos+name_len]; pos += name_len;
+                    let name_bytes = &self.data[pos..pos + name_len];
+                    pos += name_len;
                     let name = String::from_utf8_lossy(name_bytes).into_owned();
-                    let hash = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let ts   = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    aliases.push(ParsedAlias { name, chain_hash: hash, timestamp: ts, file_offset: record_offset });
+                    let hash = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    aliases.push(ParsedAlias {
+                        name,
+                        chain_hash: hash,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
                 }
 
                 RT_AMEND => {
-                    if pos + 8 + 1 > self.data.len() { error = Some(ParseError::Truncated); break; }
-                    let target = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    let reason_len = self.data[pos] as usize; pos += 1;
-                    if pos + reason_len + 8 > self.data.len() { error = Some(ParseError::Truncated); break; }
-                    let reason_bytes = &self.data[pos..pos+reason_len]; pos += reason_len;
+                    if pos + 8 + 1 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let target = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    let reason_len = self.data[pos] as usize;
+                    pos += 1;
+                    if pos + reason_len + 8 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let reason_bytes = &self.data[pos..pos + reason_len];
+                    pos += reason_len;
                     let reason = String::from_utf8_lossy(reason_bytes).into_owned();
-                    let ts = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
-                    amends.push(ParsedAmend { target_offset: target, reason, timestamp: ts, file_offset: record_offset });
+                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    pos += 8;
+                    amends.push(ParsedAmend {
+                        target_offset: target,
+                        reason,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
                 }
 
                 other => {
@@ -299,7 +419,14 @@ impl<'a> OlangReader<'a> {
         let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len();
         let amended_offsets: alloc::collections::BTreeSet<u64> =
             amends.iter().map(|a| a.target_offset).collect();
-        let file = ParsedFile { nodes, edges, aliases, amends, amended_offsets, created_at: self.created_at };
+        let file = ParsedFile {
+            nodes,
+            edges,
+            aliases,
+            amends,
+            amended_offsets,
+            created_at: self.created_at,
+        };
         let info = RecoveryInfo {
             records_recovered,
             last_good_offset: pos,
@@ -314,13 +441,13 @@ impl<'a> OlangReader<'a> {
 #[allow(missing_docs)]
 pub struct ParsedFile {
     /// Node records.
-    pub nodes:      Vec<ParsedNode>,
+    pub nodes: Vec<ParsedNode>,
     /// Edge records.
-    pub edges:      Vec<ParsedEdge>,
+    pub edges: Vec<ParsedEdge>,
     /// Alias records.
-    pub aliases:    Vec<ParsedAlias>,
+    pub aliases: Vec<ParsedAlias>,
     /// Amendment records (v0.04+).
-    pub amends:     Vec<ParsedAmend>,
+    pub amends: Vec<ParsedAmend>,
     /// Offsets đã bị amend — dùng để filter records.
     pub amended_offsets: alloc::collections::BTreeSet<u64>,
     /// Timestamp khi file được tạo.
@@ -329,11 +456,17 @@ pub struct ParsedFile {
 
 impl ParsedFile {
     /// Số nodes.
-    pub fn node_count(&self) -> usize { self.nodes.len() }
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
     /// Số edges.
-    pub fn edge_count(&self) -> usize { self.edges.len() }
+    pub fn edge_count(&self) -> usize {
+        self.edges.len()
+    }
     /// Số aliases.
-    pub fn alias_count(&self) -> usize { self.aliases.len() }
+    pub fn alias_count(&self) -> usize {
+        self.aliases.len()
+    }
 
     /// Nodes theo tầng.
     pub fn nodes_in_layer(&self, layer: u8) -> Vec<&ParsedNode> {
@@ -353,10 +486,12 @@ impl ParsedFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::writer::OlangWriter;
     use crate::encoder::encode_codepoint;
+    use crate::writer::OlangWriter;
 
-    fn skip_if_empty() -> bool { ucd::table_len() == 0 }
+    fn skip_if_empty() -> bool {
+        ucd::table_len() == 0
+    }
 
     fn roundtrip(write: impl FnOnce(&mut OlangWriter)) -> ParsedFile {
         let mut w = OlangWriter::new(42);
@@ -368,7 +503,7 @@ mod tests {
 
     #[test]
     fn reader_bad_magic() {
-        let bad = [0x00u8, 0x01, 0x02, 0x03, 0x03, 0,0,0,0,0,0,0,0];
+        let bad = [0x00u8, 0x01, 0x02, 0x03, 0x03, 0, 0, 0, 0, 0, 0, 0, 0];
         let result = OlangReader::new(&bad);
         assert!(matches!(result, Err(ParseError::BadMagic)));
     }
@@ -393,7 +528,9 @@ mod tests {
 
     #[test]
     fn roundtrip_one_node() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let chain = encode_codepoint(0x1F525); // 🔥
         let pf = roundtrip(|w| {
             w.append_node(&chain, 0, false, 1000).unwrap();
@@ -409,7 +546,9 @@ mod tests {
 
     #[test]
     fn roundtrip_qr_node() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let chain = encode_codepoint(0x1F4A7); // 💧
         let pf = roundtrip(|w| {
             w.append_node(&chain, 2, true, 5000).unwrap();
@@ -429,7 +568,7 @@ mod tests {
         assert_eq!(pf.edge_count(), 1);
         let e = &pf.edges[0];
         assert_eq!(e.from_hash, 0xABCD_1234);
-        assert_eq!(e.to_hash,   0xEF56_7890);
+        assert_eq!(e.to_hash, 0xEF56_7890);
         assert_eq!(e.edge_type, 0x01);
         assert_eq!(e.timestamp, 2000);
     }
@@ -449,9 +588,11 @@ mod tests {
 
     #[test]
     fn roundtrip_mixed_records() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let chain = encode_codepoint(0x1F525);
-        let hash  = chain.chain_hash();
+        let hash = chain.chain_hash();
 
         let pf = roundtrip(|w| {
             w.append_node(&chain, 0, false, 1000).unwrap();
@@ -466,13 +607,16 @@ mod tests {
 
     #[test]
     fn roundtrip_many_nodes() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let cps = [0x1F525u32, 0x1F4A7, 0x2744, 0x25CF, 0x2208];
 
         let pf = roundtrip(|w| {
             for (i, &cp) in cps.iter().enumerate() {
                 let chain = encode_codepoint(cp);
-                w.append_node(&chain, (i % 3) as u8, i % 2 == 0, i as i64 * 1000).unwrap();
+                w.append_node(&chain, (i % 3) as u8, i % 2 == 0, i as i64 * 1000)
+                    .unwrap();
             }
         });
 
@@ -480,34 +624,45 @@ mod tests {
         // Verify thứ tự giữ nguyên (append-only)
         for (i, &cp) in cps.iter().enumerate() {
             let expected = encode_codepoint(cp);
-            assert_eq!(pf.nodes[i].chain, expected,
-                "Node[{}] chain phải đúng", i);
+            assert_eq!(pf.nodes[i].chain, expected, "Node[{}] chain phải đúng", i);
         }
     }
 
     #[test]
     fn file_offsets_increasing() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let pf = roundtrip(|w| {
-            w.append_node(&encode_codepoint(0x1F525), 0, false, 1000).unwrap();
-            w.append_node(&encode_codepoint(0x1F4A7), 0, false, 2000).unwrap();
+            w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
+                .unwrap();
+            w.append_node(&encode_codepoint(0x1F4A7), 0, false, 2000)
+                .unwrap();
             w.append_edge(0x01, 0x02, 0x01, 3000);
         });
 
         // Offsets phải tăng dần
-        assert!(pf.nodes[0].file_offset < pf.nodes[1].file_offset,
-            "Node offsets tăng dần");
-        assert!(pf.nodes[1].file_offset < pf.edges[0].file_offset,
-            "Edge offset sau node offset");
+        assert!(
+            pf.nodes[0].file_offset < pf.nodes[1].file_offset,
+            "Node offsets tăng dần"
+        );
+        assert!(
+            pf.nodes[1].file_offset < pf.edges[0].file_offset,
+            "Edge offset sau node offset"
+        );
     }
 
     #[test]
     fn crash_recovery_partial_write() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         // Giả lập crash: file bị cắt giữa chừng
         let mut w = OlangWriter::new(0);
-        w.append_node(&encode_codepoint(0x1F525), 0, false, 1000).unwrap();
-        w.append_node(&encode_codepoint(0x1F4A7), 0, false, 2000).unwrap();
+        w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
+            .unwrap();
+        w.append_node(&encode_codepoint(0x1F4A7), 0, false, 2000)
+            .unwrap();
 
         let full_bytes = w.into_bytes();
 
@@ -533,7 +688,9 @@ mod tests {
 
     #[test]
     fn recoverable_full_file() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let chain = encode_codepoint(0x1F525);
         let mut w = OlangWriter::new(0);
         w.append_node(&chain, 0, false, 1000).unwrap();
@@ -551,10 +708,14 @@ mod tests {
 
     #[test]
     fn recoverable_truncated_recovers_first() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let mut w = OlangWriter::new(0);
-        w.append_node(&encode_codepoint(0x1F525), 0, false, 1000).unwrap();
-        w.append_node(&encode_codepoint(0x1F4A7), 0, false, 2000).unwrap();
+        w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
+            .unwrap();
+        w.append_node(&encode_codepoint(0x1F4A7), 0, false, 2000)
+            .unwrap();
         let full = w.into_bytes();
 
         // Truncate last record
@@ -564,17 +725,26 @@ mod tests {
 
         // First node should be recovered
         assert!(pf.node_count() >= 1, "At least 1 node recovered");
-        assert!(matches!(info.error, Some(ParseError::Truncated)),
-            "Truncated error detected");
-        assert!(info.last_good_offset < info.total_bytes,
-            "Parse stopped before end: {} < {}", info.last_good_offset, info.total_bytes);
+        assert!(
+            matches!(info.error, Some(ParseError::Truncated)),
+            "Truncated error detected"
+        );
+        assert!(
+            info.last_good_offset < info.total_bytes,
+            "Parse stopped before end: {} < {}",
+            info.last_good_offset,
+            info.total_bytes
+        );
     }
 
     #[test]
     fn recoverable_unknown_record_type() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let mut w = OlangWriter::new(0);
-        w.append_node(&encode_codepoint(0x1F525), 0, false, 1000).unwrap();
+        w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
+            .unwrap();
         let mut bytes = w.into_bytes();
 
         // Append garbage record type
@@ -585,6 +755,9 @@ mod tests {
         let (pf, info) = reader.parse_recoverable();
 
         assert_eq!(pf.node_count(), 1, "Valid node recovered before corruption");
-        assert!(matches!(info.error, Some(ParseError::UnknownRecordType(0xFE))));
+        assert!(matches!(
+            info.error,
+            Some(ParseError::UnknownRecordType(0xFE))
+        ));
     }
 }

@@ -9,8 +9,8 @@
 //! Không panic — luôn degrade gracefully.
 
 extern crate alloc;
-use alloc::string::String;
 use alloc::format;
+use alloc::string::String;
 
 /// Lỗi runtime — degrade gracefully, không panic.
 #[derive(Debug, Clone)]
@@ -32,9 +32,7 @@ pub enum HomeError {
         message: String,
     },
     /// Encode thất bại — input không hợp lệ.
-    EncodeFailed {
-        reason: String,
-    },
+    EncodeFailed { reason: String },
 }
 
 impl HomeError {
@@ -46,14 +44,26 @@ impl HomeError {
     /// Mô tả lỗi.
     pub fn describe(&self) -> String {
         match self {
-            HomeError::DiskFull { pending_bytes, message } =>
-                format!("Disk full: {} bytes pending — {}", pending_bytes, message),
-            HomeError::CorruptFile { recovered_records, lost_bytes } =>
-                format!("Corrupt file: recovered {} records, lost {} bytes", recovered_records, lost_bytes),
-            HomeError::NetworkFailure { attempt, max_attempts, message } =>
-                format!("Network failure (attempt {}/{}): {}", attempt, max_attempts, message),
-            HomeError::EncodeFailed { reason } =>
-                format!("Encode failed: {}", reason),
+            HomeError::DiskFull {
+                pending_bytes,
+                message,
+            } => format!("Disk full: {} bytes pending — {}", pending_bytes, message),
+            HomeError::CorruptFile {
+                recovered_records,
+                lost_bytes,
+            } => format!(
+                "Corrupt file: recovered {} records, lost {} bytes",
+                recovered_records, lost_bytes
+            ),
+            HomeError::NetworkFailure {
+                attempt,
+                max_attempts,
+                message,
+            } => format!(
+                "Network failure (attempt {}/{}): {}",
+                attempt, max_attempts, message
+            ),
+            HomeError::EncodeFailed { reason } => format!("Encode failed: {}", reason),
         }
     }
 }
@@ -102,13 +112,15 @@ mod tests {
     #[test]
     fn error_retryable() {
         let e = HomeError::NetworkFailure {
-            attempt: 2, max_attempts: 5,
+            attempt: 2,
+            max_attempts: 5,
             message: String::from("timeout"),
         };
         assert!(e.is_retryable());
 
         let e2 = HomeError::NetworkFailure {
-            attempt: 5, max_attempts: 5,
+            attempt: 5,
+            max_attempts: 5,
             message: String::from("timeout"),
         };
         assert!(!e2.is_retryable());

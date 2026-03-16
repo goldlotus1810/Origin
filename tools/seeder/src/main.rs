@@ -8,49 +8,49 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use olang::encoder::encode_codepoint;
-use olang::qr::QRSigner;
-use olang::writer::OlangWriter;
-use olang::registry::Registry;
 use olang::log::{EventLog, LogEvent};
+use olang::qr::QRSigner;
+use olang::registry::Registry;
+use olang::writer::OlangWriter;
 
 /// L0 Seed Map: (tên, codepoint, aliases)
 /// Chain KHÔNG hardcode — đến từ encode_codepoint(cp).
 static L0_NODES: &[(&str, u32, &[&str])] = &[
-    ("fire",    0x1F525, &["lua", "lửa", "fire", "feu"]),
-    ("light",   0x1F4A1, &["anh-sang", "light"]),
-    ("spark",   0x2728,  &["tia-lua", "spark"]),
-    ("bolt",    0x26A1,  &["set", "lightning"]),
-    ("water",   0x1F4A7, &["nuoc", "nước", "water", "eau"]),
-    ("earth",   0x1F30D, &["dat", "earth"]),
-    ("wind",    0x1F32C, &["gio", "wind"]),
-    ("sound",   0x1F50A, &["am-thanh", "sound"]),
-    ("cold",    0x2744,  &["lanh", "cold"]),
-    ("warm",    0x1F31E, &["am", "warm"]),
-    ("sun",     0x2600,  &["mat-troi", "sun"]),
-    ("pain",    0x1F915, &["dau", "pain"]),
-    ("joy",     0x1F60C, &["vui", "joy"]),
-    ("hunger",  0x1F374, &["doi", "hunger"]),
+    ("fire", 0x1F525, &["lua", "lửa", "fire", "feu"]),
+    ("light", 0x1F4A1, &["anh-sang", "light"]),
+    ("spark", 0x2728, &["tia-lua", "spark"]),
+    ("bolt", 0x26A1, &["set", "lightning"]),
+    ("water", 0x1F4A7, &["nuoc", "nước", "water", "eau"]),
+    ("earth", 0x1F30D, &["dat", "earth"]),
+    ("wind", 0x1F32C, &["gio", "wind"]),
+    ("sound", 0x1F50A, &["am-thanh", "sound"]),
+    ("cold", 0x2744, &["lanh", "cold"]),
+    ("warm", 0x1F31E, &["am", "warm"]),
+    ("sun", 0x2600, &["mat-troi", "sun"]),
+    ("pain", 0x1F915, &["dau", "pain"]),
+    ("joy", 0x1F60C, &["vui", "joy"]),
+    ("hunger", 0x1F374, &["doi", "hunger"]),
     ("fatigue", 0x1F634, &["met", "tired"]),
-    ("danger",  0x26A0,  &["nguy-hiem", "danger"]),
-    ("dark",    0x1F311, &["toi", "dark"]),
-    ("alert",   0x1F6A8, &["canh-bao", "alert"]),
+    ("danger", 0x26A0, &["nguy-hiem", "danger"]),
+    ("dark", 0x1F311, &["toi", "dark"]),
+    ("alert", 0x1F6A8, &["canh-bao", "alert"]),
     ("shelter", 0x1F3E0, &["nha", "shelter", "home"]),
-    ("house",   0x1F3E1, &["nha-o", "house"]),
-    ("nature",  0x1F333, &["thien-nhien", "nature"]),
-    ("ocean",   0x1F30A, &["bien", "ocean", "sea"]),
-    ("mind",    0x1F9E0, &["tam-tri", "tâm trí", "mind", "brain"]),
-    ("person",  0x1F464, &["nguoi", "person"]),
-    ("eye",     0x1F441, &["mat", "eye"]),
-    ("heart",   0x2764,  &["tim", "trái tim", "heart"]),
-    ("yes",     0x2705,  &["co", "yes", "true"]),
-    ("no",      0x274C,  &["khong", "no", "false"]),
-    ("now",     0x23F0,  &["bay-gio", "now"]),
-    ("all",     0x267E,  &["tat-ca", "all"]),
-    ("move",    0x1F3C3, &["di-chuyen", "move"]),
-    ("stop",    0x1F6D1, &["dung", "stop"]),
-    ("open",    0x1F513, &["mo", "open"]),
-    ("close",   0x1F512, &["dong", "close"]),
-    ("origin",  0x25CB,  &["nguon-goc", "origin"]),
+    ("house", 0x1F3E1, &["nha-o", "house"]),
+    ("nature", 0x1F333, &["thien-nhien", "nature"]),
+    ("ocean", 0x1F30A, &["bien", "ocean", "sea"]),
+    ("mind", 0x1F9E0, &["tam-tri", "tâm trí", "mind", "brain"]),
+    ("person", 0x1F464, &["nguoi", "person"]),
+    ("eye", 0x1F441, &["mat", "eye"]),
+    ("heart", 0x2764, &["tim", "trái tim", "heart"]),
+    ("yes", 0x2705, &["co", "yes", "true"]),
+    ("no", 0x274C, &["khong", "no", "false"]),
+    ("now", 0x23F0, &["bay-gio", "now"]),
+    ("all", 0x267E, &["tat-ca", "all"]),
+    ("move", 0x1F3C3, &["di-chuyen", "move"]),
+    ("stop", 0x1F6D1, &["dung", "stop"]),
+    ("open", 0x1F513, &["mo", "open"]),
+    ("close", 0x1F512, &["dong", "close"]),
+    ("origin", 0x25CB, &["nguon-goc", "origin"]),
 ];
 
 fn now_ns() -> i64 {
@@ -74,17 +74,17 @@ fn main() {
     let seed = [0x42u8; 32];
     let signer = QRSigner::from_seed(&seed);
 
-    let mut writer   = OlangWriter::new(ts);
+    let mut writer = OlangWriter::new(ts);
     let mut registry = Registry::new();
-    let mut log      = EventLog::new(String::from("origin.olang.log"));
+    let mut log = EventLog::new(String::from("origin.olang.log"));
 
-    let mut count  = 0usize;
+    let mut count = 0usize;
     let mut failed = 0usize;
 
     for &(name, cp, aliases) in L0_NODES {
         let chain = encode_codepoint(cp);
-        let hash  = chain.chain_hash();
-        let qr    = signer.sign_qr(&chain, ts);
+        let hash = chain.chain_hash();
+        let qr = signer.sign_qr(&chain, ts);
 
         if !signer.verify(&qr) {
             eprintln!("[seeder] WARN: verify failed: {}", name);
@@ -94,8 +94,12 @@ fn main() {
 
         // QT8: file TRUOC
         let offset = match writer.append_node(&chain, 0, true, ts) {
-            Ok(o)  => o,
-            Err(e) => { eprintln!("[seeder] write error {}: {:?}", name, e); failed+=1; continue; }
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("[seeder] write error {}: {:?}", name, e);
+                failed += 1;
+                continue;
+            }
         };
         let _ = writer.append_alias(&format!("_qr_{:016X}", hash), hash, ts);
 
@@ -109,8 +113,10 @@ fn main() {
 
         // Log CUOI CUNG
         log.append(LogEvent::NodeCreated {
-            chain_hash: hash, layer: 0,
-            file_offset: offset, timestamp: ts,
+            chain_hash: hash,
+            layer: 0,
+            file_offset: offset,
+            timestamp: ts,
         });
 
         let uname = ucd::lookup(cp).map(|e| e.name).unwrap_or("?");
@@ -138,8 +144,11 @@ fn main() {
     // Verify roundtrip
     let reader = olang::reader::OlangReader::new(&bytes).expect("parse");
     let parsed = reader.parse_all().expect("parse all");
-    println!("[seeder] ✓ Roundtrip: {} nodes, {} aliases",
-        parsed.node_count(), parsed.alias_count());
+    println!(
+        "[seeder] ✓ Roundtrip: {} nodes, {} aliases",
+        parsed.node_count(),
+        parsed.alias_count()
+    );
 
     println!("[seeder] Done ✓  ○(empty)==○");
 }

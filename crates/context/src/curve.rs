@@ -16,7 +16,7 @@ use silk::walk::ResponseTone;
 /// α cho f_conv
 pub const ALPHA: f32 = 0.6;
 /// β cho f_dn
-pub const BETA:  f32 = 0.4;
+pub const BETA: f32 = 0.4;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ConversationCurve
@@ -29,17 +29,17 @@ const VARIANCE_WINDOW: usize = 5;
 #[derive(Debug)]
 pub struct ConversationCurve {
     /// Valence qua các turns — append-only
-    pub curve:   Vec<f32>,
+    pub curve: Vec<f32>,
     /// V'(t) — first derivative
-    pub d1:      Vec<f32>,
+    pub d1: Vec<f32>,
     /// V''(t) — second derivative
-    pub d2:      Vec<f32>,
+    pub d2: Vec<f32>,
     /// f_conv hiện tại
     pub fx_conv: f32,
     /// f_dn tích lũy từ ĐN nodes
-    pub fx_dn:   f32,
+    pub fx_dn: f32,
     /// f(x) tổng hợp
-    pub fx:      f32,
+    pub fx: f32,
     /// Window variance — emotional instability indicator
     pub window_variance: f32,
     /// Emotional instability detected
@@ -49,12 +49,12 @@ pub struct ConversationCurve {
 impl ConversationCurve {
     pub fn new() -> Self {
         Self {
-            curve:   Vec::new(),
-            d1:      Vec::new(),
-            d2:      Vec::new(),
+            curve: Vec::new(),
+            d1: Vec::new(),
+            d2: Vec::new(),
             fx_conv: 0.0,
-            fx_dn:   0.0,
-            fx:      0.0,
+            fx_dn: 0.0,
+            fx: 0.0,
             window_variance: 0.0,
             unstable: false,
         }
@@ -69,13 +69,13 @@ impl ConversationCurve {
 
         // d1 = V(t) - V(t-1)
         if n >= 2 {
-            self.d1.push(self.curve[n-1] - self.curve[n-2]);
+            self.d1.push(self.curve[n - 1] - self.curve[n - 2]);
         }
 
         // d2 = d1(t) - d1(t-1)
         let d1_len = self.d1.len();
         if d1_len >= 2 {
-            self.d2.push(self.d1[d1_len-1] - self.d1[d1_len-2]);
+            self.d2.push(self.d1[d1_len - 1] - self.d1[d1_len - 2]);
         }
 
         // f_conv = V + 0.5×d1 + 0.25×d2
@@ -96,7 +96,7 @@ impl ConversationCurve {
     pub fn update_dn(&mut self, dn_affect: f32) {
         // Exponential moving average để f_dn không nhảy đột ngột
         self.fx_dn = self.fx_dn * 0.7 + dn_affect * 0.3;
-        self.fx    = ALPHA * self.fx_conv + BETA * self.fx_dn;
+        self.fx = ALPHA * self.fx_conv + BETA * self.fx_dn;
     }
 
     /// ResponseTone từ curve hiện tại.
@@ -113,7 +113,9 @@ impl ConversationCurve {
     }
 
     /// Số turns.
-    pub fn turn_count(&self) -> usize { self.curve.len() }
+    pub fn turn_count(&self) -> usize {
+        self.curve.len()
+    }
 
     /// Valence hiện tại.
     pub fn current_v(&self) -> f32 {
@@ -131,13 +133,19 @@ impl ConversationCurve {
     }
 
     /// f(x) hiện tại.
-    pub fn fx(&self) -> f32 { self.fx }
+    pub fn fx(&self) -> f32 {
+        self.fx
+    }
 
     /// Window variance hiện tại.
-    pub fn window_variance(&self) -> f32 { self.window_variance }
+    pub fn window_variance(&self) -> f32 {
+        self.window_variance
+    }
 
     /// Emotional instability?
-    pub fn is_unstable(&self) -> bool { self.unstable }
+    pub fn is_unstable(&self) -> bool {
+        self.unstable
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Window Variance — emotional instability detection
@@ -161,9 +169,8 @@ impl ConversationCurve {
         let mean: f32 = window.iter().sum::<f32>() / VARIANCE_WINDOW as f32;
 
         // Variance = Σ(v - mean)² / N
-        let var: f32 = window.iter()
-            .map(|v| (v - mean) * (v - mean))
-            .sum::<f32>() / VARIANCE_WINDOW as f32;
+        let var: f32 =
+            window.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / VARIANCE_WINDOW as f32;
 
         self.window_variance = var;
 
@@ -174,7 +181,8 @@ impl ConversationCurve {
             0
         }..];
 
-        let sign_changes = d1_window.windows(2)
+        let sign_changes = d1_window
+            .windows(2)
             .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
             .count();
 
@@ -184,7 +192,9 @@ impl ConversationCurve {
 }
 
 impl Default for ConversationCurve {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -216,8 +226,10 @@ mod tests {
         let mut c = ConversationCurve::new();
         c.push(-0.1);
         c.push(-0.3);
-        assert!((c.d1_now() - (-0.2)).abs() < 0.001,
-            "d1 = -0.3 - (-0.1) = -0.2");
+        assert!(
+            (c.d1_now() - (-0.2)).abs() < 0.001,
+            "d1 = -0.3 - (-0.1) = -0.2"
+        );
     }
 
     #[test]
@@ -227,8 +239,11 @@ mod tests {
         c.push(-0.3);
         c.push(-0.6);
         // d1[0] = -0.2, d1[1] = -0.3, d2 = -0.3 - (-0.2) = -0.1
-        assert!((c.d2_now() - (-0.1)).abs() < 0.001,
-            "d2 ≈ -0.1, got {}", c.d2_now());
+        assert!(
+            (c.d2_now() - (-0.1)).abs() < 0.001,
+            "d2 ≈ -0.1, got {}",
+            c.d2_now()
+        );
     }
 
     #[test]
@@ -239,8 +254,11 @@ mod tests {
         // f_conv = V + 0.5×d1 + 0.25×d2
         //       = -0.3 + 0.5×(-0.2) + 0.25×0 = -0.3 - 0.1 = -0.4
         // f(x) = 0.6×(-0.4) + 0.4×0 = -0.24
-        assert!((c.fx() - (-0.24)).abs() < 0.01,
-            "f(x) ≈ -0.24, got {}", c.fx());
+        assert!(
+            (c.fx() - (-0.24)).abs() < 0.01,
+            "f(x) ≈ -0.24, got {}",
+            c.fx()
+        );
     }
 
     #[test]
@@ -248,8 +266,8 @@ mod tests {
         let mut c = ConversationCurve::new();
         c.push(0.0);
         c.update_dn(-0.5); // ĐN node buồn
-        // f_dn = 0×0.7 + (-0.5)×0.3 = -0.15
-        // f(x) = 0.6×0 + 0.4×(-0.15) = -0.06
+                           // f_dn = 0×0.7 + (-0.5)×0.3 = -0.15
+                           // f(x) = 0.6×0 + 0.4×(-0.15) = -0.06
         assert!(c.fx() < 0.0, "f_dn âm ảnh hưởng f(x)");
     }
 
@@ -259,8 +277,11 @@ mod tests {
         c.push(-0.1);
         c.push(-0.3);
         c.push(-0.6);
-        assert_eq!(c.tone(), ResponseTone::Supportive,
-            "Đang buồn xuống → Supportive");
+        assert_eq!(
+            c.tone(),
+            ResponseTone::Supportive,
+            "Đang buồn xuống → Supportive"
+        );
     }
 
     #[test]
@@ -269,8 +290,11 @@ mod tests {
         c.push(-0.5);
         c.push(-0.2);
         c.push(0.1);
-        assert_eq!(c.tone(), ResponseTone::Reinforcing,
-            "Đang hồi phục → Reinforcing");
+        assert_eq!(
+            c.tone(),
+            ResponseTone::Reinforcing,
+            "Đang hồi phục → Reinforcing"
+        );
     }
 
     #[test]
@@ -279,8 +303,7 @@ mod tests {
         c.push(-0.4);
         c.push(-0.4);
         c.push(-0.4);
-        assert_eq!(c.tone(), ResponseTone::Gentle,
-            "Buồn ổn định → Gentle");
+        assert_eq!(c.tone(), ResponseTone::Gentle, "Buồn ổn định → Gentle");
     }
 
     #[test]
@@ -302,8 +325,11 @@ mod tests {
         for _ in 0..5 {
             c.push(-0.3);
         }
-        assert!(c.window_variance() < 0.01,
-            "Stable values → low variance: {}", c.window_variance());
+        assert!(
+            c.window_variance() < 0.01,
+            "Stable values → low variance: {}",
+            c.window_variance()
+        );
         assert!(!c.is_unstable(), "Stable → not unstable");
     }
 
@@ -315,10 +341,12 @@ mod tests {
         for v in vals {
             c.push(v);
         }
-        assert!(c.window_variance() > 0.04,
-            "Oscillating → high variance: {}", c.window_variance());
-        assert!(c.is_unstable(),
-            "Oscillating with sign changes → unstable");
+        assert!(
+            c.window_variance() > 0.04,
+            "Oscillating → high variance: {}",
+            c.window_variance()
+        );
+        assert!(c.is_unstable(), "Oscillating with sign changes → unstable");
     }
 
     #[test]
@@ -332,8 +360,11 @@ mod tests {
         // Even if base tone would be Celebratory, instability → Gentle
         if c.is_unstable() {
             let tone = c.tone();
-            assert_ne!(tone, ResponseTone::Celebratory,
-                "Unstable → never Celebratory");
+            assert_ne!(
+                tone,
+                ResponseTone::Celebratory,
+                "Unstable → never Celebratory"
+            );
         }
     }
 
@@ -342,8 +373,7 @@ mod tests {
         let mut c = ConversationCurve::new();
         c.push(-0.5);
         c.push(0.3);
-        assert_eq!(c.window_variance(), 0.0,
-            "< 5 turns → variance = 0");
+        assert_eq!(c.window_variance(), 0.0, "< 5 turns → variance = 0");
         assert!(!c.is_unstable());
     }
 
@@ -356,7 +386,11 @@ mod tests {
         c2.push(0.0);
         c2.update_dn(-0.8); // c2 có ĐN âm
 
-        assert!(c2.fx() < c1.fx(),
-            "ĐN âm → f(x) thấp hơn: {} < {}", c2.fx(), c1.fx());
+        assert!(
+            c2.fx() < c1.fx(),
+            "ĐN âm → f(x) thấp hơn: {} < {}",
+            c2.fx(),
+            c1.fx()
+        );
     }
 }

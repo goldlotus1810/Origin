@@ -26,35 +26,35 @@ use crate::arch::{Architecture, ChipsetLayout, CpuInfo, MemoryInfo, PlatformProf
 #[repr(u8)]
 pub enum PlatformCapability {
     /// Đọc sensor (temperature, humidity, etc.)
-    SensorRead   = 0x01,
+    SensorRead = 0x01,
     /// Điều khiển actuator (relay, motor)
     ActuatorCtrl = 0x02,
     /// Camera/video capture
-    Camera       = 0x03,
+    Camera = 0x03,
     /// Network monitoring
-    NetworkMon   = 0x04,
+    NetworkMon = 0x04,
     /// File system access
-    FileSystem   = 0x05,
+    FileSystem = 0x05,
     /// Process listing / monitoring
-    ProcessList  = 0x06,
+    ProcessList = 0x06,
     /// GPIO access (embedded)
-    Gpio         = 0x07,
+    Gpio = 0x07,
     /// I2C bus (embedded)
-    I2c          = 0x08,
+    I2c = 0x08,
     /// SPI bus (embedded)
-    Spi          = 0x09,
+    Spi = 0x09,
     /// UART serial (embedded)
-    Uart         = 0x0A,
+    Uart = 0x0A,
     /// Bluetooth
-    Bluetooth    = 0x0B,
+    Bluetooth = 0x0B,
     /// WiFi
-    Wifi         = 0x0C,
+    Wifi = 0x0C,
     /// USB host
-    Usb          = 0x0D,
+    Usb = 0x0D,
     /// Display output
-    Display      = 0x0E,
+    Display = 0x0E,
     /// Audio input/output
-    Audio        = 0x0F,
+    Audio = 0x0F,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,15 +322,13 @@ impl MockPlatform {
     pub fn riscv_embedded() -> Self {
         Self {
             arch: Architecture::RiscV32,
-            devices: alloc::vec![
-                DeviceDescriptor {
-                    id: String::from("i2c_bme280"),
-                    name: String::from("BME280 Environment"),
-                    device_type: DeviceType::Sensor,
-                    status: DeviceStatus::Ready,
-                    bus: BusType::I2c,
-                },
-            ],
+            devices: alloc::vec![DeviceDescriptor {
+                id: String::from("i2c_bme280"),
+                name: String::from("BME280 Environment"),
+                device_type: DeviceType::Sensor,
+                status: DeviceStatus::Ready,
+                bus: BusType::I2c,
+            },],
             caps: alloc::vec![
                 PlatformCapability::SensorRead,
                 PlatformCapability::Gpio,
@@ -398,9 +396,13 @@ impl MockPlatform {
 }
 
 impl HalPlatform for MockPlatform {
-    fn name(&self) -> &str { "mock" }
+    fn name(&self) -> &str {
+        "mock"
+    }
 
-    fn architecture(&self) -> Architecture { self.arch }
+    fn architecture(&self) -> Architecture {
+        self.arch
+    }
 
     fn cpu_info(&self) -> CpuInfo {
         CpuInfo {
@@ -461,7 +463,10 @@ mod tests {
         assert_eq!(profile.chipset, ChipsetLayout::Soc);
         assert!(platform.has_capability(PlatformCapability::Camera));
         assert!(platform.has_capability(PlatformCapability::Bluetooth));
-        assert!(!platform.has_capability(PlatformCapability::Gpio), "Phone thường không expose GPIO");
+        assert!(
+            !platform.has_capability(PlatformCapability::Gpio),
+            "Phone thường không expose GPIO"
+        );
     }
 
     #[test]
@@ -472,7 +477,10 @@ mod tests {
         assert_eq!(profile.chipset, ChipsetLayout::Mcu);
         assert!(platform.has_capability(PlatformCapability::Gpio));
         assert!(platform.has_capability(PlatformCapability::I2c));
-        assert!(!platform.has_capability(PlatformCapability::FileSystem), "ESP32 không có filesystem");
+        assert!(
+            !platform.has_capability(PlatformCapability::FileSystem),
+            "ESP32 không có filesystem"
+        );
         assert!(profile.memory.total_bytes < 1024 * 1024, "ESP32 < 1MB RAM");
     }
 

@@ -10,10 +10,10 @@
 //! Feature flags gate code paths per tier.
 
 extern crate alloc;
-use alloc::string::String;
 use alloc::format;
+use alloc::string::String;
 
-use crate::arch::{Architecture, MemoryInfo, CpuInfo};
+use crate::arch::{Architecture, CpuInfo, MemoryInfo};
 use crate::platform::PlatformCapability;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,16 +26,16 @@ use crate::platform::PlatformCapability;
 pub enum HardwareTier {
     /// Tier 4: Sensor relay (8-bit MCU, <64KB RAM)
     /// Chỉ chạy ISL relay — forward data lên Worker.
-    Sensor  = 4,
+    Sensor = 4,
     /// Tier 3: Worker (ESP32, MCU, 64KB-1MB RAM)
     /// L0 + 1 Skill + ISL. Không học, không dream.
-    Worker  = 3,
+    Worker = 3,
     /// Tier 2: Compact (Pi Zero, low-end phone, 256MB-1GB RAM)
     /// L0 + L1 + STM. Không dream, không promote QR.
     Compact = 2,
     /// Tier 1: Full (Pi 4, PC, Server, 1GB+ RAM)
     /// L0-Ln + Dream + Chief + full learning pipeline.
-    Full    = 1,
+    Full = 1,
 }
 
 impl HardwareTier {
@@ -66,61 +66,78 @@ impl HardwareTier {
             Architecture::Mips => Self::Compact,
             Architecture::Wasm => Self::Compact, // WASM hạn chế memory
             Architecture::Arm32 | Architecture::RiscV32 => Self::Compact,
-            Architecture::X86 | Architecture::X86_64 | Architecture::Arm64 | Architecture::RiscV64 => Self::Full,
+            Architecture::X86
+            | Architecture::X86_64
+            | Architecture::Arm64
+            | Architecture::RiscV64 => Self::Full,
             Architecture::Unknown => Self::Worker,
         }
     }
 
     /// Tier này có khả năng nào.
-    pub fn can_learn(&self) -> bool     { *self <= Self::Compact }
-    pub fn can_dream(&self) -> bool     { *self == Self::Full }
-    pub fn can_promote_qr(&self) -> bool{ *self == Self::Full }
-    pub fn can_run_chief(&self) -> bool { *self == Self::Full }
-    pub fn has_silk(&self) -> bool       { *self <= Self::Compact }
-    pub fn has_stm(&self) -> bool        { *self <= Self::Compact }
+    pub fn can_learn(&self) -> bool {
+        *self <= Self::Compact
+    }
+    pub fn can_dream(&self) -> bool {
+        *self == Self::Full
+    }
+    pub fn can_promote_qr(&self) -> bool {
+        *self == Self::Full
+    }
+    pub fn can_run_chief(&self) -> bool {
+        *self == Self::Full
+    }
+    pub fn has_silk(&self) -> bool {
+        *self <= Self::Compact
+    }
+    pub fn has_stm(&self) -> bool {
+        *self <= Self::Compact
+    }
 
     /// Max Silk edges cho tier này.
     pub fn max_silk_edges(&self) -> usize {
         match self {
-            Self::Full    => 1_000_000,
+            Self::Full => 1_000_000,
             Self::Compact => 10_000,
-            Self::Worker  => 0,
-            Self::Sensor  => 0,
+            Self::Worker => 0,
+            Self::Sensor => 0,
         }
     }
 
     /// Max STM observations.
     pub fn max_stm(&self) -> usize {
         match self {
-            Self::Full    => 10_000,
+            Self::Full => 10_000,
             Self::Compact => 500,
-            Self::Worker  => 0,
-            Self::Sensor  => 0,
+            Self::Worker => 0,
+            Self::Sensor => 0,
         }
     }
 
     /// PageCache capacity (from compact.rs Fibonacci capacities).
     pub fn page_cache_capacity(&self) -> usize {
         match self {
-            Self::Full    => 610,   // Fib[15]
-            Self::Compact => 233,   // Fib[13]
-            Self::Worker  => 55,    // Fib[10]
-            Self::Sensor  => 0,     // no cache
+            Self::Full => 610,    // Fib[15]
+            Self::Compact => 233, // Fib[13]
+            Self::Worker => 55,   // Fib[10]
+            Self::Sensor => 0,    // no cache
         }
     }
 
     /// ISL queue size.
     pub fn isl_queue_size(&self) -> usize {
         match self {
-            Self::Full    => 256,
+            Self::Full => 256,
             Self::Compact => 64,
-            Self::Worker  => 16,
-            Self::Sensor  => 4,
+            Self::Worker => 16,
+            Self::Sensor => 4,
         }
     }
 
     /// As byte (for ISL transport).
-    pub fn as_byte(self) -> u8 { self as u8 }
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
 
     /// From byte.
     pub fn from_byte(b: u8) -> Option<Self> {
@@ -136,10 +153,10 @@ impl HardwareTier {
     /// Human-readable name.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Full    => "Full",
+            Self::Full => "Full",
             Self::Compact => "Compact",
-            Self::Worker  => "Worker",
-            Self::Sensor  => "Sensor",
+            Self::Worker => "Worker",
+            Self::Sensor => "Sensor",
         }
     }
 
@@ -147,9 +164,12 @@ impl HardwareTier {
     pub fn summary(&self) -> String {
         format!(
             "Tier {} ({}) | learn={} dream={} silk={} stm={}",
-            self.as_byte(), self.name(),
-            self.can_learn(), self.can_dream(),
-            self.max_silk_edges(), self.max_stm(),
+            self.as_byte(),
+            self.name(),
+            self.can_learn(),
+            self.can_dream(),
+            self.max_silk_edges(),
+            self.max_stm(),
         )
     }
 }
@@ -243,7 +263,11 @@ mod tests {
     #[test]
     fn detect_worker_esp32() {
         // ESP32: 520KB SRAM → 0MB in integer
-        let m = MemoryInfo { total_bytes: 520 * 1024, available_bytes: 260 * 1024, storage_bytes: 4 * 1024 * 1024 };
+        let m = MemoryInfo {
+            total_bytes: 520 * 1024,
+            available_bytes: 260 * 1024,
+            storage_bytes: 4 * 1024 * 1024,
+        };
         let tier = HardwareTier::detect(&m, &cpu(Architecture::Xtensa));
         assert_eq!(tier, HardwareTier::Sensor); // <1MB → Sensor
     }
@@ -257,7 +281,11 @@ mod tests {
 
     #[test]
     fn detect_sensor_tiny() {
-        let m = MemoryInfo { total_bytes: 32 * 1024, available_bytes: 16 * 1024, storage_bytes: 0 };
+        let m = MemoryInfo {
+            total_bytes: 32 * 1024,
+            available_bytes: 16 * 1024,
+            storage_bytes: 0,
+        };
         let tier = HardwareTier::detect(&m, &cpu(Architecture::Thumb));
         assert_eq!(tier, HardwareTier::Sensor);
     }
@@ -299,9 +327,18 @@ mod tests {
 
     #[test]
     fn tier_from_arch() {
-        assert_eq!(HardwareTier::from_arch(Architecture::X86_64), HardwareTier::Full);
-        assert_eq!(HardwareTier::from_arch(Architecture::Xtensa), HardwareTier::Worker);
-        assert_eq!(HardwareTier::from_arch(Architecture::Wasm), HardwareTier::Compact);
+        assert_eq!(
+            HardwareTier::from_arch(Architecture::X86_64),
+            HardwareTier::Full
+        );
+        assert_eq!(
+            HardwareTier::from_arch(Architecture::Xtensa),
+            HardwareTier::Worker
+        );
+        assert_eq!(
+            HardwareTier::from_arch(Architecture::Wasm),
+            HardwareTier::Compact
+        );
     }
 
     #[test]

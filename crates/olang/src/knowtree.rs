@@ -21,13 +21,13 @@
 //!   - promote(): STM observation → L2 node
 
 extern crate alloc;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::format;
 
-use crate::molecular::{MolecularChain, RelationBase};
-use crate::compact::{TieredStore, CompactNode, NodeWithEdges};
+use crate::compact::{CompactNode, NodeWithEdges, TieredStore};
 use crate::hash::fnv1a_str;
+use crate::molecular::{MolecularChain, RelationBase};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KnowTree
@@ -105,13 +105,15 @@ impl KnowTree {
         // Create silk edges between consecutive word hashes
         if word_hashes.len() >= 2 {
             for w in word_hashes.windows(2) {
-                self.store.store_edge(w[0], w[1], 0.6, RelationBase::Compose, 2);
+                self.store
+                    .store_edge(w[0], w[1], 0.6, RelationBase::Compose, 2);
             }
         }
 
         // Edge from sentence node to each word (Member relation)
         for &wh in word_hashes {
-            self.store.store_edge(hash, wh, 0.5, RelationBase::Member, 2);
+            self.store
+                .store_edge(hash, wh, 0.5, RelationBase::Member, 2);
         }
 
         hash
@@ -134,7 +136,8 @@ impl KnowTree {
 
         // Edges from concept to sources (DerivedFrom)
         for &src in sources {
-            self.store.store_edge(hash, src, 0.7, RelationBase::DerivedFrom, layer);
+            self.store
+                .store_edge(hash, src, 0.7, RelationBase::DerivedFrom, layer);
         }
 
         hash
@@ -185,7 +188,7 @@ impl KnowTree {
     /// Returns hashes of all stored sentence nodes.
     pub fn store_chapter(
         &mut self,
-        chains: &[(MolecularChain, Vec<u64>)],  // (sentence_chain, word_hashes)
+        chains: &[(MolecularChain, Vec<u64>)], // (sentence_chain, word_hashes)
         chapter_chain: Option<&MolecularChain>,
         ts: i64,
     ) -> Vec<u64> {
@@ -198,7 +201,8 @@ impl KnowTree {
 
             // Sequential edge (sentence → next sentence)
             if prev_hash != 0 {
-                self.store.store_edge(prev_hash, hash, 0.4, RelationBase::Causes, 2);
+                self.store
+                    .store_edge(prev_hash, hash, 0.4, RelationBase::Causes, 2);
             }
             prev_hash = hash;
         }
@@ -209,28 +213,44 @@ impl KnowTree {
     // ── Stats ────────────────────────────────────────────────────────────────
 
     /// Total nodes across all layers.
-    pub fn total_nodes(&self) -> u64 { self.store.total_nodes() }
+    pub fn total_nodes(&self) -> u64 {
+        self.store.total_nodes()
+    }
 
     /// Total edges.
-    pub fn total_edges(&self) -> u64 { self.store.total_edges() }
+    pub fn total_edges(&self) -> u64 {
+        self.store.total_edges()
+    }
 
     /// Sentences stored (L2).
-    pub fn sentences(&self) -> u64 { self.sentences_stored }
+    pub fn sentences(&self) -> u64 {
+        self.sentences_stored
+    }
 
     /// Concepts stored (L3+).
-    pub fn concepts(&self) -> u64 { self.concepts_stored }
+    pub fn concepts(&self) -> u64 {
+        self.concepts_stored
+    }
 
     /// Promotions from STM.
-    pub fn promotions(&self) -> u64 { self.promotions }
+    pub fn promotions(&self) -> u64 {
+        self.promotions
+    }
 
     /// RAM usage estimate.
-    pub fn ram_usage(&self) -> usize { self.store.ram_usage() }
+    pub fn ram_usage(&self) -> usize {
+        self.store.ram_usage()
+    }
 
     /// Disk usage estimate.
-    pub fn disk_usage(&self) -> usize { self.store.disk_usage() }
+    pub fn disk_usage(&self) -> usize {
+        self.store.disk_usage()
+    }
 
     /// Cache hit rate.
-    pub fn cache_hit_rate(&self) -> f32 { self.store.cache.hit_rate() }
+    pub fn cache_hit_rate(&self) -> f32 {
+        self.store.cache.hit_rate()
+    }
 
     /// Summary.
     pub fn summary(&self) -> String {
@@ -238,15 +258,21 @@ impl KnowTree {
             "KnowTree: {} sentences + {} concepts + {} promotions\n\
              Nodes: {} | Edges: {} | RAM: ~{}KB | Disk: ~{}KB\n\
              Cache: {:.1}% hit rate",
-            self.sentences_stored, self.concepts_stored, self.promotions,
-            self.store.total_nodes(), self.store.total_edges(),
-            self.ram_usage() / 1024, self.disk_usage() / 1024,
+            self.sentences_stored,
+            self.concepts_stored,
+            self.promotions,
+            self.store.total_nodes(),
+            self.store.total_edges(),
+            self.ram_usage() / 1024,
+            self.disk_usage() / 1024,
             self.cache_hit_rate() * 100.0,
         )
     }
 
     /// Mutable access to underlying store (for advanced operations).
-    pub fn store_mut(&mut self) -> &mut TieredStore { &mut self.store }
+    pub fn store_mut(&mut self) -> &mut TieredStore {
+        &mut self.store
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,13 +294,16 @@ pub fn text_to_word_hashes(text: &str) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molecular::{Molecule, ShapeBase, EmotionDim, TimeDim};
+    use crate::molecular::{EmotionDim, Molecule, ShapeBase, TimeDim};
 
     fn test_chain(v: u8) -> MolecularChain {
         MolecularChain::single(Molecule {
             shape: ShapeBase::Sphere,
             relation: RelationBase::Member,
-            emotion: EmotionDim { valence: v, arousal: 0x80 },
+            emotion: EmotionDim {
+                valence: v,
+                arousal: 0x80,
+            },
             time: TimeDim::Medium,
         })
     }
@@ -328,7 +357,8 @@ mod tests {
         let c2 = test_chain(0x90);
         let h1 = kt.store_sentence(&c1, None, &[], 1000);
         let _h2 = kt.store_sentence(&c2, None, &[], 1001);
-        kt.store_mut().store_edge(h1, _h2, 0.8, RelationBase::Similar, 2);
+        kt.store_mut()
+            .store_edge(h1, _h2, 0.8, RelationBase::Similar, 2);
 
         let result = kt.query(h1, 2, 1);
         assert!(result.is_some());
@@ -337,9 +367,14 @@ mod tests {
     #[test]
     fn knowtree_store_chapter() {
         let mut kt = KnowTree::new(4, 100);
-        let chains: Vec<(MolecularChain, Vec<u64>)> = (0u8..5).map(|i| {
-            (test_chain(0x80 + i), alloc::vec![i as u64 * 100, i as u64 * 100 + 1])
-        }).collect();
+        let chains: Vec<(MolecularChain, Vec<u64>)> = (0u8..5)
+            .map(|i| {
+                (
+                    test_chain(0x80 + i),
+                    alloc::vec![i as u64 * 100, i as u64 * 100 + 1],
+                )
+            })
+            .collect();
 
         let hashes = kt.store_chapter(&chains, None, 1000);
         assert_eq!(hashes.len(), 5);

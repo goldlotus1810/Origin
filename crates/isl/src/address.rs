@@ -21,16 +21,21 @@ extern crate alloc;
 /// Serialize: [layer, group, subgroup, index] = 4 bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ISLAddress {
-    pub layer:    u8,
-    pub group:    u8,
+    pub layer: u8,
+    pub group: u8,
     pub subgroup: u8,
-    pub index:    u8,
+    pub index: u8,
 }
 
 impl ISLAddress {
     /// Tạo address từ 4 components.
     pub const fn new(layer: u8, group: u8, subgroup: u8, index: u8) -> Self {
-        Self { layer, group, subgroup, index }
+        Self {
+            layer,
+            group,
+            subgroup,
+            index,
+        }
     }
 
     /// L0 root address.
@@ -61,10 +66,14 @@ impl ISLAddress {
     }
 
     /// Kiểm tra có phải broadcast không.
-    pub fn is_broadcast(self) -> bool { self == Self::BROADCAST }
+    pub fn is_broadcast(self) -> bool {
+        self == Self::BROADCAST
+    }
 
     /// Layer number.
-    pub fn layer(self) -> u8 { self.layer }
+    pub fn layer(self) -> u8 {
+        self.layer
+    }
 
     /// Địa chỉ layer tiếp theo (sub-address).
     pub fn child(self, group: u8, subgroup: u8, index: u8) -> Self {
@@ -74,8 +83,11 @@ impl ISLAddress {
 
 impl core::fmt::Display for ISLAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "ISL[{:02X}:{:02X}:{:02X}:{:02X}]",
-            self.layer, self.group, self.subgroup, self.index)
+        write!(
+            f,
+            "ISL[{:02X}:{:02X}:{:02X}:{:02X}]",
+            self.layer, self.group, self.subgroup, self.index
+        )
     }
 }
 
@@ -94,15 +106,19 @@ pub struct ISLAllocator {
 }
 
 impl ISLAllocator {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Cấp phát address mới trong (layer, group, subgroup).
     ///
     /// Trả None nếu namespace đã đầy (256 addresses).
     pub fn alloc(&mut self, layer: u8, group: u8, subgroup: u8) -> Option<ISLAddress> {
-        let key     = (layer, group, subgroup);
+        let key = (layer, group, subgroup);
         let counter = self.counters.entry(key).or_insert(0u16);
-        if *counter >= 256 { return None; } // đầy (0..=255 dùng hết)
+        if *counter >= 256 {
+            return None;
+        } // đầy (0..=255 dùng hết)
         let addr = ISLAddress::new(layer, group, subgroup, *counter as u8);
         *counter += 1;
         Some(addr)
@@ -111,7 +127,10 @@ impl ISLAllocator {
     /// Số addresses đã cấp phát trong namespace.
     /// Số addresses đã cấp phát trong namespace.
     pub fn count(&self, layer: u8, group: u8, subgroup: u8) -> u16 {
-        self.counters.get(&(layer, group, subgroup)).copied().unwrap_or(0)
+        self.counters
+            .get(&(layer, group, subgroup))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Derive address từ molecular chain hash (thuật toán từ spec).
@@ -121,9 +140,9 @@ impl ISLAllocator {
     /// subgroup = hash[1] % 64 (RelationBase)
     /// index    = counter tự tăng
     pub fn alloc_from_hash(&mut self, depth: u8, hash: u64) -> Option<ISLAddress> {
-        let b      = hash.to_be_bytes();
-        let group  = b[0] % 64;
-        let sub    = b[1] % 64;
+        let b = hash.to_be_bytes();
+        let group = b[0] % 64;
+        let sub = b[1] % 64;
         self.alloc(depth, group, sub)
     }
 }
@@ -177,7 +196,7 @@ mod tests {
         let mut alloc = ISLAllocator::new();
         let a = alloc.alloc(1, 0, 0).unwrap();
         let b = alloc.alloc(1, 0, 1).unwrap(); // subgroup khác
-        // Cùng index 0 nhưng subgroup khác → không collision
+                                               // Cùng index 0 nhưng subgroup khác → không collision
         assert_eq!(a.index, 0);
         assert_eq!(b.index, 0);
         assert_ne!(a, b);
@@ -203,7 +222,7 @@ mod tests {
     fn allocator_from_hash() {
         let mut alloc = ISLAllocator::new();
         let hash = 0xABCD1234_EF567890_u64;
-        let a    = alloc.alloc_from_hash(2, hash).unwrap();
+        let a = alloc.alloc_from_hash(2, hash).unwrap();
         assert_eq!(a.layer, 2);
         // group + subgroup từ hash bytes
         assert!(a.group < 64);

@@ -20,8 +20,8 @@ extern crate alloc;
 /// I = Intensity ∈ [ 0.0,  1.0]  (nhẹ → mạnh)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EmotionTag {
-    pub valence:   f32,
-    pub arousal:   f32,
+    pub valence: f32,
+    pub arousal: f32,
     pub dominance: f32,
     pub intensity: f32,
 }
@@ -29,21 +29,28 @@ pub struct EmotionTag {
 impl EmotionTag {
     /// Trung lập.
     pub const NEUTRAL: Self = Self {
-        valence: 0.0, arousal: 0.3,
-        dominance: 0.5, intensity: 0.2,
+        valence: 0.0,
+        arousal: 0.3,
+        dominance: 0.5,
+        intensity: 0.2,
     };
 
     /// Tạo mới.
     pub const fn new(v: f32, a: f32, d: f32, i: f32) -> Self {
-        Self { valence: v, arousal: a, dominance: d, intensity: i }
+        Self {
+            valence: v,
+            arousal: a,
+            dominance: d,
+            intensity: i,
+        }
     }
 
     /// Blend 2 EmotionTags với tỷ lệ alpha.
     pub fn blend(self, other: Self, alpha: f32) -> Self {
         let b = 1.0 - alpha;
         Self {
-            valence:   self.valence   * alpha + other.valence   * b,
-            arousal:   self.arousal   * alpha + other.arousal   * b,
+            valence: self.valence * alpha + other.valence * b,
+            arousal: self.arousal * alpha + other.arousal * b,
             dominance: self.dominance * alpha + other.dominance * b,
             intensity: self.intensity * alpha + other.intensity * b,
         }
@@ -59,8 +66,8 @@ impl EmotionTag {
     /// Từ bytes UCD (valence_byte, arousal_byte).
     pub fn from_ucd_bytes(valence_b: u8, arousal_b: u8) -> Self {
         Self {
-            valence:   (valence_b as f32 / 127.5) - 1.0,
-            arousal:   arousal_b as f32 / 255.0,
+            valence: (valence_b as f32 / 127.5) - 1.0,
+            arousal: arousal_b as f32 / 255.0,
             dominance: 0.5,
             intensity: arousal_b as f32 / 255.0,
         }
@@ -76,33 +83,33 @@ impl EmotionTag {
 #[repr(u8)]
 pub enum EdgeKind {
     // Structural (L0 bất biến)
-    Member      = 0x01, // ∈
-    Subset      = 0x02, // ⊂
-    Equiv       = 0x03, // ≡
-    Orthogonal  = 0x04, // ⊥
-    Compose     = 0x05, // ∘
-    Causes      = 0x06, // →
-    Similar     = 0x07, // ≈
+    Member = 0x01,      // ∈
+    Subset = 0x02,      // ⊂
+    Equiv = 0x03,       // ≡
+    Orthogonal = 0x04,  // ⊥
+    Compose = 0x05,     // ∘
+    Causes = 0x06,      // →
+    Similar = 0x07,     // ≈
     DerivedFrom = 0x08, // ←
     // Space
-    Contains    = 0x09, // ∪
-    Intersects  = 0x0A, // ∩
-    Subtracts   = 0x0B, // ∖
-    Mirror      = 0x0C, // ↔
+    Contains = 0x09,   // ∪
+    Intersects = 0x0A, // ∩
+    Subtracts = 0x0B,  // ∖
+    Mirror = 0x0C,     // ↔
     // Time
-    Flows       = 0x0D, // ⟶
-    Repeats     = 0x0E, // ⟳
-    Resolves    = 0x0F, // ↑
-    Activates   = 0x10, // ⚡
-    Sync        = 0x11, // ∥
+    Flows = 0x0D,     // ⟶
+    Repeats = 0x0E,   // ⟳
+    Resolves = 0x0F,  // ↑
+    Activates = 0x10, // ⚡
+    Sync = 0x11,      // ∥
     // Language
-    Translates  = 0x12, // f(L) alias
+    Translates = 0x12, // f(L) alias
     // Associative learned (Hebbian + EmotionTag)
-    Assoc       = 0xFF, // ~ co-activation (generic)
-    EdgeAssoc   = 0xA0, // ~ liên tưởng học được (với EmotionTag + source)
-    EdgeCausal  = 0xA1, // →→ nhân quả học được (với confidence)
+    Assoc = 0xFF,      // ~ co-activation (generic)
+    EdgeAssoc = 0xA0,  // ~ liên tưởng học được (với EmotionTag + source)
+    EdgeCausal = 0xA1, // →→ nhân quả học được (với confidence)
     // QR Supersession
-    Supersedes  = 0xF0, // B supersedes A
+    Supersedes = 0xF0, // B supersedes A
 }
 
 impl EdgeKind {
@@ -130,18 +137,26 @@ impl EdgeKind {
             0xFF => Some(Self::Assoc),
             0xA0 => Some(Self::EdgeAssoc),
             0xA1 => Some(Self::EdgeCausal),
-            _    => None,
+            _ => None,
         }
     }
 
-    pub fn as_byte(self) -> u8 { self as u8 }
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
 
     /// Structural edge — bất biến, không thay đổi weight.
     pub fn is_structural(self) -> bool {
-        matches!(self,
-            Self::Member | Self::Subset | Self::Equiv |
-            Self::Orthogonal | Self::Compose | Self::Causes |
-            Self::Similar | Self::DerivedFrom
+        matches!(
+            self,
+            Self::Member
+                | Self::Subset
+                | Self::Equiv
+                | Self::Orthogonal
+                | Self::Compose
+                | Self::Causes
+                | Self::Similar
+                | Self::DerivedFrom
         )
     }
 
@@ -153,18 +168,21 @@ impl EdgeKind {
     /// Symbol cho edge kind.
     pub fn symbol(self) -> &'static str {
         match self {
-            Self::Member     => "∈",  Self::Subset    => "⊂",
-            Self::Equiv      => "≡",  Self::Similar   => "≈",
-            Self::Compose    => "∘",  Self::Causes    => "→",
-            Self::Orthogonal => "⊥",  Self::DerivedFrom => "←",
-            Self::Assoc      => "~",
-            Self::EdgeAssoc  => "~~", // liên tưởng
+            Self::Member => "∈",
+            Self::Subset => "⊂",
+            Self::Equiv => "≡",
+            Self::Similar => "≈",
+            Self::Compose => "∘",
+            Self::Causes => "→",
+            Self::Orthogonal => "⊥",
+            Self::DerivedFrom => "←",
+            Self::Assoc => "~",
+            Self::EdgeAssoc => "~~",  // liên tưởng
             Self::EdgeCausal => "→→", // nhân quả
-            _                => "?",
+            _ => "?",
         }
     }
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModalitySource — nguồn gốc học
@@ -177,13 +195,13 @@ impl EdgeKind {
 pub enum ModalitySource {
     /// Từ text/ngôn ngữ
     #[default]
-    Text  = 0x01,
+    Text = 0x01,
     /// Từ audio/giọng nói
     Audio = 0x02,
     /// Từ hình ảnh/video
     Image = 0x03,
     /// Từ cảm biến sinh học (nhịp tim, nhiệt độ...)
-    Bio   = 0x04,
+    Bio = 0x04,
     /// Từ nhiều nguồn kết hợp
     Fused = 0x05,
 }
@@ -191,15 +209,14 @@ pub enum ModalitySource {
 impl ModalitySource {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Text  => "text",
+            Self::Text => "text",
             Self::Audio => "audio",
             Self::Image => "image",
-            Self::Bio   => "bio",
+            Self::Bio => "bio",
             Self::Fused => "fused",
         }
     }
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SilkEdge — một edge trong graph
@@ -212,15 +229,15 @@ impl ModalitySource {
 #[derive(Debug, Clone)]
 pub struct SilkEdge {
     /// Hash của node nguồn
-    pub from_hash:  u64,
+    pub from_hash: u64,
     /// Hash của node đích
-    pub to_hash:    u64,
+    pub to_hash: u64,
     /// Loại quan hệ
-    pub kind:       EdgeKind,
+    pub kind: EdgeKind,
     /// Màu cảm xúc lúc edge hình thành
-    pub emotion:    EmotionTag,
+    pub emotion: EmotionTag,
     /// Hebbian weight ∈ [0.0, 1.0]
-    pub weight:     f32,
+    pub weight: f32,
     /// Số lần co-activate
     pub fire_count: u32,
     /// Timestamp tạo edge (ns)
@@ -228,41 +245,38 @@ pub struct SilkEdge {
     /// Timestamp cập nhật cuối (ns)
     pub updated_at: i64,
     /// Nguồn gốc học (text/audio/image/bio)
-    pub source:     ModalitySource,
+    pub source: ModalitySource,
     /// Confidence cho EdgeCausal ∈ [0.0, 1.0]
     pub confidence: f32,
 }
 
 impl SilkEdge {
     /// Tạo structural edge (weight = 1.0, bất biến).
-    pub fn structural(
-        from_hash: u64, to_hash: u64,
-        kind: EdgeKind, ts: i64,
-    ) -> Self {
+    pub fn structural(from_hash: u64, to_hash: u64, kind: EdgeKind, ts: i64) -> Self {
         Self {
-            from_hash, to_hash, kind,
-            emotion:    EmotionTag::NEUTRAL,
-            weight:     1.0,
+            from_hash,
+            to_hash,
+            kind,
+            emotion: EmotionTag::NEUTRAL,
+            weight: 1.0,
             fire_count: 1,
             created_at: ts,
             updated_at: ts,
-            source:     ModalitySource::Text,
+            source: ModalitySource::Text,
             confidence: 1.0,
         }
     }
 
     /// Tạo associative edge với EmotionTag.
-    pub fn associative(
-        from_hash: u64, to_hash: u64,
-        emotion: EmotionTag, ts: i64,
-    ) -> Self {
+    pub fn associative(from_hash: u64, to_hash: u64, emotion: EmotionTag, ts: i64) -> Self {
         Self {
-            from_hash, to_hash,
-            kind:       EdgeKind::Assoc,
+            from_hash,
+            to_hash,
+            kind: EdgeKind::Assoc,
             emotion,
-            source:     ModalitySource::Text,
+            source: ModalitySource::Text,
             confidence: 0.0,
-            weight:     0.1, // khởi đầu yếu
+            weight: 0.1, // khởi đầu yếu
             fire_count: 1,
             created_at: ts,
             updated_at: ts,
