@@ -627,8 +627,14 @@ Tier 3: ESP32 (520KB SRAM)
 | World rendering | ⬜ Planned | — | vSDF → 3D scene |
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |
+| SystemManifest | ✅ Done | ↑ (olang) | Boot scan → categorize nodes (Axiom/Emotion/Device/Command/Knowledge/Agent/Skill) |
+| DriverProbe | ✅ Done | ↑ (agents) | Worker self-diagnose hardware, probe_report() → Chief |
+| CapabilityGate | ✅ Done | ↑ (agents) | Permission system: NetworkExternal/QRWrite/MediaCapture cần user approval |
+| DataTemplate | ✅ Done | ↑ (context) | DynamicLexicon + KeywordTemplate — runtime-extensible thay hardcode |
+| UserAuthority | ✅ Done | ↑ (memory) | QR proposals cần user confirm trước khi ghi bất biến |
+| Confirm/Deny intent | ✅ Done | ↑ (context) | NL understanding: "đồng ý/ok/yes" → Confirm, "không/từ chối" → Deny |
 
-**Tổng: 888 tests, 0 failures, 14 crates**
+**Tổng: 932 tests, 0 failures, 14 crates**
 
 ---
 
