@@ -13,6 +13,7 @@
 
 extern crate alloc;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use context::emotion::IntentKind;
 use crate::encoder::ContentInput;
@@ -188,6 +189,152 @@ impl SecurityGate {
 }
 
 impl Default for SecurityGate {
+    fn default() -> Self { Self::new() }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Capability — quyền truy cập tài nguyên
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Quyền truy cập tài nguyên hệ thống.
+///
+/// Worker/Chief xin quyền → AAM approve → SecurityGate cấp.
+/// Không có quyền = không truy cập.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capability {
+    /// Đọc sensor data
+    SensorRead,
+    /// Điều khiển actuator (on/off, dim...)
+    ActuatorWrite,
+    /// Truy cập mạng nội bộ (LAN)
+    NetworkLocal,
+    /// Truy cập mạng ngoài (Internet, Wiki...)
+    NetworkExternal,
+    /// Đọc file hệ thống
+    FileRead,
+    /// Ghi file hệ thống
+    FileWrite,
+    /// Ghi vào QR (immutable record)
+    QRWrite,
+    /// Camera / audio capture
+    MediaCapture,
+}
+
+/// Yêu cầu quyền — Agent/Worker gửi cho SecurityGate.
+#[derive(Debug, Clone)]
+pub struct CapabilityRequest {
+    /// Ai yêu cầu (ISL address string)
+    pub requester: String,
+    /// Quyền cần
+    pub capability: Capability,
+    /// Lý do (để hiển thị cho user)
+    pub reason: String,
+    /// Timestamp
+    pub timestamp: i64,
+}
+
+/// Phán quyết quyền.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CapabilityVerdict {
+    /// Được cấp (auto-approve hoặc user đã approve)
+    Granted,
+    /// Cần hỏi user trước
+    NeedUserApproval { prompt: String },
+    /// Từ chối
+    Denied { reason: String },
+}
+
+/// CapabilityGate — kiểm tra quyền truy cập.
+///
+/// Nguyên tắc:
+///   - SensorRead, NetworkLocal: auto-grant (đọc nội bộ)
+///   - ActuatorWrite, FileWrite: auto-grant nếu từ Chief
+///   - NetworkExternal, QRWrite: cần user approval
+///   - MediaCapture: cần user approval
+pub struct CapabilityGate {
+    /// Quyền đã được user approve (persist qua session)
+    granted: Vec<(String, Capability)>,
+}
+
+impl CapabilityGate {
+    /// Tạo mới — chưa có quyền nào.
+    pub fn new() -> Self {
+        Self { granted: Vec::new() }
+    }
+
+    /// Kiểm tra quyền.
+    pub fn check(&self, request: &CapabilityRequest) -> CapabilityVerdict {
+        // Already granted?
+        if self.is_granted(&request.requester, request.capability) {
+            return CapabilityVerdict::Granted;
+        }
+
+        match request.capability {
+            // Auto-grant: đọc sensor, mạng nội bộ
+            Capability::SensorRead | Capability::NetworkLocal => {
+                CapabilityVerdict::Granted
+            }
+
+            // Auto-grant nếu từ Chief (tier 1)
+            Capability::ActuatorWrite | Capability::FileRead | Capability::FileWrite => {
+                // Hiện tại auto-grant — khi có user authority sẽ kiểm tra tier
+                CapabilityVerdict::Granted
+            }
+
+            // Cần user approval: truy cập Internet
+            Capability::NetworkExternal => {
+                CapabilityVerdict::NeedUserApproval {
+                    prompt: alloc::format!(
+                        "{} xin quyền truy cập mạng ngoài: {}",
+                        request.requester, request.reason
+                    ),
+                }
+            }
+
+            // Cần user approval: ghi QR (immutable)
+            Capability::QRWrite => {
+                CapabilityVerdict::NeedUserApproval {
+                    prompt: alloc::format!(
+                        "{} xin ghi QR (bất biến): {}",
+                        request.requester, request.reason
+                    ),
+                }
+            }
+
+            // Cần user approval: camera/audio
+            Capability::MediaCapture => {
+                CapabilityVerdict::NeedUserApproval {
+                    prompt: alloc::format!(
+                        "{} xin quyền capture media: {}",
+                        request.requester, request.reason
+                    ),
+                }
+            }
+        }
+    }
+
+    /// User đã approve → ghi nhận.
+    pub fn grant(&mut self, requester: &str, capability: Capability) {
+        if !self.is_granted(requester, capability) {
+            self.granted.push((String::from(requester), capability));
+        }
+    }
+
+    /// Kiểm tra đã được grant chưa.
+    pub fn is_granted(&self, requester: &str, capability: Capability) -> bool {
+        self.granted.iter().any(|(r, c)| r == requester && *c == capability)
+    }
+
+    /// Thu hồi quyền.
+    pub fn revoke(&mut self, requester: &str, capability: Capability) {
+        self.granted.retain(|(r, c)| !(r == requester && *c == capability));
+    }
+
+    /// Số quyền đã cấp.
+    pub fn granted_count(&self) -> usize { self.granted.len() }
+}
+
+impl Default for CapabilityGate {
     fn default() -> Self { Self::new() }
 }
 
@@ -368,5 +515,97 @@ mod tests {
     fn should_answer_fact_true() {
         assert!(EpistemicFirewall::should_answer(EpistemicLevel::Fact));
         assert!(EpistemicFirewall::should_answer(EpistemicLevel::Opinion));
+    }
+
+    // ── CapabilityGate ─────────────────────────────────────────────────────────
+
+    fn cap_req(cap: Capability) -> CapabilityRequest {
+        CapabilityRequest {
+            requester: String::from("worker_sensor@01:05:00:01"),
+            capability: cap,
+            reason: String::from("test"),
+            timestamp: 1000,
+        }
+    }
+
+    #[test]
+    fn sensor_read_auto_granted() {
+        let gate = CapabilityGate::new();
+        assert_eq!(gate.check(&cap_req(Capability::SensorRead)), CapabilityVerdict::Granted);
+    }
+
+    #[test]
+    fn network_local_auto_granted() {
+        let gate = CapabilityGate::new();
+        assert_eq!(gate.check(&cap_req(Capability::NetworkLocal)), CapabilityVerdict::Granted);
+    }
+
+    #[test]
+    fn network_external_needs_approval() {
+        let gate = CapabilityGate::new();
+        let v = gate.check(&cap_req(Capability::NetworkExternal));
+        assert!(matches!(v, CapabilityVerdict::NeedUserApproval { .. }),
+            "Internet access cần user approval");
+    }
+
+    #[test]
+    fn qr_write_needs_approval() {
+        let gate = CapabilityGate::new();
+        let v = gate.check(&cap_req(Capability::QRWrite));
+        assert!(matches!(v, CapabilityVerdict::NeedUserApproval { .. }),
+            "QR write cần user approval");
+    }
+
+    #[test]
+    fn media_capture_needs_approval() {
+        let gate = CapabilityGate::new();
+        let v = gate.check(&cap_req(Capability::MediaCapture));
+        assert!(matches!(v, CapabilityVerdict::NeedUserApproval { .. }));
+    }
+
+    #[test]
+    fn grant_then_auto_approve() {
+        let mut gate = CapabilityGate::new();
+        let req = cap_req(Capability::NetworkExternal);
+        // Chưa grant → need approval
+        assert!(matches!(gate.check(&req), CapabilityVerdict::NeedUserApproval { .. }));
+        // User approve → grant
+        gate.grant(&req.requester, Capability::NetworkExternal);
+        // Sau khi grant → auto approve
+        assert_eq!(gate.check(&req), CapabilityVerdict::Granted);
+    }
+
+    #[test]
+    fn revoke_capability() {
+        let mut gate = CapabilityGate::new();
+        gate.grant("worker_a", Capability::NetworkExternal);
+        assert!(gate.is_granted("worker_a", Capability::NetworkExternal));
+        gate.revoke("worker_a", Capability::NetworkExternal);
+        assert!(!gate.is_granted("worker_a", Capability::NetworkExternal));
+    }
+
+    #[test]
+    fn grant_idempotent() {
+        let mut gate = CapabilityGate::new();
+        gate.grant("w1", Capability::SensorRead);
+        gate.grant("w1", Capability::SensorRead);
+        assert_eq!(gate.granted_count(), 1, "Duplicate grant → chỉ 1");
+    }
+
+    #[test]
+    fn approval_prompt_contains_reason() {
+        let gate = CapabilityGate::new();
+        let req = CapabilityRequest {
+            requester: String::from("leo_ai"),
+            capability: Capability::NetworkExternal,
+            reason: String::from("tìm thông tin trên Wikipedia"),
+            timestamp: 1000,
+        };
+        if let CapabilityVerdict::NeedUserApproval { prompt } = gate.check(&req) {
+            assert!(prompt.contains("Wikipedia"), "Prompt phải có lý do");
+            assert!(prompt.contains("leo_ai"), "Prompt phải có requester");
+        } else {
+            panic!("Phải trả NeedUserApproval");
+        }
     }
 }

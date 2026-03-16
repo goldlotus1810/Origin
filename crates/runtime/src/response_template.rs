@@ -59,6 +59,12 @@ pub fn render(p: &ResponseParams) -> String {
 
         IntentAction::Proceed =>
             proceed_text(p.tone, p.valence, p.original.as_deref()),
+
+        IntentAction::UserConfirm =>
+            confirm_text(p.valence),
+
+        IntentAction::UserDeny =>
+            deny_text(p.valence),
     }
 }
 
@@ -163,6 +169,14 @@ pub fn tone_fallback(tone: ResponseTone, cur_v: f32) -> String {
         ResponseTone::Celebratory => "Tuyệt!".to_string(),
         ResponseTone::Engaged     => "Ừ.".to_string(),
     }
+}
+
+fn confirm_text(_cur_v: f32) -> String {
+    "Đã ghi nhận. Mình sẽ thực hiện.".to_string()
+}
+
+fn deny_text(_cur_v: f32) -> String {
+    "Đã ghi nhận. Mình sẽ không thực hiện.".to_string()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

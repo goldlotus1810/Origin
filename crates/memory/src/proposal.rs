@@ -300,6 +300,174 @@ impl AAM {
 impl Default for AAM { fn default() -> Self { Self::new() } }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// UserAuthority — quyền tối cao của người dùng
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Trạng thái xác nhận của user cho một proposal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UserConfirmation {
+    /// Chưa hỏi user
+    Pending,
+    /// User đồng ý
+    Approved,
+    /// User từ chối
+    Rejected,
+    /// User hoãn (chưa quyết định)
+    Deferred,
+}
+
+/// QRProposal — proposal cần user xác nhận trước khi ghi QR.
+///
+/// AAM approve → QRProposal tạo → hỏi user → user approve → mới ghi QR.
+/// Đây là cầu nối giữa AAM (tự động) và User (quyết định cuối).
+#[derive(Debug, Clone)]
+pub struct QRProposal {
+    /// Proposal gốc từ Dream
+    pub proposal: DreamProposal,
+    /// User đã confirm chưa
+    pub user_confirmation: UserConfirmation,
+    /// Prompt hiển thị cho user
+    pub prompt: alloc::string::String,
+    /// Timestamp tạo
+    pub created_at: i64,
+}
+
+impl QRProposal {
+    /// Tạo QRProposal từ DreamProposal đã AAM-approved.
+    pub fn from_approved(proposal: DreamProposal, ts: i64) -> Self {
+        let prompt = match &proposal.kind {
+            ProposalKind::NewNode { sources, .. } => {
+                alloc::format!(
+                    "Tạo node mới từ {} nguồn, confidence={:.0}%. Đồng ý?",
+                    sources.len(), proposal.confidence * 100.0
+                )
+            }
+            ProposalKind::PromoteQR { fire_count, .. } => {
+                alloc::format!(
+                    "Nâng cấp kiến thức thành QR (bất biến), {} lần xác nhận, confidence={:.0}%. Đồng ý?",
+                    fire_count, proposal.confidence * 100.0
+                )
+            }
+            ProposalKind::NewEdge { .. } => {
+                alloc::format!(
+                    "Tạo liên kết mới, confidence={:.0}%. Đồng ý?",
+                    proposal.confidence * 100.0
+                )
+            }
+            ProposalKind::SupersedeQR { reason, .. } => {
+                alloc::format!(
+                    "Cập nhật QR cũ: \"{}\", confidence={:.0}%. Đồng ý?",
+                    reason, proposal.confidence * 100.0
+                )
+            }
+        };
+
+        Self {
+            proposal,
+            user_confirmation: UserConfirmation::Pending,
+            prompt,
+            created_at: ts,
+        }
+    }
+
+    /// User xác nhận (accept/reject).
+    pub fn confirm(&mut self, approved: bool) {
+        self.user_confirmation = if approved {
+            UserConfirmation::Approved
+        } else {
+            UserConfirmation::Rejected
+        };
+    }
+
+    /// Hoãn quyết định.
+    pub fn defer(&mut self) {
+        self.user_confirmation = UserConfirmation::Deferred;
+    }
+
+    /// Đã sẵn sàng ghi QR?
+    pub fn is_ready_to_write(&self) -> bool {
+        self.user_confirmation == UserConfirmation::Approved
+    }
+
+    /// Bị từ chối?
+    pub fn is_rejected(&self) -> bool {
+        self.user_confirmation == UserConfirmation::Rejected
+    }
+}
+
+/// UserAuthority — ghi nhận quyền tối cao của người dùng.
+///
+/// Mọi QR write phải qua UserAuthority.confirm().
+/// AAM là brain logic, UserAuthority là ý thức (user).
+pub struct UserAuthority {
+    /// Queue proposals chờ user confirm
+    pending: Vec<QRProposal>,
+    /// Proposals đã được user approve (ready to write)
+    approved: Vec<QRProposal>,
+    /// Proposals bị reject
+    rejected_count: u32,
+    /// Auto-approve mode (cho testing hoặc khi user trust hệ thống)
+    auto_approve: bool,
+}
+
+impl UserAuthority {
+    /// Tạo mới — mặc định KHÔNG auto-approve.
+    pub fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            approved: Vec::new(),
+            rejected_count: 0,
+            auto_approve: false,
+        }
+    }
+
+    /// Submit proposal đã AAM-approved → chờ user confirm.
+    pub fn submit(&mut self, proposal: DreamProposal, ts: i64) {
+        if self.auto_approve {
+            let mut qr = QRProposal::from_approved(proposal, ts);
+            qr.confirm(true);
+            self.approved.push(qr);
+        } else {
+            self.pending.push(QRProposal::from_approved(proposal, ts));
+        }
+    }
+
+    /// User xử lý proposal tại index.
+    pub fn respond(&mut self, index: usize, approved: bool) {
+        if index >= self.pending.len() { return; }
+        let mut qr = self.pending.remove(index);
+        qr.confirm(approved);
+        if approved {
+            self.approved.push(qr);
+        } else {
+            self.rejected_count += 1;
+        }
+    }
+
+    /// Lấy proposals đã approved (ready to write QR).
+    pub fn drain_approved(&mut self) -> Vec<QRProposal> {
+        core::mem::take(&mut self.approved)
+    }
+
+    /// Proposals đang chờ user.
+    pub fn pending(&self) -> &[QRProposal] { &self.pending }
+
+    /// Số pending.
+    pub fn pending_count(&self) -> usize { self.pending.len() }
+
+    /// Số đã reject.
+    pub fn rejected_count(&self) -> u32 { self.rejected_count }
+
+    /// Bật auto-approve (trust mode).
+    pub fn set_auto_approve(&mut self, on: bool) { self.auto_approve = on; }
+
+    /// Đang auto-approve?
+    pub fn is_auto_approve(&self) -> bool { self.auto_approve }
+}
+
+impl Default for UserAuthority { fn default() -> Self { Self::new() } }
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -459,5 +627,81 @@ mod tests {
             timestamp: 2000,
         };
         assert_eq!(AAM::new().review(&p2), AAMDecision::Approved);
+    }
+
+    // ── UserAuthority ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn user_authority_default_no_auto() {
+        let ua = UserAuthority::new();
+        assert!(!ua.is_auto_approve());
+        assert_eq!(ua.pending_count(), 0);
+    }
+
+    #[test]
+    fn submit_goes_to_pending() {
+        let mut ua = UserAuthority::new();
+        let p = DreamProposal::promote_qr(0x01, 10, 0.8, 1000);
+        ua.submit(p, 1000);
+        assert_eq!(ua.pending_count(), 1, "Proposal chờ user confirm");
+    }
+
+    #[test]
+    fn respond_approved_moves_to_approved() {
+        let mut ua = UserAuthority::new();
+        let p = DreamProposal::promote_qr(0x01, 10, 0.8, 1000);
+        ua.submit(p, 1000);
+        ua.respond(0, true); // user approve
+        assert_eq!(ua.pending_count(), 0);
+        let approved = ua.drain_approved();
+        assert_eq!(approved.len(), 1);
+        assert!(approved[0].is_ready_to_write());
+    }
+
+    #[test]
+    fn respond_rejected_counted() {
+        let mut ua = UserAuthority::new();
+        let p = DreamProposal::promote_qr(0x01, 10, 0.8, 1000);
+        ua.submit(p, 1000);
+        ua.respond(0, false); // user reject
+        assert_eq!(ua.pending_count(), 0);
+        assert_eq!(ua.rejected_count(), 1);
+    }
+
+    #[test]
+    fn auto_approve_bypasses_pending() {
+        let mut ua = UserAuthority::new();
+        ua.set_auto_approve(true);
+        let p = DreamProposal::promote_qr(0x01, 10, 0.8, 1000);
+        ua.submit(p, 1000);
+        assert_eq!(ua.pending_count(), 0, "Auto-approve → không pending");
+        let approved = ua.drain_approved();
+        assert_eq!(approved.len(), 1);
+    }
+
+    #[test]
+    fn qr_proposal_prompt_contains_info() {
+        let p = DreamProposal::promote_qr(0x01, 10, 0.8, 1000);
+        let qr = QRProposal::from_approved(p, 1000);
+        assert!(qr.prompt.contains("QR"), "Prompt phải nói về QR");
+        assert!(qr.prompt.contains("80"), "Prompt phải có confidence %");
+        assert!(!qr.is_ready_to_write(), "Chưa confirm → chưa sẵn sàng");
+    }
+
+    #[test]
+    fn qr_proposal_defer() {
+        let p = DreamProposal::promote_qr(0x01, 10, 0.8, 1000);
+        let mut qr = QRProposal::from_approved(p, 1000);
+        qr.defer();
+        assert_eq!(qr.user_confirmation, UserConfirmation::Deferred);
+        assert!(!qr.is_ready_to_write());
+        assert!(!qr.is_rejected());
+    }
+
+    #[test]
+    fn respond_out_of_bounds_noop() {
+        let mut ua = UserAuthority::new();
+        ua.respond(999, true); // index out of bounds
+        assert_eq!(ua.pending_count(), 0); // no crash
     }
 }

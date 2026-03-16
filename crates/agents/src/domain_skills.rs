@@ -185,8 +185,8 @@ impl Skill for ClusterSkill {
             let mut cluster = alloc::vec![i];
             assigned[i] = true;
 
-            for j in (i + 1)..ctx.input_chains.len() {
-                if assigned[j] { continue; }
+            for (j, is_assigned) in assigned.iter_mut().enumerate().skip(i + 1) {
+                if *is_assigned { continue; }
                 let merged = lca(&ctx.input_chains[i], &ctx.input_chains[j]);
                 let max_len = ctx.input_chains[i].0.len()
                     .max(ctx.input_chains[j].0.len())
@@ -194,7 +194,7 @@ impl Skill for ClusterSkill {
                 let sim = merged.0.len() as f32 / max_len as f32;
                 if sim >= threshold {
                     cluster.push(j);
-                    assigned[j] = true;
+                    *is_assigned = true;
                 }
             }
             clusters.push(cluster);
@@ -513,7 +513,7 @@ impl Skill for SensorSkill {
         ctx.push_output(chain.clone());
 
         // Emotion from sensor context
-        let emotion = if value > 35.0 || value < 5.0 {
+        let emotion = if !(5.0..=35.0).contains(&value) {
             EmotionTag { valence: -0.30, arousal: 0.65, dominance: 0.30, intensity: 0.55 }
         } else {
             EmotionTag::NEUTRAL

@@ -149,6 +149,24 @@ static KW_COMMAND: &[&str] = &[
     "turn off","turn on","set temperature","play music",
 ];
 
+static KW_CONFIRM: &[&str] = &[
+    // VI
+    "đồng ý","có","ừ","ok","được","vâng","chấp nhận","duyệt",
+    "đúng rồi","phê duyệt","cho phép",
+    // EN
+    "yes","yeah","yep","sure","approve","accept","confirm","agreed",
+    "go ahead","do it","ok","okay",
+];
+
+static KW_DENY: &[&str] = &[
+    // VI
+    "không","từ chối","không đồng ý","hủy","không cho","thôi","đừng",
+    "không được","bỏ qua","skip","bỏ",
+    // EN
+    "no","nope","deny","reject","cancel","refuse","don't","stop",
+    "skip","decline","never",
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // IntentEstimate
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,7 +221,7 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
     let lo    = text.to_lowercase();
     let words = lo.split_whitespace().count();
 
-    let mut buckets: [(IntentKind, Bucket); 12] = [
+    let mut buckets: [(IntentKind, Bucket); 14] = [
         (IntentKind::Learn,      Bucket::default()),
         (IntentKind::Inform,     Bucket::default()),
         (IntentKind::Research,   Bucket::default()),
@@ -216,6 +234,8 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
         (IntentKind::Crisis,     Bucket::default()),
         (IntentKind::Command,    Bucket::default()),
         (IntentKind::Chat,       Bucket::default()),
+        (IntentKind::Confirm,    Bucket::default()),
+        (IntentKind::Deny,       Bucket::default()),
     ];
 
     macro_rules! add {
@@ -240,6 +260,8 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
     for kw in KW_CREATIVE  { if lo.contains(kw) { add!(IntentKind::Creative,   SCORE_MEDIUM_KW,  &format!("kw:{}", kw)); } }
     for kw in KW_INFORM    { if lo.contains(kw) { add!(IntentKind::Inform,     SCORE_MEDIUM_KW,  &format!("kw:{}", kw)); } }
     for kw in KW_COMMAND   { if lo.contains(kw) { add!(IntentKind::Command,    SCORE_CMD_KW,     &format!("kw:{}", kw)); } }
+    for kw in KW_CONFIRM  { if lo.contains(kw) { add!(IntentKind::Confirm,    SCORE_CMD_KW,     &format!("kw:{}", kw)); } }
+    for kw in KW_DENY     { if lo.contains(kw) { add!(IntentKind::Deny,       SCORE_CMD_KW,     &format!("kw:{}", kw)); } }
 
     // Emotional amplifiers — dùng cur_v/cur_a từ ConversationCurve
     // Không hardcode "buồn" vào đây — dùng đường cong số
@@ -307,6 +329,10 @@ pub enum IntentAction {
     CrisisOverride,
     /// Thêm câu hỏi làm rõ
     AddClarify { kind: ClarifyKind },
+    /// User xác nhận — gửi confirm signal tới UserAuthority
+    UserConfirm,
+    /// User từ chối — gửi deny signal tới UserAuthority
+    UserDeny,
 }
 
 /// Quyết định hành động từ IntentEstimate + emotional state.
@@ -316,6 +342,8 @@ pub fn decide_action(est: &IntentEstimate, cur_v: f32) -> IntentAction {
         IntentKind::Risk       => IntentAction::AskContext { angry: cur_v < V_RISK_ANGRY },
         IntentKind::Manipulate => IntentAction::SoftRefusal,
         IntentKind::Heal       => IntentAction::EmpathizeFirst,
+        IntentKind::Confirm    => IntentAction::UserConfirm,
+        IntentKind::Deny       => IntentAction::UserDeny,
         _ => if est.need_clarify {
             IntentAction::AddClarify { kind: est.clarify_kind.unwrap_or(ClarifyKind::WhatContext) }
         } else {
@@ -496,5 +524,51 @@ mod tests {
     fn action_learn_proceeds() {
         let e = estimate_intent("photosynthesis là gì? explain chi tiết", 0.2, 0.45);
         assert_eq!(decide_action(&e, 0.2), IntentAction::Proceed);
+    }
+
+    // ── Confirm / Deny ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn confirm_detected_vi() {
+        let e = estimate_intent("đồng ý", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::Confirm);
+    }
+
+    #[test]
+    fn confirm_detected_en() {
+        let e = estimate_intent("yes, go ahead", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::Confirm);
+    }
+
+    #[test]
+    fn deny_detected_vi() {
+        let e = estimate_intent("không, từ chối", 0.0, 0.5);
+        assert_eq!(e.primary, IntentKind::Deny);
+    }
+
+    #[test]
+    fn deny_detected_en() {
+        let e = estimate_intent("no, reject that", 0.0, 0.5);
+        assert_eq!(e.primary, IntentKind::Deny);
+    }
+
+    #[test]
+    fn action_confirm() {
+        let e = estimate_intent("đồng ý cho phép", 0.3, 0.5);
+        assert_eq!(decide_action(&e, 0.3), IntentAction::UserConfirm);
+    }
+
+    #[test]
+    fn action_deny() {
+        let e = estimate_intent("không đồng ý, từ chối", 0.0, 0.5);
+        assert_eq!(decide_action(&e, 0.0), IntentAction::UserDeny);
+    }
+
+    #[test]
+    fn crisis_overrides_confirm() {
+        // Crisis keywords + confirm → crisis wins (priority via mood amplifier)
+        let e = estimate_intent("tôi không muốn sống nữa, kết thúc tất cả", -0.8, 0.3);
+        assert_eq!(e.primary, IntentKind::Crisis,
+            "Crisis overrides everything");
     }
 }

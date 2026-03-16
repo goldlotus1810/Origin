@@ -423,6 +423,111 @@ fn sensor_emotion(r: &SensorReading) -> EmotionTag {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DriverProbe — kiểm tra phần cứng
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Trạng thái phần cứng.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardwareStatus {
+    /// Phần cứng sẵn sàng
+    Ready,
+    /// Phần cứng không phản hồi
+    Unreachable,
+    /// Phần cứng lỗi (error code)
+    Error(u8),
+    /// Chưa kiểm tra
+    Unknown,
+}
+
+/// Kết quả probe phần cứng.
+#[derive(Debug, Clone)]
+pub struct DriverProbeResult {
+    /// Loại Worker
+    pub kind:     WorkerKind,
+    /// Trạng thái
+    pub status:   HardwareStatus,
+    /// Tên driver / device ID
+    pub device_id: alloc::string::String,
+    /// Capabilities: sensor units hỗ trợ, actuator types, etc.
+    pub capabilities: Vec<u8>,
+    /// Timestamp khi probe
+    pub probed_at: i64,
+}
+
+/// DriverProbe — Worker kiểm tra phần cứng của mình khi boot.
+///
+/// Mỗi Worker type khai báo hardware cần → probe → report lên Chief.
+/// Chief tổng hợp → SystemManifest biết thiết bị nào đang sống/chết.
+impl Worker {
+    /// Probe phần cứng — Worker tự kiểm tra device mình quản lý.
+    ///
+    /// Trả DriverProbeResult cho Chief tổng hợp.
+    /// Trong môi trường thật: gọi HAL interface.
+    /// Hiện tại: report từ internal state (software probe).
+    pub fn probe_hardware(&self, ts: i64) -> DriverProbeResult {
+        let device_id = match self.kind {
+            WorkerKind::Sensor   => alloc::format!("sensor@{}", self.addr),
+            WorkerKind::Actuator => alloc::format!("actuator@{}", self.addr),
+            WorkerKind::Camera   => alloc::format!("camera@{}", self.addr),
+            WorkerKind::Network  => alloc::format!("network@{}", self.addr),
+            WorkerKind::Generic  => alloc::format!("generic@{}", self.addr),
+        };
+
+        let capabilities = match self.kind {
+            WorkerKind::Sensor => alloc::vec![
+                SensorUnit::Temperature as u8,
+                SensorUnit::Humidity as u8,
+                SensorUnit::Light as u8,
+                SensorUnit::Motion as u8,
+                SensorUnit::Sound as u8,
+            ],
+            WorkerKind::Actuator => alloc::vec![0x01, 0x02], // on/off, dim
+            WorkerKind::Camera   => alloc::vec![0x01],       // video stream
+            WorkerKind::Network  => alloc::vec![0x01, 0x02], // monitor, firewall
+            WorkerKind::Generic  => alloc::vec![],
+        };
+
+        let status = match self.state {
+            WorkerState::Sleeping | WorkerState::Active => HardwareStatus::Ready,
+            WorkerState::Error => HardwareStatus::Error(0x01),
+        };
+
+        DriverProbeResult {
+            kind: self.kind,
+            status,
+            device_id,
+            capabilities,
+            probed_at: ts,
+        }
+    }
+
+    /// Encode probe result → ISLFrame để gửi lên Chief.
+    pub fn probe_report(&self, ts: i64) -> WorkerReport {
+        let probe = self.probe_hardware(ts);
+        let status_byte = match probe.status {
+            HardwareStatus::Ready       => 0x01,
+            HardwareStatus::Unreachable => 0x02,
+            HardwareStatus::Error(c)    => 0x80 | c,
+            HardwareStatus::Unknown     => 0x00,
+        };
+
+        let mut body = Vec::new();
+        body.push(self.kind as u8);
+        body.push(status_byte);
+        body.push(probe.capabilities.len() as u8);
+        body.extend_from_slice(&probe.capabilities);
+
+        let msg = ISLMessage::new(self.addr, self.chief, MsgType::Ack);
+        let frame = ISLFrame { header: msg, body };
+
+        WorkerReport {
+            frame,
+            emotion: EmotionTag::NEUTRAL,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -693,5 +798,51 @@ mod tests {
         let mut w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
         w.process(WorkerEvent::NetworkPacket { bytes_in: 1000, anomaly_score: 0.9 }, 1000);
         assert!(!w.has_reports(), "Sensor worker ignores NetworkPacket");
+    }
+
+    // ── DriverProbe ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn probe_sensor_ready() {
+        let w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        let probe = w.probe_hardware(1000);
+        assert_eq!(probe.status, HardwareStatus::Ready);
+        assert_eq!(probe.kind, WorkerKind::Sensor);
+        assert!(!probe.capabilities.is_empty(), "Sensor phải khai báo capabilities");
+        assert!(probe.device_id.contains("sensor"), "Device ID chứa loại");
+    }
+
+    #[test]
+    fn probe_actuator_ready() {
+        let w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let probe = w.probe_hardware(1000);
+        assert_eq!(probe.status, HardwareStatus::Ready);
+        assert_eq!(probe.capabilities.len(), 2, "Actuator: on/off + dim");
+    }
+
+    #[test]
+    fn probe_error_state() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        w.state = WorkerState::Error;
+        let probe = w.probe_hardware(1000);
+        assert!(matches!(probe.status, HardwareStatus::Error(_)));
+    }
+
+    #[test]
+    fn probe_report_creates_frame() {
+        let w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        let report = w.probe_report(1000);
+        assert_eq!(report.frame.header.from, waddr());
+        assert_eq!(report.frame.header.to, chief());
+        assert!(!report.frame.body.is_empty(), "Probe report phải có body");
+        // Body: kind(1) + status(1) + cap_len(1) + caps(N)
+        assert!(report.frame.body.len() >= 3);
+    }
+
+    #[test]
+    fn probe_network_capabilities() {
+        let w = Worker::new(waddr(), chief(), WorkerKind::Network);
+        let probe = w.probe_hardware(1000);
+        assert_eq!(probe.capabilities.len(), 2, "Network: monitor + firewall");
     }
 }

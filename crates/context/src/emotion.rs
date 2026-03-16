@@ -40,6 +40,10 @@ pub enum IntentKind {
     Crisis,
     /// Trò chuyện bình thường
     Chat,
+    /// Xác nhận / đồng ý (yes, ok, đồng ý...)
+    Confirm,
+    /// Từ chối / phản đối (no, không, từ chối...)
+    Deny,
 }
 
 impl IntentKind {

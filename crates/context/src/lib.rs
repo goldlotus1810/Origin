@@ -19,3 +19,4 @@ pub mod infer;
 pub mod fusion;
 pub mod word_guide;
 pub mod modality;
+pub mod template;

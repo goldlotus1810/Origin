@@ -7,6 +7,7 @@
 //! Stage 4: Registry Init — rebuild từ file hoặc rỗng
 //! Stage 5: Alias Index — nạp aliases vào RAM
 //! Stage 6: Verify — ○(x)==x self-check
+//! Stage 7: Manifest — scan registry → SystemManifest (biết mình có gì)
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -31,6 +32,8 @@ pub struct BootResult {
     pub alias_count: usize,
     pub stage:       BootStage,
     pub errors:      Vec<String>,
+    /// SystemManifest — hệ thống biết mình đang có gì sau boot.
+    pub manifest:    SystemManifest,
 }
 
 /// Stage boot đã đạt được.
@@ -105,7 +108,10 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     let node_count  = registry.len();
     let alias_count = registry.alias_count();
 
-    BootResult { registry, node_count, alias_count, stage, errors }
+    // Stage 7: Manifest — scan registry → phân loại nodes
+    let manifest = SystemManifest::scan(&registry);
+
+    BootResult { registry, node_count, alias_count, stage, errors, manifest }
 }
 
 /// Boot từ hư không — ○(∅)==○.
@@ -337,6 +343,192 @@ pub static ALIAS_CODEPOINTS: &[(&str, u32)] = &[
     ("no", 0x274C), ("không", 0x274C),
 ];
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SystemManifest — hệ thống biết mình đang có gì
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Nhóm node theo chức năng — boot scan tự động phát hiện.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeCategory {
+    /// L0 axioms/primitives
+    Axiom,
+    /// Cảm xúc / emotion nodes
+    Emotion,
+    /// Vật lý / sensor / device
+    Device,
+    /// Hành động / lệnh
+    Command,
+    /// Kiến thức đã học
+    Knowledge,
+    /// Agent / Chief / Worker registry
+    Agent,
+    /// Kỹ năng (Skill registry)
+    Skill,
+    /// Chưa phân loại
+    Uncategorized,
+}
+
+/// Một entry trong manifest — 1 node đã được phân loại.
+#[derive(Debug, Clone)]
+pub struct ManifestEntry {
+    /// Chain hash
+    pub hash:     u64,
+    /// Tầng
+    pub layer:    u8,
+    /// Nhóm chức năng
+    pub category: NodeCategory,
+    /// Tên alias (nếu có)
+    pub alias:    Option<String>,
+}
+
+/// SystemManifest — bản đồ toàn bộ nodes đã biết, phân loại sẵn.
+///
+/// Boot Stage 7: scan registry → nhóm nodes → hệ thống biết mình có gì.
+/// Khi cần tìm "tất cả Device nodes" → O(1) lookup.
+#[derive(Debug, Clone)]
+pub struct SystemManifest {
+    /// Tất cả entries theo category
+    entries: Vec<ManifestEntry>,
+}
+
+impl SystemManifest {
+    /// Scan registry → phân loại tất cả nodes.
+    pub fn scan(registry: &Registry) -> Self {
+        let mut entries = Vec::new();
+
+        for layer in 0u8..16 {
+            for reg_entry in registry.entries_in_layer(layer) {
+                let category = classify_node(reg_entry.chain_hash, layer, registry);
+                entries.push(ManifestEntry {
+                    hash:     reg_entry.chain_hash,
+                    layer,
+                    category,
+                    alias:    find_alias(reg_entry.chain_hash, registry),
+                });
+            }
+        }
+
+        Self { entries }
+    }
+
+    /// Tất cả entries thuộc 1 category.
+    pub fn by_category(&self, cat: NodeCategory) -> Vec<&ManifestEntry> {
+        self.entries.iter().filter(|e| e.category == cat).collect()
+    }
+
+    /// Số lượng nodes theo category.
+    pub fn count_by_category(&self, cat: NodeCategory) -> usize {
+        self.entries.iter().filter(|e| e.category == cat).count()
+    }
+
+    /// Tổng entries.
+    pub fn len(&self) -> usize { self.entries.len() }
+
+    /// Manifest rỗng?
+    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+
+    /// Summary text — hệ thống tự mô tả.
+    pub fn summary(&self) -> String {
+        alloc::format!(
+            "SystemManifest: {} nodes\n\
+             Axiom      : {}\n\
+             Emotion    : {}\n\
+             Device     : {}\n\
+             Command    : {}\n\
+             Knowledge  : {}\n\
+             Agent      : {}\n\
+             Skill      : {}\n\
+             Uncat      : {}",
+            self.len(),
+            self.count_by_category(NodeCategory::Axiom),
+            self.count_by_category(NodeCategory::Emotion),
+            self.count_by_category(NodeCategory::Device),
+            self.count_by_category(NodeCategory::Command),
+            self.count_by_category(NodeCategory::Knowledge),
+            self.count_by_category(NodeCategory::Agent),
+            self.count_by_category(NodeCategory::Skill),
+            self.count_by_category(NodeCategory::Uncategorized),
+        )
+    }
+}
+
+/// Phân loại node dựa trên alias name patterns + layer + UCD data.
+fn classify_node(hash: u64, layer: u8, registry: &Registry) -> NodeCategory {
+    // L0 axioms: origin, empty, compose, member
+    if layer == 0 {
+        // Check alias patterns
+        if let Some(alias) = find_alias(hash, registry) {
+            let lo = alias.to_lowercase();
+            return classify_by_alias(&lo, layer);
+        }
+        return NodeCategory::Axiom;
+    }
+
+    // Higher layers: classify by alias name
+    if let Some(alias) = find_alias(hash, registry) {
+        let lo = alias.to_lowercase();
+        return classify_by_alias(&lo, layer);
+    }
+
+    NodeCategory::Uncategorized
+}
+
+/// Phân loại theo alias name.
+fn classify_by_alias(alias: &str, layer: u8) -> NodeCategory {
+    // Axiom keywords
+    if layer == 0 && matches!(alias, "○" | "origin" | "∅" | "empty" | "∘" | "compose" | "∈" | "instance" | "member") {
+        return NodeCategory::Axiom;
+    }
+
+    // Emotion keywords (bao gồm cả emoji aliases)
+    static EMOTION_KW: &[&str] = &[
+        "joy", "sad", "happy", "angry", "fear", "love", "pain", "tired",
+        "vui", "buồn", "giận", "sợ", "yêu", "đau", "mệt",
+        "heart", "tim", "cô đơn", "lonely",
+    ];
+    for kw in EMOTION_KW {
+        if alias.contains(kw) { return NodeCategory::Emotion; }
+    }
+
+    // Device keywords
+    static DEVICE_KW: &[&str] = &[
+        "light", "đèn", "door", "cửa", "sensor", "camera",
+        "temperature", "nhiệt", "house", "shelter", "nhà",
+    ];
+    for kw in DEVICE_KW {
+        if alias.contains(kw) { return NodeCategory::Device; }
+    }
+
+    // Command keywords
+    static CMD_KW: &[&str] = &[
+        "open", "close", "stop", "move", "yes", "no",
+        "mở", "đóng", "dừng",
+    ];
+    for kw in CMD_KW {
+        if alias == *kw { return NodeCategory::Command; }
+    }
+
+    // L0 non-axiom = base concepts
+    if layer == 0 { return NodeCategory::Axiom; }
+    // L1+ without clear category = Knowledge
+    NodeCategory::Knowledge
+}
+
+/// Tìm alias đầu tiên cho một hash.
+fn find_alias(hash: u64, _registry: &Registry) -> Option<String> {
+    // Scan ALIAS_CODEPOINTS — registry không expose reverse lookup.
+    // Khi Template data thay thế hardcode, hàm này sẽ đọc từ registry.
+    for &(alias, cp) in ALIAS_CODEPOINTS {
+        if ucd::table_len() > 0 {
+            let chain = encode_codepoint(cp);
+            if chain.chain_hash() == hash {
+                return Some(String::from(alias));
+            }
+        }
+    }
+    None
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // chain_to_emoji — display layer only
@@ -618,5 +810,62 @@ mod tests {
         let chain = resolve("○", &registry);
         assert!(!chain.is_empty(), "○ → non-empty chain");
         assert_eq!(chain, encode_codepoint(0x25CB));
+    }
+
+    // ── SystemManifest ───────────────────────────────────────────────────────
+
+    #[test]
+    fn manifest_empty_registry() {
+        let registry = Registry::new();
+        let manifest = SystemManifest::scan(&registry);
+        assert!(manifest.is_empty(), "Empty registry → empty manifest");
+    }
+
+    #[test]
+    fn manifest_after_boot() {
+        if skip() { return; }
+        let result = boot_empty();
+        assert!(!result.manifest.is_empty(), "Boot manifest không rỗng");
+        // Axiom nodes phải có
+        assert!(result.manifest.count_by_category(NodeCategory::Axiom) > 0,
+            "Boot phải có axiom nodes");
+    }
+
+    #[test]
+    fn manifest_by_category() {
+        if skip() { return; }
+        let result = boot_empty();
+        let axioms = result.manifest.by_category(NodeCategory::Axiom);
+        assert!(!axioms.is_empty(), "Phải có axiom entries");
+        for entry in &axioms {
+            assert_eq!(entry.category, NodeCategory::Axiom);
+        }
+    }
+
+    #[test]
+    fn manifest_summary_has_categories() {
+        if skip() { return; }
+        let result = boot_empty();
+        let summary = result.manifest.summary();
+        assert!(summary.contains("SystemManifest"), "Summary header");
+        assert!(summary.contains("Axiom"), "Summary has Axiom");
+        assert!(summary.contains("Emotion"), "Summary has Emotion");
+        assert!(summary.contains("Device"), "Summary has Device");
+    }
+
+    #[test]
+    fn manifest_from_seeded_file() {
+        if skip() { return; }
+        use crate::writer::OlangWriter;
+        // Seed a fire node + alias
+        let chain = encode_codepoint(0x1F525);
+        let mut w = OlangWriter::new(0);
+        w.append_node(&chain, 0, true, 0).unwrap();
+        w.append_alias("fire", chain.chain_hash(), 0).unwrap();
+        let bytes = w.into_bytes();
+
+        let result = boot(Some(&bytes));
+        // fire should be classified (Axiom at L0)
+        assert!(result.manifest.len() > 0);
     }
 }

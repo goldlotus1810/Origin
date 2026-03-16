@@ -307,10 +307,8 @@ impl Chief {
         // Network anomaly detection heuristic:
         // High arousal + negative valence from network worker → elevate security
         let emotion = decode_emotion_from_body(body);
-        if emotion.arousal > 0.7 && emotion.valence < -0.3 {
-            if self.security_level < 2 {
-                self.security_level += 1;
-            }
+        if emotion.arousal > 0.7 && emotion.valence < -0.3 && self.security_level < 2 {
+            self.security_level += 1;
         }
     }
 
