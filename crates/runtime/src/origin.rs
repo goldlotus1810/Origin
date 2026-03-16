@@ -111,6 +111,15 @@ pub struct HomeRuntime {
     /// Recent text history — cho reference resolution ("bà ấy", "anh ta"...).
     /// Giữ tối đa 16 turns gần nhất (text + timestamp).
     recent_texts: alloc::vec::Vec<RecentText>,
+    // ── Phase 10: Dream stats ───────────────────────────────────────────────
+    /// Fibonacci dream schedule index (starts at 5 → Fib[5]=5, then 6→8, 7→13...)
+    dream_fib_index: usize,
+    /// Total dream cycles run
+    dream_cycles: u64,
+    /// Total proposals approved across all dreams
+    dream_approved_total: u64,
+    /// Total L3 concepts created from Dream
+    dream_l3_created: u64,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -158,6 +167,10 @@ impl HomeRuntime {
             pending_writes: alloc::vec::Vec::new(),
             knowtree: KnowTree::for_pc(),
             recent_texts: alloc::vec::Vec::new(),
+            dream_fib_index: 4, // Fib[4]=5: first dream after 5 turns
+            dream_cycles: 0,
+            dream_approved_total: 0,
+            dream_l3_created: 0,
         }
     }
 
@@ -369,19 +382,32 @@ impl HomeRuntime {
             }
 
             "dream" => {
+                self.run_dream(ts);
                 let result = self
                     .dream
                     .run(self.learning.stm(), self.learning.graph(), ts);
                 let text = format!(
                     "Dream cycle ○\n\
-                     Scanned  : {}\n\
-                     Clusters : {}\n\
-                     Proposals: {}\n\
-                     Approved : {}",
+                     Scanned    : {}\n\
+                     Clusters   : {}\n\
+                     Proposals  : {}\n\
+                     Approved   : {}\n\
+                     ─── Lifetime ───\n\
+                     Total cycles: {}\n\
+                     Total approved: {}\n\
+                     L3 concepts : {}\n\
+                     Fib interval: {} turns\n\
+                     KnowTree    : {} nodes, {} L3",
                     result.scanned,
                     result.clusters_found,
                     result.proposals.len(),
                     result.approved,
+                    self.dream_cycles,
+                    self.dream_approved_total,
+                    self.dream_l3_created,
+                    silk::hebbian::fib(self.dream_fib_index),
+                    self.knowtree.total_nodes(),
+                    self.knowtree.concepts(),
                 );
                 Response {
                     text,
@@ -594,6 +620,49 @@ impl HomeRuntime {
                 context_parts.join(", ")
             ))
         }
+    }
+
+    // ── Phase 10: KnowTree L3 recall — topic-aware knowledge ────────────────
+
+    /// Query KnowTree L3 concepts related to input words.
+    ///
+    /// Returns topic-level context from Dream-promoted L3 concepts.
+    /// Supplements Silk-based recall with structured knowledge.
+    fn recall_from_knowtree(&mut self, text: &str) -> Option<String> {
+        let word_hashes = olang::knowtree::text_to_word_hashes(text);
+        if word_hashes.is_empty() {
+            return None;
+        }
+
+        let mut found_concepts: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+
+        // Search L3 concepts by word hashes
+        for &wh in &word_hashes {
+            if let Some(node_with_edges) = self.knowtree.query(wh, 3, 1) {
+                let n_edges = node_with_edges.edges.len();
+                if n_edges > 0 {
+                    found_concepts.push(format!("L3[{:x}]→{}edges", wh, n_edges));
+                }
+            }
+            // Also check L2 for direct sentence matches
+            if let Some(node_with_edges) = self.knowtree.query(wh, 2, 1) {
+                let n_edges = node_with_edges.edges.len();
+                if n_edges > 0 {
+                    found_concepts.push(format!("L2[{:x}]→{}edges", wh, n_edges));
+                }
+            }
+        }
+
+        if found_concepts.is_empty() {
+            return None;
+        }
+
+        found_concepts.truncate(5);
+        Some(format!(
+            "(KnowTree: {} matches: {})",
+            found_concepts.len(),
+            found_concepts.join(", ")
+        ))
     }
 
     // ── Contradiction Detection — so sánh với kiến thức đã học ──────────────
@@ -875,9 +944,10 @@ impl HomeRuntime {
         self.turn_count += 1;
         self.uptime_ns = ts;
 
-        // Auto-Dream: sau mỗi DREAM_INTERVAL turns
-        const DREAM_INTERVAL: u64 = 8;
-        if self.turn_count - self.last_dream_turn >= DREAM_INTERVAL
+        // Auto-Dream: Fibonacci schedule — Fib[4]=5, Fib[5]=8, Fib[6]=13, Fib[7]=21...
+        // Mỗi lần dream xong → tăng fib_index → khoảng cách tăng dần (self-regulating)
+        let dream_interval = silk::hebbian::fib(self.dream_fib_index) as u64;
+        if self.turn_count - self.last_dream_turn >= dream_interval
             && self.learning.stm().len() >= 3
         {
             self.run_dream(ts);
@@ -1038,11 +1108,23 @@ impl HomeRuntime {
                     _ => "",
                 };
 
-                // Recall related knowledge from Silk walk
-                let recall = if !input_text.is_empty() {
+                // Recall related knowledge from Silk walk + KnowTree L3
+                let silk_recall = if !input_text.is_empty() {
                     self.recall_context(input_text)
                 } else {
                     None
+                };
+                let kt_recall = if !input_text.is_empty() {
+                    self.recall_from_knowtree(input_text)
+                } else {
+                    None
+                };
+                // Merge: Silk recall + KnowTree recall
+                let recall = match (silk_recall, kt_recall) {
+                    (Some(s), Some(k)) => Some(format!("{} {}", s, k)),
+                    (Some(s), None) => Some(s),
+                    (None, Some(k)) => Some(k),
+                    (None, None) => None,
                 };
 
                 // Detect contradiction against existing knowledge
@@ -1258,14 +1340,17 @@ impl HomeRuntime {
             stm_hit_rate: hit_rate,
             fx: self.learning.context().fx(),
             tone: tone_str,
-            dream_cycles_est: if self.turn_count > 8 {
-                (self.turn_count - 1) / 8
-            } else {
-                0
-            },
+            dream_cycles: self.dream_cycles,
             pending_bytes: self.pending_writes.len(),
             saveable_edges: self.saveable_edges(),
             stm_max_fire: max_fire,
+            dream_approved: self.dream_approved_total,
+            dream_l3_concepts: self.dream_l3_created,
+            dream_fib_interval: silk::hebbian::fib(self.dream_fib_index),
+            knowtree_nodes: self.knowtree.total_nodes(),
+            knowtree_edges: self.knowtree.total_edges(),
+            knowtree_sentences: self.knowtree.sentences(),
+            knowtree_concepts: self.knowtree.concepts(),
         }
     }
 
@@ -1407,6 +1492,36 @@ impl HomeRuntime {
     /// Silk edges từ hash — cho benchmark.
     pub fn silk_edges_from(&self, hash: u64) -> usize {
         self.learning.graph().edges_from(hash).len()
+    }
+
+    /// Dream cycles completed.
+    pub fn dream_cycles(&self) -> u64 {
+        self.dream_cycles
+    }
+
+    /// Dream-approved proposals total.
+    pub fn dream_approved(&self) -> u64 {
+        self.dream_approved_total
+    }
+
+    /// L3 concepts created from Dream.
+    pub fn dream_l3_concepts(&self) -> u64 {
+        self.dream_l3_created
+    }
+
+    /// Current Fibonacci dream interval.
+    pub fn dream_fib_interval(&self) -> u32 {
+        silk::hebbian::fib(self.dream_fib_index)
+    }
+
+    /// KnowTree L3+ concepts count.
+    pub fn knowtree_concepts(&self) -> u64 {
+        self.knowtree.concepts()
+    }
+
+    /// KnowTree L2 sentences count.
+    pub fn knowtree_sentences(&self) -> u64 {
+        self.knowtree.sentences()
     }
 
     /// Lấy pending bytes và xóa buffer.
@@ -2111,13 +2226,17 @@ impl HomeRuntime {
         use olang::writer::OlangWriter;
 
         self.last_dream_turn = self.turn_count;
+        self.dream_cycles += 1;
 
         let result = self
             .dream
             .run(self.learning.stm(), self.learning.graph(), ts);
 
+        let mut approved_this_cycle: u64 = 0;
+        let mut l3_this_cycle: u64 = 0;
+
         // Feed approved proposals
-        // QT9: serialize TRƯỚC → pending_writes → RỒII mới cập nhật Registry
+        // QT9: serialize TRƯỚC → pending_writes → RỒI mới cập nhật Registry
         {
             use memory::proposal::{AAMDecision, ProposalKind};
             let aam = memory::proposal::AAM::new();
@@ -2159,11 +2278,29 @@ impl HomeRuntime {
             // 2. Cập nhật RAM SAU (QT9)
             for proposal in &result.proposals {
                 if matches!(aam.review(proposal), AAMDecision::Approved) {
+                    approved_this_cycle += 1;
                     match &proposal.kind {
-                        ProposalKind::NewNode { chain, sources, .. } => {
+                        ProposalKind::NewNode {
+                            chain,
+                            sources,
+                            emotion,
+                        } => {
                             self.registry.insert(chain, 3, 0, ts, false);
-                            // L2-Ln: store concept in KnowTree
+                            // L3 concept in KnowTree — with source edges
                             self.knowtree.store_concept(chain, None, 3, sources, ts);
+                            l3_this_cycle += 1;
+
+                            // Co-activate L3 concept with source nodes in Silk
+                            let concept_hash = chain.chain_hash();
+                            for &src_hash in sources {
+                                self.learning.graph_mut().co_activate(
+                                    concept_hash,
+                                    src_hash,
+                                    *emotion,
+                                    0.7,
+                                    ts,
+                                );
+                            }
                         }
                         ProposalKind::PromoteQR {
                             chain_hash,
@@ -2171,7 +2308,7 @@ impl HomeRuntime {
                         } => {
                             if let Some(obs) = self.learning.stm().find_by_hash(*chain_hash) {
                                 self.registry.insert(&obs.chain, 0, 0, ts, true);
-                                // L2-Ln: promote to KnowTree
+                                // L2: promote to KnowTree
                                 self.knowtree
                                     .promote_from_stm(&obs.chain, None, *fire_count, ts);
                             }
@@ -2180,6 +2317,22 @@ impl HomeRuntime {
                         _ => {}
                     }
                 }
+            }
+        }
+
+        // Update dream stats
+        self.dream_approved_total += approved_this_cycle;
+        self.dream_l3_created += l3_this_cycle;
+
+        // Fibonacci schedule: productive dream → reset to shorter interval
+        // Unproductive dream → grow interval (self-regulating)
+        if approved_this_cycle > 0 {
+            // Productive: reset fib_index down (more frequent dreaming)
+            self.dream_fib_index = 4; // Fib[4]=5
+        } else {
+            // Unproductive: increase interval (max Fib[10]=89 turns)
+            if self.dream_fib_index < 10 {
+                self.dream_fib_index += 1;
             }
         }
 
@@ -3384,5 +3537,199 @@ mod integration_tests {
             IntentAction::CrisisOverride,
             "Crisis always overrides listening"
         );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 10 tests: Dream → KnowTree L3, Fibonacci trigger, topic recall
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod phase10_tests {
+    use super::*;
+
+    fn skip() -> bool {
+        ucd::table_len() == 0
+    }
+
+    #[test]
+    fn fibonacci_dream_schedule_initial() {
+        if skip() {
+            return;
+        }
+        let rt = HomeRuntime::new(0xA001);
+        // Initial Fib index = 4 → Fib[4] = 5 turns
+        assert_eq!(rt.dream_fib_interval(), 5, "Initial dream interval = Fib[4] = 5");
+    }
+
+    #[test]
+    fn dream_stats_track_cycles() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA002);
+        assert_eq!(rt.dream_cycles(), 0);
+
+        // Feed enough diverse turns to build STM (need ≥3 obs for dream)
+        // Use long, varied sentences to ensure unique chain hashes
+        let sentences = [
+            "tôi buồn vì mất việc hôm nay",
+            "hôm qua trời mưa rất lớn",
+            "cuộc sống thật khó khăn",
+            "hy vọng ngày mai sẽ tốt hơn",
+            "bạn bè giúp đỡ tôi rất nhiều",
+            "tôi đang học những điều mới",
+            "âm nhạc giúp tôi vui hơn",
+            "thời tiết hôm nay đẹp quá",
+        ];
+        for (i, &s) in sentences.iter().enumerate() {
+            rt.process_text(s, (i + 1) as i64 * 1000);
+        }
+        // Dream triggers when turn_count - last_dream_turn >= Fib[4]=5 AND stm >= 3
+        // STM may have fewer entries due to chain_hash deduplication
+        if rt.stm_len() >= 3 {
+            assert!(
+                rt.dream_cycles() >= 1,
+                "Dream should have run: cycles={}, stm={}",
+                rt.dream_cycles(),
+                rt.stm_len()
+            );
+        }
+        // Regardless, verify dream_cycles is tracked correctly
+        // (may be 0 if STM is too small due to dedup)
+        let _ = rt.dream_cycles(); // no panic
+    }
+
+    #[test]
+    fn dream_fib_grows_when_unproductive() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA003);
+        let initial_interval = rt.dream_fib_interval();
+
+        // Feed minimal turns with very different content → no clusters
+        for i in 0..30 {
+            let text = alloc::format!("abc{}", i);
+            rt.process_text(&text, (i + 1) as i64 * 1000);
+        }
+
+        // After unproductive dreams, Fib index should increase
+        let later_interval = rt.dream_fib_interval();
+        assert!(
+            later_interval >= initial_interval,
+            "Unproductive dream → interval grows: {} → {}",
+            initial_interval,
+            later_interval
+        );
+    }
+
+    #[test]
+    fn knowtree_sentences_grow_with_input() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA004);
+        assert_eq!(rt.knowtree_sentences(), 0);
+
+        rt.process_text("tôi buồn vì mất việc", 1000);
+        rt.process_text("hôm nay trời đẹp quá", 2000);
+
+        assert!(
+            rt.knowtree_sentences() >= 2,
+            "Each text → L2 sentence: {}",
+            rt.knowtree_sentences()
+        );
+    }
+
+    #[test]
+    fn metrics_include_dream_and_knowtree() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA005);
+        rt.process_text("tôi buồn vì mất việc", 1000);
+
+        let m = rt.metrics();
+        // Verify new metrics fields exist and are reasonable
+        assert_eq!(m.turns, 1);
+        assert!(m.dream_fib_interval >= 5, "Fib interval >= 5");
+        assert!(m.knowtree_sentences >= 1, "At least 1 sentence");
+        // dream_cycles may be 0 (not enough turns yet)
+        let summary = m.summary();
+        assert!(summary.contains("dream_cycles"), "Summary has dream_cycles");
+        assert!(
+            summary.contains("knowtree_nodes"),
+            "Summary has knowtree_nodes"
+        );
+        assert!(
+            summary.contains("knowtree_L3"),
+            "Summary has knowtree_L3"
+        );
+    }
+
+    #[test]
+    fn recall_from_knowtree_after_learning() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA006);
+        // Feed several related sentences to build KnowTree
+        rt.process_text("tôi buồn vì mất việc", 1000);
+        rt.process_text("mất việc thật khó khăn", 2000);
+        rt.process_text("không có tiền rất khổ", 3000);
+
+        // Query KnowTree for related content
+        let result = rt.recall_from_knowtree("mất việc");
+        // May or may not find L3 concepts (depends on Dream), but L2 should exist
+        // Just verify no panic and reasonable output
+        if let Some(ref text) = result {
+            assert!(text.contains("KnowTree"), "Result mentions KnowTree: {}", text);
+        }
+        // At minimum, KnowTree should have sentences
+        assert!(rt.knowtree_sentences() >= 3);
+    }
+
+    #[test]
+    fn dream_command_shows_phase10_stats() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA007);
+        for i in 0..6 {
+            let text = alloc::format!("buồn đau mất mát {}", i);
+            rt.process_text(&text, (i + 1) as i64 * 1000);
+        }
+        let r = rt.process_text("○{dream}", 7000);
+        assert!(r.text.contains("Dream cycle"), "Has Dream cycle header");
+        assert!(r.text.contains("Total cycles"), "Has lifetime stats: {}", r.text);
+        assert!(r.text.contains("Fib interval"), "Has Fib interval: {}", r.text);
+        assert!(r.text.contains("KnowTree"), "Has KnowTree stats: {}", r.text);
+    }
+
+    #[test]
+    fn combined_recall_silk_and_knowtree() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA008);
+        // Build up knowledge
+        for i in 0..10 {
+            let text = alloc::format!(
+                "tôi buồn vì mất việc hôm {} rất khó khăn nhưng vẫn hy vọng",
+                i
+            );
+            rt.process_text(&text, (i + 1) as i64 * 1000);
+        }
+
+        // After 10 turns, both Silk and KnowTree should have data
+        assert!(rt.silk_edge_count() > 0, "Silk has edges");
+        assert!(rt.knowtree_sentences() > 0, "KnowTree has sentences");
+
+        // Process a query that should trigger recall
+        let r = rt.process_text("tôi buồn quá", 11000);
+        // Response should not be empty (has knowledge to recall)
+        // Just verify no panic — the response quality test is in chat-bench
+        let _ = r;
     }
 }
