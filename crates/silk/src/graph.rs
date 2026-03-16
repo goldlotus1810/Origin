@@ -50,6 +50,10 @@ impl SilkGraph {
     ///
     /// Nếu edge đã có → Hebbian strengthen.
     /// Nếu chưa có → tạo mới với weight thấp.
+    ///
+    /// **QT11**: Caller PHẢI đảm bảo from và to cùng tầng (Ln-1).
+    /// Dùng `co_activate_same_layer()` để có kiểm tra tầng tự động,
+    /// hoặc `co_activate_cross_layer()` cho kết nối khác tầng.
     pub fn co_activate(&mut self, from: u64, to: u64, emotion: EmotionTag, reward: f32, ts: i64) {
         let key = (from, to, EdgeKind::Assoc.as_byte());
 
@@ -66,6 +70,29 @@ impl SilkGraph {
             let edge = SilkEdge::associative(from, to, emotion, ts);
             self.insert_sorted(edge);
         }
+    }
+
+    /// Co-activate với kiểm tra tầng (QT11 enforcement).
+    ///
+    /// Chỉ cho phép kết nối cùng tầng. Nếu khác tầng → trả về false
+    /// và KHÔNG tạo/cập nhật edge. Dùng `co_activate_cross_layer()`
+    /// cho kết nối khác tầng có kiểm soát.
+    #[allow(clippy::too_many_arguments)]
+    pub fn co_activate_same_layer(
+        &mut self,
+        from: u64,
+        to: u64,
+        from_layer: u8,
+        to_layer: u8,
+        emotion: EmotionTag,
+        reward: f32,
+        ts: i64,
+    ) -> bool {
+        if from_layer != to_layer {
+            return false; // QT11: Silk chỉ ở Ln-1 — từ chối cross-layer
+        }
+        self.co_activate(from, to, emotion, reward, ts);
+        true
     }
 
     /// Cross-layer co-activation — kết nối giữa 2 tầng khác nhau.
@@ -541,6 +568,24 @@ mod tests {
 
         let from_a = g.edges_from(0xA);
         assert_eq!(from_a.len(), 2, "2 edges from A");
+    }
+
+    // ── QT11: Same-layer enforcement ──────────────────────────────────────
+
+    #[test]
+    fn same_layer_accepted() {
+        let mut g = SilkGraph::new();
+        let ok = g.co_activate_same_layer(0xA, 0xB, 3, 3, emo(-0.5, 0.7), 0.8, 1000);
+        assert!(ok, "Same layer → accepted");
+        assert_eq!(g.assoc_count(), 1);
+    }
+
+    #[test]
+    fn different_layer_rejected() {
+        let mut g = SilkGraph::new();
+        let ok = g.co_activate_same_layer(0xA, 0xB, 3, 5, emo(-0.5, 0.7), 0.8, 1000);
+        assert!(!ok, "Different layers → rejected by QT11");
+        assert_eq!(g.assoc_count(), 0, "No edge created");
     }
 
     // ── Cross-layer Silk ───────────────────────────────────────────────────

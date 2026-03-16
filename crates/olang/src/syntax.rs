@@ -544,8 +544,11 @@ impl<'a> Parser<'a> {
         match steps.len() {
             0 => Ok(left),
             1 => {
-                let (op, rhs) = steps.into_iter().next().unwrap();
-                if rhs == Expr::Ident("?".to_string()) {
+                let (op, rhs) = match steps.into_iter().next() {
+                    Some(pair) => pair,
+                    None => return Err(ParseError::new("Expected relation step")),
+                };
+                if rhs == Expr::Ident(String::from("?")) {
                     Ok(Expr::RelQuery {
                         subject: Box::new(left),
                         op,

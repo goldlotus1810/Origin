@@ -56,10 +56,16 @@ NGƯỜI DÙNG
     ↓
 AAM  [tier 0] — stateless · approve · quyết định cuối
     ↓ ISL
-LeoAI      [tier 1] — Knowledge + Learning + Dream + 7 bản năng
-HomeChief  [tier 1] — quản lý Worker thiết bị nhà
+LeoAI       [tier 1] — Knowledge + Learning + Dream + 7 bản năng
+HomeChief   [tier 1] — quản lý Worker thiết bị nhà
+VisionChief [tier 1] — quản lý Worker camera/sensor
+NetworkChief[tier 1] — quản lý Worker network/security
     ↓ ISL
-Workers    [tier 2] — SILENT · skill đúng việc · báo cáo chain
+Workers     [tier 2] — SILENT · skill đúng việc · báo cáo chain
+
+Giao tiếp:
+  ✅ AAM ↔ Chief     ✅ Chief ↔ Chief     ✅ Chief ↔ Worker
+  ❌ AAM ↔ Worker    ❌ Worker ↔ Worker
 ```
 
 ---
@@ -68,26 +74,42 @@ Workers    [tier 2] — SILENT · skill đúng việc · báo cáo chain
 
 ```
 crates/
-├── ucd/        Unicode → Molecule lookup (build.rs, 5263 entries)     21 tests
-├── olang/      Core: Molecule · LCA · Registry · VM · Compact       286 tests
-├── silk/       Hebbian learning · EmotionTag edges · Walk             57 tests
-├── context/    Emotion V/A/D/I · ConversationCurve · Intent          160 tests
-├── agents/     Encoder · Learning · Gate · Instinct · Chief/Worker   187 tests
-├── memory/     STM · DreamCycle · Proposals · AAM                     32 tests
-├── runtime/    HomeRuntime · ○{} Parser · MVHOS                      128 tests
-├── hal/        Hardware Abstraction · Tier · FFI · Security           76 tests
-├── isl/        Inter-System Link messaging (AES-256-GCM)              31 tests
-├── vsdf/       18 SDF generators · FFR · Physics · SceneGraph        103 tests
-└── wasm/       WebAssembly bindings · WebSocket-ISL bridge            23 tests
+├── ucd/        Unicode → Molecule lookup (build.rs, 5424 entries)      21 tests
+├── olang/      Core: Molecule · LCA · Registry · VM · Compact        594 tests
+├── silk/       Hebbian learning · EmotionTag edges · Walk              82 tests
+├── context/    Emotion V/A/D/I · ConversationCurve · Intent           168 tests
+├── agents/     Encoder · Learning · Gate · Instinct · Chief/Worker    252 tests
+├── memory/     STM · DreamCycle · Proposals · AAM                      62 tests
+├── runtime/    HomeRuntime · ○{} Parser · MVHOS                       204 tests
+├── hal/        Hardware Abstraction · Tier · FFI · Security            76 tests
+├── isl/        Inter-System Link messaging (AES-256-GCM)               31 tests
+├── vsdf/       18 SDF generators · FFR · Physics · SceneGraph         116 tests
+└── wasm/       WebAssembly bindings · WebSocket-ISL bridge             23 tests
 
 tools/
-├── seeder/     Seed 35 L0 nodes từ UCD (0 hardcode)
+├── seeder/     Seed 35 L0 nodes từ UCD (0 hardcode)                    15 tests
 ├── server/     Terminal REPL (stdin/stdout)
 ├── inspector/  Đọc/verify origin.olang
 └── bench/      Performance benchmarks
 ```
 
-**38,000+ lines Rust · 1,104 tests · 0 clippy warnings · no_std core**
+**~66,000 lines Rust · 1,644 tests · 0 clippy warnings · no_std core**
+
+---
+
+## Đánh giá hiện tại
+
+| Hạng mục | Điểm |
+|----------|------|
+| Thiết kế kiến trúc | 10/10 |
+| Chất lượng code | 8.5/10 |
+| Độ phủ test | 9/10 |
+| Tuân thủ QT (23 quy tắc) | 9.5/10 (21 đầy đủ, 2 một phần) |
+| Tính năng hoàn thiện | 7/10 (54/80 features) |
+| Bảo mật | 9/10 |
+| **Tổng** | **8.66/10 — A-** |
+
+Chi tiết: xem [REVIEW.md](REVIEW.md) và [REVIEW_VI.md](REVIEW_VI.md).
 
 ---
 
@@ -123,27 +145,88 @@ ucd (UnicodeData.txt → compile-time table)
 
 ---
 
-## Nguyên tắc bất biến
+## 23 Nguyên tắc bất biến (QT)
 
 ```
 Unicode:
-  ① Mọi Molecule từ encode_codepoint(cp) — KHÔNG viết tay
-  ② Mọi chain từ LCA hoặc UCD — KHÔNG viết tay
-  ③ Ngôn ngữ tự nhiên = alias → node
+  QT1:  5 nhóm Unicode = nền tảng. Không thêm nhóm.
+  QT2:  Tên ký tự Unicode = tên node. Không đặt tên khác.
+  QT3:  Ngôn ngữ tự nhiên = alias → node. Không tạo node riêng.
 
-Architecture:
-  ④ Ghi file TRƯỚC — cập nhật RAM SAU (QT9)
-  ⑤ Append-only — KHÔNG DELETE, KHÔNG OVERWRITE
-  ⑥ SecurityGate LUÔN chạy trước mọi input
-  ⑦ Không đủ evidence → im lặng (BlackCurtain)
+Chain:
+  QT4:  Mọi Molecule từ encode_codepoint(cp) — KHÔNG viết tay ¹
+  QT5:  Mọi chain từ LCA hoặc UCD — KHÔNG viết tay
+  QT6:  chain_hash tự sinh. KHÔNG viết tay.
+  QT7:  chain cha = LCA(chain con)
 
-Design:
-  ⑧ L0 không import L1
-  ⑨ Fibonacci xuyên suốt — cấu trúc, threshold, render
-  ⑩ Skill stateless — state nằm trong Agent
-  ⑪ Worker gửi chain, KHÔNG gửi raw data
-  ⑫ Silent by default — không polling, không heartbeat
+Node:
+  QT8:  Mọi Node tạo ra → tự động registry
+  QT9:  Ghi file TRƯỚC — cập nhật RAM SAU
+  QT10: Append-only — KHÔNG DELETE, KHÔNG OVERWRITE
+
+Silk:
+  QT11: Silk chỉ ở Ln-1 — tự do giữa lá cùng tầng ²
+  QT12: Kết nối tầng trên → qua NodeLx đại diện (Fib[n+2] threshold)
+  QT13: Silk mang EmotionTag của khoảnh khắc co-activation
+
+Kiến trúc:
+  QT14: L0 không import L1 — tuyệt đối
+  QT15: Agent tiers: AAM(tier 0) + Chiefs(tier 1) + Workers(tier 2)
+  QT16: L2-Ln đổ vào SAU khi L0+L1 hoàn thiện
+  QT17: Fibonacci xuyên suốt — cấu trúc, threshold, render
+  QT18: Không đủ evidence → im lặng — KHÔNG bịa (BlackCurtain)
+
+Skill:
+  QT19: 1 Skill = 1 trách nhiệm
+  QT20: Skill không biết Agent là gì
+  QT21: Skill không biết Skill khác tồn tại
+  QT22: Skill giao tiếp qua ExecContext.State
+  QT23: Skill không giữ state — state nằm trong Agent
+
+¹ QT4: VM PushMol, VSDF FFRCell::to_molecule(), và LCA tạo Molecule ngoài
+  encode_codepoint(). Đây là tính toán lúc chạy, không phải giá trị viết tay
+  — chấp nhận được.
+
+² QT11: SilkGraph::co_activate_same_layer() kiểm tra tầng tại API.
+  SilkGraph::co_activate() vẫn yêu cầu caller đảm bảo cùng tầng.
+  co_activate_cross_layer() cho kết nối khác tầng có kiểm soát.
 ```
+
+---
+
+## Lộ trình phát triển
+
+```
+HOÀN THÀNH (Foundation):
+  ✅ UCD Engine (5424 entries, 0 collision)
+  ✅ Molecule/Chain 5D encoding
+  ✅ LCA + Weighted + Variance
+  ✅ Registry (append-only, crash recovery)
+  ✅ Silk + Hebbian + φ⁻¹ decay
+  ✅ Emotion Pipeline 7 tầng
+  ✅ 7 Instinct Skills (Honesty → Reflection)
+  ✅ 15 Domain Skills (QT4 compliant)
+  ✅ ISL messaging (AES-256-GCM)
+  ✅ HAL (x86/ARM/RISC-V/WASM)
+  ✅ VSDF (18 SDF + FFR Fibonacci)
+  ✅ Agent Hierarchy (AAM/Chief/Worker)
+  ✅ Compiler backends (C/Rust/WASM)
+  ✅ WASM browser bindings
+
+TIẾP THEO:
+  Phase 1: VM tính toán thật (1+2=3)          — ưu tiên CAO
+  Phase 2: Duyệt đồ thị (why/explain)         — ưu tiên TRUNG BÌNH
+  Phase 3: Tri thức L1+ (180+ domain nodes)    — ưu tiên TRUNG BÌNH
+  Phase 4: Toán ký hiệu kết nối VM            — ưu tiên TRUNG BÌNH
+  Phase 5: Điều phối Agent đầy đủ             — ưu tiên CAO
+
+DÀI HẠN:
+  Phase 6: Cảm nhận thật (sensor input)
+  Phase 7: Thêm compiler backends (Go/ARM)
+  Phase 8: Tầng Build (hypothesis testing)
+```
+
+Chi tiết: xem [HomeOS_Roadmap.md](HomeOS_Roadmap.md).
 
 ---
 
@@ -153,7 +236,7 @@ Design:
 # Build toàn bộ
 cargo build --workspace
 
-# Test (1104 tests)
+# Test (1644+ tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
@@ -199,6 +282,23 @@ f(x)     : -0.312
 
 ---
 
+## Tài liệu
+
+| File | Nội dung |
+|------|---------|
+| [CLAUDE.md](CLAUDE.md) | Hướng dẫn cho AI contributors |
+| [HomeOS_Architecture.md](HomeOS_Architecture.md) | Kiến trúc tổng thể |
+| [HomeOS_Roadmap.md](HomeOS_Roadmap.md) | Kế hoạch phát triển 8 phase |
+| [HomeOS_Solutions.md](HomeOS_Solutions.md) | Hướng giải quyết hạn chế |
+| [HomeOS_Complete.md](HomeOS_Complete.md) | Thiết kế hoàn chỉnh |
+| [REVIEW.md](REVIEW.md) | Đánh giá dự án (English) |
+| [REVIEW_VI.md](REVIEW_VI.md) | Đánh giá dự án (Tiếng Việt) |
+| [docs/olang_guide.md](docs/olang_guide.md) | Hướng dẫn ngôn ngữ Olang |
+| [docs/architecture.md](docs/architecture.md) | Kiến trúc kỹ thuật chi tiết |
+| [docs/roadmap.md](docs/roadmap.md) | Kế hoạch tiếp theo |
+
+---
+
 ## Scale
 
 ```
@@ -210,4 +310,4 @@ Target:      1 tỷ nodes trên thiết bị phổ thông (RAM < 256MB, disk ~2G
 
 ---
 
-*Unicode 18.0.0 · Rust · no_std core · 2026*
+*Unicode 18.0.0 · Rust · no_std core · ~66K LoC · 1,644 tests · 0 clippy warnings · 2026*

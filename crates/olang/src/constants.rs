@@ -515,7 +515,7 @@ pub fn process_constant_command(input: &str, precision: Precision) -> String {
             }
         }
 
-        _ => format!("Unknown command. Try: const <name|all> | fib <n>"),
+        _ => String::from("Unknown command. Try: const <name|all> | fib <n>"),
     }
 }
 

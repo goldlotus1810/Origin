@@ -206,6 +206,9 @@ Unicode:
 
 Chain:
   ④ Mọi Molecule từ encode_codepoint(cp) — KHÔNG viết tay
+     ⚠️ Ngoại lệ: VM PushMol, VSDF FFRCell::to_molecule(), LCA tạo Molecule
+     ngoài encode_codepoint(). Đây là tính toán lúc chạy, không phải giá trị
+     viết tay — chấp nhận được nhưng phải ghi nhận.
   ⑤ Mọi chain từ LCA hoặc UCD — KHÔNG viết tay
   ⑥ chain_hash tự sinh. KHÔNG viết tay.
   ⑦ chain cha = LCA(chain con)
@@ -217,6 +220,8 @@ Node:
 
 Silk:
   ⑪ Silk chỉ ở Ln-1 — tự do giữa lá cùng tầng
+     ✅ API enforcement: co_activate_same_layer() kiểm tra tầng.
+     co_activate() vẫn hoạt động nhưng yêu cầu caller đảm bảo cùng tầng.
   ⑫ Kết nối tầng trên → qua NodeLx đại diện
      (✅ Done: cross-layer Silk với threshold Fib[n+2] — graph.rs:co_activate_cross_layer)
   ⑬ Silk mang EmotionTag của khoảnh khắc co-activation

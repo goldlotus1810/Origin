@@ -345,7 +345,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
 
 // ── Recursive descent parser ────────────────────────────────────────────────
 
-fn parse_additive<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), String> {
+fn parse_additive(tokens: &[Token]) -> Result<(MathExpr, &[Token]), String> {
     let (mut left, mut rest) = parse_multiplicative(tokens)?;
 
     loop {
@@ -366,7 +366,7 @@ fn parse_additive<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), St
     Ok((left, rest))
 }
 
-fn parse_multiplicative<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), String> {
+fn parse_multiplicative(tokens: &[Token]) -> Result<(MathExpr, &[Token]), String> {
     let (mut left, mut rest) = parse_power(tokens)?;
 
     loop {
@@ -387,7 +387,7 @@ fn parse_multiplicative<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token
     Ok((left, rest))
 }
 
-fn parse_power<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), String> {
+fn parse_power(tokens: &[Token]) -> Result<(MathExpr, &[Token]), String> {
     let (base, rest) = parse_unary(tokens)?;
     if let Some(Token::Caret) = rest.first() {
         let (exp, rest2) = parse_unary(&rest[1..])?;
@@ -397,7 +397,7 @@ fn parse_power<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), Strin
     }
 }
 
-fn parse_unary<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), String> {
+fn parse_unary(tokens: &[Token]) -> Result<(MathExpr, &[Token]), String> {
     match tokens.first() {
         Some(Token::Minus) => {
             let (expr, rest) = parse_primary(&tokens[1..])?;
@@ -407,7 +407,7 @@ fn parse_unary<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), Strin
     }
 }
 
-fn parse_primary<'a>(tokens: &'a [Token]) -> Result<(MathExpr, &'a [Token]), String> {
+fn parse_primary(tokens: &[Token]) -> Result<(MathExpr, &[Token]), String> {
     match tokens.first() {
         Some(Token::Num(n)) => Ok((MathExpr::Num(*n), &tokens[1..])),
         Some(Token::Var(v)) => Ok((MathExpr::Var(v.clone()), &tokens[1..])),
@@ -922,7 +922,7 @@ pub fn process_math_command(input: &str) -> String {
     let (cmd, arg) = if let Some(pos) = input.find(' ') {
         (&input[..pos], input[pos + 1..].trim())
     } else {
-        return format!("Usage: solve/derive/integrate/simplify <expression>");
+        return String::from("Usage: solve/derive/integrate/simplify <expression>");
     };
 
     // Strip quotes

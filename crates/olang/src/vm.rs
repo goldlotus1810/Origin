@@ -545,9 +545,7 @@ impl OlangVM {
                     // Never pop root scope
                     if scopes.len() > 1 {
                         scopes.pop();
-                        if call_depth > 0 {
-                            call_depth -= 1;
-                        }
+                        call_depth = call_depth.saturating_sub(1);
                     }
                 }
 

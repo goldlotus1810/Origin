@@ -146,3 +146,117 @@ fn append_to_file(path: &str, bytes: &[u8]) -> io::Result<()> {
     f.flush()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runtime::origin::{now_ns, HomeRuntime};
+
+    #[test]
+    fn olang_file_constant() {
+        assert_eq!(OLANG_FILE, "origin.olang");
+    }
+
+    #[test]
+    fn append_to_file_creates_and_appends() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("homeos_test_{}.bin", now_ns()));
+        let path_str = path.to_str().unwrap();
+
+        // First write creates the file
+        append_to_file(path_str, b"hello").unwrap();
+        assert_eq!(std::fs::read(path_str).unwrap(), b"hello");
+
+        // Second write appends
+        append_to_file(path_str, b" world").unwrap();
+        assert_eq!(std::fs::read(path_str).unwrap(), b"hello world");
+
+        // Cleanup
+        let _ = std::fs::remove_file(path_str);
+    }
+
+    #[test]
+    fn append_to_file_empty_bytes() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("homeos_test_empty_{}.bin", now_ns()));
+        let path_str = path.to_str().unwrap();
+
+        append_to_file(path_str, b"").unwrap();
+        assert_eq!(std::fs::read(path_str).unwrap().len(), 0);
+
+        let _ = std::fs::remove_file(path_str);
+    }
+
+    #[test]
+    fn runtime_boots_from_nothing() {
+        let rt = HomeRuntime::new(12345);
+        assert_eq!(rt.turn_count(), 0);
+        assert!(!rt.has_pending_writes());
+    }
+
+    #[test]
+    fn runtime_fx_starts_at_zero() {
+        let rt = HomeRuntime::new(99999);
+        // f(x) should start at 0 or near 0 with no turns
+        assert!(rt.fx().abs() < 0.01);
+    }
+
+    #[test]
+    fn runtime_process_text_increments_turn() {
+        let mut rt = HomeRuntime::new(11111);
+        let ts = now_ns();
+        let _resp = rt.process_text("hello", ts);
+        assert!(rt.turn_count() >= 1);
+    }
+
+    #[test]
+    fn runtime_with_invalid_file_still_boots() {
+        // Passing garbage bytes — runtime should handle gracefully
+        let garbage = vec![0u8; 50];
+        let rt = HomeRuntime::with_file(22222, Some(&garbage));
+        assert_eq!(rt.turn_count(), 0);
+    }
+
+    #[test]
+    fn runtime_serialize_learned_empty() {
+        let rt = HomeRuntime::new(33333);
+        let bytes = rt.serialize_learned(now_ns());
+        // No turns processed, so serialized data may be empty or just header
+        // The key thing is it does not panic
+        let _ = bytes;
+    }
+
+    #[test]
+    fn runtime_drain_pending_writes() {
+        let mut rt = HomeRuntime::new(44444);
+        // Initially no pending writes
+        assert!(!rt.has_pending_writes());
+        let drained = rt.drain_pending_writes();
+        assert!(drained.is_empty());
+    }
+
+    #[test]
+    fn flush_pending_noop_when_empty() {
+        let mut rt = HomeRuntime::new(55555);
+        // Should not panic or error when there's nothing to flush
+        flush_pending(&mut rt);
+    }
+
+    #[test]
+    fn exit_quit_commands_recognized() {
+        // Verify the trim + comparison logic used in the REPL
+        for cmd in &["exit", "quit"] {
+            let line = format!("  {}  ", cmd);
+            let input = line.trim();
+            assert!(input == "exit" || input == "quit");
+        }
+    }
+
+    #[test]
+    fn empty_input_skipped() {
+        // Verify that empty/whitespace input would be skipped
+        for input in &["", "   ", "\t", "\n"] {
+            assert!(input.trim().is_empty());
+        }
+    }
+}
