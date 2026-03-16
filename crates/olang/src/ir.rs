@@ -21,6 +21,12 @@
 //! DREAM              → trigger dream cycle
 //! STATS              → emit system stats
 //! FUSE               → pop 1, check chain for infinite loops (QT2: ∞-1)
+//! TRACE              → toggle execution tracing
+//! INSPECT            → pop 1, emit chain structure info
+//! ASSERT             → pop 1, error if empty
+//! TYPEOF             → pop 1, emit type classification
+//! WHY                → pop 2, explain connection between chains
+//! EXPLAIN            → pop 1, trace chain's origin
 
 extern crate alloc;
 use alloc::string::String;
@@ -79,6 +85,20 @@ pub enum Op {
     /// Nếu chain tham chiếu chính nó (cycle) → push empty chain (∞ = sai).
     /// Nếu chain hữu hạn → push lại chain (∞-1 = đúng).
     Fuse,
+
+    // ── Reasoning & Debug primitives ────────────────────────────────────────
+    /// Trace: bật/tắt execution tracing (mỗi bước emit TraceStep event)
+    Trace,
+    /// Inspect: pop 1 chain, emit InspectChain event (hiển thị cấu trúc bên trong)
+    Inspect,
+    /// Assert: pop 1 chain, nếu empty → emit AssertFailed event
+    Assert,
+    /// TypeOf: pop 1 chain, emit TypeInfo event (phân loại: SDF/MATH/EMOTICON/MUSICAL/Mixed)
+    TypeOf,
+    /// Why: pop 2 chains, tìm đường kết nối giữa chúng (qua Silk)
+    Why,
+    /// Explain: pop 1 chain, truy ngược nguồn gốc (tại sao chain này tồn tại)
+    Explain,
 }
 
 impl Op {
@@ -106,6 +126,12 @@ impl Op {
             Self::Store(_) => "STORE",
             Self::LoadLocal(_) => "LOAD_LOCAL",
             Self::Fuse => "FUSE",
+            Self::Trace => "TRACE",
+            Self::Inspect => "INSPECT",
+            Self::Assert => "ASSERT",
+            Self::TypeOf => "TYPEOF",
+            Self::Why => "WHY",
+            Self::Explain => "EXPLAIN",
         }
     }
 
@@ -170,6 +196,12 @@ impl Op {
                 b
             }
             Self::Fuse => alloc::vec![0x0A],
+            Self::Trace => alloc::vec![0x0B],
+            Self::Inspect => alloc::vec![0x0C],
+            Self::Assert => alloc::vec![0x0D],
+            Self::TypeOf => alloc::vec![0x0E],
+            Self::Why => alloc::vec![0x0F],
+            Self::Explain => alloc::vec![0x12],
         }
     }
 }
@@ -454,6 +486,12 @@ mod tests {
             Op::Store("v".into()),
             Op::LoadLocal("v".into()),
             Op::Fuse,
+            Op::Trace,
+            Op::Inspect,
+            Op::Assert,
+            Op::TypeOf,
+            Op::Why,
+            Op::Explain,
         ];
         for op in &ops {
             let b = op.to_bytes();

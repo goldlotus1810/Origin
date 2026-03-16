@@ -431,6 +431,30 @@ DREAM     = Offline consolidation (STM → cluster → promote QR)
 
 ---
 
+## Olang — Ngôn ngữ của HomeOS
+
+**Tham khảo đầy đủ:** `docs/olang_guide.md`
+
+```
+Olang = ngôn ngữ lập trình + suy luận + sáng tạo
+Mọi thứ là MolecularChain. Mọi phép toán là biến đổi chain.
+
+3 Pillars: Alphabet (lexer) → Syntax (parser) → Semantics (validation + IR)
+26 IR opcodes, stack-based VM, 18 relation operators
+
+Commands:
+  dream / stats / fuse / trace          — system (không arg)
+  learn / seed / inspect / assert       — có arg
+  typeof / explain / why                — reasoning & debug
+
+QT Axioms:
+  QT1: ○ là nguồn gốc
+  QT2: ∞ sai, ∞-1 đúng → FUSE opcode
+  QT3: +/- hypothesis, ⧺/⊖ physical, == truth
+```
+
+---
+
 ## Khi viết code mới
 
 1. Hỏi: "Thứ này có phải là ○[f] không?" — nếu phải hardcode → dừng lại

@@ -346,6 +346,13 @@ pub fn is_command(s: &str) -> bool {
             | "help"
             | "learn"
             | "fuse"
+            // Reasoning & debug primitives
+            | "trace"
+            | "inspect"
+            | "assert"
+            | "typeof"
+            | "why"
+            | "explain"
     )
 }
 

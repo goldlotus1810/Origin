@@ -156,6 +156,12 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Store(name) => format!("olang_store(\"{}\", pop(&s));", escape(name)),
         Op::LoadLocal(name) => format!("push(&s, olang_load_local(\"{}\"));", escape(name)),
         Op::Fuse => "/* QT2: FUSE — verify chain finite */ { Chain c = peek(&s); if (c == 0) pop(&s); }".into(),
+        Op::Trace => "/* trace */".into(),
+        Op::Inspect => "/* inspect */ printf(\"inspect: %p\\n\", peek(&s));".into(),
+        Op::Assert => "/* assert */ if (peek(&s) == 0) { fprintf(stderr, \"ASSERT FAILED\\n\"); }".into(),
+        Op::TypeOf => "/* typeof */".into(),
+        Op::Why => "/* why */ { pop(&s); } /* pop second, keep first */".into(),
+        Op::Explain => "/* explain */".into(),
     })
 }
 
@@ -218,6 +224,7 @@ fn rust_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Store(name) => format!("// store local: {}", name),
         Op::LoadLocal(name) => format!("// load local: {}", name),
         Op::Fuse => "// QT2: FUSE — verify chain finite (∞-1)".into(),
+        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => "// debug primitive (runtime only)".into(),
     })
 }
 
@@ -313,6 +320,7 @@ fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileE
         Op::Store(_) => "local.set $local ;; store".into(),
         Op::LoadLocal(_) => "local.get $local ;; load_local".into(),
         Op::Fuse => ";; QT2: FUSE — verify chain finite".into(),
+        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => ";; debug primitive (runtime only)".into(),
     })
 }
 

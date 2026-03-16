@@ -24,6 +24,12 @@
 //! | `fuse`               | QT2: verify chain finite (∞-1 mới đúng)            | ()           |
 //! | `dream`              | Trigger Dream cycle (STM → cluster → QR)           | ()           |
 //! | `stats`              | Xuất system statistics                             | ()           |
+//! | `trace`              | Toggle execution tracing                            | ()           |
+//! | `inspect expr`       | Hiển thị cấu trúc chain (hash, molecules, bytes)   | Chain        |
+//! | `assert expr`        | Kiểm tra chain non-empty, báo lỗi nếu empty        | Chain        |
+//! | `typeof expr`        | Phân loại chain: SDF/MATH/EMOTICON/Mixed            | Chain        |
+//! | `explain expr`       | Truy ngược nguồn gốc chain                         | Chain        |
+//! | `why a b`            | Giải thích kết nối giữa 2 chains                   | Chain (LCA)  |
 //!
 //! ## Scope Rules
 //!
@@ -43,7 +49,6 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::alphabet::RelOp;
 use crate::ir::{OlangProgram, Op};
 use crate::syntax::{Expr, Stmt};
 
@@ -479,6 +484,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             "dream" => ctx.emit(Op::Dream),
             "stats" => ctx.emit(Op::Stats),
             "fuse" => ctx.emit(Op::Fuse),
+            "trace" => ctx.emit(Op::Trace),
             _ => ctx.emit(Op::Nop),
         },
 
@@ -488,6 +494,16 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             match name.as_str() {
                 "learn" => ctx.emit(Op::Call("learn".into())),
                 "seed" => ctx.emit(Op::Call("seed".into())),
+                // Reasoning & debug commands with arguments
+                "inspect" => ctx.emit(Op::Inspect),
+                "assert" => ctx.emit(Op::Assert),
+                "typeof" => ctx.emit(Op::TypeOf),
+                "explain" => ctx.emit(Op::Explain),
+                "why" => {
+                    // why expects 2 chains: the arg is the second, need first from context
+                    // For single-arg form: explain origin of this chain
+                    ctx.emit(Op::Explain);
+                }
                 _ => ctx.emit(Op::Call(name.clone())),
             }
         }
@@ -524,17 +540,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             if let Some(rel_byte) = op.to_rel_byte() {
                 ctx.emit(Op::Edge(rel_byte));
             } else {
-                // Extended ops: Context, Contains, Intersects
-                // Map to semantic equivalents:
-                // Context(∂) → load both, LCA (context = shared ancestor)
-                // Contains(∪) → Edge with Member (0x01) reversed
-                // Intersects(∩) → Edge with Equiv (0x03)
-                match op {
-                    RelOp::Context => ctx.emit(Op::Lca),
-                    RelOp::Contains => ctx.emit(Op::Edge(0x01)),
-                    RelOp::Intersects => ctx.emit(Op::Edge(0x03)),
-                    _ => ctx.emit(Op::Nop),
-                }
+                // Only Context(∂) has no byte — semantic-only, use LCA
+                ctx.emit(Op::Lca);
             }
         }
 
@@ -543,13 +550,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             if let Some(rel_byte) = op.to_rel_byte() {
                 ctx.emit(Op::Query(rel_byte));
             } else {
-                // Extended query: use closest core relation
-                match op {
-                    RelOp::Context => ctx.emit(Op::Query(0x07)), // Similar
-                    RelOp::Contains => ctx.emit(Op::Query(0x01)), // Member
-                    RelOp::Intersects => ctx.emit(Op::Query(0x03)), // Equiv
-                    _ => ctx.emit(Op::Nop),
-                }
+                // Only Context(∂) has no byte — query Similar (0x07) as semantic proxy
+                ctx.emit(Op::Query(0x07));
             }
         }
 
@@ -974,5 +976,43 @@ mod tests {
         let stmts = parse("fire == water").unwrap();
         let errors = validate(&stmts);
         assert!(errors.is_empty());
+    }
+
+    // ── Reasoning & Debug primitives ────────────────────────────────────────
+
+    #[test]
+    fn lower_trace_command() {
+        let stmts = parse("trace").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Trace));
+    }
+
+    #[test]
+    fn lower_inspect_command() {
+        let stmts = parse("inspect fire;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Load("fire".into())));
+        assert!(prog.ops.contains(&Op::Inspect));
+    }
+
+    #[test]
+    fn lower_assert_command() {
+        let stmts = parse("assert fire;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Assert));
+    }
+
+    #[test]
+    fn lower_typeof_command() {
+        let stmts = parse("typeof fire;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::TypeOf));
+    }
+
+    #[test]
+    fn lower_explain_command() {
+        let stmts = parse("explain fire;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Explain));
     }
 }

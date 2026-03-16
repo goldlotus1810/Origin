@@ -310,6 +310,50 @@ impl HomeRuntime {
                 VmEvent::Error(e) => {
                     output_text.push_str(&format!("[err:{:?}] ", e));
                 }
+                // ── Reasoning & Debug ────────────────────────────────────
+                VmEvent::TraceStep {
+                    op_name,
+                    stack_depth,
+                    pc,
+                } => {
+                    output_text
+                        .push_str(&format!("[trace pc={} op={} stack={}] ", pc, op_name, stack_depth));
+                }
+                VmEvent::InspectChain {
+                    hash,
+                    molecule_count,
+                    byte_size,
+                    is_empty,
+                } => {
+                    output_text.push_str(&format!(
+                        "[inspect hash=0x{:016X} molecules={} bytes={} empty={}] ",
+                        hash, molecule_count, byte_size, is_empty
+                    ));
+                }
+                VmEvent::AssertFailed => {
+                    output_text.push_str("[ASSERT FAILED: chain is empty] ");
+                }
+                VmEvent::TypeInfo {
+                    hash,
+                    classification,
+                } => {
+                    output_text.push_str(&format!(
+                        "[typeof 0x{:04X} = {}] ",
+                        hash & 0xFFFF,
+                        classification
+                    ));
+                }
+                VmEvent::WhyConnection { from, to } => {
+                    output_text.push_str(&format!(
+                        "[why 0x{:04X} ↔ 0x{:04X}] ",
+                        from & 0xFFFF,
+                        to & 0xFFFF
+                    ));
+                }
+                VmEvent::ExplainOrigin { hash } => {
+                    output_text
+                        .push_str(&format!("[explain origin of 0x{:016X}] ", hash));
+                }
             }
         }
 

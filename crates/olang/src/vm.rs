@@ -36,6 +36,31 @@ pub enum VmEvent {
     RequestStats,
     /// Error trong VM
     Error(VmError),
+    // ── Reasoning & Debug ────────────────────────────────────────────────
+    /// Execution trace step (opcode name, stack depth, pc)
+    TraceStep {
+        op_name: &'static str,
+        stack_depth: usize,
+        pc: usize,
+    },
+    /// Inspect chain structure (molecules count, hash, byte size)
+    InspectChain {
+        hash: u64,
+        molecule_count: usize,
+        byte_size: usize,
+        is_empty: bool,
+    },
+    /// Assert failed — chain was empty
+    AssertFailed,
+    /// Type classification of a chain's molecules
+    TypeInfo {
+        hash: u64,
+        classification: String,
+    },
+    /// Why: explain connection between two chains
+    WhyConnection { from: u64, to: u64 },
+    /// Explain: trace origin of a chain
+    ExplainOrigin { hash: u64 },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,6 +118,62 @@ impl VmStack {
 // ─────────────────────────────────────────────────────────────────────────────
 // OlangVM
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Classify chain by dominant molecule characteristics.
+///
+/// Maps ShapeBase to Unicode group categories:
+/// - SDF shapes (Sphere●, Capsule▬, Box■, Cone▲) → geometric primitives
+/// - CSG ops (Torus○, Union∪, Intersect∩, Subtract∖) → mathematical composition
+/// - High emotion valence → emoticon-like
+///
+/// Returns "SDF", "MATH", "EMOTICON", or "Mixed(SDF+MATH)".
+fn classify_chain(chain: &MolecularChain) -> String {
+    use crate::molecular::ShapeBase;
+    if chain.is_empty() {
+        return "Empty".into();
+    }
+    let (mut sdf, mut math, mut emo) = (0u32, 0u32, 0u32);
+    for mol in &chain.0 {
+        match mol.shape {
+            // SDF primitives — geometric shapes
+            ShapeBase::Sphere | ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Cone => {
+                sdf += 1
+            }
+            // CSG/Math ops — compositional
+            ShapeBase::Torus | ShapeBase::Union | ShapeBase::Intersect | ShapeBase::Subtract => {
+                math += 1
+            }
+        }
+        // Extreme valence → emoticon category
+        let v = mol.emotion.valence;
+        if !(80..=176).contains(&v) {
+            emo += 1;
+        }
+    }
+    let total = chain.len() as u32;
+    let dominant = [("SDF", sdf), ("MATH", math), ("EMOTICON", emo)];
+    let mut parts: Vec<&str> = dominant
+        .iter()
+        .filter(|(_, c)| *c * 2 >= total) // ≥50% of molecules
+        .map(|(name, _)| *name)
+        .collect();
+    if parts.is_empty() {
+        parts.push("Mixed");
+    }
+    if parts.len() == 1 {
+        parts[0].into()
+    } else {
+        let mut s = String::from("Mixed(");
+        for (i, p) in parts.iter().enumerate() {
+            if i > 0 {
+                s.push('+');
+            }
+            s.push_str(p);
+        }
+        s.push(')');
+        s
+    }
+}
 
 /// OlangVM — stack machine thực thi OlangProgram.
 pub struct OlangVM {
@@ -362,6 +443,112 @@ impl OlangVM {
                         // ∞-1 = đúng → push back
                         let _ = stack.push(chain);
                     }
+                }
+
+                Op::Trace => {
+                    // Toggle tracing: emit a trace event for current state
+                    events.push(VmEvent::TraceStep {
+                        op_name: "TRACE",
+                        stack_depth: stack.data.len(),
+                        pc: pc - 1,
+                    });
+                }
+
+                Op::Inspect => {
+                    let chain = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    let bytes = chain.to_bytes();
+                    events.push(VmEvent::InspectChain {
+                        hash: chain.chain_hash(),
+                        molecule_count: chain.len(),
+                        byte_size: bytes.len(),
+                        is_empty: chain.is_empty(),
+                    });
+                    // Push back so chain is still available
+                    let _ = stack.push(chain);
+                }
+
+                Op::Assert => {
+                    let chain = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    if chain.is_empty() {
+                        events.push(VmEvent::AssertFailed);
+                    }
+                    // Push back regardless
+                    let _ = stack.push(chain);
+                }
+
+                Op::TypeOf => {
+                    let chain = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    // Classify based on molecule bytes
+                    let classification = classify_chain(&chain);
+                    events.push(VmEvent::TypeInfo {
+                        hash: chain.chain_hash(),
+                        classification,
+                    });
+                    let _ = stack.push(chain);
+                }
+
+                Op::Why => {
+                    let b = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    let a = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    events.push(VmEvent::WhyConnection {
+                        from: a.chain_hash(),
+                        to: b.chain_hash(),
+                    });
+                    // Push LCA as result (their common ancestor = their connection)
+                    let result = if a.is_empty() || b.is_empty() {
+                        if !a.is_empty() {
+                            a
+                        } else {
+                            b
+                        }
+                    } else {
+                        lca(&a, &b)
+                    };
+                    let _ = stack.push(result);
+                }
+
+                Op::Explain => {
+                    let chain = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    events.push(VmEvent::ExplainOrigin {
+                        hash: chain.chain_hash(),
+                    });
+                    let _ = stack.push(chain);
                 }
 
                 Op::Halt => {
@@ -683,5 +870,137 @@ mod tests {
             .events
             .iter()
             .any(|e| matches!(e, VmEvent::TriggerDream)));
+    }
+
+    // ── Reasoning & Debug primitives ────────────────────────────────────────
+
+    #[test]
+    fn execute_trace() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Trace).push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result
+            .events
+            .iter()
+            .any(|e| matches!(e, VmEvent::TraceStep { .. })));
+    }
+
+    #[test]
+    fn execute_inspect() {
+        if skip() {
+            return;
+        }
+        let chain = encode_codepoint(0x1F525); // 🔥
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(chain))
+            .push_op(Op::Inspect)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let has_inspect = result.events.iter().any(|e| {
+            matches!(
+                e,
+                VmEvent::InspectChain {
+                    is_empty: false,
+                    ..
+                }
+            )
+        });
+        assert!(has_inspect, "INSPECT phải emit InspectChain event");
+        // Chain should still be on stack (inspect doesn't consume)
+        assert_eq!(result.stack_depth, 1);
+    }
+
+    #[test]
+    fn execute_assert_pass() {
+        if skip() {
+            return;
+        }
+        let chain = encode_codepoint(0x1F525);
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(chain))
+            .push_op(Op::Assert)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        // No AssertFailed since chain is non-empty
+        assert!(!result
+            .events
+            .iter()
+            .any(|e| matches!(e, VmEvent::AssertFailed)));
+    }
+
+    #[test]
+    fn execute_assert_fail() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(MolecularChain::empty()))
+            .push_op(Op::Assert)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(result
+            .events
+            .iter()
+            .any(|e| matches!(e, VmEvent::AssertFailed)));
+    }
+
+    #[test]
+    fn execute_typeof() {
+        if skip() {
+            return;
+        }
+        let chain = encode_codepoint(0x1F525);
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(chain))
+            .push_op(Op::TypeOf)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result
+            .events
+            .iter()
+            .any(|e| matches!(e, VmEvent::TypeInfo { .. })));
+    }
+
+    #[test]
+    fn execute_explain() {
+        if skip() {
+            return;
+        }
+        let chain = encode_codepoint(0x1F525);
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(chain))
+            .push_op(Op::Explain)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result
+            .events
+            .iter()
+            .any(|e| matches!(e, VmEvent::ExplainOrigin { .. })));
+        // Chain still on stack
+        assert_eq!(result.stack_depth, 1);
+    }
+
+    #[test]
+    fn execute_why() {
+        if skip() {
+            return;
+        }
+        let fire = encode_codepoint(0x1F525);
+        let water = encode_codepoint(0x1F4A7);
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(fire))
+            .push_op(Op::Push(water))
+            .push_op(Op::Why)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result
+            .events
+            .iter()
+            .any(|e| matches!(e, VmEvent::WhyConnection { .. })));
+        // LCA result on stack
+        assert_eq!(result.stack_depth, 1);
     }
 }
