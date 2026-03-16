@@ -10,6 +10,7 @@
 
 extern crate alloc;
 
+pub mod hash;
 pub mod molecular;
 pub mod lca;
 pub mod encoder;

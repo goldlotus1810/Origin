@@ -12,3 +12,5 @@ ucd     = { workspace = true }
 olang   = { workspace = true, features = ["std"] }
 agents  = { workspace = true, features = ["std"] }
 runtime = { workspace = true, features = ["std"] }
+silk    = { workspace = true }
+vsdf    = { workspace = true }

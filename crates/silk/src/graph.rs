@@ -263,6 +263,16 @@ impl SilkGraph {
         self.edges.iter().filter(|e| e.kind.is_structural()).count()
     }
 
+    /// Số unique nodes (distinct from/to hashes).
+    pub fn node_count(&self) -> usize {
+        let mut nodes = alloc::collections::BTreeSet::new();
+        for e in &self.edges {
+            nodes.insert(e.from_hash);
+            nodes.insert(e.to_hash);
+        }
+        nodes.len()
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
 
     fn find_edge_idx(&self, from: u64, to: u64, kind: EdgeKind) -> Option<usize> {

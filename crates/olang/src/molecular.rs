@@ -257,14 +257,7 @@ impl MolecularChain {
 
     /// FNV-1a hash — dùng trong Registry và reverse index.
     pub fn chain_hash(&self) -> u64 {
-        const OFFSET: u64 = 0xcbf29ce484222325;
-        const PRIME:  u64 = 0x100000001b3;
-        let mut h = OFFSET;
-        for b in self.to_bytes() {
-            h ^= b as u64;
-            h  = h.wrapping_mul(PRIME);
-        }
-        h
+        crate::hash::fnv1a(&self.to_bytes())
     }
 
     /// Similarity với chain khác ∈ [0.0, 1.0].

@@ -143,6 +143,84 @@ fn main() {
         println!("  {} [{:3}→{:3}] {}", ok, truth, predicted, short);
     }
 
+    // Benchmark 3: Per-component benchmarks (lookup/LCA/Silk/FFR)
+    println!();
+    println!("── Component Benchmarks ──────────────────────────");
+
+    // 3a. UCD Lookup
+    {
+        let cps: Vec<u32> = vec![0x1F525, 0x1F4A7, 0x2744, 0x1F9E0, 0x2764, 0x1F60A, 0x1F62D, 0x1F4AA];
+        let t = Instant::now();
+        let iters = 10000;
+        for _ in 0..iters {
+            for &cp in &cps {
+                let _ = olang::encoder::encode_codepoint(cp);
+            }
+        }
+        let elapsed = t.elapsed();
+        let ops = (iters * cps.len()) as f64 / elapsed.as_secs_f64();
+        println!("UCD lookup   : {:.0} ops/s ({:.1}µs per batch of {})", ops, elapsed.as_micros() as f64 / iters as f64, cps.len());
+    }
+
+    // 3b. LCA
+    {
+        let c1 = olang::encoder::encode_codepoint(0x1F525);
+        let c2 = olang::encoder::encode_codepoint(0x1F4A7);
+        let t = Instant::now();
+        let iters = 10000;
+        for _ in 0..iters {
+            let _ = olang::lca::lca(&c1, &c2);
+        }
+        let elapsed = t.elapsed();
+        let ops = iters as f64 / elapsed.as_secs_f64();
+        println!("LCA          : {:.0} ops/s ({:.1}µs per call)", ops, elapsed.as_micros() as f64 / iters as f64);
+    }
+
+    // 3c. Silk co_activate
+    {
+        use silk::graph::SilkGraph;
+        use silk::edge::EmotionTag;
+
+        let mut graph = SilkGraph::new();
+        let t = Instant::now();
+        let iters = 10000;
+        for i in 0..iters {
+            graph.co_activate(
+                i as u64, (i + 1) as u64,
+                EmotionTag::NEUTRAL,
+                0.5, i as i64,
+            );
+        }
+        let elapsed = t.elapsed();
+        let ops = iters as f64 / elapsed.as_secs_f64();
+        println!("Silk activate: {:.0} ops/s ({:.1}µs per call)", ops, elapsed.as_micros() as f64 / iters as f64);
+    }
+
+    // 3d. FFR point generation
+    {
+        let t = Instant::now();
+        let iters = 100000u64;
+        for n in 0..iters {
+            let _ = vsdf::ffr::FfrPoint::at(n);
+        }
+        let elapsed = t.elapsed();
+        let ops = iters as f64 / elapsed.as_secs_f64();
+        println!("FFR point    : {:.0} ops/s ({:.1}µs per 1000)", ops, elapsed.as_micros() as f64 / (iters as f64 / 1000.0));
+    }
+
+    // 3e. chain_hash
+    {
+        let chain = olang::encoder::encode_codepoint(0x1F525);
+        let t = Instant::now();
+        let iters = 100000;
+        for _ in 0..iters {
+            let _ = chain.chain_hash();
+        }
+        let elapsed = t.elapsed();
+        let ops = iters as f64 / elapsed.as_secs_f64();
+        println!("chain_hash   : {:.0} ops/s ({:.1}ns per call)", ops, elapsed.as_nanos() as f64 / iters as f64);
+    }
+
     println!();
     println!("○ Done");
 }

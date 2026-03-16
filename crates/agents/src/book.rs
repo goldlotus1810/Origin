@@ -8,7 +8,7 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 
 use silk::edge::EmotionTag;
 use context::emotion::word_affect;
@@ -119,29 +119,9 @@ pub struct BookStats {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Tách câu theo dấu . ! ? — UTF-8 aware.
+/// Delegate to shared split_sentences in learning module.
 fn split_sentences(text: &str) -> Vec<String> {
-    let mut sentences = Vec::new();
-    let mut current   = String::new();
-
-    for ch in text.chars() {
-        current.push(ch);
-        if matches!(ch, '.' | '!' | '?' | '。' | '！' | '？') {
-            let trimmed = current.trim().to_string();
-            if !trimmed.is_empty() {
-                sentences.push(trimmed);
-            }
-            current.clear();
-        }
-    }
-
-    // Phần còn lại không có dấu câu
-    let trimmed = current.trim().to_string();
-    if !trimmed.is_empty() {
-        sentences.push(trimmed);
-    }
-
-    sentences
+    crate::learning::split_sentences(text)
 }
 
 /// Tính EmotionTag cho một câu.

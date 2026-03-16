@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use alloc::string::String;
 
 use crate::molecular::MolecularChain;
-use crate::writer::{MAGIC, VERSION, HEADER_SIZE, RT_NODE, RT_EDGE, RT_ALIAS};
+use crate::writer::{MAGIC, VERSION, VERSION_V03, HEADER_SIZE, RT_NODE, RT_EDGE, RT_ALIAS, RT_AMEND};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsed records
@@ -46,6 +46,18 @@ pub struct ParsedAlias {
     pub file_offset: u64,
 }
 
+/// Amendment record đã parse — append-only rollback.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedAmend {
+    /// Offset của record bị supersede.
+    pub target_offset: u64,
+    /// Lý do amend.
+    pub reason:        String,
+    pub timestamp:     i64,
+    pub file_offset:   u64,
+}
+
 /// Lỗi khi parse.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {
@@ -78,7 +90,10 @@ impl<'a> OlangReader<'a> {
     pub fn new(data: &'a [u8]) -> Result<Self, ParseError> {
         if data.len() < HEADER_SIZE { return Err(ParseError::TooShort); }
         if data[0..4] != MAGIC   { return Err(ParseError::BadMagic); }
-        if data[4] != VERSION       { return Err(ParseError::UnsupportedVersion); }
+        // Accept both v0.03 and v0.04 (backward compatible)
+        if data[4] != VERSION && data[4] != VERSION_V03 {
+            return Err(ParseError::UnsupportedVersion);
+        }
 
         let created_at = i64::from_le_bytes(data[5..13].try_into().unwrap());
         Ok(Self { data, created_at })
@@ -87,11 +102,12 @@ impl<'a> OlangReader<'a> {
     /// Timestamp khi file được tạo.
     pub fn created_at(&self) -> i64 { self.created_at }
 
-    /// Parse tất cả records.
+    /// Parse tất cả records (v0.03 + v0.04 compatible).
     pub fn parse_all(&self) -> Result<ParsedFile, ParseError> {
         let mut nodes:   Vec<ParsedNode>  = Vec::new();
         let mut edges:   Vec<ParsedEdge>  = Vec::new();
         let mut aliases: Vec<ParsedAlias> = Vec::new();
+        let mut amends:  Vec<ParsedAmend> = Vec::new();
 
         let mut pos = HEADER_SIZE;
 
@@ -152,11 +168,30 @@ impl<'a> OlangReader<'a> {
                     aliases.push(ParsedAlias { name, chain_hash: hash, timestamp: ts, file_offset: record_offset });
                 }
 
+                RT_AMEND => {
+                    // [target_offset: 8][reason_len: u8][reason: N][ts: 8]
+                    if pos + 8 + 1 > self.data.len() { return Err(ParseError::Truncated); }
+                    let target = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
+                    let reason_len = self.data[pos] as usize; pos += 1;
+
+                    if pos + reason_len + 8 > self.data.len() { return Err(ParseError::Truncated); }
+
+                    let reason_bytes = &self.data[pos..pos+reason_len]; pos += reason_len;
+                    let reason = String::from_utf8_lossy(reason_bytes).into_owned();
+                    let ts = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
+
+                    amends.push(ParsedAmend { target_offset: target, reason, timestamp: ts, file_offset: record_offset });
+                }
+
                 other => return Err(ParseError::UnknownRecordType(other)),
             }
         }
 
-        Ok(ParsedFile { nodes, edges, aliases, created_at: self.created_at })
+        // Build amended_offsets set for filtering
+        let amended_offsets: alloc::collections::BTreeSet<u64> =
+            amends.iter().map(|a| a.target_offset).collect();
+
+        Ok(ParsedFile { nodes, edges, aliases, amends, amended_offsets, created_at: self.created_at })
     }
 }
 
@@ -183,6 +218,7 @@ impl<'a> OlangReader<'a> {
         let mut nodes:   Vec<ParsedNode>  = Vec::new();
         let mut edges:   Vec<ParsedEdge>  = Vec::new();
         let mut aliases: Vec<ParsedAlias> = Vec::new();
+        let mut amends:  Vec<ParsedAmend> = Vec::new();
 
         let mut pos = HEADER_SIZE;
         let mut error = None;
@@ -242,6 +278,17 @@ impl<'a> OlangReader<'a> {
                     aliases.push(ParsedAlias { name, chain_hash: hash, timestamp: ts, file_offset: record_offset });
                 }
 
+                RT_AMEND => {
+                    if pos + 8 + 1 > self.data.len() { error = Some(ParseError::Truncated); break; }
+                    let target = u64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
+                    let reason_len = self.data[pos] as usize; pos += 1;
+                    if pos + reason_len + 8 > self.data.len() { error = Some(ParseError::Truncated); break; }
+                    let reason_bytes = &self.data[pos..pos+reason_len]; pos += reason_len;
+                    let reason = String::from_utf8_lossy(reason_bytes).into_owned();
+                    let ts = i64::from_le_bytes(self.data[pos..pos+8].try_into().unwrap()); pos += 8;
+                    amends.push(ParsedAmend { target_offset: target, reason, timestamp: ts, file_offset: record_offset });
+                }
+
                 other => {
                     error = Some(ParseError::UnknownRecordType(other));
                     break;
@@ -249,8 +296,10 @@ impl<'a> OlangReader<'a> {
             }
         }
 
-        let records_recovered = nodes.len() + edges.len() + aliases.len();
-        let file = ParsedFile { nodes, edges, aliases, created_at: self.created_at };
+        let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len();
+        let amended_offsets: alloc::collections::BTreeSet<u64> =
+            amends.iter().map(|a| a.target_offset).collect();
+        let file = ParsedFile { nodes, edges, aliases, amends, amended_offsets, created_at: self.created_at };
         let info = RecoveryInfo {
             records_recovered,
             last_good_offset: pos,
@@ -264,9 +313,17 @@ impl<'a> OlangReader<'a> {
 /// Kết quả parse đầy đủ.
 #[allow(missing_docs)]
 pub struct ParsedFile {
+    /// Node records.
     pub nodes:      Vec<ParsedNode>,
+    /// Edge records.
     pub edges:      Vec<ParsedEdge>,
+    /// Alias records.
     pub aliases:    Vec<ParsedAlias>,
+    /// Amendment records (v0.04+).
+    pub amends:     Vec<ParsedAmend>,
+    /// Offsets đã bị amend — dùng để filter records.
+    pub amended_offsets: alloc::collections::BTreeSet<u64>,
+    /// Timestamp khi file được tạo.
     pub created_at: i64,
 }
 

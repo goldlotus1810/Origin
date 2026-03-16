@@ -333,12 +333,8 @@ impl HomeRuntime {
         let mut found: alloc::vec::Vec<(u64, silk::edge::EmotionTag, f32)> = alloc::vec::Vec::new();
 
         for w in words {
-            // FNV hash y hệt learn_text
-            let mut h = 0xcbf29ce484222325_u64;
-            for b in w.to_lowercase().bytes() {
-                h ^= b as u64;
-                h = h.wrapping_mul(0x100000001b3);
-            }
+            let low = w.to_lowercase();
+            let h = olang::hash::fnv1a_str(&low);
 
             // Walk từ node này → lấy neighbors có weight cao nhất
             let edges = self.learning.graph().edges_from(h);
@@ -520,6 +516,42 @@ impl HomeRuntime {
         self.process_input(input, ts)
     }
 
+
+    // ── Observability ─────────────────────────────────────────────────────────
+
+    /// Snapshot metrics cho observability.
+    pub fn metrics(&self) -> crate::metrics::RuntimeMetrics {
+        let stm = self.learning.stm();
+        let graph = self.learning.graph();
+        let stm_obs = stm.len();
+
+        // STM hit rate: observations with fire_count > 1
+        let hits = stm.all().iter().filter(|o| o.fire_count > 1).count();
+        let hit_rate = if stm_obs > 0 { hits as f32 / stm_obs as f32 } else { 0.0 };
+        let max_fire = stm.all().iter().map(|o| o.fire_count).max().unwrap_or(0);
+
+        // Silk density: edges / (N*(N-1)/2) where N = unique nodes
+        let edge_count = graph.len();
+        let node_count = graph.node_count();
+        let max_edges = if node_count > 1 { node_count * (node_count - 1) / 2 } else { 1 };
+        let density = edge_count as f32 / max_edges as f32;
+
+        let tone_str = alloc::format!("{:?}", self.learning.context().tone());
+
+        crate::metrics::RuntimeMetrics {
+            turns: self.turn_count,
+            stm_observations: stm_obs,
+            silk_edges: edge_count,
+            silk_density: density.min(1.0),
+            stm_hit_rate: hit_rate,
+            fx: self.learning.context().fx(),
+            tone: tone_str,
+            dream_cycles_est: if self.turn_count > 8 { (self.turn_count - 1) / 8 } else { 0 },
+            pending_bytes: self.pending_writes.len(),
+            saveable_edges: self.saveable_edges(),
+            stm_max_fire: max_fire,
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Persistence — save/load origin.olang

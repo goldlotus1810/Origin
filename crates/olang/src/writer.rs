@@ -44,8 +44,10 @@ use crate::molecular::MolecularChain;
 /// Magic bytes: "○LNG" = 0xE2 0x97 0x8B 0x4C (○ = U+25CB)
 pub const MAGIC: [u8; 4] = [0xE2, 0x97, 0x8B, 0x4C];
 
-/// Version hiện tại
-pub const VERSION: u8 = 0x03;
+/// Version hiện tại — v0.04 (thêm RT_AMEND)
+pub const VERSION: u8 = 0x04;
+/// Version trước — v0.03 (vẫn đọc được)
+pub const VERSION_V03: u8 = 0x03;
 
 /// Record type bytes
 /// Record type: Node
@@ -54,6 +56,13 @@ pub const RT_NODE:  u8 = 0x01;
 pub const RT_EDGE:  u8 = 0x02;
 /// Record type: Alias
 pub const RT_ALIAS: u8 = 0x03;
+/// Record type: Amendment — supersede a previous record (append-only rollback)
+///
+/// Format: [0x04][target_offset: 8][reason_len: u8][reason: N][timestamp: 8]
+/// Total: 1 + 8 + 1 + N + 8 = 18 + N bytes
+///
+/// QT8 compliant: không xóa record cũ — chỉ đánh dấu "đã thay thế".
+pub const RT_AMEND: u8 = 0x04;
 
 /// Header size: MAGIC(4) + VERSION(1) + CREATED(8) = 13 bytes
 pub const HEADER_SIZE: usize = 13;
@@ -165,6 +174,33 @@ impl OlangWriter {
         self.buf.push(name_bytes.len() as u8);
         self.buf.extend_from_slice(name_bytes);
         self.buf.extend_from_slice(&chain_hash.to_le_bytes());
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+
+        self.write_count += 1;
+        Ok(offset)
+    }
+
+    /// Ghi AmendRecord — append-only rollback.
+    ///
+    /// Supersede một record cũ tại `target_offset` với lý do.
+    /// QT8: record cũ VẪN CÒN trong file — chỉ bị đánh dấu amended.
+    pub fn append_amend(
+        &mut self,
+        target_offset: u64,
+        reason:        &str,
+        timestamp:     i64,
+    ) -> Result<u64, WriteError> {
+        let reason_bytes = reason.as_bytes();
+        if reason_bytes.len() > 255 {
+            return Err(WriteError::NameTooLong);
+        }
+
+        let offset = self.buf.len() as u64;
+
+        self.buf.push(RT_AMEND);
+        self.buf.extend_from_slice(&target_offset.to_le_bytes());
+        self.buf.push(reason_bytes.len() as u8);
+        self.buf.extend_from_slice(reason_bytes);
         self.buf.extend_from_slice(&timestamp.to_le_bytes());
 
         self.write_count += 1;

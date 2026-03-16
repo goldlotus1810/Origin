@@ -244,8 +244,9 @@ fn default_crisis_response() -> String {
     context::intent::crisis_text_vi()
 }
 
+/// Delegate to shared implementation in context::emotion.
 fn contains_any(text: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|&n| text.contains(n))
+    context::emotion::contains_any(text, needles)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

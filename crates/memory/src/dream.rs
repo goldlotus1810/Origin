@@ -30,6 +30,11 @@ use crate::proposal::{AAM, DreamProposal, AAMDecision};
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Config cho DreamCycle.
+///
+/// α, β, γ = scoring weights cho cluster_score:
+///   score = α×chain_sim + β×hebbian_weight + γ×co_activation_ratio
+///
+/// Constraint: α + β + γ = 1.0 (normalized tại construction).
 pub struct DreamConfig {
     /// Số observations tối đa để xét (top-N by fire_count)
     pub scan_top_n:       usize,
@@ -39,6 +44,27 @@ pub struct DreamConfig {
     pub min_cluster_size:  usize,
     /// Depth của tree hiện tại (ảnh hưởng Fibonacci threshold)
     pub tree_depth:        usize,
+    /// α — weight cho chain similarity (default 0.3)
+    pub alpha: f32,
+    /// β — weight cho Hebbian weight (default 0.4)
+    pub beta:  f32,
+    /// γ — weight cho co-activation ratio (default 0.3)
+    pub gamma: f32,
+}
+
+impl DreamConfig {
+    /// Tạo DreamConfig với custom α, β, γ.
+    ///
+    /// Tự normalize nếu tổng ≠ 1.0.
+    pub fn with_weights(alpha: f32, beta: f32, gamma: f32) -> Self {
+        let sum = alpha + beta + gamma;
+        let (a, b, g) = if sum > 0.001 {
+            (alpha / sum, beta / sum, gamma / sum)
+        } else {
+            (0.3, 0.4, 0.3) // fallback to default
+        };
+        Self { alpha: a, beta: b, gamma: g, ..Default::default() }
+    }
 }
 
 impl Default for DreamConfig {
@@ -48,6 +74,9 @@ impl Default for DreamConfig {
             cluster_threshold: 0.6,
             min_cluster_size:  3,
             tree_depth:        3,
+            alpha:             0.3,
+            beta:              0.4,
+            gamma:             0.3,
         }
     }
 }
@@ -231,7 +260,7 @@ impl DreamCycle {
 
     /// Tính cluster_score(A, B).
     ///
-    /// score = 0.3×chain_sim + 0.4×hebbian_weight + 0.3×co_act_ratio
+    /// score = α×chain_sim + β×hebbian_weight + γ×co_act_ratio
     fn cluster_score(
         &self,
         a:         &Observation,
@@ -251,7 +280,7 @@ impl DreamCycle {
         // Co-activation ratio
         let co_score = graph.cluster_score_partial(ha, hb, max_fire);
 
-        0.3 * chain_sim + 0.4 * hebbian + 0.3 * co_score
+        self.config.alpha * chain_sim + self.config.beta * hebbian + self.config.gamma * co_score
     }
 }
 
@@ -348,6 +377,7 @@ mod tests {
         let dream = DreamCycle::new(DreamConfig {
             scan_top_n: 32, cluster_threshold: 0.6,
             min_cluster_size: 3, tree_depth: 3,
+            ..Default::default()
         });
         let result = dream.run(&stm, &graph, 1000);
         // scanned=2 < min_cluster_size=3 → no proposals
@@ -368,6 +398,7 @@ mod tests {
         let dream = DreamCycle::new(DreamConfig {
             scan_top_n: 32, cluster_threshold: 0.25,
             min_cluster_size: 3, tree_depth: 2,
+            ..Default::default()
         });
         let result = dream.run(&stm, &graph, 1000);
         assert!(result.scanned >= 4, "scanned={}", result.scanned);
@@ -388,6 +419,7 @@ mod tests {
         let dream = DreamCycle::new(DreamConfig {
             scan_top_n: 32, cluster_threshold: 0.2,
             min_cluster_size: 3, tree_depth: 2,
+            ..Default::default()
         });
         let result = dream.run(&stm, &graph, 1000);
 
@@ -413,6 +445,7 @@ mod tests {
         let dream = DreamCycle::new(DreamConfig {
             scan_top_n: 32, cluster_threshold: 0.2,
             min_cluster_size: 3, tree_depth: 2,
+            ..Default::default()
         });
         let result = dream.run(&stm, &graph, 1000);
         assert!(result.scanned >= 4, "scanned={}", result.scanned);
@@ -446,6 +479,7 @@ mod tests {
         let dream = DreamCycle::new(DreamConfig {
             scan_top_n: 32, cluster_threshold: 0.4,
             min_cluster_size: 2, tree_depth: 2,
+            ..Default::default()
         });
         let result = dream.run(&stm, &graph, 1000);
 
@@ -468,6 +502,7 @@ mod tests {
         let dream = DreamCycle::new(DreamConfig {
             scan_top_n: 32, cluster_threshold: 0.7, // high threshold
             min_cluster_size: 2, tree_depth: 2,
+            ..Default::default()
         });
         let result = dream.run(&stm, &graph, 1000);
         // Với threshold cao=0.7 và không có Hebbian

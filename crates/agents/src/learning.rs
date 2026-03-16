@@ -512,8 +512,8 @@ mod tests {
 
 use alloc::string::ToString;
 
-/// Tách văn bản thành câu theo dấu . ! ?
-fn split_sentences(text: &str) -> alloc::vec::Vec<alloc::string::String> {
+/// Tách văn bản thành câu theo dấu . ! ? — shared across agents crate.
+pub(crate) fn split_sentences(text: &str) -> alloc::vec::Vec<alloc::string::String> {
     let mut sentences = alloc::vec::Vec::new();
     let mut cur = alloc::string::String::new();
     for ch in text.chars() {
@@ -543,14 +543,9 @@ fn content_words(text: &str) -> alloc::vec::Vec<alloc::string::String> {
         .collect()
 }
 
-/// Hash ổn định cho một từ.
+/// Hash ổn định cho một từ — dùng shared FNV-1a.
 fn word_hash(word: &str) -> u64 {
-    let mut h = 0xcbf29ce484222325_u64; // FNV offset
-    for b in word.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3); // FNV prime
-    }
-    h
+    olang::hash::fnv1a_str(word)
 }
 
 /// Stop words — không tạo Silk node riêng.
@@ -568,20 +563,15 @@ fn is_stop_word(w: &str) -> bool {
     )
 }
 
-/// Hash cho frequency range (audio learning).
+/// Hash cho frequency range (audio learning) — namespace 0xAA.
 fn frequency_hash(freq_hz: f32) -> u64 {
     // Quantize to octave bands: 20-40, 40-80, ..., 10240-20480
     let octave = if freq_hz <= 0.0 { 0u8 }
     else { ((libm::log2f(freq_hz / 20.0).max(0.0)) as u8).min(10) };
-    let mut h = 0xcbf29ce484222325_u64;
-    h ^= 0xAA_u64; // namespace: audio
-    h = h.wrapping_mul(0x100000001b3);
-    h ^= octave as u64;
-    h = h.wrapping_mul(0x100000001b3);
-    h
+    olang::hash::fnv1a_namespaced(0xAA, &[octave])
 }
 
-/// Hash cho sensor kind (sensor learning).
+/// Hash cho sensor kind (sensor learning) — namespace 0xBB.
 fn sensor_kind_hash(kind: &SensorKind) -> u64 {
     let tag = match kind {
         SensorKind::Temperature => 0x01u8,
@@ -591,12 +581,7 @@ fn sensor_kind_hash(kind: &SensorKind) -> u64 {
         SensorKind::Sound       => 0x05,
         SensorKind::Power       => 0x06,
     };
-    let mut h = 0xcbf29ce484222325_u64;
-    h ^= 0xBB_u64; // namespace: sensor
-    h = h.wrapping_mul(0x100000001b3);
-    h ^= tag as u64;
-    h = h.wrapping_mul(0x100000001b3);
-    h
+    olang::hash::fnv1a_namespaced(0xBB, &[tag])
 }
 
 #[cfg(test)]
