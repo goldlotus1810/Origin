@@ -44,6 +44,10 @@ pub enum IntentKind {
     Confirm,
     /// Từ chối / phản đối (no, không, từ chối...)
     Deny,
+    /// Lệnh học trực tiếp — "hãy học cái này", "ghi nhớ" → QR promotion
+    LearnCommand,
+    /// Xác nhận kiến thức — "cái này đúng" → promote last learned → QR
+    ConfirmKnowledge,
 }
 
 impl IntentKind {

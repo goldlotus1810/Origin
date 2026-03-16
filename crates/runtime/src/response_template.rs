@@ -60,6 +60,12 @@ pub fn render(p: &ResponseParams) -> String {
         IntentAction::UserConfirm => confirm_text(p.valence),
 
         IntentAction::UserDeny => deny_text(p.valence),
+
+        // ForceLearnQR and ConfirmLearnQR are handled directly in process_input
+        // before reaching render() — these arms are unreachable but required.
+        IntentAction::ForceLearnQR | IntentAction::ConfirmLearnQR => {
+            proceed_text(p.tone, p.valence, p.original.as_deref())
+        }
     }
 }
 

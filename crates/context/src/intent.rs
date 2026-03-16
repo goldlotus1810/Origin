@@ -54,6 +54,10 @@ const SCORE_MEDIUM_KW: f32 = 0.40;
 const SCORE_HIGH_KW: f32 = 0.50;
 /// Score command.
 const SCORE_CMD_KW: f32 = 0.55;
+/// Score learn command — cao hơn thường vì user rõ ý định.
+const SCORE_LEARN_CMD_KW: f32 = 0.70;
+/// Score confirm knowledge.
+const SCORE_CONFIRM_KNOWLEDGE_KW: f32 = 0.65;
 
 /// Ngưỡng valence "rất buồn" → crisis amplifier.
 const V_CRISIS_LOW: f32 = -0.70;
@@ -239,6 +243,47 @@ static KW_COMMAND: &[&str] = &[
     "play music",
 ];
 
+/// Keywords cho lệnh học trực tiếp — user muốn HomeOS ghi nhớ vĩnh viễn (QR).
+static KW_LEARN_COMMAND: &[&str] = &[
+    // VI
+    "hãy học",
+    "ghi nhớ",
+    "nhớ rằng",
+    "nhớ điều này",
+    "học điều này",
+    "ghi lại",
+    "lưu lại",
+    "hãy nhớ",
+    "ghi vào qr",
+    // EN
+    "remember this",
+    "learn this",
+    "memorize",
+    "store this",
+    "save this fact",
+    "remember that",
+];
+
+/// Keywords cho xác nhận kiến thức — "cái này đúng" → promote QR.
+static KW_CONFIRM_KNOWLEDGE: &[&str] = &[
+    // VI
+    "cái này đúng",
+    "điều này đúng",
+    "đúng rồi đấy",
+    "chính xác",
+    "đúng vậy",
+    "đúng thế",
+    "kiến thức này đúng",
+    "thông tin đúng",
+    // EN
+    "that's correct",
+    "this is right",
+    "that's right",
+    "correct",
+    "exactly right",
+    "confirmed",
+];
+
 static KW_CONFIRM: &[&str] = &[
     // VI
     "đồng ý",
@@ -348,7 +393,7 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
     let lo = text.to_lowercase();
     let words = lo.split_whitespace().count();
 
-    let mut buckets: [(IntentKind, Bucket); 14] = [
+    let mut buckets: [(IntentKind, Bucket); 16] = [
         (IntentKind::Learn, Bucket::default()),
         (IntentKind::Inform, Bucket::default()),
         (IntentKind::Research, Bucket::default()),
@@ -363,6 +408,8 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
         (IntentKind::Chat, Bucket::default()),
         (IntentKind::Confirm, Bucket::default()),
         (IntentKind::Deny, Bucket::default()),
+        (IntentKind::LearnCommand, Bucket::default()),
+        (IntentKind::ConfirmKnowledge, Bucket::default()),
     ];
 
     macro_rules! add {
@@ -442,6 +489,26 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
     for kw in KW_DENY {
         if lo.contains(kw) {
             add!(IntentKind::Deny, SCORE_CMD_KW, &format!("kw:{}", kw));
+        }
+    }
+    // LearnCommand — "hãy học", "ghi nhớ", "nhớ rằng"
+    for kw in KW_LEARN_COMMAND {
+        if lo.contains(kw) {
+            add!(
+                IntentKind::LearnCommand,
+                SCORE_LEARN_CMD_KW,
+                &format!("kw:{}", kw)
+            );
+        }
+    }
+    // ConfirmKnowledge — "cái này đúng", "chính xác"
+    for kw in KW_CONFIRM_KNOWLEDGE {
+        if lo.contains(kw) {
+            add!(
+                IntentKind::ConfirmKnowledge,
+                SCORE_CONFIRM_KNOWLEDGE_KW,
+                &format!("kw:{}", kw)
+            );
         }
     }
 
@@ -526,6 +593,10 @@ pub enum IntentAction {
     UserConfirm,
     /// User từ chối — gửi deny signal tới UserAuthority
     UserDeny,
+    /// User ra lệnh học → ghi nội dung vào QR (bỏ qua Dream cycle)
+    ForceLearnQR,
+    /// User xác nhận kiến thức → promote last learned item lên QR
+    ConfirmLearnQR,
 }
 
 /// Quyết định hành động từ IntentEstimate + emotional state.
@@ -539,6 +610,8 @@ pub fn decide_action(est: &IntentEstimate, cur_v: f32) -> IntentAction {
         IntentKind::Heal => IntentAction::EmpathizeFirst,
         IntentKind::Confirm => IntentAction::UserConfirm,
         IntentKind::Deny => IntentAction::UserDeny,
+        IntentKind::LearnCommand => IntentAction::ForceLearnQR,
+        IntentKind::ConfirmKnowledge => IntentAction::ConfirmLearnQR,
         _ => {
             if est.need_clarify {
                 IntentAction::AddClarify {
@@ -777,5 +850,60 @@ mod tests {
         // Crisis keywords + confirm → crisis wins (priority via mood amplifier)
         let e = estimate_intent("tôi không muốn sống nữa, kết thúc tất cả", -0.8, 0.3);
         assert_eq!(e.primary, IntentKind::Crisis, "Crisis overrides everything");
+    }
+
+    // ── LearnCommand / ConfirmKnowledge ──────────────────────────────────────
+
+    #[test]
+    fn learn_command_vi() {
+        let e = estimate_intent("hãy học điều này đi", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::LearnCommand);
+    }
+
+    #[test]
+    fn learn_command_ghi_nho() {
+        let e = estimate_intent("ghi nhớ thông tin về Scarlett", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::LearnCommand);
+    }
+
+    #[test]
+    fn learn_command_en() {
+        let e = estimate_intent("remember this fact please", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::LearnCommand);
+    }
+
+    #[test]
+    fn learn_command_action() {
+        let e = estimate_intent("hãy học cái này", 0.3, 0.5);
+        assert_eq!(decide_action(&e, 0.3), IntentAction::ForceLearnQR);
+    }
+
+    #[test]
+    fn confirm_knowledge_vi() {
+        let e = estimate_intent("cái này đúng rồi", 0.3, 0.5);
+        assert_eq!(
+            e.primary,
+            IntentKind::ConfirmKnowledge,
+            "actual: {:?}",
+            e.primary
+        );
+    }
+
+    #[test]
+    fn confirm_knowledge_chinh_xac() {
+        let e = estimate_intent("thông tin chính xác lắm", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::ConfirmKnowledge);
+    }
+
+    #[test]
+    fn confirm_knowledge_en() {
+        let e = estimate_intent("that's correct information", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::ConfirmKnowledge);
+    }
+
+    #[test]
+    fn confirm_knowledge_action() {
+        let e = estimate_intent("điều này đúng rồi", 0.3, 0.5);
+        assert_eq!(decide_action(&e, 0.3), IntentAction::ConfirmLearnQR);
     }
 }

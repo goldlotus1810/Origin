@@ -438,6 +438,122 @@ impl HomeRuntime {
         }
     }
 
+    // ── QR Promotion — user-directed learning ─────────────────────────────────
+
+    /// User ra lệnh "hãy học cái này" → ghi chain hiện tại thành QR node.
+    ///
+    /// Bypass Dream cycle — user authority = direct QR write.
+    /// QT9: ghi file TRƯỚC (pending_writes), cập nhật RAM SAU.
+    fn force_learn_qr(
+        &mut self,
+        chain: &olang::molecular::MolecularChain,
+        emotion: silk::edge::EmotionTag,
+        ts: i64,
+    ) -> Response {
+        use olang::writer::OlangWriter;
+
+        if chain.is_empty() {
+            return Response {
+                text: String::from("Không có nội dung để ghi nhớ."),
+                tone: ResponseTone::Gentle,
+                fx: self.learning.context().fx(),
+                kind: ResponseKind::Natural,
+            };
+        }
+
+        // Ghi QR node vào pending_writes (QT9: file TRƯỚC)
+        let mut writer = OlangWriter::new_append();
+        let _ = writer.append_node(chain, 1, true, ts); // layer=1 (QR), is_qr=true
+
+        // Serialize Silk edges liên quan
+        let hash = chain.chain_hash();
+        for edge in self.learning.graph().edges_from(hash) {
+            if edge.weight >= 0.10 {
+                writer.append_edge(edge.from_hash, edge.to_hash, edge.kind.as_byte(), ts);
+            }
+        }
+
+        self.pending_writes.extend_from_slice(writer.as_bytes());
+
+        // Cập nhật Registry (RAM SAU)
+        self.registry.insert(chain, 1, 0, ts, true);
+
+        // Tăng fire_count trong STM
+        self.learning
+            .stm_mut()
+            .push(chain.clone(), emotion, ts);
+
+        let fx = self.learning.context().fx();
+        Response {
+            text: format!(
+                "○ Đã ghi nhớ (QR). chain_hash=0x{:08X}, {} molecules.",
+                hash & 0xFFFFFFFF,
+                chain.len()
+            ),
+            tone: ResponseTone::Reinforcing,
+            fx,
+            kind: ResponseKind::Natural,
+        }
+    }
+
+    /// User nói "cái này đúng" → promote observation gần nhất trong STM lên QR.
+    ///
+    /// Tìm observation có fire_count cao nhất trong STM → ghi QR.
+    fn confirm_learn_qr(&mut self, ts: i64) -> Response {
+        use olang::writer::OlangWriter;
+
+        // Tìm observation gần nhất (timestamp cao nhất) trong STM
+        let best = self
+            .learning
+            .stm()
+            .all()
+            .iter()
+            .max_by_key(|o| o.timestamp)
+            .cloned();
+
+        let obs = match best {
+            Some(o) => o,
+            None => {
+                return Response {
+                    text: String::from("Chưa có kiến thức nào để xác nhận. Hãy nói gì đó trước."),
+                    tone: ResponseTone::Gentle,
+                    fx: self.learning.context().fx(),
+                    kind: ResponseKind::Natural,
+                };
+            }
+        };
+
+        // Ghi QR node vào pending_writes
+        let mut writer = OlangWriter::new_append();
+        let _ = writer.append_node(&obs.chain, 1, true, ts);
+
+        let hash = obs.chain.chain_hash();
+
+        // Serialize related edges
+        for edge in self.learning.graph().edges_from(hash) {
+            if edge.weight >= 0.10 {
+                writer.append_edge(edge.from_hash, edge.to_hash, edge.kind.as_byte(), ts);
+            }
+        }
+
+        self.pending_writes.extend_from_slice(writer.as_bytes());
+
+        // Cập nhật Registry
+        self.registry.insert(&obs.chain, 1, 0, ts, true);
+
+        let fx = self.learning.context().fx();
+        Response {
+            text: format!(
+                "○ Xác nhận đúng → đã ghi QR. chain_hash=0x{:08X}, fire_count={}.",
+                hash & 0xFFFFFFFF,
+                obs.fire_count
+            ),
+            tone: ResponseTone::Reinforcing,
+            fx,
+            kind: ResponseKind::Natural,
+        }
+    }
+
     // ── Response generation ───────────────────────────────────────────────────
 
     /// Sinh fallback text khi không có original từ pipeline.
@@ -628,7 +744,10 @@ impl HomeRuntime {
                 fx,
                 kind: ResponseKind::Blocked,
             },
-            ProcessResult::Ok { emotion, .. } => {
+            ProcessResult::Ok {
+                ref chain,
+                emotion,
+            } => {
                 use context::intent::IntentAction;
                 use context::word_guide::affect_components;
 
@@ -637,6 +756,16 @@ impl HomeRuntime {
                 } else {
                     emotion.valence * emo_ctx_scale + raw_tag.valence * (1.0 - emo_ctx_scale)
                 };
+
+                // ── ForceLearnQR: user ra lệnh "hãy học" → ghi QR trực tiếp ──
+                if action == IntentAction::ForceLearnQR {
+                    return self.force_learn_qr(chain, emotion, ts);
+                }
+
+                // ── ConfirmLearnQR: "cái này đúng" → promote last STM → QR ──
+                if action == IntentAction::ConfirmLearnQR {
+                    return self.confirm_learn_qr(ts);
+                }
 
                 let original = match &action {
                     IntentAction::Proceed => {
@@ -2076,5 +2205,85 @@ mod integration_tests {
         assert!(resp.text.contains("Silk"), "should contain Silk status");
         assert!(resp.text.contains("Curve"), "should contain Curve status");
         assert!(resp.text.contains("Turns"), "should contain Turns");
+    }
+
+    // ── 9. Learning commands — QR promotion ──────────────────────────────────
+
+    #[test]
+    fn force_learn_qr_writes_pending() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xF001);
+        // Teach something first
+        rt.process_text("Scarlett O'Hara là nhân vật chính", 1000);
+        assert!(!rt.has_pending_writes(), "Normal text không ghi pending");
+
+        // User ra lệnh "hãy học"
+        let resp = rt.process_text("hãy học điều này: Scarlett rất mạnh mẽ", 2000);
+        assert!(
+            resp.text.contains("QR") || resp.text.contains("ghi nhớ"),
+            "Response phải xác nhận QR: {}",
+            resp.text
+        );
+        assert!(
+            rt.has_pending_writes(),
+            "ForceLearnQR phải tạo pending writes"
+        );
+    }
+
+    #[test]
+    fn confirm_learn_qr_promotes_last() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xF002);
+        // Learn something first
+        rt.process_text("Atlanta bị đốt trong chiến tranh", 1000);
+        // Confirm
+        let resp = rt.process_text("cái này đúng rồi", 2000);
+        assert!(
+            resp.text.contains("QR") || resp.text.contains("Xác nhận"),
+            "Response phải xác nhận QR: {}",
+            resp.text
+        );
+        assert!(rt.has_pending_writes(), "ConfirmLearnQR phải tạo pending");
+    }
+
+    #[test]
+    fn confirm_learn_empty_stm() {
+        let mut rt = HomeRuntime::new(0xF003);
+        // Confirm with empty STM
+        let resp = rt.process_text("cái này đúng", 1000);
+        // Should either say nothing to confirm or handle gracefully
+        assert_eq!(resp.kind, ResponseKind::Natural);
+    }
+
+    #[test]
+    fn learn_command_ghi_nho() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xF004);
+        let resp = rt.process_text("ghi nhớ rằng Rhett Butler yêu Scarlett", 1000);
+        assert!(
+            rt.has_pending_writes(),
+            "ghi nhớ phải trigger QR write: {}",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn learn_command_en() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xF005);
+        let resp = rt.process_text("remember this: Tara is a plantation", 1000);
+        assert!(
+            rt.has_pending_writes(),
+            "remember this phải trigger QR write: {}",
+            resp.text
+        );
     }
 }
