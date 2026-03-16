@@ -69,9 +69,9 @@ pub enum CharClass {
 /// Phân loại một ký tự Unicode theo bảng chữ cái Olang.
 pub fn classify(c: char) -> CharClass {
     match c {
-        // 16 relation operators
-        '∈' | '⊂' | '≡' | '⊥' | '∘' | '→' | '≈' | '←' | '∪' | '∩' | '∂' | '∖' | '↔'
-        | '⟳' | '⚡' | '∥' => CharClass::Relation,
+        // 18 relation operators (v2 spec: structural + space + time + context)
+        '∈' | '⊂' | '≡' | '⊥' | '∘' | '→' | '≈' | '←' | '∪' | '∩' | '∖' | '↔'
+        | '⟶' | '⟳' | '↑' | '⚡' | '∥' | '∂' => CharClass::Relation,
         // Symbol operators (control flow)
         '≔' | '⇒' | '↻' | '○' => CharClass::Symbol,
         // Arithmetic (QT3: hypothesis — chưa chứng minh)
@@ -90,55 +90,65 @@ pub fn classify(c: char) -> CharClass {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RelOp — 16 toán tử quan hệ
+// RelOp — 18 toán tử quan hệ (v2 spec)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Toán tử quan hệ trong Olang.
+/// Toán tử quan hệ trong Olang (v2 design spec).
 ///
-/// 8 gốc (→ RelationBase byte) + 8 mở rộng (semantic level).
+/// 3 nhóm: Structural (0x01-0x08) + Space (0x09-0x0C) + Time (0x0D-0x11)
+/// + Context (∂) — semantic level only, no byte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelOp {
-    // ── 8 gốc (map trực tiếp sang Molecule.relation byte) ──
-    /// ∈ (U+2208) — Member / thuộc về
+    // ── Structural Edges (bất biến — L0) ──
+    /// ∈ (U+2208) — ELEMENT OF / 0x01 / A thuộc B
     Member,
-    /// ⊂ (U+2282) — Subset / tập con
+    /// ⊂ (U+2282) — SUBSET OF / 0x02 / A tập con B
     Subset,
-    /// ≡ (U+2261) — Equivalent / tương đương
+    /// ≡ (U+2261) — IDENTICAL TO / 0x03 / A tương đương B
     Equiv,
-    /// ⊥ (U+22A5) — Orthogonal / trực giao
+    /// ⊥ (U+22A5) — UP TACK / 0x04 / A độc lập B
     Ortho,
-    /// ∘ (U+2218) — Compose / kết hợp → LCA
+    /// ∘ (U+2218) — RING OPERATOR / 0x05 / A∘B → mới
     Compose,
-    /// → (U+2192) — Causes / nhân quả
+    /// → (U+2192) — RIGHTWARDS ARROW / 0x06 / A gây ra B
     Causes,
-    /// ≈ (U+2248) — Similar / tương tự
+    /// ≈ (U+2248) — ALMOST EQUAL TO / 0x07 / A gần giống B
     Similar,
-    /// ← (U+2190) — DerivedFrom / bắt nguồn từ
+    /// ← (U+2190) — LEFTWARDS ARROW / 0x08 / A xuất phát từ B
     Derived,
 
-    // ── 8 mở rộng (xử lý ở semantic level) ──
-    /// ∪ (U+222A) — Contains / hợp
+    // ── Space Edges (từ SDF — bất biến) ──
+    /// ∪ (U+222A) — UNION / 0x09 / A chứa B
     Contains,
-    /// ∩ (U+2229) — Intersects / giao
+    /// ∩ (U+2229) — INTERSECTION / 0x0A / A giao B
     Intersects,
+    /// ∖ (U+2216) — SET MINUS / 0x0B / A trừ B
+    SetMinus,
+    /// ↔ (U+2194) — LEFT RIGHT ARROW / 0x0C / A đối xứng B
+    Bidir,
+
+    // ── Time Edges (từ Music — học được) ──
+    /// ⟶ (U+27F6) — LONG RIGHTWARDS ARROW / 0x0D / A chảy → B
+    Flows,
+    /// ⟳ (U+27F3) — CW GAPPED CIRCLE ARROW / 0x0E / A lặp chu kỳ B
+    Repeats,
+    /// ↑ (U+2191) — UPWARDS ARROW / 0x0F / A giải quyết ở B
+    Resolves,
+    /// ⚡ (U+26A1) — HIGH VOLTAGE / 0x10 / A kích hoạt B
+    Trigger,
+    /// ∥ (U+2225) — PARALLEL TO / 0x11 / A đồng bộ B
+    Parallel,
+
+    // ── Semantic level only (no byte) ──
     /// ∂ (U+2202) — Context / ngữ cảnh
     Context,
-    /// ∖ (U+2216) — SetMinus / loại trừ
-    SetMinus,
-    /// ↔ (U+2194) — Bidirectional / hai chiều
-    Bidir,
-    /// ⟳ (U+27F3) — Feedback / vòng lặp nhân quả
-    Feedback,
-    /// ⚡ (U+26A1) — Trigger / kích hoạt tức thì
-    Trigger,
-    /// ∥ (U+2225) — Parallel / song song, độc lập
-    Parallel,
 }
 
 impl RelOp {
     /// Parse ký tự Unicode → RelOp.
     pub fn from_char(c: char) -> Option<Self> {
         match c {
+            // Structural (0x01-0x08)
             '∈' => Some(Self::Member),
             '⊂' => Some(Self::Subset),
             '≡' => Some(Self::Equiv),
@@ -147,14 +157,19 @@ impl RelOp {
             '→' => Some(Self::Causes),
             '≈' => Some(Self::Similar),
             '←' => Some(Self::Derived),
+            // Space (0x09-0x0C)
             '∪' => Some(Self::Contains),
             '∩' => Some(Self::Intersects),
-            '∂' => Some(Self::Context),
             '∖' => Some(Self::SetMinus),
             '↔' => Some(Self::Bidir),
-            '⟳' => Some(Self::Feedback),
+            // Time (0x0D-0x11)
+            '⟶' => Some(Self::Flows),
+            '⟳' => Some(Self::Repeats),
+            '↑' => Some(Self::Resolves),
             '⚡' => Some(Self::Trigger),
             '∥' => Some(Self::Parallel),
+            // Semantic only
+            '∂' => Some(Self::Context),
             _ => None,
         }
     }
@@ -172,19 +187,24 @@ impl RelOp {
             Self::Derived => '←',
             Self::Contains => '∪',
             Self::Intersects => '∩',
-            Self::Context => '∂',
             Self::SetMinus => '∖',
             Self::Bidir => '↔',
-            Self::Feedback => '⟳',
+            Self::Flows => '⟶',
+            Self::Repeats => '⟳',
+            Self::Resolves => '↑',
             Self::Trigger => '⚡',
             Self::Parallel => '∥',
+            Self::Context => '∂',
         }
     }
 
-    /// Map sang relation byte cho IR (8 gốc).
-    /// Returns None cho 8 extended ops.
+    /// Map sang relation byte cho IR (v2 spec).
+    ///
+    /// Structural: 0x01-0x08, Space: 0x09-0x0C, Time: 0x0D-0x11.
+    /// Context(∂) = semantic level only → None.
     pub fn to_rel_byte(self) -> Option<u8> {
         match self {
+            // Structural
             Self::Member => Some(0x01),
             Self::Subset => Some(0x02),
             Self::Equiv => Some(0x03),
@@ -193,15 +213,19 @@ impl RelOp {
             Self::Causes => Some(0x06),
             Self::Similar => Some(0x07),
             Self::Derived => Some(0x08),
-            // Extended — handled at semantic level
-            Self::Contains
-            | Self::Intersects
-            | Self::Context
-            | Self::SetMinus
-            | Self::Bidir
-            | Self::Feedback
-            | Self::Trigger
-            | Self::Parallel => None,
+            // Space
+            Self::Contains => Some(0x09),
+            Self::Intersects => Some(0x0A),
+            Self::SetMinus => Some(0x0B),
+            Self::Bidir => Some(0x0C),
+            // Time
+            Self::Flows => Some(0x0D),
+            Self::Repeats => Some(0x0E),
+            Self::Resolves => Some(0x0F),
+            Self::Trigger => Some(0x10),
+            Self::Parallel => Some(0x11),
+            // Semantic only
+            Self::Context => None,
         }
     }
 }
@@ -629,8 +653,8 @@ mod tests {
     #[test]
     fn classify_relations() {
         let rels = [
-            '∈', '⊂', '≡', '⊥', '∘', '→', '≈', '←', '∪', '∩', '∂', '∖', '↔', '⟳', '⚡',
-            '∥',
+            '∈', '⊂', '≡', '⊥', '∘', '→', '≈', '←', '∪', '∩', '∖', '↔',
+            '⟶', '⟳', '↑', '⚡', '∥', '∂',
         ];
         for c in rels {
             assert_eq!(classify(c), CharClass::Relation, "'{c}' phải là Relation");
@@ -705,8 +729,9 @@ mod tests {
     // ── RelOp (16 operators) ────────────────────────────────────────────────
 
     #[test]
-    fn relop_roundtrip_all_16() {
+    fn relop_roundtrip_all_18() {
         let ops = [
+            // Structural
             ('∈', RelOp::Member),
             ('⊂', RelOp::Subset),
             ('≡', RelOp::Equiv),
@@ -715,14 +740,19 @@ mod tests {
             ('→', RelOp::Causes),
             ('≈', RelOp::Similar),
             ('←', RelOp::Derived),
+            // Space
             ('∪', RelOp::Contains),
             ('∩', RelOp::Intersects),
-            ('∂', RelOp::Context),
             ('∖', RelOp::SetMinus),
             ('↔', RelOp::Bidir),
-            ('⟳', RelOp::Feedback),
+            // Time
+            ('⟶', RelOp::Flows),
+            ('⟳', RelOp::Repeats),
+            ('↑', RelOp::Resolves),
             ('⚡', RelOp::Trigger),
             ('∥', RelOp::Parallel),
+            // Semantic
+            ('∂', RelOp::Context),
         ];
         for (c, expected) in ops {
             let op = RelOp::from_char(c).unwrap();
@@ -732,18 +762,23 @@ mod tests {
     }
 
     #[test]
-    fn relop_byte_mapping() {
-        // 8 core → Some(byte)
+    fn relop_byte_mapping_v2() {
+        // Structural: 0x01-0x08
         assert_eq!(RelOp::Member.to_rel_byte(), Some(0x01));
-        assert_eq!(RelOp::Causes.to_rel_byte(), Some(0x06));
         assert_eq!(RelOp::Derived.to_rel_byte(), Some(0x08));
-        // 8 extended → None
+        // Space: 0x09-0x0C
+        assert_eq!(RelOp::Contains.to_rel_byte(), Some(0x09));
+        assert_eq!(RelOp::Intersects.to_rel_byte(), Some(0x0A));
+        assert_eq!(RelOp::SetMinus.to_rel_byte(), Some(0x0B));
+        assert_eq!(RelOp::Bidir.to_rel_byte(), Some(0x0C));
+        // Time: 0x0D-0x11
+        assert_eq!(RelOp::Flows.to_rel_byte(), Some(0x0D));
+        assert_eq!(RelOp::Repeats.to_rel_byte(), Some(0x0E));
+        assert_eq!(RelOp::Resolves.to_rel_byte(), Some(0x0F));
+        assert_eq!(RelOp::Trigger.to_rel_byte(), Some(0x10));
+        assert_eq!(RelOp::Parallel.to_rel_byte(), Some(0x11));
+        // Context: semantic only → None
         assert_eq!(RelOp::Context.to_rel_byte(), None);
-        assert_eq!(RelOp::SetMinus.to_rel_byte(), None);
-        assert_eq!(RelOp::Bidir.to_rel_byte(), None);
-        assert_eq!(RelOp::Feedback.to_rel_byte(), None);
-        assert_eq!(RelOp::Trigger.to_rel_byte(), None);
-        assert_eq!(RelOp::Parallel.to_rel_byte(), None);
     }
 
     // ── ArithOp ─────────────────────────────────────────────────────────────
