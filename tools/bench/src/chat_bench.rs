@@ -117,8 +117,15 @@ fn bar_chart(pct: f32) -> String {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--inspect") {
+        inspect_system();
+        return;
+    }
+
     println!("○ HomeOS Chat Benchmark — Tổng quát qua chat thực tế");
     println!("UCD: {} entries", ucd::table_len());
+    println!("  (Dùng --inspect để xem số liệu chi tiết Node/Silk)");
     println!();
 
     let mut sb = ScoreBoard::default();
@@ -765,4 +772,141 @@ fn bench_cross_lingual(sb: &mut ScoreBoard) -> (usize, usize) {
     }
 
     (p, t)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inspect — số liệu chi tiết Node & Silk
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn inspect_system() {
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║          HomeOS — Số liệu Node & Silk trước Phase 9        ║");
+    println!("╚══════════════════════════════════════════════════════════════╝");
+    println!();
+
+    // ── 1. UCD Foundation ────────────────────────────────────────────────────
+    println!("── 1. UCD Foundation (L0) ─────────────────────────────");
+    println!("  UCD table entries : {}", ucd::table_len());
+    println!();
+
+    // ── 2. Fresh boot baseline ───────────────────────────────────────────────
+    println!("── 2. Fresh Boot Baseline ─────────────────────────────");
+    let rt0 = HomeRuntime::new(0x0001);
+    let m0 = rt0.metrics();
+    print_metrics(&m0, "boot");
+    println!("  KnowTree nodes   : {}", rt0.knowtree().total_nodes());
+    println!("  KnowTree edges   : {}", rt0.knowtree().total_edges());
+    println!("  KnowTree L2 sent : {}", rt0.knowtree().sentences());
+    println!("  KnowTree L3 conc : {}", rt0.knowtree().concepts());
+    println!();
+
+    // ── 3. After 20-turn conversation ────────────────────────────────────────
+    println!("── 3. After 20-turn Conversation ──────────────────────");
+    let mut rt1 = HomeRuntime::new(0x0002);
+    let turns = [
+        "xin chào",
+        "tôi buồn vì mất việc",
+        "cô đơn lắm, không ai hiểu",
+        "nhưng hôm nay khá hơn một chút",
+        "tôi tìm được việc mới rồi!",
+        "hạnh phúc quá, cảm ơn cuộc sống!",
+        "Scarlett O'Hara sống ở đồn điền Tara",
+        "Rhett Butler yêu Scarlett rất nhiều",
+        "Atlanta bị đốt cháy trong Nội chiến Hoa Kỳ",
+        "Melanie Hamilton là người phụ nữ hiền lành",
+        "Trận Điện Biên Phủ diễn ra năm 1954",
+        "Tướng Võ Nguyên Giáp chỉ huy chiến dịch",
+        "Hiệp định Genève được ký kết sau đó",
+        "hôm nay trời đẹp quá, tôi thích đi dạo",
+        "tôi thích đọc sách, cuốn này hay lắm",
+        "I am very happy today!",
+        "Je suis triste et fatigué",
+        "Das ist wunderbar!",
+        "bạn thân tôi bị bệnh nặng",
+        "bác sĩ nói có thể chữa được, tôi nhẹ nhõm",
+    ];
+    for (i, turn) in turns.iter().enumerate() {
+        rt1.process_text(turn, (i as i64 + 1) * 1000);
+    }
+    let m1 = rt1.metrics();
+    print_metrics(&m1, "20-turn");
+    println!("  KnowTree nodes   : {}", rt1.knowtree().total_nodes());
+    println!("  KnowTree edges   : {}", rt1.knowtree().total_edges());
+    println!("  KnowTree L2 sent : {}", rt1.knowtree().sentences());
+    println!();
+
+    // ── 4. After read_book ───────────────────────────────────────────────────
+    println!("── 4. After read_book (novel) ──────────────────────────");
+    let stored = rt1.read_book(
+        "Scarlett O'Hara không xinh đẹp nhưng rất quyến rũ. \
+         Nàng có đôi mắt xanh lá cây sáng ngời và làn da trắng. \
+         Gerald O'Hara là cha của Scarlett, một người Ireland nhập cư. \
+         Rhett Butler là người đàn ông phóng khoáng và thông minh. \
+         Atlanta bị đốt cháy trong cuộc Nội chiến Hoa Kỳ. \
+         Melanie Hamilton là người phụ nữ hiền lành và trung thành. \
+         Scarlett phải tự tay cứu đồn điền Tara khỏi sự tàn phá. \
+         Rhett Butler yêu Scarlett nhưng cuối cùng bỏ đi vì mệt mỏi.",
+        30000,
+    );
+    let m2 = rt1.metrics();
+    println!("  book sentences   : {}", stored);
+    print_metrics(&m2, "post-book");
+    println!("  KnowTree nodes   : {}", rt1.knowtree().total_nodes());
+    println!("  KnowTree edges   : {}", rt1.knowtree().total_edges());
+    println!("  KnowTree L2 sent : {}", rt1.knowtree().sentences());
+    println!();
+
+    // ── 5. Silk edge map ─────────────────────────────────────────────────────
+    println!("── 5. Silk Edge Map (từ khóa → edges) ─────────────────");
+    let keywords = [
+        "scarlett", "rhett", "tara", "atlanta", "melanie",
+        "buồn", "vui", "hạnh", "cô", "mất",
+        "điện", "giáp", "genève",
+        "happy", "triste", "wunderbar",
+        "bệnh", "chữa", "sách",
+    ];
+    let mut total_kw_edges = 0usize;
+    for kw in &keywords {
+        let count = rt1.silk_edges_from(olang::hash::fnv1a_str(kw));
+        total_kw_edges += count;
+        let bar = "█".repeat(count.min(20));
+        let mark = if count > 0 { "●" } else { "○" };
+        println!("  {} {:12} → {:3} {}", mark, kw, count, bar);
+    }
+    println!("  ─────────────────────────────");
+    println!("  total keyword edges: {}", total_kw_edges);
+    println!();
+
+    // ── Summary ──────────────────────────────────────────────────────────────
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║                    TỔNG KẾT TRƯỚC PHASE 9                  ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║  UCD entries        : {:>6}                                ║", ucd::table_len());
+    println!("║  STM observations   : {:>6}                                ║", m2.stm_observations);
+    println!("║  STM hit rate       : {:>5.1}%                                ║", m2.stm_hit_rate * 100.0);
+    println!("║  STM max fire count : {:>6}                                ║", m2.stm_max_fire);
+    println!("║  Silk edges         : {:>6}                                ║", m2.silk_edges);
+    println!("║  Silk density       : {:>6.4}                                ║", m2.silk_density);
+    println!("║  Saveable edges     : {:>6}  (weight >= 0.30)              ║", m2.saveable_edges);
+    println!("║  KnowTree nodes     : {:>6}                                ║", rt1.knowtree().total_nodes());
+    println!("║  KnowTree edges     : {:>6}                                ║", rt1.knowtree().total_edges());
+    println!("║  KnowTree L2 sent   : {:>6}                                ║", rt1.knowtree().sentences());
+    println!("║  KnowTree L3 conc   : {:>6}                                ║", rt1.knowtree().concepts());
+    println!("║  Keyword silk edges  : {:>6}  (19 tracked words)           ║", total_kw_edges);
+    println!("║  f(x) final         : {:>6.3}                                ║", m2.fx);
+    println!("║  Tone               : {:>6}                                ║", m2.tone);
+    println!("╚══════════════════════════════════════════════════════════════╝");
+}
+
+fn print_metrics(m: &runtime::metrics::RuntimeMetrics, label: &str) {
+    println!("  [{}]", label);
+    println!("  turns            : {}", m.turns);
+    println!("  STM observations : {}", m.stm_observations);
+    println!("  STM hit rate     : {:.1}%", m.stm_hit_rate * 100.0);
+    println!("  STM max fire     : {}", m.stm_max_fire);
+    println!("  Silk edges       : {}", m.silk_edges);
+    println!("  Silk density     : {:.4}", m.silk_density);
+    println!("  Saveable edges   : {} (weight >= 0.30)", m.saveable_edges);
+    println!("  f(x)             : {:.3}", m.fx);
+    println!("  tone             : {}", m.tone);
 }
