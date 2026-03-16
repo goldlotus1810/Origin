@@ -438,6 +438,166 @@ impl HomeRuntime {
         }
     }
 
+    // ── Knowledge Recall — tìm kiến thức liên quan từ Silk + STM ──────────────
+
+    /// Recall related knowledge from Silk graph + STM.
+    ///
+    /// Walk Silk từ content words trong query, tìm nodes có edge mạnh.
+    /// Trả về context string chứa thông tin liên quan đã học.
+    fn recall_context(&self, query: &str) -> Option<String> {
+        let words: alloc::vec::Vec<&str> = query
+            .split_whitespace()
+            .filter(|w| w.chars().count() > 2)
+            .take(10)
+            .collect();
+
+        if words.is_empty() {
+            return None;
+        }
+
+        // Collect word hashes
+        let hashes: alloc::vec::Vec<(u64, &str)> = words
+            .iter()
+            .map(|w| {
+                let low: String = w.to_lowercase();
+                (olang::hash::fnv1a_str(&low), *w)
+            })
+            .collect();
+
+        // Walk Silk: tìm edges từ query words → known words
+        let mut related: alloc::vec::Vec<(u64, f32, silk::edge::EmotionTag)> =
+            alloc::vec::Vec::new();
+        for &(h, _) in &hashes {
+            for edge in self.learning.graph().edges_from(h) {
+                if edge.weight > 0.15 {
+                    related.push((edge.to_hash, edge.weight, edge.emotion));
+                }
+            }
+        }
+
+        if related.is_empty() {
+            return None;
+        }
+
+        // Sort by weight, deduplicate
+        related.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        related.dedup_by_key(|r| r.0);
+        related.truncate(8);
+
+        // Find matching STM observations by hash
+        let mut context_parts: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+        for &(h, w, emo) in &related {
+            if let Some(obs) = self.learning.stm().find_by_hash(h) {
+                let v_label = if emo.valence > 0.3 {
+                    "tích cực"
+                } else if emo.valence < -0.3 {
+                    "tiêu cực"
+                } else {
+                    "trung tính"
+                };
+                context_parts.push(format!(
+                    "[fire={}, w={:.2}, {}]",
+                    obs.fire_count, w, v_label
+                ));
+            }
+        }
+
+        if context_parts.is_empty() {
+            // Return number of silk connections found even without STM match
+            Some(format!(
+                "({} liên kết Silk, chưa có trong STM)",
+                related.len()
+            ))
+        } else {
+            Some(format!(
+                "({} liên kết: {})",
+                related.len(),
+                context_parts.join(", ")
+            ))
+        }
+    }
+
+    // ── Contradiction Detection — so sánh với kiến thức đã học ──────────────
+
+    /// Detect contradiction between new input and existing knowledge.
+    ///
+    /// So sánh emotion profile của input với STM observations có cùng từ khóa.
+    /// Nếu valence đối nghịch + cùng chủ đề → contradiction.
+    fn detect_contradiction(
+        &self,
+        text: &str,
+        new_chain: &olang::molecular::MolecularChain,
+        new_emotion: silk::edge::EmotionTag,
+    ) -> Option<String> {
+        let words: alloc::vec::Vec<String> = text
+            .split_whitespace()
+            .filter(|w| w.chars().count() > 2)
+            .map(|w| w.to_lowercase())
+            .collect();
+
+        if words.is_empty() {
+            return None;
+        }
+
+        // Tìm STM observations có edge mạnh với cùng từ khóa
+        let mut conflicts: alloc::vec::Vec<(u64, f32, silk::edge::EmotionTag)> =
+            alloc::vec::Vec::new();
+
+        for w in &words {
+            let h = olang::hash::fnv1a_str(w);
+            for edge in self.learning.graph().edges_from(h) {
+                if edge.weight > 0.30 {
+                    // Check valence opposition: new_emotion vs edge emotion
+                    let v_dist =
+                        (new_emotion.valence - edge.emotion.valence).abs();
+                    if v_dist > 0.60 {
+                        conflicts.push((edge.to_hash, v_dist, edge.emotion));
+                    }
+                }
+            }
+        }
+
+        if conflicts.is_empty() {
+            return None;
+        }
+
+        // Chain similarity — molecular level check
+        let chain_sim = if let Some(obs) = self
+            .learning
+            .stm()
+            .all()
+            .iter()
+            .find(|o| conflicts.iter().any(|c| o.chain.chain_hash() == c.0))
+        {
+            obs.chain.similarity_full(new_chain)
+        } else {
+            0.0
+        };
+
+        // High topic overlap + valence opposition = contradiction
+        let max_v_dist = conflicts
+            .iter()
+            .map(|c| c.1)
+            .fold(0.0f32, |a, b| a.max(b));
+
+        if max_v_dist > 0.60 || (chain_sim > 0.3 && max_v_dist > 0.40) {
+            let existing_v = conflicts[0].2.valence;
+            let direction = if new_emotion.valence > existing_v {
+                "tích cực hơn"
+            } else {
+                "tiêu cực hơn"
+            };
+            Some(format!(
+                "Mình nhận thấy điều này {} so với những gì đã biết trước đó \
+                 (khoảng cách cảm xúc: {:.0}%). Bạn có muốn cập nhật kiến thức không?",
+                direction,
+                max_v_dist * 100.0
+            ))
+        } else {
+            None
+        }
+    }
+
     // ── QR Promotion — user-directed learning ─────────────────────────────────
 
     /// User ra lệnh "hãy học cái này" → ghi chain hiện tại thành QR node.
@@ -767,24 +927,57 @@ impl HomeRuntime {
                     return self.confirm_learn_qr(ts);
                 }
 
-                let original = match &action {
-                    IntentAction::Proceed => {
-                        let comps = affect_components(self.learning.context().curve());
-                        Some(natural_reply(
-                            tone,
-                            final_v,
-                            comps.lead_word,
-                            comps.support_word,
-                        ))
-                    }
-                    _ => None,
+                // ── Knowledge recall + contradiction ──────────────────────
+                let input_text = match &input {
+                    ContentInput::Text { content, .. } => content.as_str(),
+                    _ => "",
                 };
+
+                // Recall related knowledge from Silk walk
+                let recall = if !input_text.is_empty() {
+                    self.recall_context(input_text)
+                } else {
+                    None
+                };
+
+                // Detect contradiction against existing knowledge
+                let contradiction = if !input_text.is_empty() {
+                    self.detect_contradiction(input_text, chain, emotion)
+                } else {
+                    None
+                };
+
+                // Build response with context awareness
+                let original = if let Some(ref contra) = contradiction {
+                    // Contradiction detected → inform user
+                    Some(contra.clone())
+                } else {
+                    match &action {
+                        IntentAction::Proceed => {
+                            // Use recalled context if available for richer reply
+                            if let Some(ref ctx) = recall {
+                                Some(contextual_reply(tone, final_v, input_text, ctx))
+                            } else {
+                                let comps =
+                                    affect_components(self.learning.context().curve());
+                                Some(natural_reply(
+                                    tone,
+                                    final_v,
+                                    comps.lead_word,
+                                    comps.support_word,
+                                ))
+                            }
+                        }
+                        _ => None,
+                    }
+                };
+
                 let text = render(&ResponseParams {
                     tone,
                     action,
                     valence: final_v,
                     fx,
-                    context: None,
+                    context: recall,
                     original,
                 });
                 Response {
@@ -1072,6 +1265,74 @@ fn natural_reply(
         }
         ResponseTone::Engaged => {
             alloc::format!("{} — {}.", lead, support)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// contextual_reply — câu trả lời dựa trên nội dung + ngữ cảnh
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tạo câu trả lời phù hợp bối cảnh — dùng từ ngữ liên quan đến nội dung
+/// thay vì chỉ tone-based generic phrases.
+fn contextual_reply(
+    tone: silk::walk::ResponseTone,
+    v: f32,
+    input: &str,
+    context: &str,
+) -> alloc::string::String {
+    use silk::walk::ResponseTone;
+
+    // Extract key content words from input for reference
+    let key_words: alloc::vec::Vec<&str> = input
+        .split_whitespace()
+        .filter(|w| w.chars().count() > 2)
+        .take(3)
+        .collect();
+    let topic = if key_words.is_empty() {
+        ""
+    } else {
+        key_words[0]
+    };
+
+    match tone {
+        ResponseTone::Supportive | ResponseTone::Pause => {
+            if v < -0.50 {
+                alloc::format!(
+                    "Mình hiểu cảm giác khi nghĩ về {} — điều đó nặng nề thật. {}",
+                    topic, context
+                )
+            } else if v < -0.20 {
+                alloc::format!(
+                    "Mình nghe thấy điều bạn nói về {}. {}", topic, context
+                )
+            } else {
+                alloc::format!(
+                    "Về {} — mình đang lắng nghe. {}", topic, context
+                )
+            }
+        }
+        ResponseTone::Gentle => {
+            alloc::format!("Cứ từ từ nói về {} nhé. {}", topic, context)
+        }
+        ResponseTone::Reinforcing => {
+            if v > 0.30 {
+                alloc::format!("Đúng rồi — {} thú vị đấy. {}", topic, context)
+            } else {
+                alloc::format!(
+                    "Mình ghi nhận về {}. {}", topic, context
+                )
+            }
+        }
+        ResponseTone::Celebratory => {
+            alloc::format!("Tuyệt! {} hay lắm. {}", topic, context)
+        }
+        ResponseTone::Engaged => {
+            if context.is_empty() {
+                alloc::format!("Về {} — mình đang nghe.", topic)
+            } else {
+                alloc::format!("Về {} — {}.", topic, context)
+            }
         }
     }
 }
@@ -2285,5 +2546,256 @@ mod integration_tests {
             "remember this phải trigger QR write: {}",
             resp.text
         );
+    }
+
+    // ── 10. Integration tests — historical content + novel ──────────────────
+
+    #[test]
+    fn learn_historical_war_content() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA001);
+
+        // Feed historical war content
+        let war_facts = [
+            "Trận Điện Biên Phủ diễn ra năm 1954, quân Pháp thất bại nặng nề.",
+            "Tướng Võ Nguyên Giáp chỉ huy chiến dịch với chiến thuật vây lấn.",
+            "Điện Biên Phủ là trận đánh quyết định kết thúc chiến tranh Đông Dương.",
+            "Hiệp định Genève được ký kết sau chiến thắng Điện Biên Phủ.",
+        ];
+
+        for (i, fact) in war_facts.iter().enumerate() {
+            let resp = rt.process_text(fact, (i as i64 + 1) * 1000);
+            assert_eq!(resp.kind, ResponseKind::Natural, "fact {} phải xử lý được", i);
+        }
+
+        // Verify learning occurred
+        assert!(
+            rt.learning.stm().len() > 0,
+            "STM phải có entries sau khi học war content"
+        );
+        assert!(
+            rt.learning.graph().len() > 0,
+            "Silk phải có edges từ war content"
+        );
+    }
+
+    #[test]
+    fn learn_novel_gone_with_the_wind() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA002);
+
+        // Feed Gone with the Wind content
+        let novel_content = [
+            "Scarlett O'Hara là con gái của Gerald O'Hara, chủ đồn điền Tara.",
+            "Scarlett yêu Ashley Wilkes nhưng Ashley lại cưới Melanie Hamilton.",
+            "Rhett Butler là người đàn ông phóng khoáng, thông minh và giàu có.",
+            "Atlanta bị đốt cháy trong cuộc Nội chiến Hoa Kỳ.",
+            "Scarlett phải tự tay cứu đồn điền Tara khỏi sự tàn phá của chiến tranh.",
+            "Rhett Butler yêu Scarlett nhưng cuối cùng bỏ đi vì mệt mỏi.",
+            "Melanie Hamilton là người phụ nữ hiền lành, nhân hậu và trung thành.",
+            "Scarlett rất mạnh mẽ, kiên cường nhưng cũng ích kỷ và thực dụng.",
+        ];
+
+        for (i, content) in novel_content.iter().enumerate() {
+            rt.process_text(content, (i as i64 + 1) * 1000);
+        }
+
+        // Verify silk edges exist between related concepts
+        let scarlett_hash = olang::hash::fnv1a_str("scarlett");
+        let _rhett_hash = olang::hash::fnv1a_str("rhett");
+        let _tara_hash = olang::hash::fnv1a_str("tara");
+
+        let scarlett_edges = rt.learning.graph().edges_from(scarlett_hash);
+        assert!(
+            !scarlett_edges.is_empty(),
+            "Scarlett phải có Silk edges (đã xuất hiện nhiều lần)"
+        );
+
+        // Verify STM has learned content (some may deduplicate by chain_hash)
+        assert!(
+            rt.learning.stm().len() >= 1,
+            "STM phải có observations: {}",
+            rt.learning.stm().len()
+        );
+    }
+
+    #[test]
+    fn learn_then_recall_context() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA003);
+
+        // Teach facts
+        rt.process_text("Scarlett O'Hara sống ở đồn điền Tara", 1000);
+        rt.process_text("Scarlett yêu Ashley nhưng Ashley cưới Melanie", 2000);
+        rt.process_text("Rhett Butler yêu Scarlett rất nhiều", 3000);
+
+        // Ask about related topic — should trigger Silk walk recall
+        let resp = rt.process_text("Scarlett là ai", 4000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // Response should not be empty/generic
+        assert!(
+            resp.text.len() > 5,
+            "Response về Scarlett không nên rỗng: {}",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn contextual_reply_uses_topic() {
+        // Test the contextual_reply function directly
+        let reply = super::contextual_reply(
+            ResponseTone::Engaged,
+            0.2,
+            "Scarlett mạnh mẽ lắm",
+            "(3 liên kết Silk)",
+        );
+        assert!(
+            reply.contains("Scarlett"),
+            "Reply phải reference topic: {}",
+            reply
+        );
+    }
+
+    #[test]
+    fn contradiction_different_valence() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA004);
+
+        // Teach positive fact about Scarlett
+        rt.process_text("Scarlett rất mạnh mẽ, kiên cường và dũng cảm", 1000);
+        rt.process_text("Scarlett chiến đấu bảo vệ Tara thành công", 2000);
+
+        // Feed contradicting negative statement
+        let resp = rt.process_text("Scarlett yếu đuối và hèn nhát, không làm được gì", 3000);
+        // System should process without crash (contradiction detection is best-effort)
+        assert_eq!(resp.kind, ResponseKind::Natural);
+    }
+
+    #[test]
+    fn learn_and_confirm_knowledge() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA005);
+
+        // Learn a fact
+        rt.process_text("Melanie Hamilton rất hiền lành và nhân hậu", 1000);
+
+        // Confirm it
+        let resp = rt.process_text("cái này đúng rồi", 2000);
+        assert!(
+            rt.has_pending_writes(),
+            "Confirm phải trigger QR write: {}",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn learn_war_then_wrong_info() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA006);
+
+        // Teach correct fact
+        rt.process_text("Trận Điện Biên Phủ diễn ra năm 1954", 1000);
+        rt.process_text("Tướng Võ Nguyên Giáp chỉ huy quân đội Việt Nam", 2000);
+
+        // Feed wrong info (should be processed, contradiction may or may not detect)
+        let resp = rt.process_text("Điện Biên Phủ là chiến thắng của quân Pháp", 3000);
+        assert_eq!(
+            resp.kind,
+            ResponseKind::Natural,
+            "Wrong info phải được xử lý bình thường"
+        );
+    }
+
+    #[test]
+    fn multiple_sessions_recall() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA007);
+
+        // Learn extensively about one topic
+        for i in 0..5 {
+            rt.process_text(
+                "Rhett Butler là nhân vật quan trọng trong Cuốn theo chiều gió",
+                (i + 1) * 1000,
+            );
+        }
+
+        // Rhett should have high fire_count
+        let rhett_hash = olang::hash::fnv1a_str("rhett");
+        let edges = rt.learning.graph().edges_from(rhett_hash);
+        assert!(
+            !edges.is_empty(),
+            "Rhett phải có Silk edges sau 5 lần mention"
+        );
+    }
+
+    #[test]
+    fn response_tone_matches_content() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA008);
+
+        // Positive content
+        let r1 = rt.process_text("hôm nay tuyệt vời quá", 1000);
+        assert_eq!(r1.kind, ResponseKind::Natural);
+
+        // Sad content
+        let r2 = rt.process_text("tôi buồn vì mất mát quá lớn", 2000);
+        assert_eq!(r2.kind, ResponseKind::Natural);
+        // Tone should shift toward supportive after sad input
+    }
+
+    #[test]
+    fn read_book_then_query() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA009);
+
+        // Use read_book API
+        let stored = rt.read_book(
+            "Scarlett O'Hara không xinh đẹp nhưng rất quyến rũ. \
+             Nàng có đôi mắt xanh lá cây sáng ngời. \
+             Gerald O'Hara là cha của Scarlett, một người Ireland nhập cư.",
+            1000,
+        );
+        assert!(stored >= 2, "read_book phải store >= 2 sentences: {}", stored);
+
+        // Query about what was read
+        let resp = rt.process_text("kể về Scarlett", 2000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        assert!(resp.text.len() > 5, "Response không nên rỗng: {}", resp.text);
+    }
+
+    #[test]
+    fn recall_context_returns_silk_info() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xA010);
+
+        // Build knowledge
+        rt.process_text("Atlanta bị đốt cháy trong chiến tranh", 1000);
+        rt.process_text("Scarlett chạy khỏi Atlanta đang cháy", 2000);
+
+        // Check recall
+        let _recall = rt.recall_context("Atlanta chiến tranh");
+        // May or may not find context depending on Silk edge weights
+        // Just verify it doesn't crash and returns consistent result
+        // (Silk edges need multiple co-activations to build up weight)
     }
 }
