@@ -71,14 +71,14 @@
 | QT1: 5 Unicode groups = foundation | Unicode | COMPLIANT |
 | QT2: Unicode char names = node names | Unicode | COMPLIANT |
 | QT3: Natural language = alias → node | Unicode | COMPLIANT |
-| QT4: All Molecules from encode_codepoint() | Chain | COMPLIANT |
+| QT4: All Molecules from encode_codepoint() | Chain | PARTIAL — VM PushMol, FFR to_molecule(), LCA construct Molecules directly (necessary for computation) |
 | QT5: All chains from LCA or UCD | Chain | COMPLIANT |
 | QT6: chain_hash auto-generated | Chain | COMPLIANT |
 | QT7: Parent chain = LCA(child chains) | Chain | COMPLIANT |
 | QT8: Every Node → auto registry | Node | COMPLIANT |
 | QT9: Write file BEFORE updating RAM | Node | COMPLIANT |
 | QT10: Append-only — NO DELETE/OVERWRITE | Node | COMPLIANT |
-| QT11: Silk only at Ln-1 | Silk | COMPLIANT |
+| QT11: Silk only at Ln-1 | Silk | PARTIAL — SilkGraph has no built-in layer check; relies on caller enforcement |
 | QT12: Cross-layer via NodeLx + Fib threshold | Silk | COMPLIANT |
 | QT13: Silk carries EmotionTag | Silk | COMPLIANT |
 | QT14: L0 does NOT import L1 | Architecture | COMPLIANT |
@@ -92,7 +92,11 @@
 | QT22: Skills communicate via ExecContext.State | Skill | COMPLIANT |
 | QT23: Skill stateless | Skill | COMPLIANT |
 
-**Result: 23/23 COMPLIANT**
+**Result: 21/23 COMPLIANT, 2/23 PARTIAL, 0/23 VIOLATED**
+
+> **QT4 note**: VM `PushMol`, VSDF `FFRCell::to_molecule()`, and LCA result construction necessarily build Molecules outside `encode_codepoint()`. These are runtime computations, not hardcoded presets — arguably valid but worth documenting.
+>
+> **QT11 note**: `SilkGraph::co_activate()` has no layer parameter — layer constraints are convention-enforced by callers (LearningLoop, LeoAI), not structurally enforced at the API boundary. Adding a layer check in `co_activate()` would make this rule airtight.
 
 ---
 
@@ -229,12 +233,12 @@ No BuildZone for draft concepts, no hypothesis testing, no A/B verification.
 | **Architecture Design** | 10/10 | 20% | 2.00 |
 | **Code Quality** | 8.5/10 | 15% | 1.28 |
 | **Test Coverage** | 9/10 | 15% | 1.35 |
-| **QT Compliance** | 10/10 | 15% | 1.50 |
+| **QT Compliance** | 9.5/10 | 15% | 1.43 |
 | **Feature Completeness** | 7/10 | 20% | 1.40 |
 | **Security** | 9/10 | 10% | 0.90 |
 | **Documentation** | 6/10 | 5% | 0.30 |
 
-### Overall Score: **8.73 / 10**
+### Overall Score: **8.66 / 10**
 
 ### Grade: **A-**
 
@@ -322,10 +326,10 @@ HomeOS is an **exceptionally well-architected** project with **outstanding code 
 The project demonstrates rare qualities:
 - **Zero architectural debt** — clean from day one
 - **Zero test debt** — everything that exists is tested
-- **Zero QT violations** — every invariant rule is respected
+- **Zero QT violations** — 21 fully compliant, 2 partial (convention-enforced, not structurally violated)
 
 The 8-phase Master Plan addresses all identified gaps in the correct dependency order.
 
-**Score: 8.73/10 — Grade A-**
+**Score: 8.66/10 — Grade A-**
 
 > "The foundation is solid. The DNA is correct. Now teach it to think."
