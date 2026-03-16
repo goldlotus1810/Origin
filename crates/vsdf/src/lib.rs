@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+pub mod body;
 pub mod delta;
 pub mod ffr;
 pub mod fit;
