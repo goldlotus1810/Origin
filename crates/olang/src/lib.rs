@@ -28,3 +28,4 @@ pub mod separator;
 pub mod ling;
 pub mod compiler;
 pub mod compact;
+pub mod knowtree;
