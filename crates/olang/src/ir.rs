@@ -70,6 +70,10 @@ pub enum Op {
     Stats,
     /// No-op
     Nop,
+    /// Pop top, store vào biến cục bộ (cho `let` binding)
+    Store(String),
+    /// Push biến cục bộ lên stack
+    LoadLocal(String),
 }
 
 impl Op {
@@ -94,6 +98,8 @@ impl Op {
             Self::Dream => "DREAM",
             Self::Stats => "STATS",
             Self::Nop => "NOP",
+            Self::Store(_) => "STORE",
+            Self::LoadLocal(_) => "LOAD_LOCAL",
         }
     }
 
@@ -142,6 +148,18 @@ impl Op {
             Self::Call(s) => {
                 let sb = s.as_bytes();
                 let mut b = alloc::vec![0x32, sb.len() as u8];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::Store(s) => {
+                let sb = s.as_bytes();
+                let mut b = alloc::vec![0x33, sb.len() as u8];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::LoadLocal(s) => {
+                let sb = s.as_bytes();
+                let mut b = alloc::vec![0x34, sb.len() as u8];
                 b.extend_from_slice(sb);
                 b
             }
@@ -426,6 +444,8 @@ mod tests {
             Op::Jz(0),
             Op::Load("x".into()),
             Op::Call("f".into()),
+            Op::Store("v".into()),
+            Op::LoadLocal("v".into()),
         ];
         for op in &ops {
             let b = op.to_bytes();

@@ -119,6 +119,7 @@ impl OlangVM {
     /// Sau đó caller gọi resume_with(chain) để tiếp tục.
     pub fn execute(&self, prog: &OlangProgram) -> VmResult {
         let mut stack = VmStack::new();
+        let mut locals: Vec<(alloc::string::String, MolecularChain)> = Vec::new();
         let mut events = Vec::new();
         let mut steps = 0u32;
         let mut pc = 0usize;
@@ -308,6 +309,35 @@ impl OlangVM {
 
                 Op::Stats => {
                     events.push(VmEvent::RequestStats);
+                }
+
+                Op::Store(name) => {
+                    let val = match stack.pop() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            events.push(VmEvent::Error(e));
+                            break;
+                        }
+                    };
+                    // Update existing or insert new
+                    if let Some(entry) = locals.iter_mut().find(|(n, _)| n == name) {
+                        entry.1 = val;
+                    } else {
+                        locals.push((name.clone(), val));
+                    }
+                }
+
+                Op::LoadLocal(name) => {
+                    let val = locals
+                        .iter()
+                        .rev()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, c)| c.clone())
+                        .unwrap_or_else(MolecularChain::empty);
+                    if let Err(e) = stack.push(val) {
+                        events.push(VmEvent::Error(e));
+                        break;
+                    }
                 }
 
                 Op::Halt => {

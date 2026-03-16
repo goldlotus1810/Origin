@@ -10,6 +10,7 @@
 
 extern crate alloc;
 
+pub mod alphabet;
 pub mod clone;
 pub mod compact;
 pub mod compiler;
@@ -25,7 +26,9 @@ pub mod qr;
 pub mod reader;
 pub mod registry;
 pub mod self_model;
+pub mod semantic;
 pub mod separator;
 pub mod startup;
+pub mod syntax;
 pub mod vm;
 pub mod writer;

@@ -153,6 +153,8 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Dream => "/* dream */".into(),
         Op::Stats => "/* stats */".into(),
         Op::Nop => "".into(),
+        Op::Store(name) => format!("olang_store(\"{}\", pop(&s));", escape(name)),
+        Op::LoadLocal(name) => format!("push(&s, olang_load_local(\"{}\"));", escape(name)),
     })
 }
 
@@ -212,6 +214,8 @@ fn rust_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Call(name) => format!("{}();", name.replace(' ', "_")),
         Op::Jmp(t) => format!("// jmp {}", t),
         Op::Jz(t)  => format!("// jz {} (runtime check needed)", t),
+        Op::Store(name) => format!("// store local: {}", name),
+        Op::LoadLocal(name) => format!("// load local: {}", name),
     })
 }
 
@@ -304,6 +308,8 @@ fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileE
         Op::Call(name) => format!("call ${}", name.replace(' ', "_")),
         Op::Jmp(t) => format!(";; jmp {} (label needed)", t),
         Op::Jz(t) => format!("i64.eqz  br_if {};; jz", t),
+        Op::Store(_) => "local.set $local ;; store".into(),
+        Op::LoadLocal(_) => "local.get $local ;; load_local".into(),
     })
 }
 
