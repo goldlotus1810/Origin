@@ -339,10 +339,10 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 | **agents** | Encoder, Learning, Gate, Skill, Instinct, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `instinct.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
 | **memory** | STM, Dream, Proposals, AAM | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
 | **runtime** | HomeRuntime entry point, ○{} Parser | `origin.rs`, `parser.rs`, `response_template.rs` | `cargo test -p runtime` |
-| **hal** | Hardware Abstraction Layer: arch detect, platform probe, security scan, device drivers | `arch.rs`, `platform.rs`, `probe.rs`, `security.rs`, `driver.rs` | `cargo test -p hal` |
+| **hal** | HAL: arch detect, platform probe, security, drivers, tier system, FFI | `arch.rs`, `platform.rs`, `probe.rs`, `security.rs`, `driver.rs`, `tier.rs`, `ffi.rs` | `cargo test -p hal` |
 | **isl** | Inter-system messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs`, `queue.rs` | `cargo test -p isl` |
-| **vsdf** | 18 SDF + ∇f + FFR Fibonacci render | `sdf.rs`, `ffr.rs`, `physics.rs`, `vector.rs`, `fit.rs` | `cargo test -p vsdf` |
-| **wasm** | Browser WebAssembly bindings | `lib.rs` | `cargo test -p homeos-wasm` |
+| **vsdf** | 18 SDF + ∇f + FFR + 3D scene graph | `sdf.rs`, `ffr.rs`, `physics.rs`, `fit.rs`, `scene.rs` | `cargo test -p vsdf` |
+| **wasm** | Browser WASM bindings + WebSocket-ISL bridge | `lib.rs`, `bridge.rs` | `cargo test -p homeos-wasm` |
 
 **Tools (std):**
 | Tool | Mục đích | Test |
@@ -359,7 +359,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (1035 tests)
+# Test toàn bộ (1081 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)

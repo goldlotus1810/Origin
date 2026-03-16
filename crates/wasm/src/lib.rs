@@ -9,6 +9,8 @@
 //!   const r  = os.process("○{lửa ∘ nước}");
 //!   console.log(r); // JSON response
 
+pub mod bridge;
+
 use wasm_bindgen::prelude::*;
 
 use runtime::origin::{HomeRuntime, Response, ResponseKind};

@@ -17,3 +17,4 @@ pub mod vector;
 pub mod delta;
 pub mod physics;
 pub mod occlusion;
+pub mod scene;
