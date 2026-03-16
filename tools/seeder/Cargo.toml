@@ -22,3 +22,7 @@ path = "src/l2_data.rs"
 [[bin]]
 name = "l3_topics"
 path = "src/l3_topics.rs"
+
+[[bin]]
+name = "seed_domains"
+path = "src/seed_domains.rs"
