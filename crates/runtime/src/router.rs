@@ -27,7 +27,7 @@ use agents::chief::{Chief, ChiefKind};
 use agents::leo::LeoAI;
 use agents::worker::Worker;
 use isl::address::ISLAddress;
-use isl::message::{ISLMessage, MsgType};
+use isl::message::{ISLFrame, ISLMessage, MsgType};
 use memory::proposal::{AAM, AAMDecision, DreamProposal, UserAuthority};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,6 +41,12 @@ pub struct TickStats {
     pub worker_reports: u32,
     /// Chief reports routed to LeoAI
     pub chief_reports: u32,
+    /// Chief-to-Chief peer messages routed
+    pub peer_messages: u32,
+    /// Chief commands dispatched to Worker inboxes
+    pub commands_dispatched: u32,
+    /// LeoAI inbox messages processed
+    pub leo_inbox_processed: u32,
     /// Proposals sent to AAM
     pub proposals_sent: u32,
     /// Proposals approved by AAM
@@ -66,6 +72,10 @@ pub struct RouterStats {
     pub total_worker_reports: u64,
     /// Total chief reports routed
     pub total_chief_reports: u64,
+    /// Total peer messages routed
+    pub total_peer_messages: u64,
+    /// Total commands dispatched to workers
+    pub total_commands_dispatched: u64,
     /// Total proposals to AAM
     pub total_proposals: u64,
     /// Total approved
@@ -153,6 +163,51 @@ impl MessageRouter {
             }
         }
 
+        // ── Phase 1b: Chief commands → Worker inboxes ─────────────────────
+        for chief in chiefs.iter_mut() {
+            let cmds = chief.drain_commands();
+            for cmd in cmds {
+                tick.commands_dispatched += 1;
+                let target_key = cmd.header.to.to_u32();
+                for worker in workers.iter_mut() {
+                    if worker.addr.to_u32() == target_key {
+                        worker.receive_isl(cmd.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        // ── Phase 1c: Worker inbox poll ───────────────────────────────────
+        for worker in workers.iter_mut() {
+            worker.poll_inbox(ts);
+        }
+
+        // ── Phase 1d: Chief-to-Chief peer messaging ───────────────────────
+        // Collect peer messages first to avoid borrow conflicts
+        let mut peer_msgs: Vec<ISLFrame> = Vec::new();
+        for chief in chiefs.iter_mut() {
+            peer_msgs.extend(chief.drain_peer_outbox());
+        }
+        for msg in peer_msgs {
+            tick.peer_messages += 1;
+            let target_key = msg.header.to.to_u32();
+            for chief in chiefs.iter_mut() {
+                if chief.addr.to_u32() == target_key {
+                    chief.receive_peer(msg.clone(), ts);
+                    break;
+                }
+            }
+            // Broadcast: if target is 0xEE (emergency broadcast), send to all
+            if msg.header.to.to_u32() == 0 && msg.header.msg_type == MsgType::Emergency {
+                for chief in chiefs.iter_mut() {
+                    if chief.addr.to_u32() != msg.header.from.to_u32() {
+                        chief.receive_peer(msg.clone(), ts);
+                    }
+                }
+            }
+        }
+
         // ── Phase 2: Chiefs → LeoAI ─────────────────────────────────────────
         for chief in chiefs.iter_mut() {
             let reports = chief.drain_reports();
@@ -232,6 +287,8 @@ impl MessageRouter {
         self.stats.ticks += 1;
         self.stats.total_worker_reports += tick.worker_reports as u64;
         self.stats.total_chief_reports += tick.chief_reports as u64;
+        self.stats.total_peer_messages += tick.peer_messages as u64;
+        self.stats.total_commands_dispatched += tick.commands_dispatched as u64;
         self.stats.total_proposals += tick.proposals_sent as u64;
         self.stats.total_approved += tick.proposals_approved as u64;
         self.stats.total_rejected += tick.proposals_rejected as u64;
@@ -268,14 +325,18 @@ impl MessageRouter {
     pub fn summary(&self) -> alloc::string::String {
         alloc::format!(
             "Router ○\n\
-             Ticks        : {}\n\
-             Worker→Chief : {}\n\
-             Chief→LeoAI  : {}\n\
-             Proposals    : {} (approved: {}, rejected: {})\n\
-             User pending : {}",
+             Ticks          : {}\n\
+             Worker→Chief   : {}\n\
+             Chief→LeoAI    : {}\n\
+             Chief↔Chief    : {}\n\
+             Cmds→Workers   : {}\n\
+             Proposals      : {} (approved: {}, rejected: {})\n\
+             User pending   : {}",
             self.stats.ticks,
             self.stats.total_worker_reports,
             self.stats.total_chief_reports,
+            self.stats.total_peer_messages,
+            self.stats.total_commands_dispatched,
             self.stats.total_proposals,
             self.stats.total_approved,
             self.stats.total_rejected,
@@ -394,6 +455,42 @@ mod tests {
         assert_eq!(payload_to_hash(&[0xAB, 0xCD, 0xEF]), 0xABCDEF);
         assert_eq!(payload_to_hash(&[0x00, 0x00, 0x00]), 0);
         assert_eq!(payload_to_hash(&[0xFF, 0xFF, 0xFF]), 0xFFFFFF);
+    }
+
+    #[test]
+    fn tick_dispatches_chief_commands_to_workers() {
+        let mut r = MessageRouter::new();
+        let (aam, leo_addr, chief_addr) = addrs();
+        let worker_addr = ISLAddress::new(0, 0, 0, 10);
+
+        let mut leo = LeoAI::new(leo_addr, aam);
+        let mut worker = Worker::new(worker_addr, chief_addr, WorkerKind::Actuator);
+
+        let mut chief = Chief::new(chief_addr, aam, leo_addr, ChiefKind::Home);
+        chief.register_worker(worker_addr, WorkerKind::Actuator as u8, 0);
+        // Queue a command for the worker
+        chief.forward_command(worker_addr, 0x01, 0xFF);
+
+        let mut workers = alloc::vec![worker];
+        let mut chiefs = alloc::vec![chief];
+        let stats = r.tick(&mut workers, &mut chiefs, &mut leo, 1000);
+
+        assert!(
+            stats.commands_dispatched > 0,
+            "Chief command dispatched to worker"
+        );
+        // Worker should have processed the command and created an ACK
+        assert!(
+            workers[0].has_reports(),
+            "Worker processed command from inbox"
+        );
+    }
+
+    #[test]
+    fn tick_peer_messages_stats() {
+        let r = MessageRouter::new();
+        let summary = r.summary();
+        assert!(summary.contains("Chief↔Chief"), "Summary has peer field");
     }
 
     #[test]

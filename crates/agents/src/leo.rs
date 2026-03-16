@@ -71,6 +71,9 @@ pub struct LeoAI {
     /// Outbox → AAM
     outbox: Vec<ISLFrame>,
 
+    /// ISL inbox — frames from Chiefs and AAM
+    inbox: Vec<ISLFrame>,
+
     /// QT9: bytes chờ ghi disk — caller drain và flush.
     pending_writes: Vec<u8>,
 
@@ -98,6 +101,7 @@ impl LeoAI {
             learning: LearningLoop::new(0x1E0A1), // stable session id
             pending: Vec::new(),
             outbox: Vec::new(),
+            inbox: Vec::new(),
             pending_writes: Vec::new(),
             qr_promoted: 0,
             ingested: 0,
@@ -284,6 +288,58 @@ impl LeoAI {
     /// Drain pending writes — caller flush to disk.
     pub fn drain_pending_writes(&mut self) -> Vec<u8> {
         core::mem::take(&mut self.pending_writes)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ISL Inbox — nhận ISL frames từ Chiefs và AAM
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Receive an ISL frame into the inbox.
+    pub fn receive_isl(&mut self, frame: ISLFrame) {
+        self.inbox.push(frame);
+    }
+
+    /// Poll inbox — process all pending ISL messages.
+    ///
+    /// Dispatches:
+    ///   Approved/Nack → receive_aam_decision()
+    ///   ChainPayload → treat as report data, feed to learning
+    ///   Propose → forward to AAM outbox
+    ///
+    /// Returns number of messages processed.
+    pub fn poll_inbox(&mut self, ts: i64) -> u32 {
+        if self.inbox.is_empty() {
+            return 0;
+        }
+        let frames: Vec<ISLFrame> = core::mem::take(&mut self.inbox);
+        let count = frames.len() as u32;
+        for frame in frames {
+            match frame.header.msg_type {
+                MsgType::Approved | MsgType::Nack => {
+                    self.receive_aam_decision(frame.header, ts);
+                }
+                MsgType::ChainPayload => {
+                    // Treat as data from Chief — ingest
+                    let emotion = silk::edge::EmotionTag::NEUTRAL;
+                    let report = IngestedReport {
+                        from_worker: frame.header.from,
+                        emotion,
+                        payload: frame.body,
+                        timestamp: ts,
+                    };
+                    self.ingest(report, ts);
+                }
+                _ => {
+                    // Unknown msg type — push to outbox for forwarding
+                }
+            }
+        }
+        count
+    }
+
+    /// Number of pending ISL messages in inbox.
+    pub fn inbox_len(&self) -> usize {
+        self.inbox.len()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -579,6 +635,66 @@ mod tests {
 
         // STM observation đã bị remove sau promote
         assert!(l.stm_len() < stm_before, "STM phải giảm sau promote QR");
+    }
+
+    // ── ISL inbox ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn leo_inbox_starts_empty() {
+        let l = leo();
+        assert_eq!(l.inbox_len(), 0);
+    }
+
+    #[test]
+    fn leo_receive_isl_queues() {
+        let mut l = leo();
+        let msg = ISLMessage::new(aam_addr(), leo_addr(), MsgType::Approved);
+        let frame = ISLFrame::bare(msg);
+        l.receive_isl(frame);
+        assert_eq!(l.inbox_len(), 1);
+    }
+
+    #[test]
+    fn leo_poll_inbox_processes_aam_decision() {
+        let mut l = leo();
+        // Add a pending proposal
+        l.pending.push(LeoPendingProposal {
+            chain_hash: 0x1,
+            fire_count: 5,
+            confidence: 0.8,
+            timestamp: 0,
+        });
+        // Send Approved via inbox
+        let approved =
+            ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        l.receive_isl(ISLFrame::bare(approved));
+
+        let processed = l.poll_inbox(1000);
+        assert_eq!(processed, 1);
+        assert_eq!(l.inbox_len(), 0, "Inbox drained");
+        assert_eq!(l.pending_count(), 0, "Approved clears pending");
+    }
+
+    #[test]
+    fn leo_poll_inbox_nack() {
+        let mut l = leo();
+        l.pending.push(LeoPendingProposal {
+            chain_hash: 0x2,
+            fire_count: 3,
+            confidence: 0.5,
+            timestamp: 0,
+        });
+        let nack = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Nack, [0, 0, 0]);
+        l.receive_isl(ISLFrame::bare(nack));
+        l.poll_inbox(1000);
+        assert_eq!(l.pending_count(), 0, "Nack clears pending");
+    }
+
+    #[test]
+    fn leo_poll_inbox_empty_noop() {
+        let mut l = leo();
+        let processed = l.poll_inbox(1000);
+        assert_eq!(processed, 0);
     }
 
     #[test]

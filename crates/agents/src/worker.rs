@@ -134,6 +134,8 @@ pub struct Worker {
     pub state: WorkerState,
     /// Outbox — chờ gửi lên Chief
     pub outbox: Vec<WorkerReport>,
+    /// ISL inbox — commands from Chief via ISL
+    inbox: Vec<ISLFrame>,
     /// Event count
     pub events: u32,
     /// Door worker: security locked state
@@ -153,6 +155,7 @@ impl Worker {
             kind,
             state: WorkerState::Sleeping,
             outbox: Vec::new(),
+            inbox: Vec::new(),
             events: 0,
             security_locked: false,
             anomaly_accumulator: 0.0,
@@ -375,6 +378,34 @@ impl Worker {
             });
         }
         // ≤ 0.4 → silent (no report)
+    }
+
+    // ── ISL Inbox ──────────────────────────────────────────────────────────
+
+    /// Receive an ISL frame into the inbox (called by Chief via router).
+    pub fn receive_isl(&mut self, frame: ISLFrame) {
+        self.inbox.push(frame);
+    }
+
+    /// Poll inbox — process all pending ISL commands.
+    ///
+    /// Drains inbox, dispatches each frame as WorkerEvent::ISLCommand.
+    /// Returns number of commands processed.
+    pub fn poll_inbox(&mut self, ts: i64) -> u32 {
+        if self.inbox.is_empty() {
+            return 0;
+        }
+        let frames: Vec<ISLFrame> = core::mem::take(&mut self.inbox);
+        let count = frames.len() as u32;
+        for frame in frames {
+            self.process(WorkerEvent::ISLCommand(frame.header), ts);
+        }
+        count
+    }
+
+    /// Number of pending ISL messages in inbox.
+    pub fn inbox_len(&self) -> usize {
+        self.inbox.len()
     }
 
     /// Lock/unlock security (door worker).
@@ -1445,6 +1476,55 @@ mod tests {
     }
 
     // ── SensorNormalizer ──────────────────────────────────────────────────────
+
+    // ── ISL inbox ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn worker_inbox_starts_empty() {
+        let w = worker();
+        assert_eq!(w.inbox_len(), 0);
+    }
+
+    #[test]
+    fn worker_receive_isl_queues() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let cmd = ISLMessage::actuator(chief(), waddr(), 0x01, 0xFF);
+        let frame = ISLFrame::bare(cmd);
+        w.receive_isl(frame);
+        assert_eq!(w.inbox_len(), 1);
+    }
+
+    #[test]
+    fn worker_poll_inbox_processes_commands() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let cmd = ISLMessage::actuator(chief(), waddr(), 0x01, 0xFF);
+        let frame = ISLFrame::bare(cmd);
+        w.receive_isl(frame);
+        let processed = w.poll_inbox(1000);
+        assert_eq!(processed, 1);
+        assert_eq!(w.inbox_len(), 0, "Inbox drained after poll");
+        assert!(w.has_reports(), "Command → ACK report");
+    }
+
+    #[test]
+    fn worker_poll_inbox_empty_noop() {
+        let mut w = worker();
+        let processed = w.poll_inbox(1000);
+        assert_eq!(processed, 0);
+    }
+
+    #[test]
+    fn worker_poll_inbox_multiple_commands() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        for i in 0..3 {
+            let cmd = ISLMessage::actuator(chief(), waddr(), 0x01, i);
+            w.receive_isl(ISLFrame::bare(cmd));
+        }
+        assert_eq!(w.inbox_len(), 3);
+        let processed = w.poll_inbox(1000);
+        assert_eq!(processed, 3);
+        assert_eq!(w.outbox.len(), 3, "3 commands → 3 ACKs");
+    }
 
     #[test]
     fn normalizer_first_reading_reports() {

@@ -127,6 +127,8 @@ pub struct Chief {
     /// Outbox → Workers (commands)
     cmd_queue: Vec<ISLFrame>,
     pub events: u32,
+    /// Peer outbox → other Chiefs (Chief-to-Chief messaging)
+    peer_outbox: Vec<ISLFrame>,
     // ── Domain-specific state ────────────────────────────────────────────────
     /// NetworkChief: security alert level (0=normal, 1=elevated, 2=critical).
     pub security_level: u8,
@@ -149,6 +151,7 @@ impl Chief {
             outbox: Vec::new(),
             cmd_queue: Vec::new(),
             events: 0,
+            peer_outbox: Vec::new(),
             security_level: 0,
             motion_events: 0,
             last_temp: None,
@@ -215,9 +218,12 @@ impl Chief {
                 // Emergency → forward lên AAM
                 let alert = ISLFrame::bare(ISLMessage::emergency(self.addr, 0xEE));
                 self.cmd_queue.push(alert);
-                // NetworkChief: escalate security level ngay
+                // NetworkChief: escalate security level + notify peer Chiefs
                 if self.kind == ChiefKind::Network {
                     self.security_level = 2; // critical
+                    // Broadcast emergency to all peer Chiefs
+                    let peer_alert = ISLFrame::bare(ISLMessage::emergency(self.addr, 0xEE));
+                    self.peer_outbox.push(peer_alert);
                 }
             }
             _ => {}
@@ -338,6 +344,52 @@ impl Chief {
         for addr in actuator_addrs {
             self.forward_command(addr, cmd, value);
         }
+    }
+
+    // ── Chief-to-Chief peer messaging ─────────────────────────────────────
+
+    /// Receive a peer message from another Chief.
+    ///
+    /// Used for inter-domain coordination:
+    ///   NetworkChief alerts HomeChief about intrusion → lock doors
+    ///   VisionChief tells HomeChief about sustained motion → turn on lights
+    pub fn receive_peer(&mut self, frame: ISLFrame, ts: i64) {
+        self.state = ChiefState::Processing;
+        self.events += 1;
+
+        match frame.header.msg_type {
+            MsgType::Emergency => {
+                // Peer emergency: NetworkChief → HomeChief = lock all
+                if self.kind == ChiefKind::Home {
+                    self.command_all_actuators(0x03, 0x01); // lock command
+                }
+            }
+            MsgType::ChainPayload => {
+                // Peer data sharing — ingest as report for LeoAI
+                let emotion = decode_emotion_from_body(&frame.body);
+                self.outbox.push(IngestedReport {
+                    from_worker: frame.header.from, // from peer Chief
+                    emotion,
+                    payload: frame.body.clone(),
+                    timestamp: ts,
+                });
+            }
+            _ => {}
+        }
+
+        self.state = ChiefState::Sleeping;
+    }
+
+    /// Send a message to a peer Chief.
+    pub fn send_to_peer(&mut self, target: ISLAddress, msg_type: MsgType, body: Vec<u8>) {
+        let msg = ISLMessage::new(self.addr, target, msg_type);
+        let frame = ISLFrame::with_body(msg, body);
+        self.peer_outbox.push(frame);
+    }
+
+    /// Drain peer outbox → messages for other Chiefs.
+    pub fn drain_peer_outbox(&mut self) -> Vec<ISLFrame> {
+        core::mem::take(&mut self.peer_outbox)
     }
 
     /// Reset security level (dùng sau khi AAM xác nhận an toàn).
@@ -707,6 +759,71 @@ mod tests {
         c.receive_frame(frame, 1000);
 
         assert_eq!(c.motion_events, 1, "Motion event detected");
+    }
+
+    // ── Chief-to-Chief peer messaging ────────────────────────────────────
+
+    #[test]
+    fn peer_outbox_starts_empty() {
+        let mut c = make_chief();
+        let out = c.drain_peer_outbox();
+        assert!(out.is_empty(), "Fresh chief has empty peer outbox");
+    }
+
+    #[test]
+    fn network_emergency_broadcasts_to_peers() {
+        let mut net = Chief::new(chief(), aam(), leo(), ChiefKind::Network);
+        let emerg = ISLMessage::emergency(worker_addr(1), 0xFF);
+        let frame = ISLFrame::bare(emerg);
+        net.receive_frame(frame, 1000);
+
+        let peer_msgs = net.drain_peer_outbox();
+        assert!(
+            !peer_msgs.is_empty(),
+            "NetworkChief emergency → peer broadcast"
+        );
+        assert_eq!(peer_msgs[0].header.msg_type, MsgType::Emergency);
+    }
+
+    #[test]
+    fn home_chief_locks_on_peer_emergency() {
+        let mut home = make_chief();
+        // Register an actuator worker
+        home.register_worker(worker_addr(5), 0x02, 1000);
+
+        // Receive peer emergency from NetworkChief
+        let net_addr = ISLAddress::new(1, 0, 0, 2);
+        let emerg = ISLMessage::emergency(net_addr, 0xEE);
+        let frame = ISLFrame::bare(emerg);
+        home.receive_peer(frame, 2000);
+
+        let cmds = home.drain_commands();
+        assert!(!cmds.is_empty(), "Peer emergency → lock actuators");
+    }
+
+    #[test]
+    fn peer_chain_payload_creates_report() {
+        let mut c = make_chief();
+        let peer_addr = ISLAddress::new(1, 0, 0, 3);
+        let msg = ISLMessage::new(peer_addr, chief(), MsgType::ChainPayload);
+        let body = alloc::vec![1u8, 0x01, 0, 0, 0x41, 0xA0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let frame = ISLFrame::with_body(msg, body);
+        c.receive_peer(frame, 3000);
+
+        let reports = c.drain_reports();
+        assert_eq!(reports.len(), 1, "Peer ChainPayload → report for LeoAI");
+    }
+
+    #[test]
+    fn send_to_peer_queues_message() {
+        let mut c = make_chief();
+        let target = ISLAddress::new(1, 0, 0, 5);
+        c.send_to_peer(target, MsgType::ChainPayload, alloc::vec![0x01, 0x02]);
+
+        let msgs = c.drain_peer_outbox();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].header.to, target);
+        assert_eq!(msgs[0].header.from, chief());
     }
 
     #[test]
