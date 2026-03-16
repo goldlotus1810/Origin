@@ -71,6 +71,12 @@ pub struct LeoAI {
     /// Outbox → AAM
     outbox:        Vec<ISLFrame>,
 
+    /// QT9: bytes chờ ghi disk — caller drain và flush.
+    pending_writes: Vec<u8>,
+
+    /// Số QR đã promote (AAM approved + ghi file).
+    qr_promoted: u32,
+
     /// Stats
     pub ingested:  u32,
     pub dreamed:   u32,
@@ -92,6 +98,8 @@ impl LeoAI {
             learning:       LearningLoop::new(0x1E0A1), // stable session id
             pending:        Vec::new(),
             outbox:         Vec::new(),
+            pending_writes: Vec::new(),
+            qr_promoted:    0,
             ingested:       0,
             dreamed:        0,
             last_event_ts:  0,
@@ -183,21 +191,28 @@ impl LeoAI {
     ///
     /// AAM chỉ approve/reject — không đụng KnowledgeTree.
     /// LeoAI nhận approved → promote QR trong LearningLoop.
-    pub fn receive_aam_decision(&mut self, msg: ISLMessage, _ts: i64) {
+    pub fn receive_aam_decision(&mut self, msg: ISLMessage, ts: i64) {
         match msg.msg_type {
             MsgType::Approved => {
-                // payload[0] = proposal index (đơn giản)
                 let idx = msg.payload[0] as usize;
                 if idx < self.pending.len() {
                     let p = self.pending.remove(idx);
-                    // Promote: learning sẽ xử lý trong Dream cycle tiếp theo
-                    // Đây là signal "AAM đã ký" — knowledge được ghi QR
-                    // (STM → QR qua Dream + ED25519 trong writer)
-                    let _ = p; // TODO: wire vào olang::writer QR path
+
+                    // Tìm chain trong STM bằng chain_hash
+                    if let Some(obs) = self.learning.stm().find_by_hash(p.chain_hash) {
+                        // QT9: Ghi file TRƯỚC — cập nhật RAM SAU
+                        use olang::writer::OlangWriter;
+                        let mut writer = OlangWriter::new(ts);
+                        let _ = writer.append_node(&obs.chain, 0, true, ts);
+                        self.pending_writes.extend_from_slice(writer.as_bytes());
+                        self.qr_promoted += 1;
+                    }
+
+                    // Xóa observation đã promote khỏi STM
+                    self.learning.stm_mut().remove_promoted(&[p.chain_hash]);
                 }
             }
             MsgType::Nack => {
-                // Bị từ chối → xóa khỏi pending
                 let idx = msg.payload[0] as usize;
                 if idx < self.pending.len() {
                     self.pending.remove(idx);
@@ -222,6 +237,15 @@ impl LeoAI {
     pub fn edge_count(&self) -> usize { self.learning.graph().len() }
     pub fn fx(&self)         -> f32   { self.learning.context().fx() }
     pub fn pending_count(&self) -> usize { self.pending.len() }
+    pub fn qr_count(&self)  -> u32   { self.qr_promoted }
+
+    /// Có bytes chờ ghi disk?
+    pub fn has_pending_writes(&self) -> bool { !self.pending_writes.is_empty() }
+
+    /// Drain pending writes — caller flush to disk.
+    pub fn drain_pending_writes(&mut self) -> Vec<u8> {
+        core::mem::take(&mut self.pending_writes)
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Instinct — 7 bản năng bẩm sinh
@@ -237,7 +261,7 @@ impl LeoAI {
         // Chuẩn bị state cho Reflection từ learning stats
         ctx.set(
             alloc::string::String::from("qr_count"),
-            alloc::format!("{}", 0), // TODO: wire real QR count khi có writer
+            alloc::format!("{}", self.qr_promoted),
         );
         ctx.set(
             alloc::string::String::from("dn_count"),
@@ -386,6 +410,52 @@ mod tests {
         let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
         l.receive_aam_decision(approved, 1000);
         assert_eq!(l.pending_count(), 0, "Approved → xóa khỏi pending");
+    }
+
+    #[test]
+    fn aam_approved_writes_qr() {
+        let mut l = leo();
+        // Feed data → STM gets an observation
+        l.ingest(report(-0.5, 1), 1000);
+        assert!(l.stm_len() >= 1);
+
+        // Lấy chain_hash từ STM observation đầu tiên
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+
+        // Tạo pending proposal cho hash đó
+        l.pending.push(LeoPendingProposal {
+            chain_hash: hash, fire_count: 5, confidence: 0.8, timestamp: 1000,
+        });
+
+        // AAM Approved
+        let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        l.receive_aam_decision(approved, 2000);
+
+        // QR đã promote
+        assert_eq!(l.qr_count(), 1, "QR promoted count phải = 1");
+        assert!(l.has_pending_writes(), "Phải có bytes chờ ghi disk");
+
+        // Drain writes
+        let bytes = l.drain_pending_writes();
+        assert!(!bytes.is_empty(), "Bytes phải có data");
+        assert!(!l.has_pending_writes(), "Drain xong phải rỗng");
+    }
+
+    #[test]
+    fn aam_approved_removes_from_stm() {
+        let mut l = leo();
+        l.ingest(report(-0.5, 1), 1000);
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+        let stm_before = l.stm_len();
+
+        l.pending.push(LeoPendingProposal {
+            chain_hash: hash, fire_count: 5, confidence: 0.8, timestamp: 1000,
+        });
+        let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        l.receive_aam_decision(approved, 2000);
+
+        // STM observation đã bị remove sau promote
+        assert!(l.stm_len() < stm_before, "STM phải giảm sau promote QR");
     }
 
     #[test]
