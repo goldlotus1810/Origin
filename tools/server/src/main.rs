@@ -7,18 +7,10 @@
 
 use std::io::{self, BufRead, Write};
 use std::fs::OpenOptions;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use runtime::origin::HomeRuntime;
+use runtime::origin::{HomeRuntime, now_ns};
 
 const OLANG_FILE: &str = "origin.olang";
-
-fn now_ns() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as i64
-}
 
 fn main() {
     // ○(∅) == ○ — boot

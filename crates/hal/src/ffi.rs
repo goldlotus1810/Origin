@@ -146,11 +146,44 @@ impl Default for DesktopBridge {
 impl PlatformBridge for DesktopBridge {
     fn name(&self) -> &str { "Desktop" }
     fn tier(&self) -> HardwareTier { self.tier }
-    fn timestamp_ms(&self) -> i64 { 0 } // real impl: std::time
-    fn read_file(&self, _path: &str) -> Option<Vec<u8>> { None } // real impl: std::fs
+
+    #[cfg(feature = "std")]
+    fn timestamp_ms(&self) -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn timestamp_ms(&self) -> i64 { 0 }
+
+    #[cfg(feature = "std")]
+    fn read_file(&self, path: &str) -> Option<Vec<u8>> {
+        std::fs::read(path).ok()
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn read_file(&self, _path: &str) -> Option<Vec<u8>> { None }
+
+    #[cfg(feature = "std")]
+    fn write_file(&self, path: &str, data: &[u8]) -> bool {
+        std::fs::write(path, data).is_ok()
+    }
+
+    #[cfg(not(feature = "std"))]
     fn write_file(&self, _path: &str, _data: &[u8]) -> bool { false }
-    fn notify(&self, _title: &str, _body: &str) {} // real impl: desktop notification
-    fn log(&self, _level: LogLevel, _msg: &str) {} // real impl: println! or log crate
+
+    fn notify(&self, _title: &str, _body: &str) {}
+
+    #[cfg(feature = "std")]
+    fn log(&self, level: LogLevel, msg: &str) {
+        eprintln!("[{:?}] {}", level, msg);
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn log(&self, _level: LogLevel, _msg: &str) {}
+
     fn read_sensor(&self, _sensor_id: &str) -> Option<f32> { None }
 }
 

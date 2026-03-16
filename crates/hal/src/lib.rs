@@ -14,8 +14,10 @@
 //!   Traditional (Northbridge/Southbridge) → PCH (single-chip) → SoC (all-in-one)
 //!   HAL abstract tất cả — Worker không cần biết chipset layout
 
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
 
 pub mod arch;
 pub mod platform;

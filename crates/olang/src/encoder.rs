@@ -58,29 +58,10 @@ pub fn encode_zwj_sequence(codepoints: &[u32]) -> MolecularChain {
 /// Encode flag sequence (Regional Indicator pair) → 2 molecules.
 ///
 /// Ví dụ: 🇻🇳 = U+1F1FB (V) + U+1F1F3 (N)
+/// Dùng encode_codepoint() cho từng RI — KHÔNG hardcode Molecule.
 pub fn encode_flag(ri1: u32, ri2: u32) -> MolecularChain {
-    let letter1 = ri1.saturating_sub(0x1F1E6) as u8;
-    let letter2 = ri2.saturating_sub(0x1F1E6) as u8;
-
-    let m1 = Molecule {
-        shape:    ShapeBase::Box,
-        relation: RelationBase::Compose,
-        emotion:  EmotionDim {
-            valence: 0x80u8.saturating_add(letter1.saturating_mul(2)),
-            arousal: 0x60,
-        },
-        time: TimeDim::Static,
-    };
-    let m2 = Molecule {
-        shape:    ShapeBase::Box,
-        relation: RelationBase::Member,
-        emotion:  EmotionDim {
-            valence: 0x80u8.saturating_add(letter2.saturating_mul(2)),
-            arousal: 0x60,
-        },
-        time: TimeDim::Static,
-    };
-    MolecularChain(alloc::vec![m1, m2])
+    // QT4: mọi Molecule từ encode_codepoint() — ZWJ-like sequence
+    encode_zwj_sequence(&[ri1, ri2])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,10 +158,12 @@ mod tests {
 
     #[test]
     fn encode_flag_vietnam() {
+        if ucd::table_len() == 0 { return; }
         // 🇻🇳 = U+1F1FB (V) + U+1F1F3 (N)
+        // QT4: encode_flag delegates to encode_zwj_sequence — no hardcoded Molecule
         let chain = encode_flag(0x1F1FB, 0x1F1F3);
         assert_eq!(chain.len(), 2);
-        assert_eq!(chain.0[0].shape, ShapeBase::Box);
+        // ZWJ-like: first mol.relation = Compose, last = Member
         assert_eq!(chain.0[0].relation, RelationBase::Compose);
         assert_eq!(chain.0[1].relation, RelationBase::Member);
     }
