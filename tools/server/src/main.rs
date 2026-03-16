@@ -89,9 +89,11 @@ fn main() {
         let ts = now_ns();
         let response = rt.process_text(input, ts);
 
-        // Output
-        println!("{}", response.text);
-        println!();
+        // Output — silent responses (SilentAck, Observe) → không in gì
+        if !response.text.is_empty() {
+            println!("{}", response.text);
+            println!();
+        }
 
         // Flush pending writes → origin.olang (QT9: ghi file TRƯỚC)
         flush_pending(&mut rt);
