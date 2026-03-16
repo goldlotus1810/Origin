@@ -780,6 +780,648 @@ impl SilkPruner {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PageIndex — lightweight hash → page_id lookup
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Page index entry: chỉ 12 bytes per node (hash + page_id).
+///
+/// Với 1B nodes: 12B × 1B = 12GB — vẫn lớn.
+/// Giải pháp: Bloom filter + range index per layer.
+///
+/// PageIndex chỉ load layer đang cần.
+/// L0-L1: luôn in RAM (nhỏ).
+/// L2+: load range index on-demand.
+#[derive(Debug, Clone)]
+pub struct PageIndexEntry {
+    /// Truncated hash (4 bytes — đủ cho 4B unique entries)
+    pub hash_lo: u32,
+    /// Page ID chứa node này
+    pub page_id: u32,
+}
+
+/// Page index cho 1 layer — compact mapping hash → page.
+#[derive(Debug, Clone)]
+pub struct LayerIndex {
+    /// Layer
+    pub layer: u8,
+    /// Entries sorted by hash_lo (binary search)
+    pub entries: Vec<PageIndexEntry>,
+    /// Bloom filter (256 bytes = 2048 bits) — quick "definitely not here" check
+    pub bloom: [u8; 256],
+}
+
+impl LayerIndex {
+    /// Tạo index rỗng.
+    pub fn new(layer: u8) -> Self {
+        Self { layer, entries: Vec::new(), bloom: [0u8; 256] }
+    }
+
+    /// Thêm entry.
+    pub fn insert(&mut self, hash: u64, page_id: u32) {
+        let hash_lo = (hash & 0xFFFFFFFF) as u32;
+        // Bloom filter: set 3 bits
+        let b1 = (hash & 0x7FF) as usize;
+        let b2 = ((hash >> 11) & 0x7FF) as usize;
+        let b3 = ((hash >> 22) & 0x7FF) as usize;
+        self.bloom[b1 / 8] |= 1 << (b1 % 8);
+        self.bloom[b2 / 8] |= 1 << (b2 % 8);
+        self.bloom[b3 / 8] |= 1 << (b3 % 8);
+
+        // Insert sorted
+        let pos = self.entries.partition_point(|e| e.hash_lo < hash_lo);
+        self.entries.insert(pos, PageIndexEntry { hash_lo, page_id });
+    }
+
+    /// Bloom filter check — nhanh, false positive OK.
+    pub fn maybe_contains(&self, hash: u64) -> bool {
+        let b1 = (hash & 0x7FF) as usize;
+        let b2 = ((hash >> 11) & 0x7FF) as usize;
+        let b3 = ((hash >> 22) & 0x7FF) as usize;
+        (self.bloom[b1 / 8] & (1 << (b1 % 8))) != 0
+            && (self.bloom[b2 / 8] & (1 << (b2 % 8))) != 0
+            && (self.bloom[b3 / 8] & (1 << (b3 % 8))) != 0
+    }
+
+    /// Tìm page_id chứa hash (binary search).
+    pub fn find_page(&self, hash: u64) -> Option<u32> {
+        if !self.maybe_contains(hash) { return None; }
+        let hash_lo = (hash & 0xFFFFFFFF) as u32;
+        self.entries.binary_search_by_key(&hash_lo, |e| e.hash_lo)
+            .ok()
+            .map(|i| self.entries[i].page_id)
+    }
+
+    /// Số entries.
+    pub fn len(&self) -> usize { self.entries.len() }
+
+    /// Rỗng?
+    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+
+    /// Size in RAM (bytes).
+    ///
+    /// 256 (bloom) + entries × 8 (hash_lo:4 + page_id:4)
+    pub fn ram_size(&self) -> usize {
+        256 + self.entries.len() * 8
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PageCache — LRU cache cho CompactPages
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// LRU page cache — chỉ giữ N pages hot nhất trong RAM.
+///
+/// Bình thường: PC giữ ~Fib[15] = 610 pages trong RAM.
+/// Mỗi page ~233 nodes × ~30B = ~7KB compact data.
+/// 610 pages × 7KB = ~4.3MB RAM — AFFORDABLE.
+///
+/// Access pattern: LRU eviction khi cache đầy.
+/// Page bị evict → write back to disk nếu dirty.
+pub struct PageCache {
+    /// Cached pages (page_id → page)
+    pages: Vec<(u32, CompactPage, u64)>, // (page_id, page, last_access_ts)
+    /// Max pages in cache
+    capacity: usize,
+    /// Access counter (monotonic)
+    access_counter: u64,
+    /// Tổng hit/miss cho stats
+    hits: u64,
+    /// Misses
+    misses: u64,
+}
+
+/// Fibonacci cache capacities cho các tầng thiết bị.
+pub struct CacheCapacity;
+impl CacheCapacity {
+    /// ESP32/MCU: Fib[10] = 55 pages ≈ 385KB
+    pub const EMBEDDED: usize = 55;
+    /// Smartphone: Fib[13] = 233 pages ≈ 1.6MB
+    pub const MOBILE: usize = 233;
+    /// PC: Fib[15] = 610 pages ≈ 4.3MB
+    pub const PC: usize = 610;
+    /// Server: Fib[18] = 2584 pages ≈ 18MB
+    pub const SERVER: usize = 2584;
+}
+
+impl PageCache {
+    /// Tạo cache với capacity.
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            pages: Vec::with_capacity(capacity),
+            capacity,
+            access_counter: 0,
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    /// Cache cho PC.
+    pub fn for_pc() -> Self { Self::new(CacheCapacity::PC) }
+
+    /// Cache cho mobile.
+    pub fn for_mobile() -> Self { Self::new(CacheCapacity::MOBILE) }
+
+    /// Cache cho embedded.
+    pub fn for_embedded() -> Self { Self::new(CacheCapacity::EMBEDDED) }
+
+    /// Get page from cache (hit). Returns None if not cached (miss).
+    pub fn get(&mut self, page_id: u32) -> Option<&CompactPage> {
+        self.access_counter += 1;
+        for entry in self.pages.iter_mut() {
+            if entry.0 == page_id {
+                entry.2 = self.access_counter; // update LRU timestamp
+                self.hits += 1;
+                return Some(&entry.1);
+            }
+        }
+        self.misses += 1;
+        None
+    }
+
+    /// Put page into cache. Evicts LRU if full.
+    /// Returns evicted page if any (caller should write to disk).
+    pub fn put(&mut self, page_id: u32, page: CompactPage) -> Option<CompactPage> {
+        self.access_counter += 1;
+
+        // Already cached? Update.
+        for entry in self.pages.iter_mut() {
+            if entry.0 == page_id {
+                entry.1 = page;
+                entry.2 = self.access_counter;
+                return None;
+            }
+        }
+
+        // Cache full → evict LRU
+        let evicted = if self.pages.len() >= self.capacity {
+            // Find least recently used
+            let lru_idx = self.pages.iter()
+                .enumerate()
+                .min_by_key(|(_, e)| e.2)
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            let old = self.pages.swap_remove(lru_idx);
+            Some(old.1)
+        } else {
+            None
+        };
+
+        self.pages.push((page_id, page, self.access_counter));
+        evicted
+    }
+
+    /// Số pages hiện tại.
+    pub fn len(&self) -> usize { self.pages.len() }
+
+    /// Cache rỗng?
+    pub fn is_empty(&self) -> bool { self.pages.is_empty() }
+
+    /// Hit rate (0.0 .. 1.0).
+    pub fn hit_rate(&self) -> f32 {
+        let total = self.hits + self.misses;
+        if total == 0 { return 0.0; }
+        self.hits as f32 / total as f32
+    }
+
+    /// RAM usage estimate (bytes).
+    pub fn ram_usage(&self) -> usize {
+        self.pages.iter().map(|(_, p, _)| p.data_size() + 12).sum()
+    }
+
+    /// Stats summary.
+    pub fn stats(&self) -> String {
+        alloc::format!(
+            "PageCache: {}/{} pages | {:.1}% hit rate | ~{}KB RAM",
+            self.len(), self.capacity,
+            self.hit_rate() * 100.0,
+            self.ram_usage() / 1024,
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TieredStore — Hot/Warm/Cold storage
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Storage tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageTier {
+    /// Hot: trong RAM (L0-L1 + recently accessed L2+)
+    Hot,
+    /// Warm: trong PageCache (frequently accessed L2+ pages)
+    Warm,
+    /// Cold: trên disk (archived L2+ pages, load on-demand)
+    Cold,
+}
+
+/// Kết quả lookup: node + edges + neighbors (silk tracking).
+///
+/// ```text
+/// NodeWithEdges {
+///   node: CompactNode (target)
+///   edges: [CompactEdge] (outgoing silk connections)
+///   neighbors: [NeighborInfo] (resolved neighbor nodes)
+///   depth: u8 (how deep we followed)
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct NodeWithEdges {
+    /// The node itself
+    pub node: CompactNode,
+    /// Outgoing silk edges from this node
+    pub edges: Vec<CompactEdge>,
+    /// Resolved neighbor nodes (if depth > 0)
+    pub neighbors: Vec<NeighborInfo>,
+    /// Depth at which this node was found
+    pub depth: u8,
+}
+
+/// Thông tin 1 neighbor node (qua silk edge).
+#[derive(Debug, Clone)]
+pub struct NeighborInfo {
+    /// Neighbor node
+    pub node: CompactNode,
+    /// Silk edge weight (0.0 .. 1.0)
+    pub weight: f32,
+    /// Relation type
+    pub relation: RelationBase,
+}
+
+/// Tiered store — quản lý storage across tiers.
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────┐
+/// │ HOT (RAM)                                               │
+/// │   L0-L1: Full Registry + SilkGraph (always loaded)      │
+/// │   Recent STM entries                                     │
+/// │   RAM budget: ~50MB on PC, ~10MB on phone               │
+/// ├─────────────────────────────────────────────────────────┤
+/// │ WARM (PageCache)                                        │
+/// │   L2+ CompactPages (LRU, Fib[15]=610 pages on PC)      │
+/// │   LayerIndex per loaded layer                            │
+/// │   RAM budget: ~5MB on PC, ~2MB on phone                 │
+/// ├─────────────────────────────────────────────────────────┤
+/// │ COLD (Disk)                                             │
+/// │   All CompactPages serialized                            │
+/// │   Global index (LayerIndex per layer)                    │
+/// │   Disk budget: unlimited                                 │
+/// └─────────────────────────────────────────────────────────┘
+///
+/// 1B nodes + 5B edges estimate:
+///   Index: 1B × 8B = 8GB (too much for RAM)
+///     → Shard by layer: L2 index, L3 index, ..., LN index
+///     → Each layer index fits in RAM when needed
+///   Pages: 1B nodes / 233 per page = 4.3M pages
+///     → 4.3M × 7KB = ~30GB disk (OK)
+///     → PageCache: 610 pages × 7KB = 4.3MB RAM (OK)
+///   Edges: 5B × 38.2% kept × 10B = ~19GB disk (OK)
+///
+/// Total for 1B nodes:
+///   RAM:  ~60MB (hot L0-L1 + warm cache + active index)
+///   Disk: ~50GB (pages + edges + index)
+/// ```
+pub struct TieredStore {
+    /// Page cache (warm tier)
+    pub cache: PageCache,
+    /// Layer indexes (loaded on demand)
+    pub indexes: Vec<LayerIndex>,
+    /// Cold pages (serialized bytes, simulating disk)
+    /// In real impl: file offsets
+    cold_storage: Vec<(u32, Vec<u8>)>, // (page_id, serialized_bytes)
+    /// Dictionary (shared across tiers)
+    pub dict: ChainDictionary,
+    /// Next page ID
+    next_page_id: u32,
+    /// Total nodes stored
+    total_nodes: u64,
+    /// Total edges stored
+    total_edges: u64,
+}
+
+impl TieredStore {
+    /// Tạo store cho PC.
+    pub fn for_pc() -> Self {
+        Self {
+            cache: PageCache::for_pc(),
+            indexes: Vec::new(),
+            cold_storage: Vec::new(),
+            dict: ChainDictionary::default_size(),
+            next_page_id: 0,
+            total_nodes: 0,
+            total_edges: 0,
+        }
+    }
+
+    /// Tạo store cho mobile.
+    pub fn for_mobile() -> Self {
+        Self {
+            cache: PageCache::for_mobile(),
+            indexes: Vec::new(),
+            cold_storage: Vec::new(),
+            dict: ChainDictionary::default_size(),
+            next_page_id: 0,
+            total_nodes: 0,
+            total_edges: 0,
+        }
+    }
+
+    /// Tạo store cho embedded.
+    pub fn for_embedded() -> Self {
+        Self {
+            cache: PageCache::for_embedded(),
+            indexes: Vec::new(),
+            cold_storage: Vec::new(),
+            dict: ChainDictionary::new(256), // smaller dict for embedded
+            next_page_id: 0,
+            total_nodes: 0,
+            total_edges: 0,
+        }
+    }
+
+    /// Tạo store custom.
+    pub fn new(cache_capacity: usize, dict_capacity: usize) -> Self {
+        Self {
+            cache: PageCache::new(cache_capacity),
+            indexes: Vec::new(),
+            cold_storage: Vec::new(),
+            dict: ChainDictionary::new(dict_capacity),
+            next_page_id: 0,
+            total_nodes: 0,
+            total_edges: 0,
+        }
+    }
+
+    /// Store compact node. Auto-manages pages and tiers.
+    pub fn store_node(
+        &mut self,
+        chain: &MolecularChain,
+        parent: Option<&MolecularChain>,
+        layer: u8,
+        ts: i64,
+    ) -> u64 {
+        let node = CompactNode::encode(chain, parent, &mut self.dict, layer, ts);
+        let hash = node.hash;
+
+        // Get or create current page for this layer
+        let page_id = self.current_page_for_layer(layer);
+
+        // Try to get page from cache
+        if self.cache.get(page_id).is_some() {
+            // Page in cache — we need mutable access, so re-get mutably
+            // (limitation of our simple cache design)
+        }
+
+        // Get or create page
+        let mut page = self.take_page(page_id)
+            .unwrap_or_else(|| CompactPage::new(page_id, layer));
+
+        if page.is_full() {
+            // Flush current page to cold
+            self.flush_page(page);
+            // Create new page
+            self.next_page_id += 1;
+            page = CompactPage::new(self.next_page_id, layer);
+        }
+
+        page.push_node(node);
+        self.total_nodes += 1;
+
+        // Update index
+        self.ensure_index(layer);
+        for idx in &mut self.indexes {
+            if idx.layer == layer {
+                idx.insert(hash, page.page_id);
+                break;
+            }
+        }
+
+        // Put page back in cache
+        if let Some(evicted) = self.cache.put(page.page_id, page) {
+            self.flush_page(evicted);
+        }
+
+        hash
+    }
+
+    /// Store compact edge.
+    pub fn store_edge(&mut self, from: u64, to: u64, weight: f32, relation: RelationBase, layer: u8) {
+        let edge = CompactEdge::encode(from, to, weight, relation);
+
+        let page_id = self.current_page_for_layer(layer);
+        let mut page = self.take_page(page_id)
+            .unwrap_or_else(|| CompactPage::new(page_id, layer));
+
+        page.push_edge(edge);
+        self.total_edges += 1;
+
+        if let Some(evicted) = self.cache.put(page.page_id, page) {
+            self.flush_page(evicted);
+        }
+    }
+
+    /// Lookup node by hash.
+    pub fn lookup(&mut self, hash: u64, layer: u8) -> Option<&CompactNode> {
+        // 1. Check index for page_id
+        let page_id = {
+            let idx = self.indexes.iter().find(|i| i.layer == layer)?;
+            idx.find_page(hash)?
+        };
+
+        // 2. Check cache
+        if self.cache.get(page_id).is_some() {
+            let page = self.cache.get(page_id)?;
+            return page.nodes.iter().find(|n| n.hash == hash);
+        }
+
+        // 3. Load from cold storage
+        self.load_page_from_cold(page_id);
+        let page = self.cache.get(page_id)?;
+        page.nodes.iter().find(|n| n.hash == hash)
+    }
+
+    /// Total nodes stored across all tiers.
+    pub fn total_nodes(&self) -> u64 { self.total_nodes }
+
+    /// Total edges stored.
+    pub fn total_edges(&self) -> u64 { self.total_edges }
+
+    /// Estimated RAM usage (bytes).
+    pub fn ram_usage(&self) -> usize {
+        let cache_ram = self.cache.ram_usage();
+        let index_ram: usize = self.indexes.iter().map(|i| i.ram_size()).sum();
+        let dict_ram = self.dict.len() * 16; // rough estimate
+        cache_ram + index_ram + dict_ram
+    }
+
+    /// Estimated disk usage (bytes).
+    pub fn disk_usage(&self) -> usize {
+        self.cold_storage.iter().map(|(_, b)| b.len()).sum()
+    }
+
+    /// Summary.
+    pub fn summary(&self) -> String {
+        alloc::format!(
+            "TieredStore: {} nodes + {} edges\n\
+             RAM: ~{}KB | Disk: ~{}KB\n\
+             {}",
+            self.total_nodes, self.total_edges,
+            self.ram_usage() / 1024,
+            self.disk_usage() / 1024,
+            self.cache.stats(),
+        )
+    }
+
+    /// Lookup node + follow silk edges → connected nodes.
+    ///
+    /// Cơ chế đọc kết quả đến đúng địa chỉ, track silk to node:
+    /// ```text
+    /// hash → LayerIndex (bloom → binary search) → page_id
+    ///   → PageCache (LRU hit?) or Cold (load from disk)
+    ///     → CompactPage → scan nodes for hash match
+    ///       → CompactNode found!
+    ///         → scan page edges where from_hash == hash
+    ///           → each to_hash → recursive lookup (depth limited)
+    ///             → return NodeWithEdges { node, neighbors[] }
+    /// ```
+    pub fn lookup_with_edges(
+        &mut self,
+        hash: u64,
+        layer: u8,
+        max_depth: u8,
+    ) -> Option<NodeWithEdges> {
+        self.lookup_recursive(hash, layer, max_depth, 0)
+    }
+
+    /// Internal recursive lookup with depth tracking.
+    fn lookup_recursive(
+        &mut self,
+        hash: u64,
+        layer: u8,
+        max_depth: u8,
+        current_depth: u8,
+    ) -> Option<NodeWithEdges> {
+        // 1. Resolve hash → page_id via LayerIndex
+        let page_id = {
+            let idx = self.indexes.iter().find(|i| i.layer == layer)?;
+            idx.find_page(hash)?
+        };
+
+        // 2. Load page (cache hit or cold load)
+        if self.cache.get(page_id).is_none() {
+            self.load_page_from_cold(page_id);
+        }
+
+        let page = self.cache.get(page_id)?;
+
+        // 3. Find node in page
+        let node = page.nodes.iter().find(|n| n.hash == hash)?.clone();
+
+        // 4. Collect outgoing edges from this page
+        let edges: Vec<CompactEdge> = page.edges.iter()
+            .filter(|e| e.from_hash == (hash & 0xFFFFFFFF) as u32)
+            .cloned()
+            .collect();
+
+        // 5. Follow edges to neighbors (depth limited)
+        let mut neighbors = Vec::new();
+        if current_depth < max_depth {
+            for edge in &edges {
+                // Reconstruct full hash from truncated to_hash
+                // Search across all layer indexes for to_hash
+                if let Some(neighbor) = self.find_node_by_truncated_hash(edge.to_hash, layer) {
+                    neighbors.push(NeighborInfo {
+                        node: neighbor,
+                        weight: edge.weight_f32(),
+                        relation: RelationBase::from_byte(edge.relation).unwrap_or(RelationBase::Member),
+                    });
+                }
+            }
+        }
+
+        Some(NodeWithEdges {
+            node,
+            edges,
+            neighbors,
+            depth: current_depth,
+        })
+    }
+
+    /// Find node by truncated hash (4 bytes) — searches current layer first,
+    /// then adjacent layers.
+    fn find_node_by_truncated_hash(&mut self, hash_lo: u32, preferred_layer: u8) -> Option<CompactNode> {
+        // Search preferred layer first
+        let layers: Vec<u8> = {
+            let mut l = alloc::vec![preferred_layer];
+            // Also check adjacent layers (silk can cross layers)
+            if preferred_layer > 0 { l.push(preferred_layer - 1); }
+            l.push(preferred_layer + 1);
+            l
+        };
+
+        for &layer in &layers {
+            if let Some(idx) = self.indexes.iter().find(|i| i.layer == layer) {
+                if let Some(pos) = idx.entries.iter().position(|e| e.hash_lo == hash_lo) {
+                    let page_id = idx.entries[pos].page_id;
+                    if self.cache.get(page_id).is_none() {
+                        self.load_page_from_cold(page_id);
+                    }
+                    if let Some(page) = self.cache.get(page_id) {
+                        if let Some(node) = page.nodes.iter()
+                            .find(|n| (n.hash & 0xFFFFFFFF) as u32 == hash_lo)
+                        {
+                            return Some(node.clone());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    // ── Internal helpers ─────────────────────────────────────────────────────
+
+    fn current_page_for_layer(&self, _layer: u8) -> u32 {
+        // Simple: use next_page_id as current
+        self.next_page_id
+    }
+
+    fn ensure_index(&mut self, layer: u8) {
+        if !self.indexes.iter().any(|i| i.layer == layer) {
+            self.indexes.push(LayerIndex::new(layer));
+        }
+    }
+
+    fn take_page(&mut self, page_id: u32) -> Option<CompactPage> {
+        // Try cache first
+        // Since we can't remove from cache easily, just get reference
+        // In real impl: cache.remove(page_id)
+        if self.cache.get(page_id).is_some() {
+            // Clone from cache (simplified — real impl would move)
+            let page = self.cache.get(page_id)?.clone();
+            return Some(page);
+        }
+        None
+    }
+
+    fn flush_page(&mut self, page: CompactPage) {
+        let bytes = page.to_bytes();
+        self.cold_storage.push((page.page_id, bytes));
+    }
+
+    fn load_page_from_cold(&mut self, page_id: u32) {
+        // Find in cold storage
+        if let Some(idx) = self.cold_storage.iter().position(|(id, _)| *id == page_id) {
+            let (_, _bytes) = &self.cold_storage[idx];
+            // Simplified: just create empty page (real impl would deserialize)
+            let page = CompactPage::new(page_id, 0);
+            if let Some(evicted) = self.cache.put(page_id, page) {
+                self.flush_page(evicted);
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1100,6 +1742,164 @@ mod tests {
     fn pruner_fibonacci_threshold() {
         // φ⁻¹ ≈ 0.618 → threshold = 1 - 0.618 = 0.382
         assert!((SilkPruner::FIBONACCI_THRESHOLD - 0.382).abs() < 0.001);
+    }
+
+    // ── LayerIndex ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn layer_index_insert_and_find() {
+        let mut idx = LayerIndex::new(2);
+        idx.insert(0xDEADBEEF12345678, 42);
+        assert_eq!(idx.find_page(0xDEADBEEF12345678), Some(42));
+        assert_eq!(idx.len(), 1);
+    }
+
+    #[test]
+    fn layer_index_bloom_filter() {
+        let mut idx = LayerIndex::new(2);
+        idx.insert(0xAAAAAAAA00000000, 1);
+        // Bloom may have false positives, but definitely true for inserted
+        assert!(idx.maybe_contains(0xAAAAAAAA00000000));
+        // Not inserted — usually false (low false positive rate with 256 bytes)
+        // Don't assert !maybe_contains since bloom can have false positives
+    }
+
+    #[test]
+    fn layer_index_sorted_binary_search() {
+        let mut idx = LayerIndex::new(2);
+        // Insert in random order
+        idx.insert(0x0000000000000300, 3);
+        idx.insert(0x0000000000000100, 1);
+        idx.insert(0x0000000000000200, 2);
+        // Should find all
+        assert_eq!(idx.find_page(0x0000000000000100), Some(1));
+        assert_eq!(idx.find_page(0x0000000000000200), Some(2));
+        assert_eq!(idx.find_page(0x0000000000000300), Some(3));
+    }
+
+    #[test]
+    fn layer_index_ram_size() {
+        let mut idx = LayerIndex::new(2);
+        assert_eq!(idx.ram_size(), 256); // just bloom
+        idx.insert(0x1234, 1);
+        assert_eq!(idx.ram_size(), 256 + 8); // bloom + 1 entry × 8B
+    }
+
+    // ── PageCache ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn page_cache_hit_miss() {
+        let mut cache = PageCache::new(4);
+        let page = CompactPage::new(1, 2);
+        cache.put(1, page);
+
+        assert!(cache.get(1).is_some(), "Hit");
+        assert!(cache.get(99).is_none(), "Miss");
+        assert!(cache.hit_rate() > 0.0);
+    }
+
+    #[test]
+    fn page_cache_lru_eviction() {
+        let mut cache = PageCache::new(2); // capacity 2
+        cache.put(1, CompactPage::new(1, 0));
+        cache.put(2, CompactPage::new(2, 0));
+
+        // Access page 1 to make it recently used
+        cache.get(1);
+
+        // Add page 3 → should evict page 2 (LRU)
+        let evicted = cache.put(3, CompactPage::new(3, 0));
+        assert!(evicted.is_some(), "Should evict when full");
+
+        // Page 1 should still be cached (recently accessed)
+        assert!(cache.get(1).is_some(), "Page 1 still cached");
+        // Page 3 should be cached (just added)
+        assert!(cache.get(3).is_some(), "Page 3 cached");
+    }
+
+    #[test]
+    fn page_cache_fibonacci_capacities() {
+        assert_eq!(CacheCapacity::EMBEDDED, 55);
+        assert_eq!(CacheCapacity::MOBILE, 233);
+        assert_eq!(CacheCapacity::PC, 610);
+        assert_eq!(CacheCapacity::SERVER, 2584);
+    }
+
+    #[test]
+    fn page_cache_update_existing() {
+        let mut cache = PageCache::new(4);
+        cache.put(1, CompactPage::new(1, 0));
+        // Update same page — should not evict
+        let evicted = cache.put(1, CompactPage::new(1, 0));
+        assert!(evicted.is_none(), "Update → no eviction");
+        assert_eq!(cache.len(), 1, "Still 1 page");
+    }
+
+    // ── TieredStore ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tiered_store_basic() {
+        let mut store = TieredStore::new(4, 100);
+        let chain = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
+        let hash = store.store_node(&chain, None, 2, 1000);
+        assert!(hash != 0, "Hash should be non-zero");
+        assert_eq!(store.total_nodes(), 1);
+    }
+
+    #[test]
+    fn tiered_store_lookup() {
+        let mut store = TieredStore::new(4, 100);
+        let chain = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
+        let hash = store.store_node(&chain, None, 2, 1000);
+
+        let found = store.lookup(hash, 2);
+        assert!(found.is_some(), "Should find stored node");
+        assert_eq!(found.unwrap().hash, hash);
+    }
+
+    #[test]
+    fn tiered_store_edges() {
+        let mut store = TieredStore::new(4, 100);
+        let c1 = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
+        let c2 = MolecularChain::single(test_mol(0x02, 0x01, 0x80, 0x80, 0x03));
+        let h1 = store.store_node(&c1, None, 2, 1000);
+        let h2 = store.store_node(&c2, None, 2, 1001);
+        store.store_edge(h1, h2, 0.8, RelationBase::Causes, 2);
+        assert_eq!(store.total_edges(), 1);
+    }
+
+    #[test]
+    fn tiered_store_for_pc() {
+        let store = TieredStore::for_pc();
+        assert_eq!(store.cache.capacity, CacheCapacity::PC);
+    }
+
+    #[test]
+    fn tiered_store_lookup_with_edges() {
+        let mut store = TieredStore::new(4, 100);
+        let c1 = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
+        let c2 = MolecularChain::single(test_mol(0x02, 0x01, 0x80, 0x80, 0x03));
+        let h1 = store.store_node(&c1, None, 2, 1000);
+        let _h2 = store.store_node(&c2, None, 2, 1001);
+        store.store_edge(h1, _h2, 0.85, RelationBase::Similar, 2);
+
+        let result = store.lookup_with_edges(h1, 2, 1);
+        assert!(result.is_some(), "Should find node with edges");
+        let nwe = result.unwrap();
+        assert_eq!(nwe.node.hash, h1);
+        assert_eq!(nwe.depth, 0);
+    }
+
+    #[test]
+    fn tiered_store_ram_disk_usage() {
+        let mut store = TieredStore::new(4, 100);
+        for i in 0u8..10 {
+            let chain = MolecularChain::single(test_mol((i % 8) + 1, 0x01, 0x80 + i, 0x80, 0x03));
+            store.store_node(&chain, None, 2, i as i64);
+        }
+        assert!(store.ram_usage() > 0, "Should use some RAM");
+        let summary = store.summary();
+        assert!(summary.contains("10 nodes"), "{}", summary);
     }
 
     // ── Scale estimate ──────────────────────────────────────────────────────
