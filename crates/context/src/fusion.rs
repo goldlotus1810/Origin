@@ -16,6 +16,7 @@
 
 extern crate alloc;
 use silk::edge::EmotionTag;
+use silk::hebbian::PHI_INV;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModalityInput — một nguồn cảm xúc
@@ -74,8 +75,13 @@ pub struct FusedEmotionTag {
 }
 
 impl FusedEmotionTag {
-    /// BlackCurtain threshold — dưới đây không kết luận
-    pub const CONFIDENCE_THRESHOLD: f32 = 0.35;
+    /// BlackCurtain threshold = φ⁻² × (1 - φ⁻³) ≈ 0.29
+    /// Trước: 0.35 (hardcode). Giờ: derived từ φ.
+    pub const CONFIDENCE_THRESHOLD: f32 = {
+        let phi_inv2 = PHI_INV * PHI_INV;
+        let phi_inv3 = phi_inv2 * PHI_INV;
+        phi_inv2 * (1.0 - phi_inv3)
+    };
 
     /// Có đủ tin cậy để đưa ra kết luận không.
     pub fn is_certain(self) -> bool {
@@ -169,16 +175,19 @@ pub fn fuse(inputs: &[ModalityInput]) -> FusedEmotionTag {
         }
     }
 
-    // Conflict threshold: > 0.4 = mâu thuẫn đáng kể
-    let has_conflict = max_conflict > 0.40;
+    // Conflict threshold: > φ⁻² ≈ 0.382 = mâu thuẫn đáng kể
+    // Trước: 0.40 (hardcode). Giờ: φ⁻² (computed).
+    let phi_inv2 = PHI_INV * PHI_INV;
+    let has_conflict = max_conflict > phi_inv2;
     let conflict_level = (max_conflict / 2.0).clamp(0.0, 1.0);
 
     // 3. Confidence
     // Baseline = trung bình confidence các sources
     let avg_conf = inputs.iter().map(|i| i.confidence).sum::<f32>() / inputs.len() as f32;
-    // Penalty khi conflict: giảm confidence tỷ lệ với conflict level
+    // Penalty khi conflict: giảm confidence tỷ lệ với φ⁻¹
+    // Trước: 0.6 (hardcode). Giờ: φ⁻¹ ≈ 0.618 (computed).
     let confidence = if has_conflict {
-        (avg_conf * (1.0 - conflict_level * 0.6)).clamp(0.0, 1.0)
+        (avg_conf * (1.0 - conflict_level * PHI_INV)).clamp(0.0, 1.0)
     } else {
         avg_conf
     };

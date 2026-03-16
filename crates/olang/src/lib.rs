@@ -24,6 +24,7 @@ pub mod ling;
 pub mod log;
 pub mod math;
 pub mod molecular;
+pub mod precision;
 pub mod qr;
 pub mod reader;
 pub mod registry;

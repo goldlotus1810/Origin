@@ -1,22 +1,27 @@
 //! # curve — ConversationCurve
 //!
 //! f(x) = α × f_conv(t) + β × f_dn(nodes)
-//! α = 0.6  (hội thoại hiện tại)
-//! β = 0.4  (ĐN tích lũy từ trước)
+//! α = φ⁻¹ ≈ 0.618  (hội thoại hiện tại)
+//! β = φ⁻² ≈ 0.382  (ĐN tích lũy từ trước)
+//!   φ⁻¹ + φ⁻² = 1.0 (exact golden ratio identity)
 //!
-//! f_conv(t) = V + 0.5×V'(t) + 0.25×V''(t)
+//! f_conv(t) = V + φ⁻²×V'(t) + φ⁻³×V''(t)
 //!   V'(t)  = tốc độ thay đổi
 //!   V''(t) = gia tốc thay đổi
+//!
+//! Trước đây α=0.6, β=0.4 (hardcode). Giờ tất cả derived từ φ.
+//! φ⁻¹ + φ⁻² = 1.0 — đảm bảo LUÔN sum-to-one (bất kể precision).
 
 extern crate alloc;
 use alloc::vec::Vec;
 
 use silk::walk::ResponseTone;
+use silk::hebbian::PHI_INV;
 
-/// α cho f_conv
-pub const ALPHA: f32 = 0.6;
-/// β cho f_dn
-pub const BETA: f32 = 0.4;
+/// α cho f_conv = φ⁻¹ ≈ 0.618 — current turn weight.
+pub const ALPHA: f32 = PHI_INV;
+/// β cho f_dn = 1 - φ⁻¹ = φ⁻² ≈ 0.382 — history weight.
+pub const BETA: f32 = 1.0 - PHI_INV;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ConversationCurve
@@ -78,10 +83,13 @@ impl ConversationCurve {
             self.d2.push(self.d1[d1_len - 1] - self.d1[d1_len - 2]);
         }
 
-        // f_conv = V + 0.5×d1 + 0.25×d2
+        // f_conv = V + φ⁻²×d1 + φ⁻³×d2
+        // Trước: 0.5, 0.25 (hardcode). Giờ: φ⁻², φ⁻³ (computed).
+        let phi_inv2 = PHI_INV * PHI_INV;
+        let phi_inv3 = phi_inv2 * PHI_INV;
         let d1_now = self.d1.last().copied().unwrap_or(0.0);
         let d2_now = self.d2.last().copied().unwrap_or(0.0);
-        self.fx_conv = valence + 0.5 * d1_now + 0.25 * d2_now;
+        self.fx_conv = valence + phi_inv2 * d1_now + phi_inv3 * d2_now;
 
         // f(x) = α×f_conv + β×f_dn
         self.fx = ALPHA * self.fx_conv + BETA * self.fx_dn;
@@ -94,8 +102,10 @@ impl ConversationCurve {
 
     /// Cập nhật f_dn từ ĐN node mới.
     pub fn update_dn(&mut self, dn_affect: f32) {
-        // Exponential moving average để f_dn không nhảy đột ngột
-        self.fx_dn = self.fx_dn * 0.7 + dn_affect * 0.3;
+        // Exponential moving average: old×φ⁻¹ + new×φ⁻²
+        // Trước: 0.7/0.3 (hardcode). Giờ: φ⁻¹/φ⁻² (sum = 1.0 exact).
+        let phi_inv2 = PHI_INV * PHI_INV;
+        self.fx_dn = self.fx_dn * PHI_INV + dn_affect * phi_inv2;
         self.fx = ALPHA * self.fx_conv + BETA * self.fx_dn;
     }
 

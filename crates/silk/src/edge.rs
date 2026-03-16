@@ -62,9 +62,13 @@ impl EmotionTag {
     }
 
     /// Từ bytes UCD (valence_byte, arousal_byte).
+    ///
+    /// Valence: byte/128.0 - 1.0 → [-1.0, +0.9921875]
+    /// 128.0 = power of 2 → exact in IEEE 754 (trước đây 127.5 gây rounding error).
+    /// Byte 128 → 0.0 (neutral) — exact midpoint.
     pub fn from_ucd_bytes(valence_b: u8, arousal_b: u8) -> Self {
         Self {
-            valence: (valence_b as f32 / 127.5) - 1.0,
+            valence: (valence_b as f32 / 128.0) - 1.0,
             arousal: arousal_b as f32 / 255.0,
             dominance: 0.5,
             intensity: arousal_b as f32 / 255.0,
