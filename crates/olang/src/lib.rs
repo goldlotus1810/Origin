@@ -21,6 +21,7 @@ pub mod knowtree;
 pub mod lca;
 pub mod ling;
 pub mod log;
+pub mod math;
 pub mod molecular;
 pub mod qr;
 pub mod reader;

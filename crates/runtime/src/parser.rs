@@ -359,7 +359,16 @@ fn is_command(s: &str) -> bool {
             | "reboot"
             | "status"
             | "help"
-    )
+    ) || is_math_command(s)
+}
+
+/// Check if input is a math command (prefix-based).
+fn is_math_command(s: &str) -> bool {
+    let prefixes = [
+        "solve ", "giai ", "derive ", "derivative ", "dao-ham ", "d/dx ",
+        "integrate ", "integral ", "tich-phan ", "simplify ", "eval ",
+    ];
+    prefixes.iter().any(|p| s.starts_with(p))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -561,5 +570,64 @@ mod tests {
         // ○ standalone = SDF Torus node trong text bình thường
         let r = parser().parse("○ là hình tròn");
         assert!(matches!(r, ParseResult::Natural(_)));
+    }
+
+    // ── Math commands ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_solve_command() {
+        let r = parser().parse("○{solve \"2x + 3 = 7\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("solve \"2x + 3 = 7\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_derive_command() {
+        let r = parser().parse("○{derive \"x^2 + 3x\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("derive \"x^2 + 3x\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_integrate_command() {
+        let r = parser().parse("○{integrate \"2x\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("integrate \"2x\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_simplify_command() {
+        let r = parser().parse("○{simplify \"2x + 3x\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("simplify \"2x + 3x\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_eval_command() {
+        let r = parser().parse("○{eval \"x^2 + 1\" x=3}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("eval \"x^2 + 1\" x=3".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_vietnamese_math_commands() {
+        let r = parser().parse("○{giai \"x + 5 = 10\"}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+
+        let r = parser().parse("○{dao-ham \"x^2\"}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+
+        let r = parser().parse("○{tich-phan \"3x^2\"}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
     }
 }

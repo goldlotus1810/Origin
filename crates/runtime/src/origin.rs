@@ -569,27 +569,50 @@ impl HomeRuntime {
             "help" => Response {
                 text: String::from(
                     "HomeOS ○{} Commands:\n\
-                     ○{🔥}          — query node\n\
-                     ○{🔥 ∘ 💧}    — compose (LCA)\n\
-                     ○{🔥 ∈ ?}     — relation query\n\
-                     ○{? → 💧}     — reverse query\n\
-                     ○{term ∂ ctx} — context query\n\
-                     ○{dream}      — run Dream cycle\n\
-                     ○{stats}      — system statistics\n\
-                     ○{health}     — system health check\n\
-                     ○{help}       — this message",
+                     ○{🔥}                  — query node\n\
+                     ○{🔥 ∘ 💧}            — compose (LCA)\n\
+                     ○{🔥 ∈ ?}             — relation query\n\
+                     ○{? → 💧}             — reverse query\n\
+                     ○{term ∂ ctx}         — context query\n\
+                     ○{dream}              — run Dream cycle\n\
+                     ○{stats}              — system statistics\n\
+                     ○{health}             — system health check\n\
+                     ○{solve \"2x+3=7\"}     — solve equation\n\
+                     ○{derive \"x^2+3x\"}   — symbolic derivative\n\
+                     ○{integrate \"2x\"}     — symbolic integral\n\
+                     ○{simplify \"2x+3x\"}  — simplify expression\n\
+                     ○{eval \"x^2+1\" x=3}  — evaluate expression\n\
+                     ○{help}               — this message",
                 ),
                 tone: ResponseTone::Engaged,
                 fx: 0.0,
                 kind: ResponseKind::System,
             },
 
-            _ => Response {
-                text: format!("Unknown command: {}", cmd),
-                tone: ResponseTone::Engaged,
-                fx: 0.0,
-                kind: ResponseKind::System,
-            },
+            _ => {
+                // Math commands (solve, derive, integrate, simplify, eval)
+                let math_prefixes = [
+                    "solve ", "giai ", "derive ", "derivative ", "dao-ham ",
+                    "d/dx ", "integrate ", "integral ", "tich-phan ",
+                    "simplify ", "eval ",
+                ];
+                if math_prefixes.iter().any(|p| cmd.starts_with(p)) {
+                    let text = olang::math::process_math_command(cmd);
+                    Response {
+                        text,
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    }
+                } else {
+                    Response {
+                        text: format!("Unknown command: {}", cmd),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    }
+                }
+            }
         }
     }
 
