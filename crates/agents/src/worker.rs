@@ -93,6 +93,10 @@ pub enum WorkerEvent {
     SensorData(SensorReading),
     /// Nhận ISL command từ Chief
     ISLCommand(ISLMessage),
+    /// Camera frame (motion_score, brightness)
+    CameraFrame { motion_score: f32, brightness: f32 },
+    /// Network packet summary (bytes_in, anomaly_score 0.0..1.0)
+    NetworkPacket { bytes_in: u32, anomaly_score: f32 },
     /// Timer tick (heartbeat nội bộ)
     Tick { ts: i64 },
     /// Wake up từ sleep
@@ -116,6 +120,12 @@ pub struct WorkerReport {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Worker Agent — HomeOS thu nhỏ tại thiết bị.
+///
+/// Worker profiles (từ spec):
+///   Sensor   = L0 + SensorSkill
+///   Actuator = L0 + ActuatorSkill (door thêm SecuritySkill)
+///   Camera   = L0 + FFR + vSDF + InverseRenderSkill
+///   Network  = L0 + NetworkSkill + ImmunitySkill
 #[allow(missing_docs)]
 pub struct Worker {
     pub addr:    ISLAddress,
@@ -126,6 +136,12 @@ pub struct Worker {
     pub outbox:  Vec<WorkerReport>,
     /// Event count
     pub events:  u32,
+    /// Door worker: security locked state
+    pub security_locked: bool,
+    /// Network worker: cumulative anomaly score
+    pub anomaly_accumulator: f32,
+    /// Camera worker: consecutive motion frames
+    pub motion_streak: u32,
 }
 
 impl Worker {
@@ -136,6 +152,9 @@ impl Worker {
             state:  WorkerState::Sleeping,
             outbox: Vec::new(),
             events: 0,
+            security_locked: false,
+            anomaly_accumulator: 0.0,
+            motion_streak: 0,
         }
     }
 
@@ -159,14 +178,17 @@ impl Worker {
             WorkerEvent::ISLCommand(msg) => {
                 self.process_command(msg, ts);
             }
+            WorkerEvent::CameraFrame { motion_score, brightness } => {
+                self.process_camera(motion_score, brightness, ts);
+            }
+            WorkerEvent::NetworkPacket { bytes_in, anomaly_score } => {
+                self.process_network(bytes_in, anomaly_score, ts);
+            }
             WorkerEvent::Tick { ts } => {
-                // Heartbeat — chỉ gửi nếu có gì trong outbox
                 // Silent = không gửi tick rỗng
                 let _ = ts;
             }
-            WorkerEvent::Wake => {
-                // Wake event — không làm gì thêm, chờ sự kiện tiếp
-            }
+            WorkerEvent::Wake => {}
         }
 
         self.state = WorkerState::Sleeping; // sleep ngay sau khi xử lý
@@ -200,15 +222,122 @@ impl Worker {
     }
 
     fn process_command(&mut self, cmd: ISLMessage, _ts: i64) {
-        // Nhận ActuatorCmd → thực thi → gửi ACK
-        if cmd.msg_type == MsgType::ActuatorCmd {
-            let ack = ISLMessage::ack(self.addr, cmd.from, MsgType::ActuatorCmd);
-            let frame = ISLFrame::bare(ack);
+        if cmd.msg_type != MsgType::ActuatorCmd { return; }
+
+        // Door worker: security check trước khi thực thi
+        if self.kind == WorkerKind::Actuator && self.security_locked {
+            // Reject — gửi NACK thay vì ACK
+            let nack = ISLMessage::nack(self.addr, cmd.from, MsgType::ActuatorCmd);
+            let frame = ISLFrame::bare(nack);
             self.outbox.push(WorkerReport {
                 frame,
-                emotion: EmotionTag::NEUTRAL,
+                emotion: EmotionTag { valence: -0.50, arousal: 0.60, dominance: 0.80, intensity: 0.50 },
+            });
+            return;
+        }
+
+        let ack = ISLMessage::ack(self.addr, cmd.from, MsgType::ActuatorCmd);
+        let frame = ISLFrame::bare(ack);
+        self.outbox.push(WorkerReport {
+            frame,
+            emotion: EmotionTag::NEUTRAL,
+        });
+    }
+
+    /// Camera worker: process frame, detect motion.
+    ///
+    /// Profile: L0 + FFR + vSDF + InverseRenderSkill
+    /// Worker gửi motion chain (molecular) — KHÔNG raw pixels.
+    fn process_camera(&mut self, motion_score: f32, brightness: f32, ts: i64) {
+        if self.kind != WorkerKind::Camera { return; }
+
+        // Track motion streak
+        if motion_score > 0.3 {
+            self.motion_streak += 1;
+        } else {
+            self.motion_streak = 0;
+        }
+
+        // Chỉ gửi report khi có motion đáng kể (threshold: score > 0.3)
+        // Silent by default — không gửi frame rỗng
+        if motion_score <= 0.3 { return; }
+
+        let payload = [
+            self.addr.index,        // camera id
+            0x04,                      // unit = Motion
+            (motion_score * 255.0) as u8, // quantized motion
+        ];
+        let msg = ISLMessage::with_payload(self.addr, self.chief, MsgType::ChainPayload, payload);
+
+        // Body: motion_score(f32) + brightness(f32) + streak(u32) + timestamp(i64)
+        let mut body = Vec::with_capacity(20);
+        body.push(self.addr.index); // sensor_id
+        body.push(0x04);              // unit = Motion
+        body.extend_from_slice(&motion_score.to_be_bytes());
+        body.extend_from_slice(&brightness.to_be_bytes());
+        body.extend_from_slice(&self.motion_streak.to_be_bytes());
+        body.extend_from_slice(&ts.to_be_bytes());
+        let frame = ISLFrame::with_body(msg, body);
+
+        let emotion = if self.motion_streak > 5 {
+            // Sustained motion → higher urgency
+            EmotionTag { valence: -0.20, arousal: 0.85, dominance: 0.40, intensity: 0.75 }
+        } else {
+            EmotionTag { valence: 0.0, arousal: 0.60, dominance: 0.50, intensity: 0.45 }
+        };
+
+        self.outbox.push(WorkerReport { frame, emotion });
+    }
+
+    /// Network worker: monitor traffic, detect anomalies.
+    ///
+    /// Profile: L0 + NetworkSkill + ImmunitySkill
+    /// anomaly_score > 0.7 → Emergency (immediate escalation)
+    /// anomaly_score > 0.4 → report to Chief
+    /// anomaly_score ≤ 0.4 → silent
+    fn process_network(&mut self, bytes_in: u32, anomaly_score: f32, _ts: i64) {
+        if self.kind != WorkerKind::Network { return; }
+
+        // Accumulate anomaly (exponential moving average)
+        self.anomaly_accumulator = self.anomaly_accumulator * 0.7 + anomaly_score * 0.3;
+
+        // Emergency: high anomaly → immediate alert
+        if anomaly_score > 0.7 {
+            let msg = ISLMessage::emergency(self.addr, (anomaly_score * 255.0) as u8);
+            let frame = ISLFrame::bare(msg);
+            self.outbox.push(WorkerReport {
+                frame,
+                emotion: EmotionTag { valence: -0.70, arousal: 0.95, dominance: 0.20, intensity: 0.90 },
+            });
+            return;
+        }
+
+        // Moderate anomaly → report to Chief
+        if anomaly_score > 0.4 {
+            let payload = [
+                self.addr.index,
+                0xFF, // network unit
+                (anomaly_score * 255.0) as u8,
+            ];
+            let msg = ISLMessage::with_payload(self.addr, self.chief, MsgType::ChainPayload, payload);
+            let mut body = Vec::with_capacity(12);
+            body.push(self.addr.index);
+            body.push(0xFF);
+            body.extend_from_slice(&anomaly_score.to_be_bytes());
+            body.extend_from_slice(&bytes_in.to_be_bytes());
+            let frame = ISLFrame::with_body(msg, body);
+
+            self.outbox.push(WorkerReport {
+                frame,
+                emotion: EmotionTag { valence: -0.30, arousal: 0.65, dominance: 0.35, intensity: 0.55 },
             });
         }
+        // ≤ 0.4 → silent (no report)
+    }
+
+    /// Lock/unlock security (door worker).
+    pub fn set_security_lock(&mut self, locked: bool) {
+        self.security_locked = locked;
     }
 }
 
@@ -443,5 +572,126 @@ mod tests {
         // So sánh với JSON: {"sensor_id":1,"value":22.0,"unit":"Temperature","timestamp":1000}
         // = ~70+ bytes
         assert!(bytes.len() < 40, "Wire size nhỏ hơn JSON đáng kể");
+    }
+
+    // ── Camera worker ────────────────────────────────────────────────────────
+
+    #[test]
+    fn camera_reports_on_motion() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
+        w.process(WorkerEvent::CameraFrame { motion_score: 0.8, brightness: 100.0 }, 1000);
+        assert!(w.has_reports(), "Motion > 0.3 → report");
+        assert_eq!(w.motion_streak, 1);
+    }
+
+    #[test]
+    fn camera_silent_no_motion() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
+        w.process(WorkerEvent::CameraFrame { motion_score: 0.1, brightness: 50.0 }, 1000);
+        assert!(!w.has_reports(), "Motion ≤ 0.3 → silent");
+        assert_eq!(w.motion_streak, 0);
+    }
+
+    #[test]
+    fn camera_motion_streak_tracking() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
+        for i in 0..3 {
+            w.process(WorkerEvent::CameraFrame { motion_score: 0.6, brightness: 80.0 }, i * 100);
+        }
+        assert_eq!(w.motion_streak, 3);
+        // Break streak
+        w.process(WorkerEvent::CameraFrame { motion_score: 0.1, brightness: 80.0 }, 400);
+        assert_eq!(w.motion_streak, 0);
+    }
+
+    #[test]
+    fn camera_sustained_motion_high_urgency() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Camera);
+        for i in 0..7 {
+            w.process(WorkerEvent::CameraFrame { motion_score: 0.8, brightness: 90.0 }, i * 100);
+        }
+        assert!(w.motion_streak > 5, "Streak > 5");
+        let reports = w.flush();
+        let last = &reports[reports.len() - 1];
+        assert!(last.emotion.arousal > 0.80, "Sustained motion → high arousal");
+    }
+
+    // ── Network worker ───────────────────────────────────────────────────────
+
+    #[test]
+    fn network_emergency_on_high_anomaly() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
+        w.process(WorkerEvent::NetworkPacket { bytes_in: 1000, anomaly_score: 0.9 }, 1000);
+        assert!(w.has_reports());
+        let report = &w.outbox[0];
+        assert_eq!(report.frame.header.msg_type, MsgType::Emergency, "High anomaly → Emergency");
+    }
+
+    #[test]
+    fn network_report_moderate_anomaly() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
+        w.process(WorkerEvent::NetworkPacket { bytes_in: 500, anomaly_score: 0.5 }, 1000);
+        assert!(w.has_reports());
+        let report = &w.outbox[0];
+        assert_eq!(report.frame.header.msg_type, MsgType::ChainPayload, "Moderate → report");
+    }
+
+    #[test]
+    fn network_silent_low_anomaly() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
+        w.process(WorkerEvent::NetworkPacket { bytes_in: 100, anomaly_score: 0.2 }, 1000);
+        assert!(!w.has_reports(), "Low anomaly → silent");
+    }
+
+    #[test]
+    fn network_anomaly_accumulator() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Network);
+        // EMA: acc = acc * 0.7 + score * 0.3
+        w.process(WorkerEvent::NetworkPacket { bytes_in: 100, anomaly_score: 0.5 }, 1000);
+        assert!((w.anomaly_accumulator - 0.15).abs() < 0.01, "acc = 0*0.7 + 0.5*0.3 = 0.15");
+        w.process(WorkerEvent::NetworkPacket { bytes_in: 100, anomaly_score: 0.5 }, 2000);
+        // 0.15*0.7 + 0.5*0.3 = 0.105 + 0.15 = 0.255
+        assert!((w.anomaly_accumulator - 0.255).abs() < 0.01);
+    }
+
+    // ── Door worker (security) ───────────────────────────────────────────────
+
+    #[test]
+    fn door_locked_rejects_command() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        w.set_security_lock(true);
+        let cmd = ISLMessage::actuator(chief(), waddr(), 0x01, 0xFF);
+        w.process(WorkerEvent::ISLCommand(cmd), 1000);
+
+        assert!(w.has_reports());
+        let report = &w.outbox[0];
+        assert_eq!(report.frame.header.msg_type, MsgType::Nack, "Locked → NACK");
+    }
+
+    #[test]
+    fn door_unlocked_accepts_command() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        w.set_security_lock(false);
+        let cmd = ISLMessage::actuator(chief(), waddr(), 0x01, 0xFF);
+        w.process(WorkerEvent::ISLCommand(cmd), 1000);
+
+        let report = &w.outbox[0];
+        assert_eq!(report.frame.header.msg_type, MsgType::Ack, "Unlocked → ACK");
+    }
+
+    // ── Non-matching kind ignored ────────────────────────────────────────────
+
+    #[test]
+    fn sensor_ignores_camera_event() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        w.process(WorkerEvent::CameraFrame { motion_score: 0.9, brightness: 100.0 }, 1000);
+        assert!(!w.has_reports(), "Sensor worker ignores CameraFrame");
+    }
+
+    #[test]
+    fn sensor_ignores_network_event() {
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        w.process(WorkerEvent::NetworkPacket { bytes_in: 1000, anomaly_score: 0.9 }, 1000);
+        assert!(!w.has_reports(), "Sensor worker ignores NetworkPacket");
     }
 }

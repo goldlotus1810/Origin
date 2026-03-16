@@ -116,6 +116,11 @@ impl ISLMessage {
         Self::with_payload(from, to, MsgType::Ack, [msg_type as u8, 0, 0])
     }
 
+    /// NACK — từ chối thực hiện.
+    pub fn nack(from: ISLAddress, to: ISLAddress, msg_type: MsgType) -> Self {
+        Self::with_payload(from, to, MsgType::Nack, [msg_type as u8, 0, 0])
+    }
+
     /// Serialize → 12 bytes.
     pub fn to_bytes(self) -> [u8; Self::SIZE] {
         let f = self.from.to_bytes();
