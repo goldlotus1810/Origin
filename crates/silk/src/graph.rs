@@ -159,6 +159,62 @@ impl SilkGraph {
             .retain(|e| !e.kind.is_associative() || e.weight >= 0.01);
     }
 
+    // ── Maintain — chăm sóc Ln-1 ──────────────────────────────────────────
+
+    /// Chăm sóc vườn Silk: decay + cắt tỉa overflow.
+    ///
+    /// Gọi định kỳ (mỗi N turns hoặc trước Dream).
+    /// 1. Decay tất cả associative edges theo thời gian.
+    /// 2. Nếu vượt max_edges → cắt tỉa edges yếu nhất (giữ structural).
+    ///
+    /// Trả về số edges đã bị cắt tỉa.
+    pub fn maintain(&mut self, elapsed_ns: i64, max_edges: usize) -> usize {
+        let before = self.edges.len();
+
+        // 1. Decay theo thời gian — φ⁻¹ mỗi 24h
+        self.decay_all(elapsed_ns);
+
+        // 2. Overflow pruning — giữ max_edges, cắt associative yếu nhất
+        let assoc_count = self.assoc_count();
+        let structural_count = self.structural_count();
+
+        if max_edges > 0 && self.edges.len() > max_edges {
+            // Capacity cho associative = max_edges - structural
+            let assoc_cap = max_edges.saturating_sub(structural_count);
+
+            if assoc_count > assoc_cap {
+                // Thu thập weights → tìm threshold cắt
+                let mut assoc_weights: Vec<f32> = self
+                    .edges
+                    .iter()
+                    .filter(|e| e.kind.is_associative())
+                    .map(|e| e.weight)
+                    .collect();
+                assoc_weights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+
+                // Cắt (assoc_count - assoc_cap) edges yếu nhất
+                let cut = assoc_count - assoc_cap;
+                if cut < assoc_weights.len() {
+                    let threshold = assoc_weights[cut];
+                    let mut removed = 0usize;
+                    self.edges.retain(|e| {
+                        if !e.kind.is_associative() {
+                            return true; // giữ structural
+                        }
+                        if removed < cut && e.weight < threshold {
+                            removed += 1;
+                            false // cắt
+                        } else {
+                            true // giữ
+                        }
+                    });
+                }
+            }
+        }
+
+        before - self.edges.len()
+    }
+
     // ── Lookup ───────────────────────────────────────────────────────────────
 
     /// Tìm edge bằng (from, to, kind).
@@ -542,5 +598,73 @@ mod tests {
         assert!(g.find_edge(0xA, 0xB, EdgeKind::Member).is_some());
         assert!(g.find_edge(0xA, 0xB, EdgeKind::Similar).is_some());
         assert!(g.find_edge(0xA, 0xB, EdgeKind::Assoc).is_some());
+    }
+
+    // ── Maintain — chăm sóc Ln-1 ───────────────────────────────────────────
+
+    #[test]
+    fn maintain_decays_and_prunes() {
+        let mut g = SilkGraph::new();
+        // Tạo edge yếu
+        g.co_activate(0xA, 0xB, emo(-0.3, 0.5), 0.3, 0);
+        assert_eq!(g.assoc_count(), 1);
+
+        // Maintain với 30 ngày → edge phải bị decay đến < 0.01 và bị xóa
+        let thirty_days = 86_400_000_000_000i64 * 30;
+        let pruned = g.maintain(thirty_days, 0);
+        assert!(pruned > 0, "Edge yếu sau 30 ngày phải bị cắt");
+        assert_eq!(g.assoc_count(), 0);
+    }
+
+    #[test]
+    fn maintain_overflow_pruning() {
+        let mut g = SilkGraph::new();
+        // Structural: 2 edges (không bị cắt)
+        g.connect_structural(0x01, 0x02, EdgeKind::Member, 0);
+        g.connect_structural(0x03, 0x04, EdgeKind::Causes, 0);
+
+        // Associative: 10 edges với weight khác nhau
+        for i in 0u64..10 {
+            g.co_activate(0x100 + i, 0x200 + i, emo(0.0, 0.5), 0.5, 0);
+        }
+        // Strengthen 5 trong số đó
+        for i in 0u64..5 {
+            for _ in 0..20 {
+                g.co_activate(0x100 + i, 0x200 + i, emo(0.0, 0.5), 0.8, 0);
+            }
+        }
+
+        assert_eq!(g.structural_count(), 2);
+        assert_eq!(g.assoc_count(), 10);
+
+        // Max = 7 (2 structural + 5 assoc capacity)
+        let pruned = g.maintain(0, 7);
+        assert!(pruned > 0, "Overflow phải cắt: pruned={}", pruned);
+        assert!(g.len() <= 7, "Tổng edges <= max: {}", g.len());
+        // Structural vẫn còn
+        assert_eq!(g.structural_count(), 2, "Structural không bị cắt");
+    }
+
+    #[test]
+    fn maintain_structural_untouched() {
+        let mut g = SilkGraph::new();
+        g.connect_structural(0xA, 0xB, EdgeKind::Member, 0);
+        g.connect_structural(0xC, 0xD, EdgeKind::Causes, 0);
+
+        let pruned = g.maintain(86_400_000_000_000 * 365, 1); // 1 năm, max=1
+        assert_eq!(pruned, 0, "Structural edges không bao giờ bị cắt");
+        assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn maintain_zero_elapsed_no_decay() {
+        let mut g = SilkGraph::new();
+        for _ in 0..30 {
+            g.co_activate(0xA, 0xB, emo(0.0, 0.5), 1.0, 0);
+        }
+        let w_before = g.assoc_weight(0xA, 0xB);
+        g.maintain(0, 0);
+        let w_after = g.assoc_weight(0xA, 0xB);
+        assert_eq!(w_before, w_after, "0 elapsed → không decay");
     }
 }

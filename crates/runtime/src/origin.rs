@@ -2228,6 +2228,11 @@ impl HomeRuntime {
         self.last_dream_turn = self.turn_count;
         self.dream_cycles += 1;
 
+        // Chăm sóc Ln-1 trước khi Dream — cắt tỉa cành yếu, giữ cây khỏe
+        let elapsed_ns = if self.uptime_ns > 0 { ts - self.uptime_ns } else { 0 }
+            * 1_000_000; // ms → ns
+        self.learning.maintain_silk(elapsed_ns, 100_000);
+
         let result = self
             .dream
             .run(self.learning.stm(), self.learning.graph(), ts);

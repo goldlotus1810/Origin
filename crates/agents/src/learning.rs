@@ -364,6 +364,18 @@ impl LearningLoop {
         }
     }
 
+    // ── Maintain — chăm sóc Ln-1 ─────────────────────────────────────────────
+
+    /// Chăm sóc Silk graph: decay + cắt tỉa overflow.
+    ///
+    /// `elapsed_ns`: thời gian đã trôi kể từ lần maintain trước.
+    /// `max_edges`: giới hạn tổng số edges (0 = không giới hạn).
+    ///
+    /// Trả về số edges đã bị cắt tỉa.
+    pub fn maintain_silk(&mut self, elapsed_ns: i64, max_edges: usize) -> usize {
+        self.graph.maintain(elapsed_ns, max_edges)
+    }
+
     // ── Accessors ────────────────────────────────────────────────────────────
 
     pub fn stm(&self) -> &ShortTermMemory {

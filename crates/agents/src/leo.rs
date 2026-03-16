@@ -160,10 +160,21 @@ impl LeoAI {
 
     /// Chạy dream cycle qua LearningLoop.
     ///
+    /// Trước khi dream: chăm sóc Silk (decay + cắt tỉa).
     /// Tìm observations đủ điều kiện → tạo proposal → gửi AAM xác nhận.
     pub fn run_dream(&mut self, ts: i64) {
         self.state = LeoState::Dreaming;
         self.dreamed += 1;
+
+        // Chăm sóc Ln-1 trước khi dream — cắt tỉa để Dream nhìn thấy cây sạch
+        let elapsed = if self.last_event_ts > 0 {
+            ts - self.last_event_ts
+        } else {
+            0
+        };
+        // Convert ms→ns nếu cần (ts thường là ms, decay cần ns)
+        let elapsed_ns = elapsed * 1_000_000;
+        self.learning.maintain_silk(elapsed_ns, 10_000);
 
         // Dream candidates: observations có fire trong Silk ≥ threshold
         let candidates = self.learning.dream_candidates(10);
