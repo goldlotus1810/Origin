@@ -21,9 +21,11 @@ pub mod arch;
 pub mod platform;
 pub mod probe;
 pub mod security;
+pub mod driver;
 
 // Re-export core types
 pub use arch::{Architecture, ChipsetLayout, CpuInfo, MemoryInfo, PlatformProfile};
 pub use platform::{HalPlatform, PlatformCapability, DeviceDescriptor, DeviceType, DeviceStatus, MockPlatform};
 pub use probe::{SystemProbe, ProbeResult, ProbeStatus, VulnerabilityReport, VulnerabilitySeverity};
 pub use security::{SecurityScanner, ProcessInfo, NetworkConnection, ConnectionStatus, ThreatLevel};
+pub use driver::{InputEvent, DisplayInfo, DisplayKind, AudioInfo};

@@ -333,13 +333,13 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 | Crate | Mục đích | Files chính | Test |
 |-------|---------|-------------|------|
 | **ucd** | Unicode → Molecule lookup | `build.rs`, `src/lib.rs` | `cargo test -p ucd` |
-| **olang** | Core: Molecule, LCA, Registry, VM, Compiler | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs`, `clone.rs` | `cargo test -p olang` |
+| **olang** | Core: Molecule, LCA, Registry, VM, Compiler, Compact | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs`, `clone.rs`, `compact.rs` | `cargo test -p olang` |
 | **silk** | Hebbian learning, emotion edges, walk | `edge.rs`, `hebbian.rs`, `walk.rs`, `graph.rs` | `cargo test -p silk` |
 | **context** | Emotion V/A/D/I, ConversationCurve, Intent | `emotion.rs`, `curve.rs`, `intent.rs`, `fusion.rs` | `cargo test -p context` |
 | **agents** | Encoder, Learning, Gate, Skill, Instinct, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `instinct.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
 | **memory** | STM, Dream, Proposals, AAM | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
 | **runtime** | HomeRuntime entry point, ○{} Parser | `origin.rs`, `parser.rs`, `response_template.rs` | `cargo test -p runtime` |
-| **hal** | Hardware Abstraction Layer: arch detect, platform probe, security scan | `arch.rs`, `platform.rs`, `probe.rs`, `security.rs` | `cargo test -p hal` |
+| **hal** | Hardware Abstraction Layer: arch detect, platform probe, security scan, device drivers | `arch.rs`, `platform.rs`, `probe.rs`, `security.rs`, `driver.rs` | `cargo test -p hal` |
 | **isl** | Inter-system messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs`, `queue.rs` | `cargo test -p isl` |
 | **vsdf** | 18 SDF + ∇f + FFR Fibonacci render | `sdf.rs`, `ffr.rs`, `physics.rs`, `vector.rs`, `fit.rs` | `cargo test -p vsdf` |
 | **wasm** | Browser WebAssembly bindings | `lib.rs` | `cargo test -p homeos-wasm` |
@@ -359,7 +359,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (980 tests)
+# Test toàn bộ (1021 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)

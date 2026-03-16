@@ -225,9 +225,9 @@ impl SystemProbe {
         // Determine overall status
         let status = if vulnerabilities.iter().any(|v| v.severity >= VulnerabilitySeverity::Critical) {
             ProbeStatus::Critical
-        } else if vulnerabilities.iter().any(|v| v.severity >= VulnerabilitySeverity::High) {
-            ProbeStatus::Warning
-        } else if devices_error > 0 {
+        } else if devices_error > 0
+            || vulnerabilities.iter().any(|v| v.severity >= VulnerabilitySeverity::High)
+        {
             ProbeStatus::Warning
         } else {
             ProbeStatus::Healthy

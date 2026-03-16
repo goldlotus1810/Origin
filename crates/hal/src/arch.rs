@@ -47,6 +47,7 @@ pub enum Architecture {
 
 impl Architecture {
     /// Detect kiến trúc lúc compile-time.
+    #[allow(clippy::needless_return)]
     pub fn detect() -> Self {
         #[cfg(target_arch = "x86")]
         { return Architecture::X86; }

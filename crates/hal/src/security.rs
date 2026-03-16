@@ -146,10 +146,8 @@ impl SecurityScanner {
             }
 
             // Unknown non-system, non-trusted process
-            if !proc.is_system && !proc.is_trusted {
-                if max_threat < ThreatLevel::Monitor {
-                    max_threat = ThreatLevel::Monitor;
-                }
+            if !proc.is_system && !proc.is_trusted && max_threat < ThreatLevel::Monitor {
+                max_threat = ThreatLevel::Monitor;
             }
         }
 
