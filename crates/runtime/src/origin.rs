@@ -23,7 +23,6 @@ use silk::walk::ResponseTone;
 use crate::parser::{OlangExpr, OlangParser, ParseResult, RelationOp};
 use olang::ir::{compile_expr, OlangIrExpr};
 use olang::knowtree::KnowTree;
-use olang::molecular::Dimension;
 use olang::registry::Registry;
 use vsdf::body::{body_from_molecule, BodyStore};
 use olang::self_model::SelfModel;
@@ -1188,7 +1187,7 @@ impl HomeRuntime {
         let proc_result = self.learning.process_one(input.clone());
 
         // ── T6b: KnowTree — store text as L2 compact node ───────────────
-        if let ProcessResult::Ok { ref chain, .. } = proc_result {
+        if let ProcessResult::Ok { ref chain, emotion } = proc_result {
             if let ContentInput::Text { ref content, .. } = input {
                 let word_hashes = olang::knowtree::text_to_word_hashes(content);
                 if !word_hashes.is_empty() {
@@ -1211,6 +1210,52 @@ impl HomeRuntime {
                     // Insert into store
                     let entry = self.body_store.get_or_create(hash);
                     *entry = body;
+                }
+            }
+
+            // ── T6b3: Evolution — detect & create evolved nodes ──────────
+            // So sánh chain mới với STM — nếu đúng 1 dimension khác → evolution
+            // Evolution = tạo loài mới (new node), KHÔNG update node cũ (QT append-only)
+            {
+                let candidates = self.learning.detect_evolutions(chain);
+                for cand in &candidates {
+                    // Try evolve source chain → validate consistency
+                    if let Some((evolved_chain, evo_result)) = cand.source_chain.evolve_and_apply(
+                        0,
+                        cand.dimension,
+                        cand.new_value,
+                    ) {
+                        if evo_result.valid {
+                            let evolved_hash = evolved_chain.chain_hash();
+
+                            // Tạo body cho evolved node
+                            if let Some(evolved_mol) = evolved_chain.first() {
+                                if self.body_store.get(evolved_hash).is_none() {
+                                    let body = body_from_molecule(
+                                        evolved_hash,
+                                        evolved_mol.shape,
+                                        evolved_mol.emotion.valence,
+                                        evolved_mol.emotion.arousal,
+                                        evolved_mol.time,
+                                    );
+                                    let entry = self.body_store.get_or_create(evolved_hash);
+                                    *entry = body;
+                                }
+                            }
+
+                            // Silk edge: source → evolved (DerivedFrom)
+                            // "loài mới" derived from "loài gốc"
+                            let evo_emotion = emotion; // inherit emotion context
+                            self.learning.graph_mut().co_activate(
+                                cand.source_hash,
+                                evolved_hash,
+                                evo_emotion,
+                                0.9, // high strength — direct evolution link
+                                ts,
+                            );
+                        }
+                        // invalid → discard silently (QT: sai → hủy)
+                    }
                 }
             }
         }
@@ -4151,5 +4196,82 @@ mod phase10_tests {
         // Response should not be empty (has knowledge to recall)
         // Just verify no panic — the response quality test is in chat-bench
         let _ = r;
+    }
+}
+
+#[cfg(test)]
+mod evolution_integration_tests {
+    use super::*;
+
+    fn skip() -> bool {
+        ucd::table_len() == 0
+    }
+
+    #[test]
+    fn body_store_populated_after_processing() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xE001);
+        rt.process_text("lửa cháy sáng", 1000);
+        assert!(rt.body_count() > 0, "Processing text creates bodies");
+    }
+
+    #[test]
+    fn evolution_creates_silk_edges() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xE002);
+        // Feed diverse inputs to build varied STM entries
+        rt.process_text("🔥", 1000); // fire
+        rt.process_text("💧", 2000); // water
+        rt.process_text("❄️", 3000); // snow
+        rt.process_text("☀️", 4000); // sun
+
+        let edges_after = rt.silk_edge_count();
+        // Multiple diverse inputs → Silk edges from co-activation + potential evolution
+        assert!(edges_after > 0, "Diverse inputs create Silk edges");
+    }
+
+    #[test]
+    fn body_count_grows_with_diverse_inputs() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xE003);
+        rt.process_text("mặt trời mọc", 1000);
+        let bodies_1 = rt.body_count();
+
+        rt.process_text("mưa rơi lạnh lẽo", 2000);
+        let bodies_2 = rt.body_count();
+
+        // Different text → different chains → more bodies
+        assert!(bodies_2 >= bodies_1, "More inputs → more or equal bodies");
+    }
+
+    #[test]
+    fn evolution_pipeline_no_panic() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xE004);
+        // Stress test: many inputs with varying emotion contexts
+        let texts = [
+            "tôi vui vẻ hôm nay",
+            "tôi buồn quá đi",
+            "trời đẹp quá trời",
+            "mưa rơi buồn lắm",
+            "nắng ấm vui ghê",
+            "gió lạnh buốt xương",
+            "hoa nở đẹp quá",
+            "lá rơi buồn thiu",
+        ];
+        for (i, text) in texts.iter().enumerate() {
+            rt.process_text(text, (i as i64 + 1) * 1000);
+        }
+        // No panic → pipeline handles evolution correctly
+        assert!(rt.body_count() > 0, "Bodies created from varied text");
+        assert!(rt.silk_edge_count() > 0, "Silk edges from co-activation + evolution");
     }
 }

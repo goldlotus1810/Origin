@@ -590,6 +590,32 @@ impl Molecule {
         }
     }
 
+    /// So sánh 2 molecules — tìm dimensions nào khác nhau.
+    ///
+    /// Trả về danh sách (Dimension, old_value, new_value) cho mỗi chiều khác.
+    /// Nếu chỉ 1 chiều khác → candidate cho evolution.
+    /// Nếu 0 chiều khác → identical (không evolve).
+    /// Nếu 2+ chiều khác → quá khác biệt (cần LCA thay vì evolve).
+    pub fn dimension_delta(&self, other: &Molecule) -> Vec<(Dimension, u8, u8)> {
+        let mut deltas = Vec::new();
+        if self.shape != other.shape {
+            deltas.push((Dimension::Shape, self.shape, other.shape));
+        }
+        if self.relation != other.relation {
+            deltas.push((Dimension::Relation, self.relation, other.relation));
+        }
+        if self.emotion.valence != other.emotion.valence {
+            deltas.push((Dimension::Valence, self.emotion.valence, other.emotion.valence));
+        }
+        if self.emotion.arousal != other.emotion.arousal {
+            deltas.push((Dimension::Arousal, self.emotion.arousal, other.emotion.arousal));
+        }
+        if self.time != other.time {
+            deltas.push((Dimension::Time, self.time, other.time));
+        }
+        deltas
+    }
+
     /// Internal consistency score ∈ [0, 4].
     ///
     /// Kiểm tra 4 quy tắc tương thích giữa 5 chiều:
@@ -1399,6 +1425,51 @@ mod tests {
 
         // Evolved is a DIFFERENT node
         assert_ne!(original.chain_hash(), evolved.chain_hash());
+    }
+
+    // ── dimension_delta tests ──────────────────────────────────────────────
+
+    #[test]
+    fn delta_identical_molecules() {
+        let m = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let deltas = m.dimension_delta(&m);
+        assert_eq!(deltas.len(), 0, "Identical molecules → 0 deltas");
+    }
+
+    #[test]
+    fn delta_one_dimension_shape() {
+        let a = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let b = test_mol(0x03, 0x01, 0x80, 0x80, 0x03); // Shape changed Sphere→Box
+        let deltas = a.dimension_delta(&b);
+        assert_eq!(deltas.len(), 1, "Only shape differs");
+        assert!(matches!(deltas[0].0, Dimension::Shape));
+        assert_eq!(deltas[0].1, 0x01); // old
+        assert_eq!(deltas[0].2, 0x03); // new
+    }
+
+    #[test]
+    fn delta_one_dimension_valence() {
+        let a = test_mol(0x01, 0x01, 0x20, 0x80, 0x03);
+        let b = test_mol(0x01, 0x01, 0xE0, 0x80, 0x03); // Valence flipped
+        let deltas = a.dimension_delta(&b);
+        assert_eq!(deltas.len(), 1);
+        assert!(matches!(deltas[0].0, Dimension::Valence));
+    }
+
+    #[test]
+    fn delta_two_dimensions() {
+        let a = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let b = test_mol(0x03, 0x01, 0x80, 0xC0, 0x03); // Shape + Arousal changed
+        let deltas = a.dimension_delta(&b);
+        assert_eq!(deltas.len(), 2, "Two dimensions differ → not evolution candidate");
+    }
+
+    #[test]
+    fn delta_all_dimensions() {
+        let a = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let b = test_mol(0x05, 0x06, 0x20, 0xC0, 0x01);
+        let deltas = a.dimension_delta(&b);
+        assert_eq!(deltas.len(), 5, "All 5 dimensions differ");
     }
 }
 

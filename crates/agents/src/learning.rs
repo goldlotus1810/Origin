@@ -11,7 +11,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use context::engine::ContextEngine;
-use olang::molecular::MolecularChain;
+use olang::molecular::{Dimension, MolecularChain};
 use silk::edge::EmotionTag;
 use silk::graph::SilkGraph;
 
@@ -401,6 +401,71 @@ impl LearningLoop {
     pub fn dream_candidates(&self, n: usize) -> Vec<&Observation> {
         self.stm.top_n(n)
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Evolution detection — tìm "loài mới" từ learning
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// So sánh chain mới với STM observations — tìm evolution candidates.
+    ///
+    /// Nếu chain mới khác 1 observation đúng 1 dimension → evolution candidate.
+    /// Trả về danh sách (source_chain, dimension, old_value, new_value).
+    ///
+    /// Logic:
+    ///   - So sánh first molecule (đại diện ngữ nghĩa) của chain mới vs STM
+    ///   - Chỉ khác đúng 1 dimension → candidate (mutation = evolution)
+    ///   - Khác 0 → identical, khác 2+ → quá xa (không phải evolution)
+    pub fn detect_evolutions(
+        &self,
+        new_chain: &MolecularChain,
+    ) -> Vec<EvolutionCandidate> {
+        let new_mol = match new_chain.first() {
+            Some(m) => m,
+            None => return Vec::new(),
+        };
+        let new_hash = new_chain.chain_hash();
+
+        let mut candidates = Vec::new();
+
+        for obs in self.stm.all() {
+            // Không so sánh với chính mình
+            if obs.chain.chain_hash() == new_hash {
+                continue;
+            }
+
+            if let Some(obs_mol) = obs.chain.first() {
+                let deltas = obs_mol.dimension_delta(new_mol);
+                if deltas.len() == 1 {
+                    // Đúng 1 dimension khác → evolution candidate!
+                    let (dim, old_val, new_val) = deltas[0];
+                    candidates.push(EvolutionCandidate {
+                        source_hash: obs.chain.chain_hash(),
+                        source_chain: obs.chain.clone(),
+                        dimension: dim,
+                        old_value: old_val,
+                        new_value: new_val,
+                    });
+                }
+            }
+        }
+
+        candidates
+    }
+}
+
+/// Evolution candidate — "loài mới" phát hiện trong learning pipeline.
+#[derive(Debug, Clone)]
+pub struct EvolutionCandidate {
+    /// Hash của chain gốc (đã có trong STM)
+    pub source_hash: u64,
+    /// Chain gốc
+    pub source_chain: MolecularChain,
+    /// Dimension đã thay đổi
+    pub dimension: Dimension,
+    /// Giá trị cũ (ở chain gốc)
+    pub old_value: u8,
+    /// Giá trị mới (ở chain mới)
+    pub new_value: u8,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -773,5 +838,101 @@ mod word_level_tests {
         ll.learn_text("Natasha yêu Andrei. Pierre tìm kiếm ý nghĩa.", emo, 1000);
         let edges = ll.graph().len();
         assert!(edges > 0, "Multi-sentence phải có edges");
+    }
+}
+
+#[cfg(test)]
+mod evolution_tests {
+    use super::*;
+    use alloc::string::ToString;
+    use olang::molecular::{EmotionDim, Molecule, MolecularChain};
+
+    /// Tạo chain từ 1 molecule — CHỈ trong tests.
+    fn chain_from_mol(shape: u8, relation: u8, v: u8, a: u8, t: u8) -> MolecularChain {
+        MolecularChain(alloc::vec![Molecule {
+            shape,
+            relation,
+            emotion: EmotionDim { valence: v, arousal: a },
+            time: t,
+        }])
+    }
+
+    #[test]
+    fn detect_no_evolution_empty_stm() {
+        let ll = LearningLoop::new(0x1234);
+        let chain = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let candidates = ll.detect_evolutions(&chain);
+        assert!(candidates.is_empty(), "Empty STM → no evolution candidates");
+    }
+
+    #[test]
+    fn detect_no_evolution_identical() {
+        let mut ll = LearningLoop::new(0x1234);
+        let chain = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        // Push same chain into STM
+        ll.stm_mut().push(chain.clone(), EmotionTag::NEUTRAL, 1000);
+        let candidates = ll.detect_evolutions(&chain);
+        assert!(candidates.is_empty(), "Identical chain → no evolution");
+    }
+
+    #[test]
+    fn detect_evolution_one_dimension() {
+        let mut ll = LearningLoop::new(0x1234);
+        // Source: shape=Sphere, neutral emotion
+        let source = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        ll.stm_mut().push(source.clone(), EmotionTag::NEUTRAL, 1000);
+
+        // New chain: same but shape=Box (1 dimension different)
+        let new_chain = chain_from_mol(0x03, 0x01, 0x80, 0x80, 0x03);
+        let candidates = ll.detect_evolutions(&new_chain);
+
+        assert_eq!(candidates.len(), 1, "1 dimension diff → 1 candidate");
+        assert!(matches!(candidates[0].dimension, Dimension::Shape));
+        assert_eq!(candidates[0].old_value, 0x01);
+        assert_eq!(candidates[0].new_value, 0x03);
+    }
+
+    #[test]
+    fn detect_no_evolution_two_dimensions() {
+        let mut ll = LearningLoop::new(0x1234);
+        let source = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        ll.stm_mut().push(source, EmotionTag::NEUTRAL, 1000);
+
+        // 2 dimensions different → NOT evolution (too far)
+        let new_chain = chain_from_mol(0x03, 0x01, 0x80, 0xC0, 0x03);
+        let candidates = ll.detect_evolutions(&new_chain);
+        assert!(candidates.is_empty(), "2 dimensions diff → not evolution");
+    }
+
+    #[test]
+    fn detect_evolution_valence_shift() {
+        let mut ll = LearningLoop::new(0x1234);
+        // "fire" with positive valence
+        let happy_fire = chain_from_mol(0x01, 0x06, 0xC0, 0x90, 0x04);
+        ll.stm_mut().push(happy_fire, EmotionTag::NEUTRAL, 1000);
+
+        // Same concept but negative valence (anger)
+        let angry_fire = chain_from_mol(0x01, 0x06, 0x30, 0x90, 0x04);
+        let candidates = ll.detect_evolutions(&angry_fire);
+
+        assert_eq!(candidates.len(), 1);
+        assert!(matches!(candidates[0].dimension, Dimension::Valence));
+        assert_eq!(candidates[0].old_value, 0xC0); // was happy
+        assert_eq!(candidates[0].new_value, 0x30); // now angry
+    }
+
+    #[test]
+    fn detect_multiple_evolution_candidates() {
+        let mut ll = LearningLoop::new(0x1234);
+        // Two existing chains, each differs from new chain by exactly 1 dim
+        let chain_a = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let chain_b = chain_from_mol(0x03, 0x01, 0x80, 0x80, 0x01);
+        ll.stm_mut().push(chain_a, EmotionTag::NEUTRAL, 1000);
+        ll.stm_mut().push(chain_b, EmotionTag::NEUTRAL, 2000);
+
+        // New: shape=Box, time=Medium — differs from A by shape, from B by time
+        let new_chain = chain_from_mol(0x03, 0x01, 0x80, 0x80, 0x03);
+        let candidates = ll.detect_evolutions(&new_chain);
+        assert_eq!(candidates.len(), 2, "Two sources, each 1 dim diff → 2 candidates");
     }
 }
