@@ -218,6 +218,10 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
         Stmt::Command(_) => {
             // Commands are always valid
         }
+
+        Stmt::CommandArg { .. } => {
+            // Commands with args are always valid
+        }
     }
 }
 
@@ -262,6 +266,22 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             for arg in args {
                 validate_expr(arg, scope, errors);
             }
+        }
+
+        Expr::Chain { head, steps } => {
+            validate_expr(head, scope, errors);
+            for (_, step_expr) in steps {
+                validate_expr(step_expr, scope, errors);
+            }
+        }
+
+        Expr::Arith { lhs, rhs, .. } => {
+            validate_expr(lhs, scope, errors);
+            validate_expr(rhs, scope, errors);
+        }
+
+        Expr::Str(_) => {
+            // String literals are always valid
         }
 
         Expr::Group(inner) => {
@@ -445,6 +465,16 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             "stats" => ctx.emit(Op::Stats),
             _ => ctx.emit(Op::Nop),
         },
+
+        Stmt::CommandArg { name, arg } => {
+            // Commands with arguments: push the arg as a Load, then dispatch
+            ctx.emit(Op::Load(arg.clone()));
+            match name.as_str() {
+                "learn" => ctx.emit(Op::Call("learn".into())),
+                "seed" => ctx.emit(Op::Call("seed".into())),
+                _ => ctx.emit(Op::Call(name.clone())),
+            }
+        }
     }
 }
 
@@ -533,6 +563,49 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 }
                 ctx.emit(Op::Call(name.clone()));
             }
+        }
+
+        Expr::Chain { head, steps } => {
+            // Multi-hop chain query: A → ? → B
+            // Lower each step as sequential QUERY or EDGE operations
+            lower_expr(head, ctx);
+            for (op, step_expr) in steps {
+                let is_wildcard = matches!(step_expr, Expr::Ident(s) if s == "?");
+                if is_wildcard {
+                    // Wildcard step: query for nodes with this relation
+                    if let Some(rel_byte) = op.to_rel_byte() {
+                        ctx.emit(Op::Query(rel_byte));
+                    } else {
+                        ctx.emit(Op::Query(0x07)); // fallback: Similar
+                    }
+                } else {
+                    // Concrete step: create edge
+                    lower_expr(step_expr, ctx);
+                    if let Some(rel_byte) = op.to_rel_byte() {
+                        ctx.emit(Op::Edge(rel_byte));
+                    } else {
+                        ctx.emit(Op::Lca); // fallback for extended ops
+                    }
+                }
+            }
+        }
+
+        Expr::Arith { lhs, op, rhs } => {
+            // Arithmetic: lower both sides, then emit CALL to builtin
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            let fn_name = match op {
+                crate::alphabet::ArithOp::Add => "__add",
+                crate::alphabet::ArithOp::Sub => "__sub",
+                crate::alphabet::ArithOp::Mul => "__mul",
+                crate::alphabet::ArithOp::Div => "__div",
+            };
+            ctx.emit(Op::Call(fn_name.into()));
+        }
+
+        Expr::Str(s) => {
+            // String literal → Load as registry alias
+            ctx.emit(Op::Load(s.clone()));
         }
 
         Expr::Group(inner) => {
@@ -734,5 +807,78 @@ mod tests {
             Op::Halt,
             "Program must end with HALT"
         );
+    }
+
+    // ── New constructs ──────────────────────────────────────────────────────
+
+    #[test]
+    fn lower_chain_query() {
+        let stmts = parse("🌞 → ? → 🌵").unwrap();
+        let prog = lower(&stmts);
+        // Should have: LOAD 🌞, QUERY(Causes), LOAD 🌵, EDGE(Causes), POP, HALT
+        assert!(prog.ops.contains(&Op::Load("🌞".into())));
+        assert!(prog.ops.contains(&Op::Query(0x06))); // Causes query for wildcard
+        assert!(prog.ops.contains(&Op::Load("🌵".into())));
+    }
+
+    #[test]
+    fn lower_arithmetic() {
+        let stmts = parse("1 + 2").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Call("__add".into())));
+    }
+
+    #[test]
+    fn lower_string_literal() {
+        let stmts = parse("emit \"hello\";").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Load("hello".into())));
+        assert!(prog.ops.contains(&Op::Emit));
+    }
+
+    #[test]
+    fn lower_command_arg() {
+        let stmts = parse("learn \"tôi buồn\";").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Load("tôi buồn".into())));
+        assert!(prog.ops.contains(&Op::Call("learn".into())));
+    }
+
+    #[test]
+    fn lower_symbol_define() {
+        let stmts = parse("steam ≔ fire ∘ water;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Store("steam".into())));
+        assert!(prog.ops.contains(&Op::Lca));
+    }
+
+    #[test]
+    fn lower_symbol_implies() {
+        let stmts = parse("fire ⇒ { ○ water; }").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))));
+        assert!(prog.ops.contains(&Op::Emit));
+    }
+
+    #[test]
+    fn lower_cycle_loop() {
+        let stmts = parse("↻ 2 { ○ fire; }").unwrap();
+        let prog = lower(&stmts);
+        let emit_count = prog.ops.iter().filter(|op| **op == Op::Emit).count();
+        assert_eq!(emit_count, 2, "↻ 2 should produce 2 EMITs");
+    }
+
+    #[test]
+    fn validate_chain_query() {
+        let stmts = parse("🌞 → ? → 🌵").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn validate_arithmetic() {
+        let stmts = parse("1 + 2").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty());
     }
 }

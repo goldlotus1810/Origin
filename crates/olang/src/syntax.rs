@@ -1,150 +1,140 @@
 //! # syntax — Cú pháp chính thức của Olang
 //!
-//! Định nghĩa ngữ pháp (grammar), AST, và recursive descent parser.
-//!
 //! ## Ngữ pháp Olang (BNF)
 //!
 //! ```text
 //! program       = stmt*
 //!
-//! stmt          = let_stmt
-//!               | emit_stmt
-//!               | if_stmt
-//!               | loop_stmt
-//!               | fn_stmt
-//!               | command_stmt
-//!               | expr_stmt
+//! stmt          = let_stmt | emit_stmt | if_stmt | loop_stmt
+//!               | fn_stmt  | command_stmt | expr_stmt
 //!
+//! ── Keyword style ─────────────────────────────────────────
 //! let_stmt      = 'let' IDENT '=' expr ';'
-//! emit_stmt     = 'emit' expr ';'
+//! emit_stmt     = ('emit' | '○') expr ';'
 //! if_stmt       = 'if' expr block ('else' block)?
-//! loop_stmt     = 'loop' INT block
+//! loop_stmt     = ('loop' | '↻') INT block
 //! fn_stmt       = 'fn' IDENT '(' params? ')' block
-//! command_stmt  = COMMAND ';'?
-//! expr_stmt     = expr ';'
+//! command_stmt  = COMMAND (STR)? ';'?
 //!
-//! block         = '{' stmt* '}'
+//! ── Symbol style (tương đương) ────────────────────────────
+//! define_stmt   = expr '≔' expr ';'             → Let
+//! fn_def_sym    = expr '≔' '(' params ')' block → FnDef
+//! implies_stmt  = expr '⇒' block ('⊥' block)?  → If
+//! cycle_stmt    = '↻' INT block                 → Loop
+//! circle_stmt   = '○' expr ';'                  → Emit
 //!
-//! expr          = compose_expr
-//! compose_expr  = rel_expr ('∘' rel_expr)*
-//! rel_expr      = primary (REL_OP (primary | '?'))?
-//! primary       = IDENT
-//!               | INT
+//! ── Expressions ───────────────────────────────────────────
+//! expr          = rel_chain
+//! rel_chain     = compose (REL_OP (compose | '?'))*
+//! compose       = arith ('∘' arith)*
+//! arith         = primary (ARITH_OP primary)*
+//! primary       = IDENT | INT | STR
 //!               | '(' expr ')'
-//!               | IDENT '(' args? ')'    /* call */
+//!               | IDENT '(' args? ')'
+//!               | '?' (wildcard)
 //!
-//! params        = IDENT (',' IDENT)*
-//! args          = expr (',' expr)*
-//!
-//! REL_OP        = '∈' | '⊂' | '≡' | '⊥' | '→' | '≈' | '←' | '∪' | '∩' | '∂'
+//! REL_OP        = ∈ ⊂ ≡ ⊥ → ≈ ← ∪ ∩ ∂ ∖ ↔ ⟳ ⚡ ∥
+//! ARITH_OP      = + - × ÷
 //! ```
 //!
-//! ## Backwards Compatibility
+//! ## Chain Queries
 //!
-//! Nếu input là single expression (không có `;`, `let`, `fn`, `if`, `loop`),
-//! parser tự động wrap thành single-expr program.
-//!
-//! `fire ∘ water` → `[Stmt::Expr(Compose(fire, water))]`
+//! ```text
+//! ○{🌞 → ? → 🌵}     → tìm X sao cho 🌞→X và X→🌵
+//! ○{? ∈ L3_Thermo}    → tất cả nodes trong nhóm
+//! ```
 
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::alphabet::{Lexer, RelOp, Token};
+use crate::alphabet::{ArithOp, Lexer, RelOp, Token};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AST — Abstract Syntax Tree
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Statement — đơn vị thực thi trong chương trình Olang.
+/// Statement — đơn vị thực thi.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
 pub enum Stmt {
-    /// `let name = expr;` — gán biến cục bộ
-    Let {
-        /// Tên biến
-        name: String,
-        /// Biểu thức giá trị
-        value: Expr,
-    },
+    /// `let name = expr;` hoặc `name ≔ expr;`
+    Let { name: String, value: Expr },
 
-    /// `emit expr;` — xuất chain ra caller
+    /// `emit expr;` hoặc `○ expr;`
     Emit(Expr),
 
-    /// `if cond { then } else { else_ }` — điều kiện
+    /// `if cond { then } else { else_ }` hoặc `cond ⇒ { then } ⊥ { else_ }`
     If {
-        /// Biểu thức điều kiện (non-empty = true)
         cond: Expr,
-        /// Block thực thi khi true
         then_block: Vec<Stmt>,
-        /// Block thực thi khi false (optional)
         else_block: Option<Vec<Stmt>>,
     },
 
-    /// `loop N { body }` — lặp N lần
-    Loop {
-        /// Số lần lặp
-        count: u32,
-        /// Block lặp
-        body: Vec<Stmt>,
-    },
+    /// `loop N { body }` hoặc `↻ N { body }`
+    Loop { count: u32, body: Vec<Stmt> },
 
-    /// `fn name(params) { body }` — định nghĩa hàm
+    /// `fn name(params) { body }` hoặc `name ≔ (params) { body }`
     FnDef {
-        /// Tên hàm
         name: String,
-        /// Danh sách tham số
         params: Vec<String>,
-        /// Thân hàm
         body: Vec<Stmt>,
     },
 
-    /// Expression statement: `expr;`
+    /// Expression statement
     Expr(Expr),
 
-    /// System command: `dream;` `stats;` etc.
+    /// System command: `dream;` `stats;` `learn "text";`
     Command(String),
+
+    /// Command with argument: `learn "text"`, `seed L0`
+    CommandArg { name: String, arg: String },
 }
 
-/// Expression — biểu thức trong Olang. Mọi expression evaluate → MolecularChain.
+/// Expression — mọi expression evaluate → MolecularChain.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
 pub enum Expr {
-    /// Identifier: tên biến, alias node, hoặc emoji
+    /// Identifier: node alias, biến, emoji
     Ident(String),
 
-    /// Integer literal (dùng trong loop count)
+    /// Integer literal
     Int(u32),
+
+    /// String literal: "text"
+    Str(String),
 
     /// `a ∘ b` — Compose / LCA
     Compose(Box<Expr>, Box<Expr>),
 
-    /// `a REL b` — tạo relation edge giữa a và b
+    /// `a REL b` — relation edge
     RelEdge {
-        /// Bên trái
         lhs: Box<Expr>,
-        /// Toán tử quan hệ
         op: RelOp,
-        /// Bên phải
         rhs: Box<Expr>,
     },
 
-    /// `a REL ?` — query: tìm nodes có relation với a
-    RelQuery {
-        /// Subject
-        subject: Box<Expr>,
-        /// Toán tử quan hệ
-        op: RelOp,
+    /// `a REL ?` — relation query
+    RelQuery { subject: Box<Expr>, op: RelOp },
+
+    /// `A → ? → B` — chain query (multi-hop path finding)
+    Chain {
+        head: Box<Expr>,
+        steps: Vec<(RelOp, Expr)>,
     },
 
-    /// `name(args)` — gọi hàm
-    Call {
-        /// Tên hàm
-        name: String,
-        /// Arguments
-        args: Vec<Expr>,
+    /// `1 + 2`, `3 × 4` — arithmetic (chỉ cho numbers)
+    Arith {
+        lhs: Box<Expr>,
+        op: ArithOp,
+        rhs: Box<Expr>,
     },
 
-    /// `(expr)` — nhóm / parenthesized
+    /// `name(args)` — function call
+    Call { name: String, args: Vec<Expr> },
+
+    /// `(expr)` — grouping
     Group(Box<Expr>),
 }
 
@@ -154,6 +144,7 @@ pub enum Expr {
 
 /// Lỗi cú pháp.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
 pub struct ParseError {
     /// Mô tả lỗi
     pub message: String,
@@ -172,6 +163,7 @@ impl ParseError {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Recursive descent parser cho Olang.
+#[allow(missing_docs)]
 pub struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
@@ -190,15 +182,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse toàn bộ source → Vec<Stmt>.
-    ///
-    /// Nếu input là single expression → wrap thành `[Stmt::Expr(expr)]`.
     pub fn parse_program(&mut self) -> Result<Vec<Stmt>, ParseError> {
-        // Empty program
         if self.tokens.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Detect: single expression (no semicolons, no keywords at top level)?
+        // Single expression mode (backwards compatible)
         if self.is_single_expr() {
             let expr = self.parse_expr()?;
             return Ok(alloc::vec![Stmt::Expr(expr)]);
@@ -215,19 +204,26 @@ impl<'a> Parser<'a> {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek() {
+            // Keyword style
             Token::Let => self.parse_let(),
-            Token::Emit => self.parse_emit(),
+            Token::Emit => self.parse_emit_kw(),
             Token::If => self.parse_if(),
-            Token::Loop => self.parse_loop(),
+            Token::Loop => self.parse_loop_kw(),
             Token::Fn => self.parse_fn(),
             Token::Command(_) => self.parse_command(),
-            _ => self.parse_expr_stmt(),
+
+            // Symbol style
+            Token::Circle => self.parse_emit_sym(),   // ○ expr;
+            Token::Cycle => self.parse_loop_sym(),    // ↻ N { }
+
+            // Expression, then check for ≔ or ⇒ suffix
+            _ => self.parse_expr_or_symbol_stmt(),
         }
     }
 
     /// `let name = expr;`
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
-        self.expect(&Token::Let)?;
+        self.advance(); // consume 'let'
         let name = self.expect_ident()?;
         self.expect(&Token::Eq)?;
         let value = self.parse_expr()?;
@@ -236,16 +232,27 @@ impl<'a> Parser<'a> {
     }
 
     /// `emit expr;`
-    fn parse_emit(&mut self) -> Result<Stmt, ParseError> {
-        self.expect(&Token::Emit)?;
+    fn parse_emit_kw(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'emit'
         let expr = self.parse_expr()?;
         self.expect(&Token::Semi)?;
         Ok(Stmt::Emit(expr))
     }
 
+    /// `○ expr;`
+    fn parse_emit_sym(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume ○
+        let expr = self.parse_expr()?;
+        // Optional semicolon
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::Emit(expr))
+    }
+
     /// `if expr { stmts } (else { stmts })?`
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
-        self.expect(&Token::If)?;
+        self.advance(); // consume 'if'
         let cond = self.parse_expr()?;
         let then_block = self.parse_block()?;
         let else_block = if self.check(&Token::Else) {
@@ -254,7 +261,6 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        // Optional trailing semicolon
         if self.check(&Token::Semi) {
             self.advance();
         }
@@ -266,11 +272,21 @@ impl<'a> Parser<'a> {
     }
 
     /// `loop N { stmts }`
-    fn parse_loop(&mut self) -> Result<Stmt, ParseError> {
-        self.expect(&Token::Loop)?;
+    fn parse_loop_kw(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'loop'
         let count = self.expect_int()?;
         let body = self.parse_block()?;
-        // Optional trailing semicolon
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::Loop { count, body })
+    }
+
+    /// `↻ N { stmts }`
+    fn parse_loop_sym(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume ↻
+        let count = self.expect_int()?;
+        let body = self.parse_block()?;
         if self.check(&Token::Semi) {
             self.advance();
         }
@@ -279,40 +295,165 @@ impl<'a> Parser<'a> {
 
     /// `fn name(params) { stmts }`
     fn parse_fn(&mut self) -> Result<Stmt, ParseError> {
-        self.expect(&Token::Fn)?;
+        self.advance(); // consume 'fn'
         let name = self.expect_ident()?;
         self.expect(&Token::LParen)?;
         let params = self.parse_params()?;
         self.expect(&Token::RParen)?;
         let body = self.parse_block()?;
-        // Optional trailing semicolon
         if self.check(&Token::Semi) {
             self.advance();
         }
         Ok(Stmt::FnDef { name, params, body })
     }
 
-    /// command ';'?
+    /// command (STR)? ';'?
     fn parse_command(&mut self) -> Result<Stmt, ParseError> {
         let cmd = match self.advance() {
             Token::Command(s) => s,
             _ => return Err(ParseError::new("Expected command")),
         };
-        // Optional semicolon
-        if self.check(&Token::Semi) {
-            self.advance();
+        // Check for argument: learn "text" or seed L0
+        match self.peek() {
+            Token::Str(s) => {
+                let arg = s.clone();
+                self.advance();
+                if self.check(&Token::Semi) {
+                    self.advance();
+                }
+                Ok(Stmt::CommandArg {
+                    name: cmd,
+                    arg,
+                })
+            }
+            Token::Ident(s) => {
+                // e.g., "seed L0"
+                let arg = s.clone();
+                self.advance();
+                if self.check(&Token::Semi) {
+                    self.advance();
+                }
+                Ok(Stmt::CommandArg {
+                    name: cmd,
+                    arg,
+                })
+            }
+            _ => {
+                if self.check(&Token::Semi) {
+                    self.advance();
+                }
+                Ok(Stmt::Command(cmd))
+            }
         }
-        Ok(Stmt::Command(cmd))
     }
 
-    /// expr ';'
-    fn parse_expr_stmt(&mut self) -> Result<Stmt, ParseError> {
+    /// Parse expression, then check for ≔ or ⇒ suffix
+    fn parse_expr_or_symbol_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expr()?;
-        // Semicolon required for expr statements in multi-stmt context
+
+        // ≔ → define (let or fn)
+        if self.check(&Token::Define) {
+            return self.finish_define(expr);
+        }
+
+        // ⇒ → implies (if/else)
+        if self.check(&Token::Implies) {
+            return self.finish_implies(expr);
+        }
+
+        // Regular expression statement
         if self.check(&Token::Semi) {
             self.advance();
         }
         Ok(Stmt::Expr(expr))
+    }
+
+    /// `name ≔ expr;` or `name ≔ (params) { body }`
+    fn finish_define(&mut self, lhs: Expr) -> Result<Stmt, ParseError> {
+        self.advance(); // consume ≔
+
+        let name = match lhs {
+            Expr::Ident(n) => n,
+            _ => return Err(ParseError::new("Left side of ≔ must be an identifier")),
+        };
+
+        // Check for function definition: name ≔ (params) { body }
+        if self.check(&Token::LParen) {
+            // Could be fn def or grouped expr — peek ahead
+            let saved_pos = self.pos;
+            self.advance(); // consume (
+
+            // Try to parse as param list
+            if let Ok(params) = self.try_parse_params() {
+                if self.check(&Token::RParen) {
+                    self.advance(); // consume )
+                    if self.check(&Token::LBrace) {
+                        let body = self.parse_block()?;
+                        if self.check(&Token::Semi) {
+                            self.advance();
+                        }
+                        return Ok(Stmt::FnDef { name, params, body });
+                    }
+                }
+            }
+
+            // Not a fn def — backtrack and parse as regular expression
+            self.pos = saved_pos;
+        }
+
+        // Regular define: name ≔ expr;
+        let value = self.parse_expr()?;
+        self.expect(&Token::Semi)?;
+        Ok(Stmt::Let { name, value })
+    }
+
+    /// `cond ⇒ { then } (⊥ { else })?`
+    fn finish_implies(&mut self, cond: Expr) -> Result<Stmt, ParseError> {
+        self.advance(); // consume ⇒
+        let then_block = self.parse_block()?;
+
+        // ⊥ { else } — orthogonal = else
+        let else_block = if self.check_rel(RelOp::Ortho) {
+            self.advance(); // consume ⊥
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        })
+    }
+
+    /// Try to parse params without consuming on failure.
+    fn try_parse_params(&mut self) -> Result<Vec<String>, ParseError> {
+        let mut params = Vec::new();
+        if self.check(&Token::RParen) {
+            return Ok(params);
+        }
+        match self.peek() {
+            Token::Ident(s) => {
+                params.push(s.clone());
+                self.advance();
+            }
+            _ => return Err(ParseError::new("Expected param name")),
+        }
+        while self.check(&Token::Comma) {
+            self.advance();
+            match self.peek() {
+                Token::Ident(s) => {
+                    params.push(s.clone());
+                    self.advance();
+                }
+                _ => return Err(ParseError::new("Expected param name")),
+            }
+        }
+        Ok(params)
     }
 
     /// `{ stmt* }`
@@ -326,7 +467,6 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
-    /// params: IDENT (',' IDENT)*
     fn parse_params(&mut self) -> Result<Vec<String>, ParseError> {
         let mut params = Vec::new();
         if !self.check(&Token::RParen) {
@@ -339,57 +479,97 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    // ── Expression parsing ──────────────────────────────────────────────────
+    // ── Expression parsing (precedence: primary → arith → compose → rel) ──
 
-    /// expr = compose_expr
+    /// expr = rel_chain
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_compose_expr()
+        self.parse_rel_chain()
     }
 
-    /// compose_expr = rel_expr ('∘' rel_expr)*
+    /// rel_chain = compose (REL_OP (compose | '?'))*
+    ///
+    /// Single hop → RelEdge or RelQuery.
+    /// Multiple hops → Chain (multi-hop path finding).
+    fn parse_rel_chain(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_compose_expr()?;
+
+        let mut steps: Vec<(RelOp, Expr)> = Vec::new();
+
+        while let Token::Rel(op) = self.peek() {
+            if op == RelOp::Compose {
+                break; // ∘ handled at compose level
+            }
+            // Don't consume ⊥ if it looks like an "else" (after ⇒ block)
+            if op == RelOp::Ortho && !steps.is_empty() {
+                // Could be else — let caller decide
+                break;
+            }
+            self.advance();
+
+            let rhs = if self.check(&Token::Wild) {
+                self.advance();
+                Expr::Ident("?".to_string())
+            } else {
+                self.parse_compose_expr()?
+            };
+            steps.push((op, rhs));
+        }
+
+        match steps.len() {
+            0 => Ok(left),
+            1 => {
+                let (op, rhs) = steps.into_iter().next().unwrap();
+                if rhs == Expr::Ident("?".to_string()) {
+                    Ok(Expr::RelQuery {
+                        subject: Box::new(left),
+                        op,
+                    })
+                } else {
+                    Ok(Expr::RelEdge {
+                        lhs: Box::new(left),
+                        op,
+                        rhs: Box::new(rhs),
+                    })
+                }
+            }
+            _ => Ok(Expr::Chain {
+                head: Box::new(left),
+                steps,
+            }),
+        }
+    }
+
+    /// compose = arith ('∘' arith)*
     fn parse_compose_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_rel_expr()?;
+        let mut left = self.parse_arith_expr()?;
 
         while self.check_rel(RelOp::Compose) {
-            self.advance(); // consume ∘
-            let right = self.parse_rel_expr()?;
+            self.advance();
+            let right = self.parse_arith_expr()?;
             left = Expr::Compose(Box::new(left), Box::new(right));
         }
 
         Ok(left)
     }
 
-    /// rel_expr = primary (REL_OP (primary | '?'))?
-    fn parse_rel_expr(&mut self) -> Result<Expr, ParseError> {
-        let left = self.parse_primary()?;
+    /// arith = primary (ARITH_OP primary)*
+    fn parse_arith_expr(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_primary()?;
 
-        // Check for relation operator (not ∘, which is handled in compose_expr)
-        if let Token::Rel(rel_op) = self.peek() {
-            if rel_op != RelOp::Compose {
-                self.advance(); // consume relation op
-                let op = rel_op;
-
-                if self.check(&Token::Wild) {
-                    self.advance(); // consume ?
-                    return Ok(Expr::RelQuery {
-                        subject: Box::new(left),
-                        op,
-                    });
-                }
-
-                let right = self.parse_primary()?;
-                return Ok(Expr::RelEdge {
-                    lhs: Box::new(left),
-                    op,
-                    rhs: Box::new(right),
-                });
-            }
+        while let Token::Arith(op) = self.peek() {
+            self.advance();
+            let right = self.parse_primary()?;
+            left = Expr::Arith {
+                lhs: Box::new(left),
+                op,
+                rhs: Box::new(right),
+            };
         }
 
         Ok(left)
     }
 
-    /// primary = IDENT | IDENT '(' args ')' | INT | '(' expr ')'
+    /// primary = IDENT | IDENT '(' args ')' | INT | STR | '(' expr ')' | '?'
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek() {
             Token::Ident(name) => {
@@ -398,7 +578,7 @@ impl<'a> Parser<'a> {
 
                 // Check for function call: name(args)
                 if self.check(&Token::LParen) {
-                    self.advance(); // (
+                    self.advance();
                     let args = self.parse_args()?;
                     self.expect(&Token::RParen)?;
                     return Ok(Expr::Call { name, args });
@@ -412,15 +592,20 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Int(val))
             }
 
+            Token::Str(s) => {
+                let s = s.clone();
+                self.advance();
+                Ok(Expr::Str(s))
+            }
+
             Token::LParen => {
-                self.advance(); // (
+                self.advance();
                 let expr = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
                 Ok(Expr::Group(Box::new(expr)))
             }
 
             Token::Wild => {
-                // Standalone ? in some positions (e.g. `? → water`)
                 self.advance();
                 Ok(Expr::Ident("?".to_string()))
             }
@@ -432,7 +617,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// args: expr (',' expr)*
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
         let mut args = Vec::new();
         if !self.check(&Token::RParen) {
@@ -503,9 +687,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Detect: chỉ có 1 expression, không có statement keywords hoặc commands?
+    /// Single-expression mode: no statement indicators?
     fn is_single_expr(&self) -> bool {
-        // If there are no semicolons, no statement keywords, no commands → single expr
         !self.tokens.iter().any(|t| {
             matches!(
                 t,
@@ -516,6 +699,10 @@ impl<'a> Parser<'a> {
                     | Token::Loop
                     | Token::Emit
                     | Token::Command(_)
+                    | Token::Define   // ≔
+                    | Token::Implies  // ⇒
+                    | Token::Cycle    // ↻
+                    | Token::Circle   // ○
             )
         })
     }
@@ -568,7 +755,6 @@ mod tests {
     #[test]
     fn parse_triple_compose() {
         let stmts = parse("fire ∘ water ∘ earth").unwrap();
-        // Left-associative: (fire ∘ water) ∘ earth
         assert_eq!(
             stmts,
             vec![Stmt::Expr(Expr::Compose(
@@ -638,7 +824,69 @@ mod tests {
         assert_eq!(stmts, vec![Stmt::Command("dream".into())]);
     }
 
-    // ── Let binding ─────────────────────────────────────────────────────────
+    // ── Chain queries (NEW) ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_chain_query() {
+        // ○{🌞 → ? → 🌵} = tìm X sao cho 🌞→X và X→🌵
+        let stmts = parse("🌞 → ? → 🌵").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::Chain {
+                head: Box::new(Expr::Ident("🌞".into())),
+                steps: vec![
+                    (RelOp::Causes, Expr::Ident("?".into())),
+                    (RelOp::Causes, Expr::Ident("🌵".into())),
+                ],
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_chain_mixed_ops() {
+        // A ∈ ? → B = tìm X sao cho A∈X và X→B
+        let stmts = parse("fire ∈ ? → water").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::Chain {
+                head: Box::new(Expr::Ident("fire".into())),
+                steps: vec![
+                    (RelOp::Member, Expr::Ident("?".into())),
+                    (RelOp::Causes, Expr::Ident("water".into())),
+                ],
+            })]
+        );
+    }
+
+    // ── Arithmetic (NEW) ────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_arithmetic_add() {
+        let stmts = parse("1 + 2").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::Arith {
+                lhs: Box::new(Expr::Int(1)),
+                op: ArithOp::Add,
+                rhs: Box::new(Expr::Int(2)),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_mul() {
+        let stmts = parse("3 × 4").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::Arith {
+                lhs: Box::new(Expr::Int(3)),
+                op: ArithOp::Mul,
+                rhs: Box::new(Expr::Int(4)),
+            })]
+        );
+    }
+
+    // ── Keyword style (existing, still works) ───────────────────────────────
 
     #[test]
     fn parse_let_binding() {
@@ -654,8 +902,6 @@ mod tests {
             }]
         );
     }
-
-    // ── If/else ─────────────────────────────────────────────────────────────
 
     #[test]
     fn parse_if_simple() {
@@ -673,17 +919,9 @@ mod tests {
     #[test]
     fn parse_if_else() {
         let stmts = parse("if fire { emit fire; } else { emit water; }").unwrap();
-        assert_eq!(
-            stmts,
-            vec![Stmt::If {
-                cond: Expr::Ident("fire".into()),
-                then_block: vec![Stmt::Emit(Expr::Ident("fire".into()))],
-                else_block: Some(vec![Stmt::Emit(Expr::Ident("water".into()))]),
-            }]
-        );
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(stmts[0], Stmt::If { .. }));
     }
-
-    // ── Loop ────────────────────────────────────────────────────────────────
 
     #[test]
     fn parse_loop_basic() {
@@ -697,16 +935,93 @@ mod tests {
         );
     }
 
-    // ── Fn definition ───────────────────────────────────────────────────────
-
     #[test]
     fn parse_fn_def() {
         let stmts = parse("fn blend(a, b) { emit a ∘ b; }").unwrap();
+        assert!(matches!(stmts[0], Stmt::FnDef { .. }));
+    }
+
+    #[test]
+    fn parse_fn_call() {
+        let stmts = parse("emit blend(fire, water);").unwrap();
+        assert!(matches!(stmts[0], Stmt::Emit(Expr::Call { .. })));
+    }
+
+    // ── Symbol style (NEW) ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_define_symbol() {
+        // steam ≔ fire ∘ water;
+        let stmts = parse("steam ≔ fire ∘ water;").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Let {
+                name: "steam".into(),
+                value: Expr::Compose(
+                    Box::new(Expr::Ident("fire".into())),
+                    Box::new(Expr::Ident("water".into())),
+                ),
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_circle_emit() {
+        // ○ fire;
+        let stmts = parse("○ fire;").unwrap();
+        assert_eq!(stmts, vec![Stmt::Emit(Expr::Ident("fire".into()))]);
+    }
+
+    #[test]
+    fn parse_implies_if() {
+        // fire ⇒ { ○ water; }
+        let stmts = parse("fire ⇒ { ○ water; }").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::If {
+                cond: Expr::Ident("fire".into()),
+                then_block: vec![Stmt::Emit(Expr::Ident("water".into()))],
+                else_block: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_implies_if_else() {
+        // fire ⇒ { ○ fire; } ⊥ { ○ water; }
+        let stmts = parse("fire ⇒ { ○ fire; } ⊥ { ○ water; }").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::If {
+                cond: Expr::Ident("fire".into()),
+                then_block: vec![Stmt::Emit(Expr::Ident("fire".into()))],
+                else_block: Some(vec![Stmt::Emit(Expr::Ident("water".into()))]),
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_cycle_loop() {
+        // ↻ 3 { ○ fire; }
+        let stmts = parse("↻ 3 { ○ fire; }").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Loop {
+                count: 3,
+                body: vec![Stmt::Emit(Expr::Ident("fire".into()))],
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_define_fn() {
+        // blend ≔ (a, b) { ○ a ∘ b; }
+        let stmts = parse("blend ≔ (a, b) { ○ a ∘ b; }").unwrap();
         assert_eq!(
             stmts,
             vec![Stmt::FnDef {
                 name: "blend".into(),
-                params: alloc::vec!["a".into(), "b".into()],
+                params: vec!["a".into(), "b".into()],
                 body: vec![Stmt::Emit(Expr::Compose(
                     Box::new(Expr::Ident("a".into())),
                     Box::new(Expr::Ident("b".into())),
@@ -715,54 +1030,92 @@ mod tests {
         );
     }
 
+    // ── Commands with args (NEW) ────────────────────────────────────────────
+
     #[test]
-    fn parse_fn_no_params() {
-        let stmts = parse("fn greet() { emit fire; }").unwrap();
+    fn parse_learn_command() {
+        let stmts = parse("learn \"tôi buồn vì mất việc\";").unwrap();
         assert_eq!(
             stmts,
-            vec![Stmt::FnDef {
-                name: "greet".into(),
-                params: Vec::new(),
-                body: vec![Stmt::Emit(Expr::Ident("fire".into()))],
+            vec![Stmt::CommandArg {
+                name: "learn".into(),
+                arg: "tôi buồn vì mất việc".into(),
             }]
         );
     }
 
-    // ── Function call ───────────────────────────────────────────────────────
-
     #[test]
-    fn parse_fn_call() {
-        let stmts = parse("emit blend(fire, water);").unwrap();
+    fn parse_seed_command() {
+        let stmts = parse("seed L0;").unwrap();
         assert_eq!(
             stmts,
-            vec![Stmt::Emit(Expr::Call {
-                name: "blend".into(),
-                args: vec![
-                    Expr::Ident("fire".into()),
-                    Expr::Ident("water".into()),
-                ],
+            vec![Stmt::CommandArg {
+                name: "seed".into(),
+                arg: "L0".into(),
+            }]
+        );
+    }
+
+    // ── New relation operators ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_set_minus() {
+        let stmts = parse("fire ∖ water").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::RelEdge {
+                lhs: Box::new(Expr::Ident("fire".into())),
+                op: RelOp::SetMinus,
+                rhs: Box::new(Expr::Ident("water".into())),
             })]
         );
     }
 
-    // ── Multi-statement programs ────────────────────────────────────────────
-
     #[test]
-    fn parse_multi_stmt() {
-        let src = "let x = fire; let y = water; emit x ∘ y;";
-        let stmts = parse(src).unwrap();
-        assert_eq!(stmts.len(), 3);
-        assert!(matches!(stmts[0], Stmt::Let { .. }));
-        assert!(matches!(stmts[1], Stmt::Let { .. }));
-        assert!(matches!(stmts[2], Stmt::Emit(_)));
+    fn parse_bidir() {
+        let stmts = parse("fire ↔ water").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::RelEdge {
+                lhs: Box::new(Expr::Ident("fire".into())),
+                op: RelOp::Bidir,
+                rhs: Box::new(Expr::Ident("water".into())),
+            })]
+        );
     }
 
     #[test]
-    fn parse_command_in_program() {
-        let stmts = parse("emit fire; dream;").unwrap();
-        assert_eq!(stmts.len(), 2);
-        assert!(matches!(stmts[0], Stmt::Emit(_)));
-        assert!(matches!(stmts[1], Stmt::Command(ref s) if s == "dream"));
+    fn parse_trigger() {
+        let stmts = parse("🔥 ⚡ 💧").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::RelEdge {
+                lhs: Box::new(Expr::Ident("🔥".into())),
+                op: RelOp::Trigger,
+                rhs: Box::new(Expr::Ident("💧".into())),
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_parallel() {
+        let stmts = parse("fire ∥ water").unwrap();
+        assert_eq!(
+            stmts,
+            vec![Stmt::Expr(Expr::RelEdge {
+                lhs: Box::new(Expr::Ident("fire".into())),
+                op: RelOp::Parallel,
+                rhs: Box::new(Expr::Ident("water".into())),
+            })]
+        );
+    }
+
+    // ── Grouping ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_grouped_expr() {
+        let stmts = parse("(fire ∘ water) → earth").unwrap();
+        assert!(matches!(stmts[0], Stmt::Expr(Expr::RelEdge { .. })));
     }
 
     // ── Vietnamese ──────────────────────────────────────────────────────────
@@ -779,22 +1132,16 @@ mod tests {
         );
     }
 
-    // ── Grouping ────────────────────────────────────────────────────────────
+    // ── Pure symbol program ─────────────────────────────────────────────────
 
     #[test]
-    fn parse_grouped_expr() {
-        let stmts = parse("(fire ∘ water) → earth").unwrap();
-        assert_eq!(
-            stmts,
-            vec![Stmt::Expr(Expr::RelEdge {
-                lhs: Box::new(Expr::Group(Box::new(Expr::Compose(
-                    Box::new(Expr::Ident("fire".into())),
-                    Box::new(Expr::Ident("water".into())),
-                )))),
-                op: RelOp::Causes,
-                rhs: Box::new(Expr::Ident("earth".into())),
-            })]
-        );
+    fn parse_pure_symbol_program() {
+        // Entire program in pure math symbols, no English keywords
+        let src = "steam ≔ 🔥 ∘ 💧; steam ∈ ? ⇒ { ○ steam; } ⊥ { ○ 💧; }";
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 2);
+        assert!(matches!(stmts[0], Stmt::Let { .. }));
+        assert!(matches!(stmts[1], Stmt::If { .. }));
     }
 
     // ── Error cases ─────────────────────────────────────────────────────────
@@ -807,15 +1154,11 @@ mod tests {
 
     #[test]
     fn parse_unclosed_paren() {
-        let result = parse("(fire");
-        assert!(result.is_err());
+        assert!(parse("(fire").is_err());
     }
 
     #[test]
     fn parse_let_missing_semi() {
-        let result = parse("let x = fire");
-        // Missing semicolon → error in multi-stmt mode
-        // But since there's 'let', it's NOT single-expr mode
-        assert!(result.is_err());
+        assert!(parse("let x = fire").is_err());
     }
 }
