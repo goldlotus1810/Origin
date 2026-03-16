@@ -157,6 +157,8 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::LoadLocal(name) => format!("push(&s, olang_load_local(\"{}\"));", escape(name)),
         Op::PushNum(n) => format!("push(&s, (Chain){:.17e});", n),
         Op::Fuse => "/* QT2: FUSE — verify chain finite */ { Chain c = peek(&s); if (c == 0) pop(&s); }".into(),
+        Op::ScopeBegin => "{ /* scope begin */".into(),
+        Op::ScopeEnd => "} /* scope end */".into(),
         Op::Trace => "/* trace */".into(),
         Op::Inspect => "/* inspect */ printf(\"inspect: %p\\n\", peek(&s));".into(),
         Op::Assert => "/* assert */ if (peek(&s) == 0) { fprintf(stderr, \"ASSERT FAILED\\n\"); }".into(),
@@ -226,6 +228,8 @@ fn rust_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::LoadLocal(name) => format!("// load local: {}", name),
         Op::PushNum(n) => format!("stack.push({:.17e}_f64);", n),
         Op::Fuse => "// QT2: FUSE — verify chain finite (∞-1)".into(),
+        Op::ScopeBegin => "{ // scope begin".into(),
+        Op::ScopeEnd => "} // scope end".into(),
         Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => "// debug primitive (runtime only)".into(),
     })
 }
@@ -323,6 +327,8 @@ fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileE
         Op::LoadLocal(_) => "local.get $local ;; load_local".into(),
         Op::PushNum(n) => format!("f64.const {:.17e}", n),
         Op::Fuse => ";; QT2: FUSE — verify chain finite".into(),
+        Op::ScopeBegin => "block $scope ;; scope begin".into(),
+        Op::ScopeEnd => "end ;; scope end".into(),
         Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => ";; debug primitive (runtime only)".into(),
     })
 }

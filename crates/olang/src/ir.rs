@@ -89,6 +89,11 @@ pub enum Op {
     /// Nếu chain hữu hạn → push lại chain (∞-1 = đúng).
     Fuse,
 
+    /// Push new scope frame (for blocks: fn body, if branches, loops)
+    ScopeBegin,
+    /// Pop scope frame, discarding locals defined in this scope
+    ScopeEnd,
+
     // ── Reasoning & Debug primitives ────────────────────────────────────────
     /// Trace: bật/tắt execution tracing (mỗi bước emit TraceStep event)
     Trace,
@@ -130,6 +135,8 @@ impl Op {
             Self::LoadLocal(_) => "LOAD_LOCAL",
             Self::PushNum(_) => "PUSH_NUM",
             Self::Fuse => "FUSE",
+            Self::ScopeBegin => "SCOPE_BEGIN",
+            Self::ScopeEnd => "SCOPE_END",
             Self::Trace => "TRACE",
             Self::Inspect => "INSPECT",
             Self::Assert => "ASSERT",
@@ -205,6 +212,8 @@ impl Op {
                 b
             }
             Self::Fuse => alloc::vec![0x0A],
+            Self::ScopeBegin => alloc::vec![0x13],
+            Self::ScopeEnd => alloc::vec![0x14],
             Self::Trace => alloc::vec![0x0B],
             Self::Inspect => alloc::vec![0x0C],
             Self::Assert => alloc::vec![0x0D],

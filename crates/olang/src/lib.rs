@@ -33,5 +33,6 @@ pub mod semantic;
 pub mod separator;
 pub mod startup;
 pub mod syntax;
+pub mod optimize;
 pub mod vm;
 pub mod writer;

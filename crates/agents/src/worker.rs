@@ -750,6 +750,203 @@ impl Worker {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SensorNormalizer — EMA smoothing + calibration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Sensor normalization configuration per unit type.
+#[derive(Debug, Clone, Copy)]
+pub struct SensorCalibration {
+    /// Physical minimum for this sensor type
+    pub min: f32,
+    /// Physical maximum for this sensor type
+    pub max: f32,
+    /// EMA smoothing factor α ∈ (0, 1]. Higher = more responsive.
+    pub ema_alpha: f32,
+    /// Minimum change (absolute) to trigger a report (dead band)
+    pub dead_band: f32,
+}
+
+impl SensorCalibration {
+    /// Default calibration for a sensor unit.
+    pub fn for_unit(unit: SensorUnit) -> Self {
+        match unit {
+            SensorUnit::Temperature => Self {
+                min: -40.0,
+                max: 85.0,
+                ema_alpha: 0.3,
+                dead_band: 0.5, // 0.5°C change minimum
+            },
+            SensorUnit::Humidity => Self {
+                min: 0.0,
+                max: 100.0,
+                ema_alpha: 0.3,
+                dead_band: 1.0, // 1% change
+            },
+            SensorUnit::Light => Self {
+                min: 0.0,
+                max: 10000.0,
+                ema_alpha: 0.4,
+                dead_band: 50.0, // 50 lux
+            },
+            SensorUnit::Motion => Self {
+                min: 0.0,
+                max: 1.0,
+                ema_alpha: 0.5, // responsive
+                dead_band: 0.1,
+            },
+            SensorUnit::Sound => Self {
+                min: 0.0,
+                max: 120.0,
+                ema_alpha: 0.4,
+                dead_band: 2.0, // 2 dB
+            },
+            SensorUnit::Distance => Self {
+                min: 0.0,
+                max: 500.0,
+                ema_alpha: 0.3,
+                dead_band: 5.0, // 5 cm
+            },
+            SensorUnit::Pressure => Self {
+                min: 800.0,
+                max: 1200.0,
+                ema_alpha: 0.2, // slow — pressure changes slowly
+                dead_band: 1.0, // 1 hPa
+            },
+            SensorUnit::Custom => Self {
+                min: 0.0,
+                max: 255.0,
+                ema_alpha: 0.3,
+                dead_band: 1.0,
+            },
+        }
+    }
+}
+
+/// Per-sensor smoothing state.
+#[derive(Debug, Clone)]
+struct SensorState {
+    /// EMA-smoothed value
+    smoothed: f32,
+    /// Last reported value (for dead band comparison)
+    last_reported: f32,
+    /// Number of samples received
+    sample_count: u32,
+    /// Calibration config
+    cal: SensorCalibration,
+}
+
+/// Sensor normalizer: EMA smoothing + dead-band filtering + calibration.
+///
+/// Buffers raw sensor readings, applies exponential moving average,
+/// and only emits when the smoothed value changes beyond the dead band.
+/// This prevents noisy sensors from flooding the pipeline with reports.
+pub struct SensorNormalizer {
+    /// Per-sensor states indexed by (sensor_id, unit)
+    states: Vec<(u8, SensorUnit, SensorState)>,
+}
+
+impl SensorNormalizer {
+    /// Create empty normalizer.
+    pub fn new() -> Self {
+        Self { states: Vec::new() }
+    }
+
+    /// Process a raw reading → returns smoothed value and whether to report.
+    ///
+    /// Returns `(smoothed_value, should_report)`:
+    /// - `smoothed_value`: EMA-filtered value
+    /// - `should_report`: true if change exceeds dead band
+    pub fn process(&mut self, reading: &SensorReading) -> (f32, bool) {
+        let state = self.get_or_create(reading.sensor_id, reading.unit);
+
+        if state.sample_count == 0 {
+            // First sample: initialize
+            state.smoothed = reading.value;
+            state.last_reported = reading.value;
+            state.sample_count = 1;
+            return (reading.value, true); // Always report first reading
+        }
+
+        // EMA: smoothed = α × new + (1 - α) × old
+        let alpha = state.cal.ema_alpha;
+        state.smoothed = alpha * reading.value + (1.0 - alpha) * state.smoothed;
+        state.sample_count += 1;
+
+        // Dead band: only report if smoothed value changed enough
+        let delta = (state.smoothed - state.last_reported).abs();
+        let should_report = delta >= state.cal.dead_band;
+        if should_report {
+            state.last_reported = state.smoothed;
+        }
+
+        (state.smoothed, should_report)
+    }
+
+    /// Normalize a value to [0.0, 1.0] range using calibration bounds.
+    pub fn normalize(&self, sensor_id: u8, unit: SensorUnit, value: f32) -> f32 {
+        let cal = self
+            .states
+            .iter()
+            .find(|(id, u, _)| *id == sensor_id && *u == unit)
+            .map(|(_, _, s)| s.cal)
+            .unwrap_or_else(|| SensorCalibration::for_unit(unit));
+        ((value - cal.min) / (cal.max - cal.min)).clamp(0.0, 1.0)
+    }
+
+    /// Get sample count for a sensor.
+    pub fn sample_count(&self, sensor_id: u8, unit: SensorUnit) -> u32 {
+        self.states
+            .iter()
+            .find(|(id, u, _)| *id == sensor_id && *u == unit)
+            .map(|(_, _, s)| s.sample_count)
+            .unwrap_or(0)
+    }
+
+    /// Get smoothed value for a sensor (None if never seen).
+    pub fn smoothed_value(&self, sensor_id: u8, unit: SensorUnit) -> Option<f32> {
+        self.states
+            .iter()
+            .find(|(id, u, _)| *id == sensor_id && *u == unit)
+            .map(|(_, _, s)| s.smoothed)
+    }
+
+    /// Override calibration for a specific sensor.
+    pub fn set_calibration(&mut self, sensor_id: u8, unit: SensorUnit, cal: SensorCalibration) {
+        let state = self.get_or_create(sensor_id, unit);
+        state.cal = cal;
+    }
+
+    fn get_or_create(&mut self, sensor_id: u8, unit: SensorUnit) -> &mut SensorState {
+        let idx = self
+            .states
+            .iter()
+            .position(|(id, u, _)| *id == sensor_id && *u == unit);
+        if let Some(i) = idx {
+            &mut self.states[i].2
+        } else {
+            self.states.push((
+                sensor_id,
+                unit,
+                SensorState {
+                    smoothed: 0.0,
+                    last_reported: 0.0,
+                    sample_count: 0,
+                    cal: SensorCalibration::for_unit(unit),
+                },
+            ));
+            let last = self.states.len() - 1;
+            &mut self.states[last].2
+        }
+    }
+}
+
+impl Default for SensorNormalizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1245,5 +1442,168 @@ mod tests {
         let w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
         let probe = w.probe_with_hal(&platform, 1000);
         assert_eq!(probe.status, HardwareStatus::Ready, "RISC-V có sensor");
+    }
+
+    // ── SensorNormalizer ──────────────────────────────────────────────────────
+
+    #[test]
+    fn normalizer_first_reading_reports() {
+        let mut norm = SensorNormalizer::new();
+        let r = SensorReading {
+            sensor_id: 1,
+            value: 22.0,
+            unit: SensorUnit::Temperature,
+            timestamp: 1000,
+        };
+        let (smoothed, should_report) = norm.process(&r);
+        assert!(should_report, "First reading always reports");
+        assert!((smoothed - 22.0).abs() < 0.01);
+        assert_eq!(norm.sample_count(1, SensorUnit::Temperature), 1);
+    }
+
+    #[test]
+    fn normalizer_ema_smoothing() {
+        let mut norm = SensorNormalizer::new();
+        // α=0.3 for temperature
+        let r1 = SensorReading {
+            sensor_id: 1,
+            value: 20.0,
+            unit: SensorUnit::Temperature,
+            timestamp: 1000,
+        };
+        norm.process(&r1); // smoothed = 20.0
+
+        let r2 = SensorReading {
+            sensor_id: 1,
+            value: 30.0,
+            unit: SensorUnit::Temperature,
+            timestamp: 2000,
+        };
+        let (smoothed, _) = norm.process(&r2);
+        // EMA: 0.3 * 30 + 0.7 * 20 = 9 + 14 = 23.0
+        assert!(
+            (smoothed - 23.0).abs() < 0.01,
+            "EMA: expected 23.0, got {}",
+            smoothed
+        );
+    }
+
+    #[test]
+    fn normalizer_dead_band_suppresses_small_changes() {
+        let mut norm = SensorNormalizer::new();
+        // Temperature dead_band = 0.5°C
+        let r1 = SensorReading {
+            sensor_id: 1,
+            value: 22.0,
+            unit: SensorUnit::Temperature,
+            timestamp: 1000,
+        };
+        norm.process(&r1); // first → report
+
+        // Small change (0.1°C) → after EMA, delta < 0.5
+        let r2 = SensorReading {
+            sensor_id: 1,
+            value: 22.1,
+            unit: SensorUnit::Temperature,
+            timestamp: 2000,
+        };
+        let (_, should_report) = norm.process(&r2);
+        assert!(!should_report, "Small change suppressed by dead band");
+    }
+
+    #[test]
+    fn normalizer_dead_band_passes_large_changes() {
+        let mut norm = SensorNormalizer::new();
+        let r1 = SensorReading {
+            sensor_id: 1,
+            value: 22.0,
+            unit: SensorUnit::Temperature,
+            timestamp: 1000,
+        };
+        norm.process(&r1);
+
+        // Large change (10°C) → delta >> 0.5
+        let r2 = SensorReading {
+            sensor_id: 1,
+            value: 32.0,
+            unit: SensorUnit::Temperature,
+            timestamp: 2000,
+        };
+        let (_, should_report) = norm.process(&r2);
+        assert!(should_report, "Large change passes dead band");
+    }
+
+    #[test]
+    fn normalizer_normalize_range() {
+        let mut norm = SensorNormalizer::new();
+        // Process one reading to create state
+        let r = SensorReading {
+            sensor_id: 1,
+            value: 22.5,
+            unit: SensorUnit::Temperature,
+            timestamp: 1000,
+        };
+        norm.process(&r);
+
+        // Temperature: min=-40, max=85 → 22.5 maps to (22.5+40)/125 = 0.5
+        let n = norm.normalize(1, SensorUnit::Temperature, 22.5);
+        assert!((n - 0.5).abs() < 0.01, "22.5°C ≈ 0.5 normalized: {}", n);
+
+        // Clamp below min
+        let n_low = norm.normalize(1, SensorUnit::Temperature, -50.0);
+        assert!((n_low - 0.0).abs() < 0.01, "Below min → 0.0");
+
+        // Clamp above max
+        let n_high = norm.normalize(1, SensorUnit::Temperature, 100.0);
+        assert!((n_high - 1.0).abs() < 0.01, "Above max → 1.0");
+    }
+
+    #[test]
+    fn normalizer_multiple_sensors() {
+        let mut norm = SensorNormalizer::new();
+        let r_temp = SensorReading {
+            sensor_id: 1,
+            value: 22.0,
+            unit: SensorUnit::Temperature,
+            timestamp: 1000,
+        };
+        let r_hum = SensorReading {
+            sensor_id: 2,
+            value: 60.0,
+            unit: SensorUnit::Humidity,
+            timestamp: 1000,
+        };
+        norm.process(&r_temp);
+        norm.process(&r_hum);
+
+        assert_eq!(norm.sample_count(1, SensorUnit::Temperature), 1);
+        assert_eq!(norm.sample_count(2, SensorUnit::Humidity), 1);
+        assert!(norm.smoothed_value(1, SensorUnit::Temperature).is_some());
+        assert!(norm.smoothed_value(2, SensorUnit::Humidity).is_some());
+    }
+
+    #[test]
+    fn normalizer_custom_calibration() {
+        let mut norm = SensorNormalizer::new();
+        norm.set_calibration(
+            5,
+            SensorUnit::Custom,
+            SensorCalibration {
+                min: 0.0,
+                max: 100.0,
+                ema_alpha: 0.5,
+                dead_band: 5.0,
+            },
+        );
+        let r = SensorReading {
+            sensor_id: 5,
+            value: 50.0,
+            unit: SensorUnit::Custom,
+            timestamp: 1000,
+        };
+        let (smoothed, _) = norm.process(&r);
+        assert!((smoothed - 50.0).abs() < 0.01);
+        let n = norm.normalize(5, SensorUnit::Custom, 50.0);
+        assert!((n - 0.5).abs() < 0.01);
     }
 }

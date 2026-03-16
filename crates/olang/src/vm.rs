@@ -200,7 +200,11 @@ impl OlangVM {
     /// Sau đó caller gọi resume_with(chain) để tiếp tục.
     pub fn execute(&self, prog: &OlangProgram) -> VmResult {
         let mut stack = VmStack::new();
-        let mut locals: Vec<(alloc::string::String, MolecularChain)> = Vec::new();
+        // Scope stack: each Vec is a scope frame with local variables.
+        // ScopeBegin pushes new frame, ScopeEnd pops it.
+        // LoadLocal searches from innermost scope outward.
+        let mut scopes: Vec<Vec<(alloc::string::String, MolecularChain)>> = Vec::new();
+        scopes.push(Vec::new()); // root scope
         let mut events = Vec::new();
         let mut steps = 0u32;
         let mut pc = 0usize;
@@ -474,24 +478,40 @@ impl OlangVM {
                             break;
                         }
                     };
-                    // Update existing or insert new
-                    if let Some(entry) = locals.iter_mut().find(|(n, _)| n == name) {
+                    // Store in current (innermost) scope.
+                    // Update existing in current scope, else insert new.
+                    let scope = scopes.last_mut().unwrap();
+                    if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
                         entry.1 = val;
                     } else {
-                        locals.push((name.clone(), val));
+                        scope.push((name.clone(), val));
                     }
                 }
 
                 Op::LoadLocal(name) => {
-                    let val = locals
+                    // Search from innermost scope outward (lexical scoping)
+                    let val = scopes
                         .iter()
                         .rev()
-                        .find(|(n, _)| n == name)
-                        .map(|(_, c)| c.clone())
+                        .find_map(|scope| {
+                            scope.iter().rev().find(|(n, _)| n == name).map(|(_, c)| c.clone())
+                        })
                         .unwrap_or_else(MolecularChain::empty);
                     if let Err(e) = stack.push(val) {
                         events.push(VmEvent::Error(e));
                         break;
+                    }
+                }
+
+                Op::ScopeBegin => {
+                    scopes.push(Vec::new());
+                }
+
+                Op::ScopeEnd => {
+                    // Pop innermost scope (discard locals)
+                    // Never pop root scope
+                    if scopes.len() > 1 {
+                        scopes.pop();
                     }
                 }
 
@@ -1234,5 +1254,122 @@ mod tests {
         let result = vm().execute(&prog);
         let n = result.outputs()[0].to_number().unwrap();
         assert!((n - 3.14159).abs() < 1e-10);
+    }
+
+    // ── Scope tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn scope_basic_store_load() {
+        // Store x=5 in root scope, load x → emit
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(5.0))
+            .push_op(Op::Store("x".into()))
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 5.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn scope_nested_shadows_outer() {
+        // Root: x = 10
+        // Inner scope: x = 20, emit x (should be 20)
+        // After scope end: emit x (should be 10 again)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::Store("x".into()))
+            .push_op(Op::ScopeBegin)
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::Store("x".into()))
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 20
+            .push_op(Op::ScopeEnd)
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 10 (inner x discarded)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+        let inner = outputs[0].to_number().unwrap();
+        let outer = outputs[1].to_number().unwrap();
+        assert!((inner - 20.0).abs() < f64::EPSILON, "Inner scope x=20: {}", inner);
+        assert!((outer - 10.0).abs() < f64::EPSILON, "Outer scope x=10: {}", outer);
+    }
+
+    #[test]
+    fn scope_inner_reads_outer() {
+        // Root: y = 42
+        // Inner scope: load y (should find in outer scope)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(42.0))
+            .push_op(Op::Store("y".into()))
+            .push_op(Op::ScopeBegin)
+            .push_op(Op::LoadLocal("y".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::ScopeEnd)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 42.0).abs() < f64::EPSILON, "Inner reads outer y=42");
+    }
+
+    #[test]
+    fn scope_double_nesting() {
+        // Root: a = 1
+        // Scope 1: b = 2
+        // Scope 2: c = 3, emit a+b+c
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(1.0))
+            .push_op(Op::Store("a".into()))
+            .push_op(Op::ScopeBegin) // scope 1
+            .push_op(Op::PushNum(2.0))
+            .push_op(Op::Store("b".into()))
+            .push_op(Op::ScopeBegin) // scope 2
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Store("c".into()))
+            // a + b
+            .push_op(Op::LoadLocal("a".into()))
+            .push_op(Op::LoadLocal("b".into()))
+            .push_op(Op::Call("__hyp_add".into()))
+            // + c
+            .push_op(Op::LoadLocal("c".into()))
+            .push_op(Op::Call("__hyp_add".into()))
+            .push_op(Op::Emit) // 1+2+3 = 6
+            .push_op(Op::ScopeEnd) // pop scope 2
+            .push_op(Op::ScopeEnd) // pop scope 1
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 6.0).abs() < f64::EPSILON, "a+b+c = 6: {}", n);
+    }
+
+    #[test]
+    fn scope_end_without_begin_safe() {
+        // ScopeEnd without Begin should not crash (root scope protected)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::ScopeEnd)
+            .push_op(Op::ScopeEnd)
+            .push_op(Op::PushNum(1.0))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert_eq!(result.outputs().len(), 1);
+    }
+
+    #[test]
+    fn scope_undefined_var_returns_empty() {
+        // Loading undefined variable → empty chain
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::LoadLocal("nonexistent".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(result.outputs()[0].is_empty(), "Undefined var → empty");
     }
 }

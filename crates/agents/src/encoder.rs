@@ -50,6 +50,18 @@ pub enum ContentInput {
     },
     /// Công thức toán học
     Math { expression: String, timestamp: i64 },
+    /// Hình ảnh → SDF description → chain
+    Image {
+        /// SDF primitive phát hiện được (0=sphere, 1=box, 2=cylinder, 3=plane, 4=mixed)
+        sdf_type: u8,
+        /// Độ sáng trung bình [0.0, 1.0]
+        brightness: f32,
+        /// Điểm chuyển động [0.0, 1.0]
+        motion_score: f32,
+        /// Số vùng phát hiện (regions / objects)
+        region_count: u8,
+        timestamp: i64,
+    },
     /// Sự kiện hệ thống
     System { event: SystemEvent, timestamp: i64 },
 }
@@ -73,6 +85,30 @@ pub enum CodeLang {
     Other,
 }
 
+/// SDF primitive type detected in image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SdfPrimitive {
+    Sphere = 0,
+    Box = 1,
+    Cylinder = 2,
+    Plane = 3,
+    Mixed = 4,
+}
+
+impl SdfPrimitive {
+    /// From raw byte.
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            0 => Self::Sphere,
+            1 => Self::Box,
+            2 => Self::Cylinder,
+            3 => Self::Plane,
+            _ => Self::Mixed,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SystemEvent {
     Boot,
@@ -91,6 +127,7 @@ impl ContentInput {
             Self::Sensor { timestamp, .. } => *timestamp,
             Self::Code { timestamp, .. } => *timestamp,
             Self::Math { timestamp, .. } => *timestamp,
+            Self::Image { timestamp, .. } => *timestamp,
             Self::System { timestamp, .. } => *timestamp,
         }
     }
@@ -120,6 +157,7 @@ pub enum SourceKind {
     Sensor,
     Code,
     Math,
+    Image,
     System,
 }
 
@@ -163,6 +201,13 @@ impl ContentEncoder {
                 expression,
                 timestamp,
             } => self.encode_math(&expression, timestamp),
+            ContentInput::Image {
+                sdf_type,
+                brightness,
+                motion_score,
+                region_count,
+                timestamp,
+            } => self.encode_image(sdf_type, brightness, motion_score, region_count, timestamp),
             ContentInput::System { event, timestamp } => self.encode_system(event, timestamp),
         }
     }
@@ -347,6 +392,47 @@ impl ContentEncoder {
             emotion,
             timestamp: ts,
             source: SourceKind::Math,
+        }
+    }
+
+    // ── Image ─────────────────────────────────────────────────────────────────
+
+    /// Image → chain từ SDF description.
+    ///
+    /// Worker camera đã pre-process: detect SDF primitive, brightness, motion.
+    /// Encoder map SDF → Geometric codepoint, motion → arousal.
+    fn encode_image(
+        &self,
+        sdf_type: u8,
+        brightness: f32,
+        motion_score: f32,
+        region_count: u8,
+        ts: i64,
+    ) -> EncodedContent {
+        // Map SDF primitive → geometric codepoint
+        let cp = match SdfPrimitive::from_byte(sdf_type) {
+            SdfPrimitive::Sphere => 0x25CF,   // ● BLACK CIRCLE
+            SdfPrimitive::Box => 0x25A0,      // ■ BLACK SQUARE
+            SdfPrimitive::Cylinder => 0x25AD,  // ▭ WHITE RECTANGLE (cylinder projection)
+            SdfPrimitive::Plane => 0x25B3,     // △ WHITE UP-POINTING TRIANGLE
+            SdfPrimitive::Mixed => 0x25C6,     // ◆ BLACK DIAMOND (composite)
+        };
+        let chain = encode_codepoint(cp);
+
+        // Emotion from visual content:
+        // - brightness → valence (dark = slightly negative, bright = slightly positive)
+        // - motion → arousal (movement = excitement)
+        // - region_count → intensity (complex scene = more intense)
+        let valence = (brightness - 0.5) * 0.4; // [-0.2, +0.2]
+        let arousal = motion_score.clamp(0.0, 1.0) * 0.7 + 0.1;
+        let intensity = ((region_count as f32) / 10.0).clamp(0.1, 0.8);
+        let emotion = EmotionTag::new(valence, arousal, 0.5, intensity);
+
+        EncodedContent {
+            chain,
+            emotion,
+            timestamp: ts,
+            source: SourceKind::Image,
         }
     }
 
@@ -650,6 +736,57 @@ mod tests {
         assert!(r.emotion.valence < 0.0, "Error → negative valence");
     }
 
+    // ── Image ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn encode_image_sphere() {
+        if skip() {
+            return;
+        }
+        let r = enc().encode(ContentInput::Image {
+            sdf_type: 0, // Sphere
+            brightness: 0.7,
+            motion_score: 0.0,
+            region_count: 1,
+            timestamp: 1000,
+        });
+        assert_eq!(r.source, SourceKind::Image);
+        assert!(!r.chain.is_empty());
+        // Bright scene → positive valence
+        assert!(r.emotion.valence > 0.0, "Bright → positive: {}", r.emotion.valence);
+    }
+
+    #[test]
+    fn encode_image_dark_negative() {
+        if skip() {
+            return;
+        }
+        let r = enc().encode(ContentInput::Image {
+            sdf_type: 1, // Box
+            brightness: 0.1,
+            motion_score: 0.0,
+            region_count: 1,
+            timestamp: 1000,
+        });
+        // Dark scene → slightly negative valence
+        assert!(r.emotion.valence < 0.0, "Dark → negative: {}", r.emotion.valence);
+    }
+
+    #[test]
+    fn encode_image_motion_high_arousal() {
+        if skip() {
+            return;
+        }
+        let r = enc().encode(ContentInput::Image {
+            sdf_type: 4, // Mixed
+            brightness: 0.5,
+            motion_score: 0.9,
+            region_count: 5,
+            timestamp: 1000,
+        });
+        assert!(r.emotion.arousal > 0.5, "Motion → high arousal: {}", r.emotion.arousal);
+    }
+
     // ── All sources produce chains ────────────────────────────────────────────
 
     #[test]
@@ -682,9 +819,16 @@ mod tests {
                 expression: "x = 1".to_string(),
                 timestamp: 5
             },
+            ContentInput::Image {
+                sdf_type: 0,
+                brightness: 0.5,
+                motion_score: 0.2,
+                region_count: 2,
+                timestamp: 6
+            },
             ContentInput::System {
                 event: SystemEvent::NodeCreated,
-                timestamp: 6
+                timestamp: 7
             },
         ];
 
