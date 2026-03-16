@@ -1040,6 +1040,21 @@ impl HomeRuntime {
             self.track_recent_text(content, ts);
         }
 
+        // ── T6d: Bản năng bẩm sinh — 7 instincts chạy SAU learning ────────
+        // Honesty → Contradiction → Causality → Abstraction → Analogy → Curiosity → Reflection
+        let instinct_ctx = if let ProcessResult::Ok { ref chain, emotion } = proc_result {
+            Some(self.run_instincts(chain, emotion, ts))
+        } else {
+            None
+        };
+
+        // ── T6e: Silk heartbeat — chăm sóc Ln-1 mỗi 13 turns (Fib[7]) ─────
+        if self.turn_count.is_multiple_of(13) && self.turn_count > 0 {
+            let elapsed_ns = if self.uptime_ns > 0 { ts - self.uptime_ns } else { 0 }
+                * 1_000_000; // ms → ns
+            self.learning.maintain_silk(elapsed_ns, 100_000);
+        }
+
         // ── T7: Decide action → render response ────────────────────────────
         let mut action = decide_action(&est, cur_v);
         let fx = self.learning.context().fx();
@@ -1231,7 +1246,7 @@ impl HomeRuntime {
                     }
                 };
 
-                let text = render(&ResponseParams {
+                let mut text = render(&ResponseParams {
                     tone,
                     action,
                     valence: final_v,
@@ -1239,6 +1254,31 @@ impl HomeRuntime {
                     context: recall,
                     original,
                 });
+
+                // ── T7e: Instinct enrichment — bản năng làm giàu response ──
+                if let Some(ref insight) = instinct_ctx {
+                    // Epistemic disclaimer (QT18: trung thực tuyệt đối)
+                    if !text.is_empty() {
+                        match insight.epistemic_grade.as_deref() {
+                            Some("hypothesis") => {
+                                text = format!("{}\n[Giả thuyết]", text);
+                            }
+                            Some("opinion") => {
+                                text = format!("{}\n[Chưa chắc chắn]", text);
+                            }
+                            _ => {} // fact → no disclaimer, silence → handled earlier
+                        }
+                    }
+
+                    // Instinct-detected contradiction overrides learning contradiction
+                    if insight.has_contradiction && contradiction.is_none() && !text.is_empty() {
+                        text = format!(
+                            "{}\n⊥ Mình nhận thấy có điều mâu thuẫn — bạn có muốn nói rõ hơn không?",
+                            text
+                        );
+                    }
+                }
+
                 Response {
                     text,
                     tone,
@@ -2210,6 +2250,133 @@ fn build_alias_map(
         }
     }
     map
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instincts — 7 bản năng bẩm sinh chạy mỗi turn
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Kết quả từ instinct pipeline — carry qua response generation.
+#[derive(Debug, Clone)]
+pub struct InstinctInsight {
+    /// Epistemic grade: "fact" / "opinion" / "hypothesis" / "silence"
+    pub epistemic_grade: Option<alloc::string::String>,
+    /// Curiosity level: "extreme" / "high" / "moderate" / "low"
+    pub curiosity_level: Option<alloc::string::String>,
+    /// Contradiction detected?
+    pub has_contradiction: bool,
+    /// Knowledge quality from Reflection
+    pub knowledge_quality: Option<f32>,
+    /// Reflection verdict: "strong" / "developing" / "fragile"
+    pub reflection_verdict: Option<alloc::string::String>,
+}
+
+impl HomeRuntime {
+    /// Chạy 7 bản năng bẩm sinh trên chain vừa encode.
+    ///
+    /// Tạo ExecContext từ learning stats → chạy instincts → trả InstinctInsight.
+    /// Instinct chạy SAU learning, TRƯỚC response generation.
+    fn run_instincts(
+        &self,
+        chain: &olang::molecular::MolecularChain,
+        emotion: silk::edge::EmotionTag,
+        ts: i64,
+    ) -> InstinctInsight {
+        use agents::instinct::innate_instincts;
+        use agents::skill::ExecContext;
+
+        let fx = self.learning.context().fx();
+        let mut ctx = ExecContext::new(ts, emotion, fx);
+
+        // Feed chain hiện tại
+        ctx.push_input(chain.clone());
+
+        // Feed chain trước đó nếu có (cho Contradiction, Causality)
+        if let Some(prev) = self.learning.stm().all().iter().rev().nth(1) {
+            ctx.push_input(prev.chain.clone());
+        }
+
+        // Chuẩn bị state cho instincts
+        let stm = self.learning.stm();
+        let graph = self.learning.graph();
+
+        // Confidence: dựa trên fire_count và Silk connectivity
+        let fire_count = stm
+            .find_by_hash(chain.chain_hash())
+            .map(|o| o.fire_count)
+            .unwrap_or(1);
+        let edge_count_from = graph.edges_from(chain.chain_hash()).len();
+        let confidence = ((fire_count as f32 * 0.1) + (edge_count_from as f32 * 0.05)).min(0.99);
+        ctx.set(
+            alloc::string::String::from("confidence"),
+            alloc::format!("{:.3}", confidence),
+        );
+
+        // Temporal order cho Causality
+        if stm.len() >= 2 {
+            ctx.set(
+                alloc::string::String::from("temporal_order"),
+                alloc::string::String::from("AB"),
+            );
+            let max_co = graph.all_edges().filter(|e| e.kind.is_associative()).count();
+            ctx.set(
+                alloc::string::String::from("coactivation_count"),
+                alloc::format!("{}", max_co.min(100)),
+            );
+        }
+
+        // Reflection stats
+        ctx.set(
+            alloc::string::String::from("qr_count"),
+            alloc::format!("{}", self.registry.len()),
+        );
+        ctx.set(
+            alloc::string::String::from("dn_count"),
+            alloc::format!("{}", stm.len()),
+        );
+        ctx.set(
+            alloc::string::String::from("edge_count"),
+            alloc::format!("{}", graph.len()),
+        );
+        ctx.set(
+            alloc::string::String::from("known_count"),
+            alloc::format!("{}", self.registry.len() + stm.len()),
+        );
+
+        // Curiosity: nearest_similarity từ STM
+        let nearest_sim = if stm.len() > 1 {
+            stm.all()
+                .iter()
+                .filter(|o| o.chain.chain_hash() != chain.chain_hash())
+                .map(|o| o.chain.similarity_full(chain))
+                .fold(0.0f32, f32::max)
+        } else {
+            0.0
+        };
+        ctx.set(
+            alloc::string::String::from("nearest_similarity"),
+            alloc::format!("{:.3}", nearest_sim),
+        );
+
+        // Chạy 7 bản năng theo thứ tự ưu tiên
+        let instincts = innate_instincts();
+        for skill in instincts {
+            let _ = skill.execute(&mut ctx);
+        }
+
+        // Thu hoạch insight
+        InstinctInsight {
+            epistemic_grade: ctx.get("epistemic_grade").map(alloc::string::String::from),
+            curiosity_level: ctx.get("curiosity_level").map(alloc::string::String::from),
+            has_contradiction: ctx.get("contradiction_verdict") == Some("contradicted"),
+            knowledge_quality: ctx
+                .get("knowledge_quality")
+                .and_then(|s| s.parse::<f32>().ok()),
+            reflection_verdict: ctx
+                .get("reflection_verdict")
+                .map(alloc::string::String::from),
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
