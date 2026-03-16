@@ -51,6 +51,55 @@ pub struct LeoPendingProposal {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ProgResult — kết quả khi LeoAI tự lập trình
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Output từ LeoAI.program() — chain hoặc number.
+#[derive(Debug, Clone)]
+pub enum ProgOutput {
+    /// VM computed a number (from PushNum / __hyp_add / etc.)
+    Number(f64),
+    /// VM emitted a MolecularChain
+    Chain(olang::molecular::MolecularChain),
+}
+
+/// Kết quả khi LeoAI tự lập trình và chạy code.
+#[derive(Debug, Clone)]
+pub struct ProgResult {
+    /// Outputs từ VM (chains + numbers)
+    pub outputs: Vec<ProgOutput>,
+    /// Chain hashes đã học vào STM
+    pub learned_hashes: Vec<u64>,
+    /// Errors (parse, semantic, VM)
+    pub errors: Vec<alloc::string::String>,
+    /// VM steps executed
+    pub steps: u32,
+}
+
+impl ProgResult {
+    /// Có lỗi không?
+    pub fn has_error(&self) -> bool {
+        !self.errors.is_empty()
+    }
+    /// Có output không?
+    pub fn has_output(&self) -> bool {
+        !self.outputs.is_empty()
+    }
+}
+
+/// Raw VM result — for Runtime to process VmEvents directly.
+#[derive(Debug)]
+pub struct RawProgResult {
+    /// All VM events (Output, LookupAlias, CreateEdge, etc.)
+    pub events: Vec<olang::vm::VmEvent>,
+    /// Steps executed
+    pub steps: u32,
+    /// Parse/semantic error if any
+    pub error: Option<alloc::string::String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LeoAI
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -329,8 +378,25 @@ impl LeoAI {
                     };
                     self.ingest(report, ts);
                 }
+                MsgType::Program => {
+                    // AAM approved programming request — body contains Olang source
+                    if let Ok(source) = core::str::from_utf8(&frame.body) {
+                        let result = self.program(source, ts);
+                        // Send Ack back with step count
+                        let steps_lo = (result.steps & 0xFF) as u8;
+                        let out_count = (result.outputs.len() & 0xFF) as u8;
+                        let err_flag = if result.has_error() { 1u8 } else { 0u8 };
+                        let ack = ISLMessage::with_payload(
+                            self.addr,
+                            frame.header.from,
+                            if result.has_error() { MsgType::Nack } else { MsgType::Ack },
+                            [steps_lo, out_count, err_flag],
+                        );
+                        self.outbox.push(ISLFrame::bare(ack));
+                    }
+                }
                 _ => {
-                    // Unknown msg type — push to outbox for forwarding
+                    // Unknown msg type — ignore
                 }
             }
         }
@@ -515,6 +581,227 @@ impl LeoAI {
             s_mol.shape, s_mol.relation, s_mol.emotion.valence, s_mol.emotion.arousal, s_mol.time,
             dim_name,
         ))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Programming — LeoAI mở VM, lập trình, chạy, học từ kết quả
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// LeoAI tự lập trình: parse Olang source → compile → execute VM → học kết quả.
+    ///
+    /// Flow: AAM approve → LeoAI nhận task → build program → VM execute → feed results
+    /// back vào LearningLoop + trả kết quả lên caller.
+    ///
+    /// LeoAI "nghĩ" bằng Olang — VM là công cụ suy luận của nó.
+    pub fn program(&mut self, source: &str, ts: i64) -> ProgResult {
+        self.state = LeoState::Learning;
+        self.last_event_ts = ts;
+
+        // Step 1: Parse Olang source → AST
+        let stmts = match olang::syntax::parse(source) {
+            Ok(s) => s,
+            Err(e) => {
+                return ProgResult {
+                    outputs: Vec::new(),
+                    learned_hashes: Vec::new(),
+                    errors: alloc::vec![alloc::format!("Parse error: {}", e.message)],
+                    steps: 0,
+                };
+            }
+        };
+
+        // Step 2: Semantic validation
+        let sem_errors = olang::semantic::validate(&stmts);
+        if !sem_errors.is_empty() {
+            return ProgResult {
+                outputs: Vec::new(),
+                learned_hashes: Vec::new(),
+                errors: sem_errors
+                    .iter()
+                    .map(|e| alloc::format!("Semantic: {}", e.message))
+                    .collect(),
+                steps: 0,
+            };
+        }
+
+        // Step 3: Lower AST → IR → OlangProgram
+        let prog = olang::semantic::lower(&stmts);
+
+        // Step 4: Execute trong VM
+        let vm = olang::vm::OlangVM::new();
+        let vm_result = vm.execute(&prog);
+
+        // Step 5: Process kết quả — học từ outputs
+        let mut outputs = Vec::new();
+        let mut learned_hashes = Vec::new();
+        let mut errors = Vec::new();
+        let cur_emotion = self.learning.context().last_emotion();
+
+        for event in &vm_result.events {
+            match event {
+                olang::vm::VmEvent::Output(chain) => {
+                    if !chain.is_empty() {
+                        let hash = chain.chain_hash();
+                        // Feed output vào STM — LeoAI học từ kết quả chạy code
+                        self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
+                        learned_hashes.push(hash);
+
+                        // Build output description
+                        if let Some(num) = chain.to_number() {
+                            outputs.push(ProgOutput::Number(num));
+                        } else {
+                            outputs.push(ProgOutput::Chain(chain.clone()));
+                        }
+                    }
+                }
+                olang::vm::VmEvent::Error(e) => {
+                    errors.push(alloc::format!("VM: {:?}", e));
+                }
+                olang::vm::VmEvent::LookupAlias(_alias) => {
+                    // LeoAI cannot resolve aliases internally — only Runtime has Registry.
+                    // Unresolved aliases are normal for standalone LeoAI execution.
+                    // Use program_raw() if caller needs to handle alias resolution.
+                }
+                _ => {} // Other events passed through
+            }
+        }
+
+        // Co-activate all learned outputs together
+        if learned_hashes.len() >= 2 {
+            for i in 0..learned_hashes.len() - 1 {
+                self.learning.graph_mut().co_activate(
+                    learned_hashes[i],
+                    learned_hashes[i + 1],
+                    cur_emotion,
+                    0.8,
+                    ts,
+                );
+            }
+        }
+
+        self.state = LeoState::Listening;
+
+        ProgResult {
+            outputs,
+            learned_hashes,
+            errors,
+            steps: vm_result.steps,
+        }
+    }
+
+    /// LeoAI tự viết Olang code từ knowledge rồi chạy.
+    ///
+    /// Ví dụ: LeoAI thấy "lửa" và "nước" trong STM → tự viết `lửa ∘ nước`
+    /// → chạy VM → nhận LCA → học concept mới.
+    pub fn program_compose(&mut self, alias_a: &str, alias_b: &str, ts: i64) -> ProgResult {
+        let code = alloc::format!("emit {} ∘ {};", alias_a, alias_b);
+        self.program(&code, ts)
+    }
+
+    /// LeoAI tự verify một truth assertion.
+    ///
+    /// Ví dụ: `"lửa" == { S=1 R=6 V=200 A=180 T=4 }`
+    pub fn program_verify(&mut self, alias: &str, chain_hash: u64, ts: i64) -> ProgResult {
+        if let Some(code) = self.express_truth(alias, chain_hash) {
+            let full = alloc::format!("emit {};", code);
+            self.program(&full, ts)
+        } else {
+            ProgResult {
+                outputs: Vec::new(),
+                learned_hashes: Vec::new(),
+                errors: alloc::vec![alloc::format!("Unknown hash: 0x{:X}", chain_hash)],
+                steps: 0,
+            }
+        }
+    }
+
+    /// LeoAI chạy thí nghiệm: thử biến đổi chain rồi xem kết quả.
+    ///
+    /// Ví dụ: "nếu thay đổi valence của lửa thì sao?"
+    /// → viết `emit { S=1 R=6 V=48 A=180 T=4 };` → chạy → học
+    pub fn program_experiment(
+        &mut self,
+        chain_hash: u64,
+        dim: &str,
+        new_val: u8,
+        ts: i64,
+    ) -> ProgResult {
+        if let Some(obs) = self.learning.stm().find_by_hash(chain_hash) {
+            if let Some(mol) = obs.chain.first() {
+                let (s, r, v, a, t) = match dim {
+                    "S" | "shape" => (new_val, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time),
+                    "R" | "relation" => (mol.shape, new_val, mol.emotion.valence, mol.emotion.arousal, mol.time),
+                    "V" | "valence" => (mol.shape, mol.relation, new_val, mol.emotion.arousal, mol.time),
+                    "A" | "arousal" => (mol.shape, mol.relation, mol.emotion.valence, new_val, mol.time),
+                    "T" | "time" => (mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, new_val),
+                    _ => {
+                        return ProgResult {
+                            outputs: Vec::new(),
+                            learned_hashes: Vec::new(),
+                            errors: alloc::vec![alloc::format!("Unknown dimension: {}", dim)],
+                            steps: 0,
+                        };
+                    }
+                };
+                let code = alloc::format!("emit {{ S={} R={} V={} A={} T={} }};", s, r, v, a, t);
+                self.program(&code, ts)
+            } else {
+                ProgResult {
+                    outputs: Vec::new(),
+                    learned_hashes: Vec::new(),
+                    errors: alloc::vec![alloc::string::String::from("Empty chain")],
+                    steps: 0,
+                }
+            }
+        } else {
+            ProgResult {
+                outputs: Vec::new(),
+                learned_hashes: Vec::new(),
+                errors: alloc::vec![alloc::format!("Unknown hash: 0x{:X}", chain_hash)],
+                steps: 0,
+            }
+        }
+    }
+
+    /// Return all VmEvents for caller to process (LookupAlias, CreateEdge, etc.)
+    /// LeoAI runs program and returns raw events that Runtime needs to handle.
+    pub fn program_raw(&mut self, source: &str, ts: i64) -> RawProgResult {
+        self.state = LeoState::Learning;
+        self.last_event_ts = ts;
+
+        let stmts = match olang::syntax::parse(source) {
+            Ok(s) => s,
+            Err(e) => {
+                self.state = LeoState::Listening;
+                return RawProgResult {
+                    events: Vec::new(),
+                    steps: 0,
+                    error: Some(alloc::format!("Parse: {}", e.message)),
+                };
+            }
+        };
+
+        let sem_errors = olang::semantic::validate(&stmts);
+        if !sem_errors.is_empty() {
+            self.state = LeoState::Listening;
+            return RawProgResult {
+                events: Vec::new(),
+                steps: 0,
+                error: Some(sem_errors[0].message.clone()),
+            };
+        }
+
+        let prog = olang::semantic::lower(&stmts);
+        let vm = olang::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+
+        self.state = LeoState::Listening;
+
+        RawProgResult {
+            events: result.events,
+            steps: result.steps,
+            error: None,
+        }
     }
 
     fn make_proposal_frame(&self, p: &LeoPendingProposal) -> ISLFrame {
@@ -910,5 +1197,128 @@ mod tests {
             assert!(s.contains("←"), "Should contain arrow: {}", s);
             assert!(s.contains("Δ"), "Should contain delta marker: {}", s);
         }
+    }
+
+    // ── Programming — LeoAI mở VM, tự lập trình ───────────────────────────
+
+    #[test]
+    fn program_arithmetic() {
+        let mut l = leo();
+        let result = l.program("emit 1 + 2;", 1000);
+        assert!(!result.has_error(), "Errors: {:?}", result.errors);
+        assert!(result.has_output(), "Should produce output");
+        // Output should be numeric 3
+        assert!(
+            result.outputs.iter().any(|o| matches!(o, ProgOutput::Number(n) if (*n - 3.0).abs() < 0.01)),
+            "1 + 2 should = 3: {:?}", result.outputs
+        );
+    }
+
+    #[test]
+    fn program_mol_literal() {
+        let mut l = leo();
+        let result = l.program("emit { S=1 R=6 V=200 A=180 T=4 };", 1000);
+        assert!(!result.has_error(), "Errors: {:?}", result.errors);
+        assert!(result.has_output());
+        // Should learn the chain into STM
+        assert!(!result.learned_hashes.is_empty(), "Should learn output");
+    }
+
+    #[test]
+    fn program_parse_error() {
+        let mut l = leo();
+        // Use truly invalid syntax — unterminated block
+        let result = l.program("fn broken( { emit;", 1000);
+        assert!(result.has_error(), "Should detect parse error: {:?}", result);
+    }
+
+    #[test]
+    fn program_semantic_error() {
+        let mut l = leo();
+        let result = l.program("emit { S=999 };", 1000);
+        assert!(result.has_error(), "S=999 should fail semantic validation");
+    }
+
+    #[test]
+    fn program_compose() {
+        let mut l = leo();
+        // program_compose builds "emit a ∘ b;" and runs it
+        let result = l.program_compose("fire", "water", 1000);
+        // Should not have parse/semantic errors (aliases are fine)
+        assert!(!result.has_error(), "Errors: {:?}", result.errors);
+        assert!(result.steps > 0, "Should execute some steps");
+    }
+
+    #[test]
+    fn program_experiment_changes_dim() {
+        let mut l = leo();
+        // First ingest something to have in STM
+        l.ingest(report(-0.5, 1), 1000);
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+
+        // Experiment: change valence
+        let result = l.program_experiment(hash, "V", 48, 2000);
+        assert!(!result.has_error(), "Experiment should not error: {:?}", result.errors);
+        assert!(result.has_output(), "Should produce modified chain");
+    }
+
+    #[test]
+    fn program_experiment_unknown_dim() {
+        let mut l = leo();
+        l.ingest(report(-0.5, 1), 1000);
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+        let result = l.program_experiment(hash, "X", 48, 2000);
+        assert!(result.has_error(), "Unknown dim should error");
+    }
+
+    #[test]
+    fn program_experiment_missing_hash() {
+        let mut l = leo();
+        let result = l.program_experiment(0xDEAD, "V", 48, 1000);
+        assert!(result.has_error(), "Missing hash should error");
+    }
+
+    #[test]
+    fn program_raw_returns_events() {
+        let mut l = leo();
+        let result = l.program_raw("emit 42;", 1000);
+        assert!(result.error.is_none(), "Should not error");
+        assert!(result.steps > 0);
+        assert!(
+            result.events.iter().any(|e| matches!(e, olang::vm::VmEvent::Output(_))),
+            "Should have Output event"
+        );
+    }
+
+    #[test]
+    fn program_via_isl_inbox() {
+        let mut l = leo();
+        // Simulate AAM sending Program message via ISL
+        let msg = ISLMessage::with_payload(
+            aam_addr(),
+            leo_addr(),
+            MsgType::Program,
+            [0, 0, 0],
+        );
+        let source = b"emit 1 + 2;".to_vec();
+        let frame = ISLFrame::with_body(msg, source);
+        l.receive_isl(frame);
+        let processed = l.poll_inbox(1000);
+        assert_eq!(processed, 1, "Should process 1 message");
+
+        // Should have Ack in outbox
+        let outbox = l.flush_outbox();
+        assert!(!outbox.is_empty(), "Should send Ack back");
+        assert_eq!(outbox[0].header.msg_type, MsgType::Ack, "Should be Ack (not Nack)");
+    }
+
+    #[test]
+    fn program_learns_into_stm() {
+        let mut l = leo();
+        let stm_before = l.stm_len();
+        let result = l.program("emit { S=2 R=3 V=100 A=50 T=1 };", 1000);
+        assert!(!result.has_error());
+        // STM should grow — LeoAI learned from its own code output
+        assert!(l.stm_len() > stm_before, "STM should grow after programming");
     }
 }

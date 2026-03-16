@@ -29,6 +29,7 @@ use olang::self_model::SelfModel;
 use olang::separator::parse_to_chains;
 use olang::startup::{boot, chain_to_emoji, resolve_with_cp};
 use olang::vm::{OlangVM, VmEvent};
+use agents::leo::{LeoAI, ProgOutput};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // System Clock — đọc giờ hệ thống thực
@@ -123,6 +124,8 @@ pub struct HomeRuntime {
     dream_l3_created: u64,
     /// NodeBody store — chain_hash → SDF + Spline bindings
     body_store: BodyStore,
+    /// LeoAI — não: nhận task, tự lập trình VM, học từ kết quả
+    leo: LeoAI,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -175,6 +178,10 @@ impl HomeRuntime {
             dream_approved_total: 0,
             dream_l3_created: 0,
             body_store: BodyStore::new(),
+            leo: LeoAI::new(
+                isl::address::ISLAddress::new(1, 0, 0, 1), // tier 1, LeoAI
+                isl::address::ISLAddress::new(0, 0, 0, 0), // tier 0, AAM
+            ),
         }
     }
 
@@ -591,12 +598,77 @@ impl HomeRuntime {
                      ○{const compare}      — compare precision tiers\n\
                      ○{fib 10}             — Fibonacci(10)\n\
                      ○{fib ratio 20}       — F(21)/F(20) → φ\n\
+                     ○{leo emit fire ∘ water;}  — LeoAI lập trình VM\n\
+                     ○{program emit { S=1 R=6 T=4 };} — LeoAI chạy Olang\n\
+                     ○{run let x = 1 + 2; emit x;} — LeoAI chạy + học\n\
                      ○{help}               — this message",
                 ),
                 tone: ResponseTone::Engaged,
                 fx: 0.0,
                 kind: ResponseKind::System,
             },
+
+            _ if cmd.starts_with("leo ") || cmd.starts_with("program ") || cmd.starts_with("run ") => {
+                // ── LeoAI programming — AAM approves → LeoAI mở VM ─────────
+                // ○{leo emit fire ∘ water;}
+                // ○{program emit { S=1 R=6 T=4 };}
+                // ○{run let x = fire; emit x ∘ water;}
+                let prefix_len = cmd.find(' ').unwrap_or(0) + 1;
+                let source = &cmd[prefix_len..];
+
+                // AAM gate: approve nếu không Crisis
+                let intent = estimate_intent(source, 0.0, 0.0);
+                if intent.primary == IntentKind::Crisis {
+                    return Response {
+                        text: String::from("⚠ LeoAI: SecurityGate blocked — Crisis detected."),
+                        tone: ResponseTone::Gentle,
+                        fx: self.learning.context().fx(),
+                        kind: ResponseKind::Blocked,
+                    };
+                }
+
+                // LeoAI lập trình + chạy VM + học kết quả
+                let prog_result = self.leo.program(source, ts);
+
+                // Format output
+                let mut text = String::from("LeoAI ○ programmed:\n");
+                if prog_result.has_error() {
+                    for err in &prog_result.errors {
+                        text.push_str(&format!("  ✗ {}\n", err));
+                    }
+                } else {
+                    for (i, out) in prog_result.outputs.iter().enumerate() {
+                        match out {
+                            ProgOutput::Number(n) => {
+                                if (*n - libm::round(*n)).abs() < 1e-10 && n.abs() < 1e15 {
+                                    text.push_str(&format!("  [{}] = {}\n", i, libm::round(*n) as i64));
+                                } else {
+                                    text.push_str(&format!("  [{}] = {:.6}\n", i, n));
+                                }
+                            }
+                            ProgOutput::Chain(chain) => {
+                                let emoji = chain_to_emoji(chain);
+                                let info = chain_info(chain, None);
+                                text.push_str(&format!("  [{}] ∘→{} {}\n", i, emoji, info));
+                            }
+                        }
+                    }
+                    if !prog_result.learned_hashes.is_empty() {
+                        text.push_str(&format!(
+                            "  Learned: {} chains, {} VM steps\n",
+                            prog_result.learned_hashes.len(),
+                            prog_result.steps
+                        ));
+                    }
+                }
+
+                Response {
+                    text,
+                    tone: ResponseTone::Engaged,
+                    fx: self.learning.context().fx(),
+                    kind: ResponseKind::OlangResult,
+                }
+            }
 
             _ => {
                 // Math commands (solve, derive, integrate, simplify, eval)
@@ -1835,6 +1907,16 @@ impl HomeRuntime {
     /// Dream-approved proposals total.
     pub fn dream_approved(&self) -> u64 {
         self.dream_approved_total
+    }
+
+    /// LeoAI reference — for reading state.
+    pub fn leo(&self) -> &LeoAI {
+        &self.leo
+    }
+
+    /// LeoAI mutable — for direct programming.
+    pub fn leo_mut(&mut self) -> &mut LeoAI {
+        &mut self.leo
     }
 
     /// L3 concepts created from Dream.
@@ -4273,5 +4355,65 @@ mod evolution_integration_tests {
         // No panic → pipeline handles evolution correctly
         assert!(rt.body_count() > 0, "Bodies created from varied text");
         assert!(rt.silk_edge_count() > 0, "Silk edges from co-activation + evolution");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LeoAI Programming — ○{leo ...} / ○{program ...} / ○{run ...}
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod leo_programming_tests {
+    use super::*;
+
+    #[test]
+    fn leo_command_arithmetic() {
+        let mut rt = HomeRuntime::new(0xF001);
+        let resp = rt.process_text("○{leo emit 1 + 2;}", 1000);
+        assert_eq!(resp.kind, ResponseKind::OlangResult);
+        assert!(resp.text.contains("LeoAI"), "Should mention LeoAI: {}", resp.text);
+        assert!(resp.text.contains("3"), "Should compute 3: {}", resp.text);
+    }
+
+    #[test]
+    fn program_command_mol_literal() {
+        let mut rt = HomeRuntime::new(0xF002);
+        let resp = rt.process_text("○{program emit { S=1 R=6 V=200 A=180 T=4 };}", 1000);
+        assert_eq!(resp.kind, ResponseKind::OlangResult);
+        assert!(resp.text.contains("LeoAI"), "Should mention LeoAI");
+        assert!(resp.text.contains("Learned"), "Should learn: {}", resp.text);
+    }
+
+    #[test]
+    fn run_command_works() {
+        let mut rt = HomeRuntime::new(0xF003);
+        let resp = rt.process_text("○{run emit 10 + 20;}", 1000);
+        assert_eq!(resp.kind, ResponseKind::OlangResult);
+        assert!(resp.text.contains("30"), "10+20=30: {}", resp.text);
+    }
+
+    #[test]
+    fn leo_command_error_handling() {
+        let mut rt = HomeRuntime::new(0xF004);
+        let resp = rt.process_text("○{leo emit { S=999 };}", 1000);
+        // Should report the error
+        assert!(resp.text.contains("✗"), "Should show error: {}", resp.text);
+    }
+
+    #[test]
+    fn leo_direct_api() {
+        let mut rt = HomeRuntime::new(0xF005);
+        // Use LeoAI directly via accessor
+        let result = rt.leo_mut().program("emit 5 + 3;", 1000);
+        assert!(!result.has_error());
+        assert!(result.outputs.iter().any(|o| matches!(o, ProgOutput::Number(n) if (*n - 8.0).abs() < 0.01)));
+    }
+
+    #[test]
+    fn leo_stm_grows_after_programming() {
+        let mut rt = HomeRuntime::new(0xF006);
+        let stm_before = rt.leo().learning.stm().len();
+        rt.leo_mut().program("emit { S=2 R=3 V=100 A=50 T=1 };", 1000);
+        assert!(rt.leo().learning.stm().len() > stm_before, "LeoAI STM should grow");
     }
 }

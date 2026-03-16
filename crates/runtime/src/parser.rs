@@ -361,6 +361,12 @@ fn is_command(s: &str) -> bool {
             | "help"
     ) || is_math_command(s)
         || is_constant_command(s)
+        || is_leo_command(s)
+}
+
+/// Check if input is a LeoAI programming command.
+fn is_leo_command(s: &str) -> bool {
+    s.starts_with("leo ") || s.starts_with("program ") || s.starts_with("run ")
 }
 
 /// Check if input is a math command (prefix-based).

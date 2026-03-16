@@ -36,6 +36,7 @@ pub enum MsgType {
     ChainPayload = 0x0B, // kèm MolecularChain
     Ack = 0x0C,          // acknowledge
     Nack = 0x0D,         // negative acknowledge
+    Program = 0x0E,      // yêu cầu LeoAI lập trình + chạy VM
 }
 
 impl MsgType {
@@ -54,6 +55,7 @@ impl MsgType {
             0x0B => Some(Self::ChainPayload),
             0x0C => Some(Self::Ack),
             0x0D => Some(Self::Nack),
+            0x0E => Some(Self::Program),
             _ => None,
         }
     }
@@ -65,7 +67,7 @@ impl MsgType {
 
     /// Message này cần ACK.
     pub fn needs_ack(self) -> bool {
-        matches!(self, Self::ActuatorCmd | Self::Propose | Self::Approved)
+        matches!(self, Self::ActuatorCmd | Self::Propose | Self::Approved | Self::Program)
     }
 }
 
