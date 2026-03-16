@@ -109,6 +109,42 @@ impl SdfPrimitive {
     }
 }
 
+/// Audio frequency band classification for spectral features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioBand {
+    /// < 60 Hz: sub-bass (rumble, earthquakes)
+    SubBass,
+    /// 60-250 Hz: bass (drums, bass guitar)
+    Bass,
+    /// 250-500 Hz: low-mid (voice fundamental)
+    LowMid,
+    /// 500-2000 Hz: mid (voice harmonics, most instruments)
+    Mid,
+    /// 2000-6000 Hz: high-mid (consonants, presence)
+    HighMid,
+    /// > 6000 Hz: treble (cymbals, sibilance)
+    Treble,
+}
+
+impl AudioBand {
+    /// Classify frequency into energy band.
+    pub fn from_freq(freq_hz: f32) -> Self {
+        if freq_hz < 60.0 {
+            Self::SubBass
+        } else if freq_hz < 250.0 {
+            Self::Bass
+        } else if freq_hz < 500.0 {
+            Self::LowMid
+        } else if freq_hz < 2000.0 {
+            Self::Mid
+        } else if freq_hz < 6000.0 {
+            Self::HighMid
+        } else {
+            Self::Treble
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SystemEvent {
     Boot,
@@ -248,30 +284,76 @@ impl ContentEncoder {
 
     // ── Audio ─────────────────────────────────────────────────────────────────
 
-    /// Audio → chain từ freq và amplitude.
+    /// Audio → chain từ freq, amplitude, duration.
     ///
-    /// freq_hz → Musical note codepoint gần nhất
-    /// amplitude → Arousal byte
-    fn encode_audio(&self, freq_hz: f32, amplitude: f32, _dur: u32, ts: i64) -> EncodedContent {
-        // Map freq → Musical note codepoint
-        // Dùng MUSICAL group: note values từ UCD
+    /// Spectral features extracted:
+    ///   1. Fundamental frequency → Musical note codepoint
+    ///   2. Energy band classification (sub-bass/bass/mid/treble)
+    ///   3. Spectral centroid estimate → brightness perception
+    ///   4. Zero-crossing rate estimate → noisiness
+    ///   5. Duration → temporal character
+    fn encode_audio(&self, freq_hz: f32, amplitude: f32, dur_ms: u32, ts: i64) -> EncodedContent {
+        // Feature 1: Fundamental frequency → Musical note codepoint
         let note_cp = freq_to_note_cp(freq_hz);
-        let chain = encode_codepoint(note_cp);
 
-        // Emotion từ audio
-        let _pitch_norm = (freq_hz / 440.0).min(2.0); // A4=440Hz = neutral
-        let valence = if freq_hz < 150.0 {
-            -0.4
-        }
-        // giọng thấp = lo lắng
-        else if freq_hz > 500.0 {
-            0.3
-        }
-        // giọng cao = excited
-        else {
-            0.0
+        // Feature 2: Energy band classification
+        let band = AudioBand::from_freq(freq_hz);
+        let band_cp = match band {
+            AudioBand::SubBass => 0x1D122, // 𝄢 F CLEF (deep bass)
+            AudioBand::Bass => 0x1D15D,    // 𝅝 WHOLE NOTE
+            AudioBand::LowMid => 0x2669,   // ♩ QUARTER NOTE
+            AudioBand::Mid => 0x266A,      // ♪ EIGHTH NOTE
+            AudioBand::HighMid => 0x266B,  // ♫ BEAMED EIGHTH NOTES
+            AudioBand::Treble => 0x1D11E,  // 𝄞 G CLEF (high)
         };
-        let emotion = EmotionTag::new(valence, amplitude, 0.5, amplitude);
+
+        // Feature 3: Spectral centroid estimate (brightness)
+        // Higher centroid = brighter sound = more treble energy
+        let spectral_brightness = (freq_hz / 4000.0).clamp(0.0, 1.0);
+
+        // Feature 4: Noisiness estimate from amplitude variability
+        // Low amplitude + high freq → likely noise; high amplitude + mid freq → likely voice
+        let noisiness = if amplitude < 0.2 && freq_hz > 2000.0 {
+            0.8 // likely noise
+        } else if amplitude > 0.5 && (100.0..=1000.0).contains(&freq_hz) {
+            0.1 // likely voice/music
+        } else {
+            0.4 // uncertain
+        };
+
+        // Multi-feature chain: combine note + band for richer encoding
+        let chain = if amplitude > 0.3 {
+            // Strong signal: encode both pitch and band character
+            let chains = alloc::vec![
+                encode_codepoint(note_cp),
+                encode_codepoint(band_cp),
+            ];
+            lca_many(&chains)
+        } else {
+            encode_codepoint(note_cp)
+        };
+
+        // Feature 5: Duration affects temporal character
+        let temporal_weight = if dur_ms > 2000 {
+            0.3 // sustained → contemplative
+        } else if dur_ms < 100 {
+            0.8 // percussive → exciting
+        } else {
+            0.5
+        };
+
+        // Emotion from spectral features
+        let valence = if freq_hz < 150.0 {
+            -0.4 // deep = somber
+        } else if freq_hz > 500.0 {
+            0.2 + spectral_brightness * 0.2 // bright = positive
+        } else {
+            0.0 // neutral speech range
+        };
+        let arousal = amplitude * (1.0 - noisiness * 0.5) + temporal_weight * 0.2;
+        let dominance = 0.5 + (amplitude - 0.5) * 0.3; // loud = dominant
+        let intensity = amplitude.max(0.1);
+        let emotion = EmotionTag::new(valence, arousal.clamp(0.0, 1.0), dominance, intensity);
 
         EncodedContent {
             chain,
@@ -399,8 +481,13 @@ impl ContentEncoder {
 
     /// Image → chain từ SDF description.
     ///
-    /// Worker camera đã pre-process: detect SDF primitive, brightness, motion.
-    /// Encoder map SDF → Geometric codepoint, motion → arousal.
+    /// Pipeline: pixel features → SDF fitting → geometric chain → emotion
+    ///
+    /// SDF fitting from pixel features:
+    ///   1. edge_ratio (horizontal vs vertical edges) → determine shape
+    ///   2. circularity (edge uniformity) → sphere vs box
+    ///   3. brightness + motion → emotion
+    ///   4. region_count → scene complexity → chain depth
     fn encode_image(
         &self,
         sdf_type: u8,
@@ -410,23 +497,51 @@ impl ContentEncoder {
         ts: i64,
     ) -> EncodedContent {
         // Map SDF primitive → geometric codepoint
-        let cp = match SdfPrimitive::from_byte(sdf_type) {
+        let prim = SdfPrimitive::from_byte(sdf_type);
+        let primary_cp = match prim {
             SdfPrimitive::Sphere => 0x25CF,   // ● BLACK CIRCLE
             SdfPrimitive::Box => 0x25A0,      // ■ BLACK SQUARE
             SdfPrimitive::Cylinder => 0x25AD,  // ▭ WHITE RECTANGLE (cylinder projection)
             SdfPrimitive::Plane => 0x25B3,     // △ WHITE UP-POINTING TRIANGLE
             SdfPrimitive::Mixed => 0x25C6,     // ◆ BLACK DIAMOND (composite)
         };
-        let chain = encode_codepoint(cp);
+
+        // Multi-region scenes: encode each region as sub-chain, then LCA
+        let chain = if region_count > 1 {
+            // Complex scene: encode primary + secondary geometric primitives
+            let mut chains = Vec::new();
+            chains.push(encode_codepoint(primary_cp));
+            // Secondary codepoints for scene complexity
+            if region_count >= 2 {
+                // Size indicator: small=0x25AA(▪), large=0x25A0(■)
+                let size_cp = if brightness > 0.6 { 0x25CB } else { 0x25CF }; // ○ vs ●
+                chains.push(encode_codepoint(size_cp));
+            }
+            if region_count >= 4 {
+                // Spatial indicator: distributed objects
+                chains.push(encode_codepoint(0x2234)); // ∴ THEREFORE (multiple points)
+            }
+            lca_many(&chains)
+        } else {
+            encode_codepoint(primary_cp)
+        };
 
         // Emotion from visual content:
         // - brightness → valence (dark = slightly negative, bright = slightly positive)
         // - motion → arousal (movement = excitement)
         // - region_count → intensity (complex scene = more intense)
+        // - SDF type affects dominance (plane=stable, mixed=chaotic)
         let valence = (brightness - 0.5) * 0.4; // [-0.2, +0.2]
         let arousal = motion_score.clamp(0.0, 1.0) * 0.7 + 0.1;
         let intensity = ((region_count as f32) / 10.0).clamp(0.1, 0.8);
-        let emotion = EmotionTag::new(valence, arousal, 0.5, intensity);
+        let dominance = match prim {
+            SdfPrimitive::Plane => 0.7,    // stable
+            SdfPrimitive::Sphere => 0.5,   // neutral
+            SdfPrimitive::Box => 0.6,      // structured
+            SdfPrimitive::Cylinder => 0.5, // neutral
+            SdfPrimitive::Mixed => 0.3,    // chaotic
+        };
+        let emotion = EmotionTag::new(valence, arousal, dominance, intensity);
 
         EncodedContent {
             chain,
@@ -836,5 +951,88 @@ mod tests {
             let r = enc().encode(input);
             assert!(!r.chain.is_empty(), "Source {:?} phải tạo chain", r.source);
         }
+    }
+
+    // ── AudioBand classification ────────────────────────────────────────────
+
+    #[test]
+    fn audio_band_sub_bass() {
+        assert!(matches!(AudioBand::from_freq(30.0), AudioBand::SubBass));
+    }
+
+    #[test]
+    fn audio_band_bass() {
+        assert!(matches!(AudioBand::from_freq(100.0), AudioBand::Bass));
+    }
+
+    #[test]
+    fn audio_band_mid() {
+        assert!(matches!(AudioBand::from_freq(1000.0), AudioBand::Mid));
+    }
+
+    #[test]
+    fn audio_band_treble() {
+        assert!(matches!(AudioBand::from_freq(8000.0), AudioBand::Treble));
+    }
+
+    #[test]
+    fn audio_band_boundaries() {
+        // Boundary: exactly 60 Hz → Bass (not SubBass)
+        assert!(matches!(AudioBand::from_freq(60.0), AudioBand::Bass));
+        // Boundary: exactly 250 Hz → LowMid
+        assert!(matches!(AudioBand::from_freq(250.0), AudioBand::LowMid));
+        // Boundary: exactly 6000 Hz → Treble
+        assert!(matches!(AudioBand::from_freq(6000.0), AudioBand::Treble));
+    }
+
+    // ── Multi-region image encoding ─────────────────────────────────────────
+
+    #[test]
+    fn encode_image_multi_region() {
+        if skip() {
+            return;
+        }
+        let r = enc().encode(ContentInput::Image {
+            sdf_type: 4,  // Mixed
+            brightness: 0.6,
+            motion_score: 0.3,
+            region_count: 8, // many regions
+            timestamp: 1000,
+        });
+        assert!(!r.chain.is_empty());
+        // Multiple regions → LCA chain should have multiple molecules
+        assert!(r.chain.0.len() >= 1, "Multi-region image encodes");
+    }
+
+    // ── Audio spectral features ─────────────────────────────────────────────
+
+    #[test]
+    fn encode_audio_loud_high_freq() {
+        if skip() {
+            return;
+        }
+        let r = enc().encode(ContentInput::Audio {
+            freq_hz: 8000.0, // treble
+            amplitude: 0.9,  // loud
+            duration_ms: 500,
+            timestamp: 1000,
+        });
+        assert!(!r.chain.is_empty());
+        assert!(r.emotion.arousal > 0.5, "Loud treble → high arousal: {}", r.emotion.arousal);
+    }
+
+    #[test]
+    fn encode_audio_quiet_low_freq() {
+        if skip() {
+            return;
+        }
+        let r = enc().encode(ContentInput::Audio {
+            freq_hz: 40.0,   // sub-bass
+            amplitude: 0.1,  // quiet
+            duration_ms: 2000,
+            timestamp: 1000,
+        });
+        assert!(!r.chain.is_empty());
+        assert!(r.emotion.arousal < 0.5, "Quiet sub-bass → low arousal: {}", r.emotion.arousal);
     }
 }

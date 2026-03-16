@@ -74,6 +74,7 @@ pub enum VmError {
     InfiniteLoop,
     InvalidJump(usize),
     MaxStepsExceeded,
+    MaxCallDepthExceeded,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +180,8 @@ fn classify_chain(chain: &MolecularChain) -> String {
 pub struct OlangVM {
     /// Max steps để tránh infinite loop (QT2: ∞-1)
     max_steps: u32,
+    /// Max call depth để tránh stack overflow từ recursion
+    max_call_depth: u32,
 }
 
 #[allow(missing_docs)]
@@ -186,11 +189,15 @@ impl OlangVM {
     pub fn new() -> Self {
         Self {
             max_steps: STEPS_MAX,
+            max_call_depth: 256, // Fib-derived: prevent stack overflow
         }
     }
 
     pub fn with_max_steps(n: u32) -> Self {
-        Self { max_steps: n }
+        Self {
+            max_steps: n,
+            max_call_depth: 256,
+        }
     }
 
     /// Execute program → Vec<VmEvent>.
@@ -208,6 +215,7 @@ impl OlangVM {
         let mut events = Vec::new();
         let mut steps = 0u32;
         let mut pc = 0usize;
+        let mut call_depth = 0u32;
 
         while pc < prog.ops.len() {
             if steps >= self.max_steps {
@@ -504,6 +512,11 @@ impl OlangVM {
                 }
 
                 Op::ScopeBegin => {
+                    call_depth += 1;
+                    if call_depth > self.max_call_depth {
+                        events.push(VmEvent::Error(VmError::MaxCallDepthExceeded));
+                        break;
+                    }
                     scopes.push(Vec::new());
                 }
 
@@ -512,6 +525,9 @@ impl OlangVM {
                     // Never pop root scope
                     if scopes.len() > 1 {
                         scopes.pop();
+                        if call_depth > 0 {
+                            call_depth -= 1;
+                        }
                     }
                 }
 
@@ -1371,5 +1387,61 @@ mod tests {
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
         assert!(result.outputs()[0].is_empty(), "Undefined var → empty");
+    }
+
+    // ── Recursion depth limit ───────────────────────────────────────────────
+
+    #[test]
+    fn call_depth_exceeded_triggers_error() {
+        // Build program with deeply nested ScopeBegin without ScopeEnd
+        let mut prog = OlangProgram::new("test");
+        for _ in 0..260 {
+            prog.push_op(Op::ScopeBegin);
+        }
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(result.has_error(), "Should error on depth > 256");
+        let has_depth_err = result.events.iter().any(|e| {
+            matches!(e, VmEvent::Error(VmError::MaxCallDepthExceeded))
+        });
+        assert!(has_depth_err, "Should have MaxCallDepthExceeded error");
+    }
+
+    #[test]
+    fn call_depth_within_limit_ok() {
+        // 10 nested scopes should be fine
+        let mut prog = OlangProgram::new("test");
+        for _ in 0..10 {
+            prog.push_op(Op::ScopeBegin);
+        }
+        prog.push_op(Op::PushNum(42.0));
+        prog.push_op(Op::Emit);
+        for _ in 0..10 {
+            prog.push_op(Op::ScopeEnd);
+        }
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "10 nested scopes should work");
+        assert_eq!(result.outputs().len(), 1);
+    }
+
+    #[test]
+    fn call_depth_decrements_on_scope_end() {
+        // Open 5 scopes, close 5, open 5 more → should be within limit
+        let mut prog = OlangProgram::new("test");
+        for _ in 0..5 {
+            prog.push_op(Op::ScopeBegin);
+        }
+        for _ in 0..5 {
+            prog.push_op(Op::ScopeEnd);
+        }
+        for _ in 0..5 {
+            prog.push_op(Op::ScopeBegin);
+        }
+        prog.push_op(Op::PushNum(99.0));
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "Depth should reset after ScopeEnd");
     }
 }

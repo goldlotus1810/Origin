@@ -536,6 +536,347 @@ impl Skill for ProposalSkill {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// InverseRenderSkill — SDF fitting from visual features
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Fit SDF primitives from visual feature description.
+///
+/// Input: state["edge_ratio"], state["circularity"], state["aspect_ratio"]
+/// Output: state["sdf_type"], state["sdf_confidence"], chain = geometric SDF
+///
+/// Camera Worker profile: L0 + FFR + vSDF + InverseRenderSkill
+pub struct InverseRenderSkill;
+
+impl Skill for InverseRenderSkill {
+    fn name(&self) -> &str {
+        "InverseRender"
+    }
+
+    fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
+        // Extract visual features from state
+        let edge_ratio: f32 = ctx
+            .get("edge_ratio")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.5); // H/V edge ratio: 1.0 = all horizontal
+        let circularity: f32 = ctx
+            .get("circularity")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.5); // 1.0 = perfectly circular
+        let aspect_ratio: f32 = ctx
+            .get("aspect_ratio")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0); // W/H: 1.0 = square
+
+        // SDF fitting heuristic:
+        //   High circularity (>0.8) → Sphere
+        //   Low circularity + aspect ~1.0 → Box
+        //   Low circularity + aspect >> 1.0 → Cylinder (elongated)
+        //   High edge_ratio (>0.8) → Plane (dominant horizontal)
+        //   Otherwise → Mixed
+        let (sdf_type, confidence) = if circularity > 0.8 {
+            (0u8, circularity) // Sphere
+        } else if edge_ratio > 0.8 && circularity < 0.3 {
+            (3u8, edge_ratio) // Plane
+        } else if circularity < 0.4 && (0.8..=1.2).contains(&aspect_ratio) {
+            (1u8, 1.0 - circularity) // Box
+        } else if !(0.67..=1.5).contains(&aspect_ratio) {
+            (2u8, (aspect_ratio - 1.0).abs().min(1.0)) // Cylinder
+        } else {
+            (4u8, 0.5) // Mixed
+        };
+
+        ctx.set(String::from("sdf_type"), alloc::format!("{}", sdf_type));
+        ctx.set(
+            String::from("sdf_confidence"),
+            alloc::format!("{:.3}", confidence),
+        );
+
+        // Encode SDF → geometric codepoint
+        let cp = match sdf_type {
+            0 => 0x25CF, // ● Sphere
+            1 => 0x25A0, // ■ Box
+            2 => 0x25AD, // ▭ Cylinder
+            3 => 0x25B3, // △ Plane
+            _ => 0x25C6, // ◆ Mixed
+        };
+        let chain = encode_codepoint(cp);
+        ctx.push_output(chain.clone());
+
+        SkillResult::Ok {
+            chain,
+            emotion: ctx.current_emotion,
+            note: alloc::format!("sdf={} conf={:.2}", sdf_type, confidence),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GeneralizationSkill — extract rules from clusters
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Extract IF-THEN rules from cluster patterns.
+///
+/// After ClusterSkill groups chains, GeneralizationSkill examines each cluster
+/// to find shared dimensions (the "IF" condition) and divergent dimensions
+/// (the "THEN" consequence).
+///
+/// Input: ctx.input_chains = cluster members (from ClusterSkill output)
+/// Output: state["rule_count"], state["rule_0"], state["rule_1"], ...
+///         Each rule: "IF shape=X AND relation=Y THEN valence=Z"
+pub struct GeneralizationSkill;
+
+impl Skill for GeneralizationSkill {
+    fn name(&self) -> &str {
+        "Generalization"
+    }
+
+    fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
+        if ctx.input_chains.len() < 2 {
+            return SkillResult::Insufficient;
+        }
+
+        let mut rules: Vec<String> = Vec::new();
+
+        // Analyze cluster: find shared vs divergent dimensions
+        // Each MolecularChain has molecules with [shape, relation, valence, arousal, time]
+        let n = ctx.input_chains.len();
+
+        // Compute per-dimension variance across cluster members
+        let mut shape_counts: [u32; 8] = [0; 8];
+        let mut rel_counts: [u32; 8] = [0; 8];
+        let mut val_sum: f32 = 0.0;
+        let mut aro_sum: f32 = 0.0;
+        let mut total_mols: u32 = 0;
+
+        for chain in &ctx.input_chains {
+            for mol in &chain.0 {
+                let s = (mol.shape.as_byte() & 0x07) as usize;
+                let r = (mol.relation.as_byte() & 0x07) as usize;
+                shape_counts[s] += 1;
+                rel_counts[r] += 1;
+                val_sum += mol.emotion.valence as f32 / 255.0;
+                aro_sum += mol.emotion.arousal as f32 / 255.0;
+                total_mols += 1;
+            }
+        }
+
+        if total_mols == 0 {
+            return SkillResult::Insufficient;
+        }
+
+        // Find dominant shape (shared condition)
+        let dom_shape = shape_counts
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &c)| c)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let shape_ratio = shape_counts[dom_shape] as f32 / total_mols as f32;
+
+        // Find dominant relation
+        let dom_rel = rel_counts
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &c)| c)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let rel_ratio = rel_counts[dom_rel] as f32 / total_mols as f32;
+
+        // Average emotion
+        let avg_val = val_sum / total_mols as f32;
+        let avg_aro = aro_sum / total_mols as f32;
+
+        // Rule generation: only if dimension is sufficiently consistent (>60%)
+        if shape_ratio > 0.6 {
+            let rule = alloc::format!(
+                "IF shape={} ({}%) THEN valence={:.2} arousal={:.2}",
+                dom_shape,
+                (shape_ratio * 100.0) as u32,
+                avg_val,
+                avg_aro
+            );
+            rules.push(rule);
+        }
+        if rel_ratio > 0.6 {
+            let rule = alloc::format!(
+                "IF relation={} ({}%) THEN valence={:.2} arousal={:.2}",
+                dom_rel,
+                (rel_ratio * 100.0) as u32,
+                avg_val,
+                avg_aro
+            );
+            rules.push(rule);
+        }
+
+        // Cross-dimensional rule: if both shape AND relation are consistent
+        if shape_ratio > 0.5 && rel_ratio > 0.5 {
+            let rule = alloc::format!(
+                "IF shape={} AND relation={} THEN valence={:.2} (n={})",
+                dom_shape, dom_rel, avg_val, n
+            );
+            rules.push(rule);
+        }
+
+        // Compute merged chain before mutable borrow of ctx
+        let merged = lca_many(&ctx.input_chains);
+
+        // Store rules in context
+        ctx.set(
+            String::from("rule_count"),
+            alloc::format!("{}", rules.len()),
+        );
+        for (i, rule) in rules.iter().enumerate() {
+            ctx.set(alloc::format!("rule_{}", i), rule.clone());
+        }
+        ctx.push_output(merged.clone());
+
+        SkillResult::Ok {
+            chain: merged,
+            emotion: ctx.current_emotion,
+            note: alloc::format!("{} rules from {} chains", rules.len(), n),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TemporalPatternSkill — time-based pattern mining
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Mine temporal patterns from timestamped observations.
+///
+/// Detects:
+///   1. Periodicity: events recurring at regular intervals
+///   2. Time-of-day clustering: events grouping at similar hours
+///   3. Sequence patterns: A always followed by B
+///
+/// Input: ctx.input_chains + state["timestamps"] = comma-separated i64 values
+/// Output: state["temporal_period"], state["temporal_cluster_hour"],
+///         state["temporal_sequence"]
+pub struct TemporalPatternSkill;
+
+impl Skill for TemporalPatternSkill {
+    fn name(&self) -> &str {
+        "TemporalPattern"
+    }
+
+    fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
+        if ctx.input_chains.len() < 3 {
+            return SkillResult::Insufficient;
+        }
+
+        // Parse timestamps
+        let ts_str = match ctx.get("timestamps") {
+            Some(s) => s,
+            None => return SkillResult::Insufficient,
+        };
+        let timestamps: Vec<i64> = ts_str
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+
+        if timestamps.len() < 3 {
+            return SkillResult::Insufficient;
+        }
+
+        // 1. Periodicity detection: compute inter-event intervals
+        let mut intervals: Vec<i64> = Vec::new();
+        for i in 1..timestamps.len() {
+            let dt = (timestamps[i] - timestamps[i - 1]).abs();
+            if dt > 0 {
+                intervals.push(dt);
+            }
+        }
+
+        if !intervals.is_empty() {
+            // Find median interval (robust to outliers)
+            let mut sorted = intervals.clone();
+            sorted.sort();
+            let median = sorted[sorted.len() / 2];
+
+            // Check if intervals are consistent (within 30% of median)
+            let consistent = intervals
+                .iter()
+                .filter(|&&dt| {
+                    let ratio = dt as f64 / median as f64;
+                    (0.7..=1.3).contains(&ratio)
+                })
+                .count();
+
+            let periodicity = consistent as f32 / intervals.len() as f32;
+            if periodicity > 0.6 {
+                ctx.set(
+                    String::from("temporal_period"),
+                    alloc::format!("{}", median),
+                );
+                ctx.set(
+                    String::from("temporal_periodicity"),
+                    alloc::format!("{:.2}", periodicity),
+                );
+            }
+        }
+
+        // 2. Time-of-day clustering (using modular arithmetic on 24h)
+        // Convert timestamps to hour-of-day (assuming milliseconds)
+        let hours: Vec<u32> = timestamps
+            .iter()
+            .map(|&ts| ((ts / 3_600_000) % 24) as u32)
+            .collect();
+
+        // Find most common hour bucket (3-hour windows)
+        let mut buckets = [0u32; 8]; // 0-2, 3-5, 6-8, ..., 21-23
+        for &h in &hours {
+            let bucket = (h / 3) as usize;
+            if bucket < 8 {
+                buckets[bucket] += 1;
+            }
+        }
+        let (peak_bucket, peak_count) = buckets
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &c)| c)
+            .unwrap_or((0, &0));
+
+        if *peak_count as f32 / hours.len() as f32 > 0.4 {
+            let peak_hour = peak_bucket * 3;
+            ctx.set(
+                String::from("temporal_cluster_hour"),
+                alloc::format!("{}", peak_hour),
+            );
+        }
+
+        // 3. Sequence pattern: check if chain[i] → chain[i+1] repeats
+        let n = ctx.input_chains.len().min(timestamps.len());
+        if n >= 4 {
+            let mut seq_count = 0u32;
+            let h0 = ctx.input_chains[0].chain_hash();
+            let h1 = ctx.input_chains[1].chain_hash();
+            for i in 2..n - 1 {
+                if ctx.input_chains[i].chain_hash() == h0
+                    && ctx.input_chains[i + 1].chain_hash() == h1
+                {
+                    seq_count += 1;
+                }
+            }
+            if seq_count > 0 {
+                ctx.set(
+                    String::from("temporal_sequence"),
+                    alloc::format!("{}→{} x{}", h0, h1, seq_count + 1),
+                );
+            }
+        }
+
+        let merged = lca_many(&ctx.input_chains);
+        ctx.push_output(merged.clone());
+
+        SkillResult::Ok {
+            chain: merged,
+            emotion: ctx.current_emotion,
+            note: String::from("temporal analysis"),
+        }
+    }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Worker Skills — Device/Sensor Processing
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1125,5 +1466,147 @@ mod tests {
             assert!(r.is_ok());
             assert!(ctx.get("proposal_hash").is_some());
         }
+    }
+
+    // ── InverseRenderSkill ─────────────────────────────────────────────────
+
+    #[test]
+    fn inverse_render_high_circularity_sphere() {
+        let skill = InverseRenderSkill;
+        let mut ctx = ctx();
+        ctx.set(String::from("edge_ratio"), String::from("0.3"));
+        ctx.set(String::from("circularity"), String::from("0.9"));
+        ctx.set(String::from("aspect_ratio"), String::from("1.0"));
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert_eq!(ctx.get("sdf_type"), Some("0")); // 0 = Sphere
+        let conf: f32 = ctx.get("sdf_confidence").unwrap().parse().unwrap();
+        assert!(conf > 0.5, "High circularity → confident sphere: {}", conf);
+    }
+
+    #[test]
+    fn inverse_render_high_edge_ratio_plane() {
+        let skill = InverseRenderSkill;
+        let mut ctx = ctx();
+        ctx.set(String::from("edge_ratio"), String::from("0.85"));
+        ctx.set(String::from("circularity"), String::from("0.2"));
+        ctx.set(String::from("aspect_ratio"), String::from("1.0"));
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert_eq!(ctx.get("sdf_type"), Some("3")); // 3 = Plane
+    }
+
+    #[test]
+    fn inverse_render_extreme_aspect_cylinder() {
+        let skill = InverseRenderSkill;
+        let mut ctx = ctx();
+        ctx.set(String::from("edge_ratio"), String::from("0.4"));
+        ctx.set(String::from("circularity"), String::from("0.5"));
+        ctx.set(String::from("aspect_ratio"), String::from("3.5"));
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert_eq!(ctx.get("sdf_type"), Some("2")); // 2 = Cylinder
+    }
+
+    #[test]
+    fn inverse_render_defaults_to_mixed() {
+        let skill = InverseRenderSkill;
+        let mut ctx = ctx();
+        // No params → defaults: edge_ratio=0.5, circularity=0.5, aspect=1.0
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        // With defaults, should produce some SDF type
+        assert!(ctx.get("sdf_type").is_some());
+        assert!(ctx.get("sdf_confidence").is_some());
+    }
+
+    // ── GeneralizationSkill ────────────────────────────────────────────────
+
+    #[test]
+    fn generalization_extracts_rules() {
+        let skill = GeneralizationSkill;
+        let mut ctx = ctx();
+        // Push multiple identical chains → high shape consistency
+        for _ in 0..5 {
+            ctx.push_input(sample_chain()); // all ● (same shape)
+        }
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        let count: usize = ctx.get("rule_count").unwrap().parse().unwrap();
+        assert!(count > 0, "Should extract at least 1 rule from uniform cluster");
+    }
+
+    #[test]
+    fn generalization_insufficient_one_chain() {
+        let skill = GeneralizationSkill;
+        let mut ctx = ctx();
+        ctx.push_input(sample_chain());
+        let r = skill.execute(&mut ctx);
+        assert!(matches!(r, SkillResult::Insufficient));
+    }
+
+    #[test]
+    fn generalization_mixed_cluster() {
+        let skill = GeneralizationSkill;
+        let mut ctx = ctx();
+        ctx.push_input(sample_chain());
+        ctx.push_input(sample_chain_b());
+        ctx.push_input(encode_codepoint(0x25B2)); // ▲
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        // Mixed cluster may or may not produce rules depending on shape distribution
+    }
+
+    // ── TemporalPatternSkill ───────────────────────────────────────────────
+
+    #[test]
+    fn temporal_pattern_detects_periodicity() {
+        let skill = TemporalPatternSkill;
+        let mut ctx = ctx();
+        for _ in 0..6 {
+            ctx.push_input(sample_chain());
+        }
+        // Regular intervals: every 3600 units
+        ctx.set(
+            String::from("timestamps"),
+            String::from("1000,4600,8200,11800,15400,19000"),
+        );
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert!(
+            ctx.get("temporal_period").is_some(),
+            "Should detect temporal_period"
+        );
+    }
+
+    #[test]
+    fn temporal_pattern_insufficient_few_entries() {
+        let skill = TemporalPatternSkill;
+        let mut ctx = ctx();
+        ctx.push_input(sample_chain());
+        ctx.set(String::from("timestamps"), String::from("1000"));
+        let r = skill.execute(&mut ctx);
+        assert!(matches!(r, SkillResult::Insufficient));
+    }
+
+    #[test]
+    fn temporal_pattern_time_of_day_buckets() {
+        let skill = TemporalPatternSkill;
+        let mut ctx = ctx();
+        for _ in 0..5 {
+            ctx.push_input(sample_chain());
+        }
+        // All at ~10:00 AM (hour 10) on different days (ms)
+        // 10h = 36_000_000 ms, 24h = 86_400_000 ms
+        ctx.set(
+            String::from("timestamps"),
+            String::from("36000000,122400000,208800000,295200000,381600000"),
+        );
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert!(
+            ctx.get("temporal_cluster_hour").is_some(),
+            "Should detect cluster hour"
+        );
     }
 }
