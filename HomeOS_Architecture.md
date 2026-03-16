@@ -460,7 +460,7 @@ Worker.process(SensorReading)
 ```
 ✅ Thuật ngữ thống nhất (dùng tên trong code: encoder.rs, learning.rs...)
 ✅ Fibonacci tách rõ evidence vs hypothesis (xem section cuối)
-✅ SkillProposal ghi rõ là Planned, chưa implement
+✅ SkillProposal đã implement đầy đủ (memory/proposal.rs)
 ✅ Agent hierarchy clarify: "2 Agent chief + Workers là tế bào thực thi"
 ```
 
@@ -622,11 +622,13 @@ Tier 3: ESP32 (520KB SRAM)
 | Metrics/Observability | ✅ Done | ↑ (runtime) | RuntimeMetrics snapshot, Silk density, STM hit rate |
 | Concurrency model | ✅ Done | ↑ (runtime) | AP trade-off, SyncSession, ConflictStrategy |
 | SDF Occlusion buffer | ✅ Done | ↑ (vsdf) | Ring buffer 5 frames, movement variance, is_occluded() |
+| ○{health} command | ✅ Done | ↑ (runtime) | STM/Silk/Curve diagnostics, ●/○ status indicators |
+| LeoAI knowledge analysis | ✅ Done | ↑ (agents) | run_knowledge_analysis(): ClusterSkill + CuratorSkill on STM |
 | World rendering | ⬜ Planned | — | vSDF → 3D scene |
 | Android/iOS FFI | ⬜ Planned | — | JNI/FFI wrapper |
 | HAL platform | ⬜ Planned | — | RPi/ESP32/WASM |
 
-**Tổng: 886 tests, 0 failures, 14 crates**
+**Tổng: 888 tests, 0 failures, 14 crates**
 
 ---
 

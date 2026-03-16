@@ -181,8 +181,8 @@ f'  > +0.15          → Reinforcing  (hồi phục → tiếp tục)
 f'' > +0.25 && V > 0 → Celebratory  (bước ngoặt tốt)
 V < -0.20, stable    → Gentle       (buồn ổn định → dịu dàng)
 
-⚠️ Planned: window variance — nếu variance(N turns) cao + f' đổi chiều
-   → "emotional instability" → Gentle thay vì Celebratory
+✅ Done: window variance — nếu variance(N turns) cao + f' đổi chiều
+   → "emotional instability" → Gentle thay vì Celebratory (curve.rs:44-140)
 ```
 
 ### Cross-modal fusion (fusion.rs):
@@ -217,7 +217,7 @@ Node:
 Silk:
   ⑪ Silk chỉ ở Ln-1 — tự do giữa lá cùng tầng
   ⑫ Kết nối tầng trên → qua NodeLx đại diện
-     (⚠️ Planned: cross-layer Silk với threshold Fib[n+2] + AAM approve)
+     (✅ Done: cross-layer Silk với threshold Fib[n+2] — graph.rs:co_activate_cross_layer)
   ⑬ Silk mang EmotionTag của khoảnh khắc co-activation
 
 Kiến trúc:
@@ -357,7 +357,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (886 tests)
+# Test toàn bộ (888 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
