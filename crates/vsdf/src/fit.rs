@@ -8,8 +8,6 @@
 //!   < 0.4 → ignore
 //!   0.4..0.7 → hold, cần thêm observation
 
-extern crate alloc;
-
 use olang::encoder::encode_codepoint;
 use olang::molecular::MolecularChain;
 

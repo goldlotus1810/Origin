@@ -10,7 +10,6 @@
 //! "bài nhạc này..."           → Observer    + Music
 //! ```
 
-extern crate alloc;
 use crate::context::{EmotionContext, EmotionSource, Role};
 
 // ─────────────────────────────────────────────────────────────────────────────

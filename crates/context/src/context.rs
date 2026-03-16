@@ -10,7 +10,6 @@
 //! Cùng sự kiện, S khác → EmotionTag khác:
 //!   Trực tiếp trải qua (S=1.0) vs Xem phim (S=0.05)
 
-extern crate alloc;
 use silk::edge::EmotionTag;
 
 // ─────────────────────────────────────────────────────────────────────────────

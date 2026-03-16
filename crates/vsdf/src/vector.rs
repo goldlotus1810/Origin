@@ -14,7 +14,6 @@
 //! Trọng lực = Vec3(0,-1,0)    + g_spline
 //! ```
 
-extern crate alloc;
 use crate::sdf::Vec3;
 use crate::spline::VectorSpline;
 

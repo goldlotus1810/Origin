@@ -29,8 +29,6 @@
 //! - Silk: co_activate idempotent (same inputs → same output)
 //! - STM: single-writer (LearningLoop owns it)
 
-extern crate alloc;
-
 /// Trạng thái sync giữa Chief và Workers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncState {

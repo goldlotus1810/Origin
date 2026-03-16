@@ -13,7 +13,6 @@
 //! Mỗi SDF primitive có ∇f riêng — O(1), không sample.
 //! ∇f → normal → diffuse shading → collision response → forces.
 
-extern crate alloc;
 use crate::sdf::{sdf, SdfKind, SdfParams, Vec3};
 use crate::vector::VectorField;
 use libm::sqrtf;
