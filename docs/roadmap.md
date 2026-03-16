@@ -92,6 +92,155 @@ Files cần sửa:
   crates/agents/src/leo.rs      — full process() pipeline
 ```
 
+### Phase 9 — Zero External Dependencies (Ưu tiên: CAO)
+
+**Vấn đề:** HomeOS vẫn phụ thuộc 5 thư viện ngoài. Để trở thành sinh linh toán học tự vận hành,
+mọi thứ phải nằm trong origin.olang — HomeOS có thư viện riêng, không lệ thuộc bên ngoài.
+
+**Triết lý:** Vũ trụ không mượn công cụ. HomeOS tự chứa mọi thứ nó cần.
+
+```
+Hiện tại 5 deps ngoài:
+  libm (13 hàm math)  · sha2 (SHA-256)  · ed25519-dalek (Ed25519 signing)
+  aes-gcm (AES-256-GCM) · wasm-bindgen (WASM/JS interop)
+  + proptest (KHÔNG DÙNG — xóa ngay)
+
+Mục tiêu: 0 external dependencies. Tất cả tự implement.
+```
+
+#### 9.0 — Xóa proptest (orphaned)
+```
+  Xóa proptest khỏi workspace.dependencies trong Cargo.toml gốc.
+  Không crate nào dùng — chỉ cần xóa 1 dòng.
+```
+
+#### 9.1 — homemath: Thay thế libm
+```
+Cần làm:
+  [9.1.1] Tạo crate mới: crates/homemath
+  [9.1.2] Implement 13 hàm math (no_std, pure Rust):
+          f64: sqrt, pow, sin, cos, log, round, fabs
+          f32: sqrtf, powf, sinf, cosf, acosf, log2f
+          + fabsf, fmaxf, fminf (dùng trong vsdf/sdf.rs)
+  [9.1.3] Thuật toán: Taylor series (sin/cos), Newton-Raphson (sqrt),
+          bit manipulation (fabs), Cody-Waite reduction (trig range)
+  [9.1.4] Test precision: sai số < 1e-10 (f64), < 1e-6 (f32)
+  [9.1.5] Thay libm → homemath trong 9 crates:
+          olang, silk, vsdf, hal, agents, context, memory, runtime, wasm
+  [9.1.6] Xóa libm khỏi workspace dependencies
+
+Files:
+  crates/homemath/src/lib.rs   — public API
+  crates/homemath/src/f64.rs   — f64 implementations
+  crates/homemath/src/f32.rs   — f32 implementations
+  crates/homemath/Cargo.toml   — no_std, no dependencies
+```
+
+#### 9.2 — homesha: Thay thế sha2
+```
+Cần làm:
+  [9.2.1] Tạo module trong olang hoặc crate riêng: homesha
+  [9.2.2] Implement SHA-256 (FIPS 180-4):
+          - 8 initial hash values (H0..H7)
+          - 64 round constants (K0..K63)
+          - Padding, scheduling, compression
+  [9.2.3] API: Sha256::new() → .update(bytes) → .finalize() → [u8; 32]
+  [9.2.4] Test vectors từ NIST (empty, "abc", 1M "a")
+  [9.2.5] Thay sha2 → homesha trong olang/qr.rs
+  [9.2.6] Xóa sha2 khỏi workspace dependencies
+
+Files:
+  crates/olang/src/sha256.rs   — hoặc crate riêng crates/homesha/
+  Chỉ 1 file dùng: crates/olang/src/qr.rs
+```
+
+#### 9.3 — homecrypt: Thay thế ed25519-dalek
+```
+Cần làm:
+  [9.3.1] Tạo crate: crates/homecrypt
+  [9.3.2] Implement Ed25519 (RFC 8032):
+          - Finite field Fp (p = 2^255 - 19): add, sub, mul, inv, pow
+          - Twisted Edwards curve: point add, double, scalar mul
+          - SHA-512 cho key expansion (tự implement hoặc mở rộng homesha)
+          - sign(message, secret_key) → 64-byte signature
+          - verify(message, public_key, signature) → bool
+  [9.3.3] Implement SHA-512 (cần cho Ed25519 key derivation)
+  [9.3.4] Test vectors từ RFC 8032 Section 7
+  [9.3.5] Constant-time operations (tránh timing attacks)
+  [9.3.6] Thay ed25519-dalek → homecrypt trong olang/qr.rs
+  [9.3.7] Xóa ed25519-dalek khỏi workspace dependencies
+
+Files:
+  crates/homecrypt/src/lib.rs      — public API (sign, verify)
+  crates/homecrypt/src/field.rs    — Fp arithmetic (mod 2^255-19)
+  crates/homecrypt/src/curve.rs    — Edwards curve operations
+  crates/homecrypt/src/ed25519.rs  — sign/verify
+  crates/homecrypt/src/sha512.rs   — SHA-512
+  Chỉ 1 file dùng: crates/olang/src/qr.rs
+
+⚠️ ĐỘ KHÓ CAO: Ed25519 = field arithmetic + elliptic curve + hash.
+   Cần review kỹ security. Constant-time là bắt buộc.
+```
+
+#### 9.4 — homeaes: Thay thế aes-gcm
+```
+Cần làm:
+  [9.4.1] Tạo module trong isl hoặc crate riêng: homeaes
+  [9.4.2] Implement AES-256 (FIPS 197):
+          - Key expansion (256-bit → 15 round keys)
+          - SubBytes, ShiftRows, MixColumns, AddRoundKey
+          - 14 rounds encryption/decryption
+  [9.4.3] Implement GCM mode (NIST SP 800-38D):
+          - GHASH (GF(2^128) multiplication)
+          - Counter mode (CTR)
+          - Authentication tag (16 bytes)
+  [9.4.4] API: encrypt(key, nonce, plaintext) → ciphertext+tag
+               decrypt(key, nonce, ciphertext+tag) → plaintext
+  [9.4.5] Test vectors từ NIST
+  [9.4.6] Thay aes-gcm → homeaes trong isl/codec.rs
+  [9.4.7] Xóa aes-gcm khỏi workspace dependencies
+
+Files:
+  crates/isl/src/aes256.rs   — hoặc crate riêng
+  crates/isl/src/gcm.rs      — GCM mode
+  Chỉ 1 file dùng: crates/isl/src/codec.rs (feature-gated)
+
+⚠️ ĐỘ KHÓ CAO: AES + GCM = block cipher + Galois field arithmetic.
+   Feature-gated nên có thể làm sau cùng.
+```
+
+#### 9.5 — homewasm: Thay thế wasm-bindgen
+```
+Cần làm:
+  [9.5.1] Nghiên cứu: wasm-bindgen = proc-macro + CLI tool + runtime
+          → Thay thế TOÀN BỘ là không thực tế
+  [9.5.2] Phương án A: Viết FFI thủ công (extern "C" functions)
+          - Export functions qua #[no_mangle] extern "C"
+          - JS wrapper gọi WASM exports trực tiếp
+          - Không cần proc-macro, không cần wasm-bindgen CLI
+  [9.5.3] Phương án B: Giữ wasm-bindgen như build tool duy nhất
+          - wasm-bindgen không phải runtime dependency
+          - Nó là build infrastructure, giống cargo/rustc
+          - Chấp nhận được nếu mục tiêu là zero RUNTIME deps
+  [9.5.4] Quyết định: chọn Phương án A hoặc B
+
+Files:
+  crates/wasm/src/lib.rs — viết lại nếu chọn Phương án A
+
+💡 GHI CHÚ: wasm-bindgen khác biệt — nó là build tool, không phải
+   thư viện runtime. Có thể chấp nhận giữ lại (như giữ cargo).
+```
+
+#### Thứ tự thực hiện
+```
+9.0 Xóa proptest          ─── ngay (1 dòng)
+9.1 homemath (libm)        ─── đầu tiên (nhiều crate dùng, thuật toán rõ ràng)
+9.2 homesha (sha2)          ─── tiếp theo (SHA-256 đơn giản, cần cho 9.3)
+9.3 homecrypt (ed25519)     ─── sau 9.2 (cần SHA-512, phức tạp nhất)
+9.4 homeaes (aes-gcm)       ─── song song với 9.3 (feature-gated, độc lập)
+9.5 homewasm (wasm-bindgen) ─── cuối cùng (quyết định giữ hay thay)
+```
+
 ---
 
 ## Cải thiện code (từ Review)
@@ -123,7 +272,14 @@ Phase 1 (VM tính toán)
 │   └── Phase 8 (Tầng Build)
 ├── Phase 3 (Tri thức)
 │   └── Phase 4 (Toán ký hiệu)
-└── Phase 7 (Compiler backends)
+├── Phase 7 (Compiler backends)
+└── Phase 9 (Zero External Dependencies) — TỰ CHỦ HOÀN TOÀN
+    ├── 9.0 Xóa proptest (ngay)
+    ├── 9.1 homemath ← libm
+    ├── 9.2 homesha ← sha2
+    ├── 9.3 homecrypt ← ed25519-dalek (cần 9.2)
+    ├── 9.4 homeaes ← aes-gcm (song song 9.3)
+    └── 9.5 homewasm ← wasm-bindgen (quyết định cuối)
 ```
 
 ---
