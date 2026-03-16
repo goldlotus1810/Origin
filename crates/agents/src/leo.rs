@@ -469,4 +469,30 @@ mod tests {
         let _ = l.edge_count();
         // LeoAI chỉ đọc stats, không ghi trực tiếp
     }
+
+    /// Integration: LeoAI QR writes → OlangReader → verify QR node.
+    #[test]
+    fn leo_qr_writes_parseable() {
+        let mut l = leo();
+        l.ingest(report(-0.5, 1), 1000);
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+
+        l.pending.push(LeoPendingProposal {
+            chain_hash: hash, fire_count: 5, confidence: 0.8, timestamp: 1000,
+        });
+        let approved = ISLMessage::with_payload(aam_addr(), leo_addr(), MsgType::Approved, [0, 0, 0]);
+        l.receive_aam_decision(approved, 2000);
+
+        let bytes = l.drain_pending_writes();
+        assert!(!bytes.is_empty(), "Phải có pending writes");
+
+        // Parse back with OlangReader
+        let reader = olang::reader::OlangReader::new(&bytes).expect("valid header");
+        let pf = reader.parse_all().expect("parseable");
+
+        assert_eq!(pf.node_count(), 1, "1 QR node");
+        assert!(pf.nodes[0].is_qr, "Node phải là QR");
+        assert_eq!(pf.nodes[0].layer, 0);
+        assert_eq!(pf.nodes[0].timestamp, 2000);
+    }
 }
