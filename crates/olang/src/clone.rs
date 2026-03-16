@@ -162,7 +162,7 @@ fn is_relevant(chain: &MolecularChain, profile: &DeviceProfile) -> bool {
 
     // Tất cả thiết bị đều cần: origin, emotion cơ bản
     // Shape Sphere (0x01) = phổ biến nhất → luôn giữ
-    if mol.shape.as_byte() == 0x01 {
+    if mol.shape == 0x01 {
         return true;
     }
 

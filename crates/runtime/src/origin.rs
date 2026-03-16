@@ -2327,7 +2327,7 @@ fn chain_info(chain: &olang::molecular::MolecularChain, cp: Option<u32>) -> allo
     }
 
     let mol = &chain.0[0];
-    let shape_sym = match mol.shape {
+    let shape_sym = match mol.shape_base() {
         olang::molecular::ShapeBase::Sphere => "●",
         olang::molecular::ShapeBase::Capsule => "▬",
         olang::molecular::ShapeBase::Box => "■",
@@ -2337,7 +2337,7 @@ fn chain_info(chain: &olang::molecular::MolecularChain, cp: Option<u32>) -> allo
         olang::molecular::ShapeBase::Intersect => "∩",
         olang::molecular::ShapeBase::Subtract => "∖",
     };
-    let rel_sym = match mol.relation {
+    let rel_sym = match mol.relation_base() {
         olang::molecular::RelationBase::Member => "∈",
         olang::molecular::RelationBase::Subset => "⊂",
         olang::molecular::RelationBase::Equiv => "≡",

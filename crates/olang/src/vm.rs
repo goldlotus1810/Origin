@@ -135,7 +135,7 @@ fn classify_chain(chain: &MolecularChain) -> String {
     }
     let (mut sdf, mut math, mut emo) = (0u32, 0u32, 0u32);
     for mol in &chain.0 {
-        match mol.shape {
+        match mol.shape_base() {
             // SDF primitives — geometric shapes
             ShapeBase::Sphere | ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Cone => {
                 sdf += 1

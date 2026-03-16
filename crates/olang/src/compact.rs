@@ -44,7 +44,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::hash::fnv1a;
-use crate::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase, ShapeBase, TimeDim};
+use crate::molecular::{EmotionDim, MolecularChain, Molecule};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DeltaMolecule — chỉ lưu diff từ parent
@@ -81,11 +81,11 @@ impl DeltaMolecule {
 
         if child.shape != parent.shape {
             mask |= 0x01;
-            data.push(child.shape.as_byte());
+            data.push(child.shape);
         }
         if child.relation != parent.relation {
             mask |= 0x02;
-            data.push(child.relation.as_byte());
+            data.push(child.relation);
         }
         if child.emotion.valence != parent.emotion.valence {
             mask |= 0x04;
@@ -97,7 +97,7 @@ impl DeltaMolecule {
         }
         if child.time != parent.time {
             mask |= 0x10;
-            data.push(child.time.as_byte());
+            data.push(child.time);
         }
 
         Self { mask, data }
@@ -109,14 +109,14 @@ impl DeltaMolecule {
         let shape = if self.mask & 0x01 != 0 {
             let b = *self.data.get(idx)?;
             idx += 1;
-            ShapeBase::from_byte(b)?
+            b
         } else {
             parent.shape
         };
         let relation = if self.mask & 0x02 != 0 {
             let b = *self.data.get(idx)?;
             idx += 1;
-            RelationBase::from_byte(b)?
+            b
         } else {
             parent.relation
         };
@@ -137,7 +137,7 @@ impl DeltaMolecule {
         let time = if self.mask & 0x10 != 0 {
             let b = *self.data.get(idx)?;
             let _ = idx;
-            TimeDim::from_byte(b)?
+            b
         } else {
             parent.time
         };
@@ -574,12 +574,12 @@ pub struct CompactEdge {
 
 impl CompactEdge {
     /// Encode từ full hashes + weight.
-    pub fn encode(from: u64, to: u64, weight: f32, relation: RelationBase) -> Self {
+    pub fn encode(from: u64, to: u64, weight: f32, relation: u8) -> Self {
         Self {
             from_hash: (from & 0xFFFFFFFF) as u32,
             to_hash: (to & 0xFFFFFFFF) as u32,
             weight: (weight.clamp(0.0, 1.0) * 255.0) as u8,
-            relation: relation.as_byte(),
+            relation,
         }
     }
 
@@ -789,7 +789,7 @@ impl SilkPruner {
     pub const FIBONACCI_THRESHOLD: f32 = 0.382;
 
     /// Prune edges: chỉ giữ strong ones.
-    pub fn prune(edges: &[(u64, u64, f32, RelationBase)], threshold: f32) -> Vec<CompactEdge> {
+    pub fn prune(edges: &[(u64, u64, f32, u8)], threshold: f32) -> Vec<CompactEdge> {
         edges
             .iter()
             .filter(|&&(_, _, w, _)| w >= threshold)
@@ -798,12 +798,12 @@ impl SilkPruner {
     }
 
     /// Prune với Fibonacci threshold mặc định.
-    pub fn prune_default(edges: &[(u64, u64, f32, RelationBase)]) -> Vec<CompactEdge> {
+    pub fn prune_default(edges: &[(u64, u64, f32, u8)]) -> Vec<CompactEdge> {
         Self::prune(edges, Self::FIBONACCI_THRESHOLD)
     }
 
     /// Thống kê prune: bao nhiêu edges bị loại.
-    pub fn prune_stats(edges: &[(u64, u64, f32, RelationBase)], threshold: f32) -> (usize, usize) {
+    pub fn prune_stats(edges: &[(u64, u64, f32, u8)], threshold: f32) -> (usize, usize) {
         let total = edges.len();
         let kept = edges.iter().filter(|&&(_, _, w, _)| w >= threshold).count();
         (kept, total - kept)
@@ -1101,8 +1101,8 @@ pub struct NeighborInfo {
     pub node: CompactNode,
     /// Silk edge weight (0.0 .. 1.0)
     pub weight: f32,
-    /// Relation type
-    pub relation: RelationBase,
+    /// Relation type (raw byte)
+    pub relation: u8,
 }
 
 /// Tiered store — quản lý storage across tiers.
@@ -1268,7 +1268,7 @@ impl TieredStore {
         from: u64,
         to: u64,
         weight: f32,
-        relation: RelationBase,
+        relation: u8,
         layer: u8,
     ) {
         let edge = CompactEdge::encode(from, to, weight, relation);
@@ -1406,8 +1406,7 @@ impl TieredStore {
                     neighbors.push(NeighborInfo {
                         node: neighbor,
                         weight: edge.weight_f32(),
-                        relation: RelationBase::from_byte(edge.relation)
-                            .unwrap_or(RelationBase::Member),
+                        relation: edge.relation,
                     });
                 }
             }
@@ -1511,17 +1510,17 @@ impl TieredStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molecular::{EmotionDim, RelationBase, ShapeBase, TimeDim};
+    use crate::molecular::{EmotionDim, RelationBase};
 
     fn test_mol(shape: u8, rel: u8, v: u8, a: u8, t: u8) -> Molecule {
         Molecule {
-            shape: ShapeBase::from_byte(shape).unwrap(),
-            relation: RelationBase::from_byte(rel).unwrap(),
+            shape,
+            relation: rel,
             emotion: EmotionDim {
                 valence: v,
                 arousal: a,
             },
-            time: TimeDim::from_byte(t).unwrap(),
+            time: t,
         }
     }
 
@@ -1729,7 +1728,7 @@ mod tests {
             0xDEADBEEF12345678,
             0xCAFEBABE87654321,
             0.75,
-            RelationBase::Causes,
+            RelationBase::Causes.as_byte(),
         );
         let bytes = edge.to_bytes();
         assert_eq!(bytes.len(), 10, "CompactEdge = 10 bytes (vs 46 full)");
@@ -1741,7 +1740,7 @@ mod tests {
             0x1234567890ABCDEF,
             0xFEDCBA0987654321,
             0.85,
-            RelationBase::Similar,
+            RelationBase::Similar.as_byte(),
         );
         let bytes = edge.to_bytes();
         let decoded = CompactEdge::from_bytes(&bytes);
@@ -1753,7 +1752,7 @@ mod tests {
 
     #[test]
     fn compact_edge_weight_quantization() {
-        let edge = CompactEdge::encode(1, 2, 0.5, RelationBase::Member);
+        let edge = CompactEdge::encode(1, 2, 0.5, RelationBase::Member.as_byte());
         let restored = edge.weight_f32();
         assert!(
             (restored - 0.5).abs() < 0.005,
@@ -1788,7 +1787,7 @@ mod tests {
 
         // Add 20 edges
         for i in 0u32..20 {
-            let edge = CompactEdge::encode(i as u64, (i + 1) as u64, 0.6, RelationBase::Causes);
+            let edge = CompactEdge::encode(i as u64, (i + 1) as u64, 0.6, RelationBase::Causes.as_byte());
             page.push_edge(edge);
         }
 
@@ -1806,7 +1805,7 @@ mod tests {
         let mut dict = ChainDictionary::new(100);
         let node = CompactNode::encode(&chain, None, &mut dict, 3, 1000);
         page.push_node(node);
-        page.push_edge(CompactEdge::encode(1, 2, 0.5, RelationBase::Member));
+        page.push_edge(CompactEdge::encode(1, 2, 0.5, RelationBase::Member.as_byte()));
 
         let bytes = page.to_bytes();
         // Check magic
@@ -1822,10 +1821,10 @@ mod tests {
     #[test]
     fn pruner_keeps_strong_edges() {
         let edges = alloc::vec![
-            (1u64, 2, 0.9, RelationBase::Causes),
-            (2, 3, 0.1, RelationBase::Similar),
-            (3, 4, 0.5, RelationBase::Member),
-            (4, 5, 0.4, RelationBase::Equiv),
+            (1u64, 2, 0.9, RelationBase::Causes.as_byte()),
+            (2, 3, 0.1, RelationBase::Similar.as_byte()),
+            (3, 4, 0.5, RelationBase::Member.as_byte()),
+            (4, 5, 0.4, RelationBase::Equiv.as_byte()),
         ];
         let pruned = SilkPruner::prune_default(&edges);
         // Threshold 0.382 → keep 0.9, 0.5, 0.4
@@ -1835,9 +1834,9 @@ mod tests {
     #[test]
     fn pruner_stats() {
         let edges = alloc::vec![
-            (1u64, 2, 0.9, RelationBase::Causes),
-            (2, 3, 0.1, RelationBase::Similar),
-            (3, 4, 0.5, RelationBase::Member),
+            (1u64, 2, 0.9, RelationBase::Causes.as_byte()),
+            (2, 3, 0.1, RelationBase::Similar.as_byte()),
+            (3, 4, 0.5, RelationBase::Member.as_byte()),
         ];
         let (kept, removed) = SilkPruner::prune_stats(&edges, 0.382);
         assert_eq!(kept, 2);
@@ -1970,7 +1969,7 @@ mod tests {
         let c2 = MolecularChain::single(test_mol(0x02, 0x01, 0x80, 0x80, 0x03));
         let h1 = store.store_node(&c1, None, 2, 1000);
         let h2 = store.store_node(&c2, None, 2, 1001);
-        store.store_edge(h1, h2, 0.8, RelationBase::Causes, 2);
+        store.store_edge(h1, h2, 0.8, RelationBase::Causes.as_byte(), 2);
         assert_eq!(store.total_edges(), 1);
     }
 
@@ -1987,7 +1986,7 @@ mod tests {
         let c2 = MolecularChain::single(test_mol(0x02, 0x01, 0x80, 0x80, 0x03));
         let h1 = store.store_node(&c1, None, 2, 1000);
         let _h2 = store.store_node(&c2, None, 2, 1001);
-        store.store_edge(h1, _h2, 0.85, RelationBase::Similar, 2);
+        store.store_edge(h1, _h2, 0.85, RelationBase::Similar.as_byte(), 2);
 
         let result = store.lookup_with_edges(h1, 2, 1);
         assert!(result.is_some(), "Should find node with edges");

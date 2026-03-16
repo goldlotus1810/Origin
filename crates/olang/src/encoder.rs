@@ -6,18 +6,19 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase, ShapeBase, TimeDim};
+use crate::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase};
 
 /// Encode một codepoint Unicode → MolecularChain (1 molecule).
 ///
 /// Tất cả 5 chiều đến từ UCD lookup — không hardcode.
+/// Raw hierarchical bytes giữ nguyên từ UCD → phân biệt ~5400 mẫu.
 /// Đây là hàm gốc của mọi chain trong HomeOS.
 pub fn encode_codepoint(cp: u32) -> MolecularChain {
-    let shape = shape_byte(ucd::shape_of(cp));
-    let relation = relation_byte(ucd::relation_of(cp));
+    let shape = ucd::shape_of(cp);
+    let relation = ucd::relation_of(cp);
     let valence = ucd::valence_of(cp);
     let arousal = ucd::arousal_of(cp);
-    let time = time_byte(ucd::time_of(cp));
+    let time = ucd::time_of(cp);
 
     MolecularChain::single(Molecule {
         shape,
@@ -49,9 +50,9 @@ pub fn encode_zwj_sequence(codepoints: &[u32]) -> MolecularChain {
         .map(|(i, &cp)| {
             let mut mol = encode_codepoint(cp).0.remove(0);
             mol.relation = if i < last {
-                RelationBase::Compose // ∘ — còn tiếp
+                RelationBase::Compose.as_byte() // ∘ — còn tiếp
             } else {
-                RelationBase::Member // ∈ — kết thúc
+                RelationBase::Member.as_byte() // ∈ — kết thúc
             };
             mol
         })
@@ -70,28 +71,13 @@ pub fn encode_flag(ri1: u32, ri2: u32) -> MolecularChain {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Byte → Enum
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn shape_byte(b: u8) -> ShapeBase {
-    ShapeBase::from_byte(b).unwrap_or(ShapeBase::Sphere)
-}
-
-fn relation_byte(b: u8) -> RelationBase {
-    RelationBase::from_byte(b).unwrap_or(RelationBase::Member)
-}
-
-fn time_byte(b: u8) -> TimeDim {
-    TimeDim::from_byte(b).unwrap_or(TimeDim::Medium)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::molecular::{ShapeBase, TimeDim};
 
     #[test]
     fn encode_fire() {
@@ -101,11 +87,15 @@ mod tests {
         let chain = encode_codepoint(0x1F525); // 🔥
         assert_eq!(chain.len(), 1);
         let m = &chain.0[0];
-        assert_eq!(m.shape, ShapeBase::Sphere, "FIRE shape = Sphere");
-        assert_eq!(m.relation, RelationBase::Member, "FIRE relation = Member");
+        assert_eq!(m.shape_base(), ShapeBase::Sphere, "FIRE shape = Sphere");
+        assert_eq!(
+            m.relation_base(),
+            RelationBase::Member,
+            "FIRE relation = Member"
+        );
         assert!(m.emotion.valence >= 0xC0, "FIRE valence cao");
         assert!(m.emotion.arousal >= 0xC0, "FIRE arousal cao");
-        assert_eq!(m.time, TimeDim::Fast, "FIRE time = Fast");
+        assert_eq!(m.time_base(), TimeDim::Fast, "FIRE time = Fast");
     }
 
     #[test]
@@ -118,7 +108,7 @@ mod tests {
         let m = &chain.0[0];
         assert!(m.emotion.valence >= 0x80, "DROPLET valence moderate");
         assert!(m.emotion.arousal <= 0x80, "DROPLET arousal thấp");
-        assert_eq!(m.time, TimeDim::Slow, "DROPLET time = Slow");
+        assert_eq!(m.time_base(), TimeDim::Slow, "DROPLET time = Slow");
     }
 
     #[test]
@@ -127,8 +117,8 @@ mod tests {
             return;
         }
         let chain = encode_codepoint(0x25CF); // ●
-        assert_eq!(chain.0[0].shape, ShapeBase::Sphere);
-        assert_eq!(chain.0[0].time, TimeDim::Static, "SDF shapes = Static");
+        assert_eq!(chain.0[0].shape_base(), ShapeBase::Sphere);
+        assert_eq!(chain.0[0].time_base(), TimeDim::Static, "SDF shapes = Static");
     }
 
     #[test]
@@ -137,8 +127,8 @@ mod tests {
             return;
         }
         let chain = encode_codepoint(0x2192); // →
-        assert_eq!(chain.0[0].relation, RelationBase::Causes);
-        assert_eq!(chain.0[0].time, TimeDim::Instant, "Arrow = Instant");
+        assert_eq!(chain.0[0].relation_base(), RelationBase::Causes);
+        assert_eq!(chain.0[0].time_base(), TimeDim::Instant, "Arrow = Instant");
     }
 
     #[test]
@@ -147,8 +137,8 @@ mod tests {
             return;
         }
         let chain = encode_codepoint(0x2208); // ∈
-        assert_eq!(chain.0[0].relation, RelationBase::Member);
-        assert_eq!(chain.0[0].time, TimeDim::Static, "Math = Static");
+        assert_eq!(chain.0[0].relation_base(), RelationBase::Member);
+        assert_eq!(chain.0[0].time_base(), TimeDim::Static, "Math = Static");
     }
 
     #[test]
@@ -160,16 +150,20 @@ mod tests {
         let chain = encode_zwj_sequence(&[0x1F468, 0x1F469, 0x1F466]);
         assert_eq!(chain.len(), 3);
         assert_eq!(
-            chain.0[0].relation,
+            chain.0[0].relation_base(),
             RelationBase::Compose,
             "mol[0] = Compose"
         );
         assert_eq!(
-            chain.0[1].relation,
+            chain.0[1].relation_base(),
             RelationBase::Compose,
             "mol[1] = Compose"
         );
-        assert_eq!(chain.0[2].relation, RelationBase::Member, "mol[2] = Member");
+        assert_eq!(
+            chain.0[2].relation_base(),
+            RelationBase::Member,
+            "mol[2] = Member"
+        );
     }
 
     #[test]
@@ -180,7 +174,7 @@ mod tests {
         let chain = encode_zwj_sequence(&[0x1F525]);
         assert_eq!(chain.len(), 1);
         // Single = Member (kết thúc ngay)
-        assert_eq!(chain.0[0].relation, RelationBase::Member);
+        assert_eq!(chain.0[0].relation_base(), RelationBase::Member);
     }
 
     #[test]
@@ -193,8 +187,8 @@ mod tests {
         let chain = encode_flag(0x1F1FB, 0x1F1F3);
         assert_eq!(chain.len(), 2);
         // ZWJ-like: first mol.relation = Compose, last = Member
-        assert_eq!(chain.0[0].relation, RelationBase::Compose);
-        assert_eq!(chain.0[1].relation, RelationBase::Member);
+        assert_eq!(chain.0[0].relation_base(), RelationBase::Compose);
+        assert_eq!(chain.0[1].relation_base(), RelationBase::Member);
     }
 
     #[test]
@@ -220,10 +214,10 @@ mod tests {
         let cp = 0x1F525u32;
         let chain = encode_codepoint(cp);
         let m = &chain.0[0];
-        assert_eq!(m.shape.as_byte(), ucd::shape_of(cp));
-        assert_eq!(m.relation.as_byte(), ucd::relation_of(cp));
+        assert_eq!(m.shape, ucd::shape_of(cp));
+        assert_eq!(m.relation, ucd::relation_of(cp));
         assert_eq!(m.emotion.valence, ucd::valence_of(cp));
         assert_eq!(m.emotion.arousal, ucd::arousal_of(cp));
-        assert_eq!(m.time.as_byte(), ucd::time_of(cp));
+        assert_eq!(m.time, ucd::time_of(cp));
     }
 }

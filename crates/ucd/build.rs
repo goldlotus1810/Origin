@@ -745,6 +745,58 @@ fn main() {
         }
     }
 
+    // ── Assign hierarchical sub-indices ────────────────────────────────────
+    // Encoding: value = base + (sub_index * N_bases)
+    // Shape/relation: N_bases = 8, Time: N_bases = 5
+    // Sub-index tăng tuần tự trong mỗi base group → phân biệt ~5400 mẫu.
+    {
+        // Count per base → assign sub_index round-robin
+        let mut shape_counters: HashMap<u8, u8> = HashMap::new(); // base → next_sub
+        let mut relation_counters: HashMap<u8, u8> = HashMap::new();
+        let mut time_counters: HashMap<u8, u8> = HashMap::new();
+
+        for entry in &mut entries {
+            // Shape: base + sub*8, max sub = (255-base)/8
+            let shape_base = entry.shape; // already 0x01-0x08
+            let shape_sub = shape_counters.entry(shape_base).or_insert(0);
+            let max_shape_sub = (255u16 - shape_base as u16) / 8;
+            if *shape_sub > 0 && (*shape_sub as u16) <= max_shape_sub {
+                entry.shape = shape_base + (*shape_sub) * 8;
+            }
+            *shape_sub = shape_sub.wrapping_add(1);
+            if *shape_sub as u16 > max_shape_sub {
+                *shape_sub = 0; // wrap around
+            }
+
+            // Relation: base + sub*8
+            let rel_base = entry.relation;
+            let rel_sub = relation_counters.entry(rel_base).or_insert(0);
+            let max_rel_sub = (255u16 - rel_base as u16) / 8;
+            if *rel_sub > 0 && (*rel_sub as u16) <= max_rel_sub {
+                entry.relation = rel_base + (*rel_sub) * 8;
+            }
+            *rel_sub = rel_sub.wrapping_add(1);
+            if *rel_sub as u16 > max_rel_sub {
+                *rel_sub = 0;
+            }
+
+            // Time: base + sub*5
+            let time_base = entry.time;
+            let time_sub = time_counters.entry(time_base).or_insert(0);
+            let max_time_sub = (255u16 - time_base as u16) / 5;
+            if *time_sub > 0 && (*time_sub as u16) <= max_time_sub {
+                entry.time = time_base + (*time_sub) * 5;
+            }
+            *time_sub = time_sub.wrapping_add(1);
+            if *time_sub as u16 > max_time_sub {
+                *time_sub = 0;
+            }
+
+            // Recompute hash with hierarchical values
+            entry.hash = chain_hash(entry.shape, entry.relation, entry.valence, entry.arousal, entry.time);
+        }
+    }
+
     // Sort by cp cho binary_search
     entries.sort_by_key(|e| e.cp);
 

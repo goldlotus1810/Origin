@@ -220,7 +220,7 @@ impl Skill for CausalitySkill {
         // 3. Relation dimension gợi ý causality
         let relation_causal = a
             .first()
-            .map(|m| m.relation == RelationBase::Causes)
+            .map(|m| m.relation_base() == RelationBase::Causes)
             .unwrap_or(false);
 
         let evidence_count = has_temporal as u8 + has_repetition as u8 + relation_causal as u8;
@@ -299,7 +299,7 @@ impl Skill for ContradictionSkill {
 
         // Test 2: Relation orthogonal
         let relation_orthogonal =
-            ma.relation == RelationBase::Orthogonal || mb.relation == RelationBase::Orthogonal;
+            ma.relation_base() == RelationBase::Orthogonal || mb.relation_base() == RelationBase::Orthogonal;
 
         // Test 3: Emotional conflict — arousal cùng cao, valence ngược
         let both_aroused = ba[3] > 0xA0 && bb[3] > 0xA0;

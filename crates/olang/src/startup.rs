@@ -703,11 +703,11 @@ pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
             // Restore relation=Member trước khi decode
             // (ZWJ set relation=Compose/Member, cần Member để match UCD)
             let mut normalized = *mol;
-            normalized.relation = crate::molecular::RelationBase::Member;
+            normalized.relation = crate::molecular::RelationBase::Member.as_byte();
             let single = crate::molecular::MolecularChain(alloc::vec![normalized]);
             let cp = ucd::decode_hash(single.chain_hash()).unwrap_or_else(|| {
                 // Fallback: bucket search với relation=Member + emotion match
-                let cands = ucd::bucket_cps(mol.shape.as_byte(), 0x01);
+                let cands = ucd::bucket_cps(mol.shape, 0x01);
                 if cands.is_empty() {
                     0x25CB
                 } else {
@@ -743,8 +743,8 @@ pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
 
     // 3. Bucket search: emotion distance
     let mol = &chain.0[0];
-    let shape = mol.shape.as_byte();
-    let relation = mol.relation.as_byte();
+    let shape = mol.shape;
+    let relation = mol.relation;
     let v_target = mol.emotion.valence;
     let a_target = mol.emotion.arousal;
 

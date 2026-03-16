@@ -14,7 +14,11 @@ use alloc::vec::Vec;
 // 5 Base Dimensions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Chiều hình dạng — từ SDF group (Geometric Shapes 25A0..25FF).
+/// Chiều hình dạng — base category từ SDF group (Geometric Shapes 25A0..25FF).
+///
+/// 8 base primitives. Mỗi base có tối đa 31 sub-variants.
+/// Encoding: `value = base + (sub_index * 8)`.
+/// Extract: `base = ((value - 1) % 8) + 1`, `sub = (value - 1) / 8`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ShapeBase {
@@ -37,7 +41,7 @@ pub enum ShapeBase {
 }
 
 impl ShapeBase {
-    /// Parse từ byte.
+    /// Parse exact base value từ byte (chỉ chấp nhận base values 0x01..0x08).
     pub fn from_byte(b: u8) -> Option<Self> {
         match b {
             0x01 => Some(Self::Sphere),
@@ -52,13 +56,42 @@ impl ShapeBase {
         }
     }
 
+    /// Extract base category từ hierarchical byte.
+    ///
+    /// Bất kỳ byte > 0 đều trích xuất được base: `((b - 1) % 8) + 1`.
+    /// Ví dụ: 0x09 (Sphere sub 1) → Sphere, 0x0A (Capsule sub 1) → Capsule.
+    pub fn from_hierarchical(b: u8) -> Option<Self> {
+        if b == 0 {
+            return None;
+        }
+        let base = ((b - 1) % 8) + 1;
+        Self::from_byte(base)
+    }
+
+    /// Sub-index within base category (0 = base representative).
+    pub fn sub_index(b: u8) -> u8 {
+        if b == 0 {
+            return 0;
+        }
+        (b - 1) / 8
+    }
+
+    /// Encode base + sub_index → hierarchical byte.
+    pub fn encode(self, sub: u8) -> u8 {
+        let base = self as u8;
+        base + sub.saturating_mul(8)
+    }
+
     /// Byte value.
     pub fn as_byte(self) -> u8 {
         self as u8
     }
 }
 
-/// Chiều quan hệ — từ RELATION group (Math Operators 2200..22FF).
+/// Chiều quan hệ — base category từ RELATION group (Math Operators 2200..22FF).
+///
+/// 8 base relations. Mỗi base có tối đa 31 sub-variants.
+/// Encoding giống ShapeBase: `value = base + (sub_index * 8)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum RelationBase {
@@ -81,7 +114,7 @@ pub enum RelationBase {
 }
 
 impl RelationBase {
-    /// Parse từ byte.
+    /// Parse exact base value từ byte.
     pub fn from_byte(b: u8) -> Option<Self> {
         match b {
             0x01 => Some(Self::Member),
@@ -94,6 +127,29 @@ impl RelationBase {
             0x08 => Some(Self::DerivedFrom),
             _ => None,
         }
+    }
+
+    /// Extract base category từ hierarchical byte.
+    pub fn from_hierarchical(b: u8) -> Option<Self> {
+        if b == 0 {
+            return None;
+        }
+        let base = ((b - 1) % 8) + 1;
+        Self::from_byte(base)
+    }
+
+    /// Sub-index within base category.
+    pub fn sub_index(b: u8) -> u8 {
+        if b == 0 {
+            return 0;
+        }
+        (b - 1) / 8
+    }
+
+    /// Encode base + sub_index → hierarchical byte.
+    pub fn encode(self, sub: u8) -> u8 {
+        let base = self as u8;
+        base + sub.saturating_mul(8)
     }
 
     /// Byte value.
@@ -119,7 +175,11 @@ impl EmotionDim {
     };
 }
 
-/// Chiều thời gian — từ MUSICAL group (note duration).
+/// Chiều thời gian — base category từ MUSICAL group (note duration).
+///
+/// 5 base tempos. Mỗi base có tối đa 51 sub-variants.
+/// Encoding: `value = base + (sub_index * 5)`.
+/// Extract: `base = ((value - 1) % 5) + 1`, `sub = (value - 1) / 5`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TimeDim {
@@ -136,7 +196,7 @@ pub enum TimeDim {
 }
 
 impl TimeDim {
-    /// Parse từ byte.
+    /// Parse exact base value từ byte.
     pub fn from_byte(b: u8) -> Option<Self> {
         match b {
             0x01 => Some(Self::Static),
@@ -146,6 +206,29 @@ impl TimeDim {
             0x05 => Some(Self::Instant),
             _ => None,
         }
+    }
+
+    /// Extract base category từ hierarchical byte.
+    pub fn from_hierarchical(b: u8) -> Option<Self> {
+        if b == 0 {
+            return None;
+        }
+        let base = ((b - 1) % 5) + 1;
+        Self::from_byte(base)
+    }
+
+    /// Sub-index within base category.
+    pub fn sub_index(b: u8) -> u8 {
+        if b == 0 {
+            return 0;
+        }
+        (b - 1) / 5
+    }
+
+    /// Encode base + sub_index → hierarchical byte.
+    pub fn encode(self, sub: u8) -> u8 {
+        let base = self as u8;
+        base + sub.saturating_mul(5)
     }
 
     /// Byte value.
@@ -189,42 +272,72 @@ pub const TAGGED_DEFAULT_TIME: u8 = 0x03; // Medium
 /// Legacy wire format: `[shape][relation][valence][arousal][time]` (5 bytes cố định)
 /// Tagged wire format: `[mask][present_values...]` (1-6 bytes, chỉ ghi non-default)
 ///
+/// Mỗi byte mang giá trị phân cấp (hierarchical):
+///   `value = base_category + (sub_index * N_bases)`
+/// Trong đó shape/relation có 8 bases, time có 5 bases.
+/// Base = danh tính ngữ nghĩa (Sphere, Causes, Fast...).
+/// Sub = biến thể cụ thể trong nhóm Unicode (~5400 mẫu).
+///
 /// Mọi Molecule đến từ `encoder::encode_codepoint()`.
 /// Không bao giờ tạo Molecule struct literal trong code production.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Molecule {
-    /// Chiều hình dạng (Shape byte)
-    pub shape: ShapeBase,
-    /// Chiều quan hệ (Relation byte)
-    pub relation: RelationBase,
+    /// Chiều hình dạng — raw hierarchical byte.
+    /// Dùng `shape_base()` để lấy ShapeBase category.
+    pub shape: u8,
+    /// Chiều quan hệ — raw hierarchical byte.
+    /// Dùng `relation_base()` để lấy RelationBase category.
+    pub relation: u8,
     /// Chiều cảm xúc (Valence + Arousal bytes)
     pub emotion: EmotionDim,
-    /// Chiều thời gian (Time byte)
-    pub time: TimeDim,
+    /// Chiều thời gian — raw hierarchical byte.
+    /// Dùng `time_base()` để lấy TimeDim category.
+    pub time: u8,
 }
 
 impl Molecule {
+    /// Extract base ShapeBase category từ hierarchical shape byte.
+    pub fn shape_base(&self) -> ShapeBase {
+        ShapeBase::from_hierarchical(self.shape).unwrap_or(ShapeBase::Sphere)
+    }
+
+    /// Extract base RelationBase category từ hierarchical relation byte.
+    pub fn relation_base(&self) -> RelationBase {
+        RelationBase::from_hierarchical(self.relation).unwrap_or(RelationBase::Member)
+    }
+
+    /// Extract base TimeDim category từ hierarchical time byte.
+    pub fn time_base(&self) -> TimeDim {
+        TimeDim::from_hierarchical(self.time).unwrap_or(TimeDim::Medium)
+    }
+
     /// Serialize → 5 bytes.
     pub fn to_bytes(self) -> [u8; 5] {
         [
-            self.shape.as_byte(),
-            self.relation.as_byte(),
+            self.shape,
+            self.relation,
             self.emotion.valence,
             self.emotion.arousal,
-            self.time.as_byte(),
+            self.time,
         ]
     }
 
     /// Deserialize từ 5 bytes.
+    ///
+    /// Chấp nhận bất kỳ byte > 0 cho shape/relation/time (hierarchical values).
     pub fn from_bytes(b: &[u8; 5]) -> Option<Self> {
+        // Validate: shape, relation, time phải > 0
+        if b[0] == 0 || b[1] == 0 || b[4] == 0 {
+            return None;
+        }
         Some(Self {
-            shape: ShapeBase::from_byte(b[0])?,
-            relation: RelationBase::from_byte(b[1])?,
+            shape: b[0],
+            relation: b[1],
             emotion: EmotionDim {
                 valence: b[2],
                 arousal: b[3],
             },
-            time: TimeDim::from_byte(b[4])?,
+            time: b[4],
         })
     }
 
@@ -233,10 +346,10 @@ impl Molecule {
     /// Dùng bởi tagged encoding để biết fields nào cần ghi.
     pub fn presence_mask(&self) -> u8 {
         let mut mask = 0u8;
-        if self.shape.as_byte() != TAGGED_DEFAULT_SHAPE {
+        if self.shape != TAGGED_DEFAULT_SHAPE {
             mask |= PRESENT_SHAPE;
         }
-        if self.relation.as_byte() != TAGGED_DEFAULT_RELATION {
+        if self.relation != TAGGED_DEFAULT_RELATION {
             mask |= PRESENT_RELATION;
         }
         if self.emotion.valence != TAGGED_DEFAULT_VALENCE {
@@ -245,7 +358,7 @@ impl Molecule {
         if self.emotion.arousal != TAGGED_DEFAULT_AROUSAL {
             mask |= PRESENT_AROUSAL;
         }
-        if self.time.as_byte() != TAGGED_DEFAULT_TIME {
+        if self.time != TAGGED_DEFAULT_TIME {
             mask |= PRESENT_TIME;
         }
         mask
@@ -263,10 +376,10 @@ impl Molecule {
         let mut out = Vec::with_capacity(1 + mask.count_ones() as usize);
         out.push(mask);
         if mask & PRESENT_SHAPE != 0 {
-            out.push(self.shape.as_byte());
+            out.push(self.shape);
         }
         if mask & PRESENT_RELATION != 0 {
-            out.push(self.relation.as_byte());
+            out.push(self.relation);
         }
         if mask & PRESENT_VALENCE != 0 {
             out.push(self.emotion.valence);
@@ -275,7 +388,7 @@ impl Molecule {
             out.push(self.emotion.arousal);
         }
         if mask & PRESENT_TIME != 0 {
-            out.push(self.time.as_byte());
+            out.push(self.time);
         }
         out
     }
@@ -283,6 +396,7 @@ impl Molecule {
     /// Deserialize từ tagged bytes.
     ///
     /// Returns `(Molecule, bytes_consumed)`. Absent fields → defaults.
+    /// Chấp nhận bất kỳ non-zero byte cho shape/relation/time (hierarchical values).
     pub fn from_tagged_bytes(b: &[u8]) -> Option<(Self, usize)> {
         if b.is_empty() {
             return None;
@@ -295,18 +409,24 @@ impl Molecule {
 
         let mut idx = 1usize;
         let shape = if mask & PRESENT_SHAPE != 0 {
-            let s = ShapeBase::from_byte(b[idx])?;
+            let s = b[idx];
+            if s == 0 {
+                return None;
+            }
             idx += 1;
             s
         } else {
-            ShapeBase::from_byte(TAGGED_DEFAULT_SHAPE)?
+            TAGGED_DEFAULT_SHAPE
         };
         let relation = if mask & PRESENT_RELATION != 0 {
-            let r = RelationBase::from_byte(b[idx])?;
+            let r = b[idx];
+            if r == 0 {
+                return None;
+            }
             idx += 1;
             r
         } else {
-            RelationBase::from_byte(TAGGED_DEFAULT_RELATION)?
+            TAGGED_DEFAULT_RELATION
         };
         let valence = if mask & PRESENT_VALENCE != 0 {
             let v = b[idx];
@@ -323,11 +443,14 @@ impl Molecule {
             TAGGED_DEFAULT_AROUSAL
         };
         let time = if mask & PRESENT_TIME != 0 {
-            let t = TimeDim::from_byte(b[idx])?;
+            let t = b[idx];
+            if t == 0 {
+                return None;
+            }
             idx += 1;
             t
         } else {
-            TimeDim::from_byte(TAGGED_DEFAULT_TIME)?
+            TAGGED_DEFAULT_TIME
         };
 
         Some((
@@ -347,6 +470,8 @@ impl Molecule {
     }
 
     /// Điểm tương đồng giữa 2 molecules ∈ [0, 5].
+    ///
+    /// So sánh exact raw bytes cho shape/relation/time.
     pub fn match_score(&self, other: &Self) -> u8 {
         let mut s = 0u8;
         if self.shape == other.shape {
@@ -441,7 +566,7 @@ impl MolecularChain {
 
     /// Similarity với chain khác ∈ [0.0, 1.0].
     ///
-    /// Dựa trên structural overlap (shape + relation match).
+    /// Dựa trên structural overlap (base category match cho shape + relation).
     /// O(n×m) — chains ngắn trong thực tế (1-10 molecules).
     pub fn similarity(&self, other: &Self) -> f32 {
         if self.is_empty() || other.is_empty() {
@@ -450,7 +575,9 @@ impl MolecularChain {
         let mut overlap = 0usize;
         for a in &self.0 {
             for b in &other.0 {
-                if a.shape == b.shape && a.relation == b.relation {
+                if a.shape_base() == b.shape_base()
+                    && a.relation_base() == b.relation_base()
+                {
                     overlap += 1;
                     break;
                 }
@@ -462,6 +589,7 @@ impl MolecularChain {
     /// Similarity đầy đủ — tính cả emotion distance.
     ///
     /// score = 0.3×shape + 0.2×relation + 0.5×emotion_proximity
+    /// Shape/relation so sánh base category (semantic similarity).
     pub fn similarity_full(&self, other: &Self) -> f32 {
         if self.is_empty() || other.is_empty() {
             return 0.0;
@@ -471,8 +599,12 @@ impl MolecularChain {
         for i in 0..n {
             let a = &self.0[i];
             let b = &other.0[i];
-            let shape_m = if a.shape == b.shape { 1.0f32 } else { 0.0 };
-            let rel_m = if a.relation == b.relation {
+            let shape_m = if a.shape_base() == b.shape_base() {
+                1.0f32
+            } else {
+                0.0
+            };
+            let rel_m = if a.relation_base() == b.relation_base() {
                 1.0f32
             } else {
                 0.0
@@ -544,20 +676,20 @@ impl MolecularChain {
 
     /// Encode f64 → 4-molecule chain.
     ///
-    /// Marker: shape=Sphere, relation=Equiv, time=Static (signals "number").
+    /// Marker: shape=Sphere(0x01), relation=Equiv(0x03), time=Static(0x01) (signals "number").
     /// 8 bytes of f64 stored in valence+arousal of 4 molecules (2 bytes each).
     pub fn from_number(n: f64) -> Self {
         let bits = n.to_bits().to_le_bytes();
         let mut mols = Vec::with_capacity(4);
         for chunk in bits.chunks(2) {
             mols.push(Molecule {
-                shape: ShapeBase::Sphere,
-                relation: RelationBase::Equiv,
+                shape: ShapeBase::Sphere.as_byte(),
+                relation: RelationBase::Equiv.as_byte(),
                 emotion: EmotionDim {
                     valence: chunk[0],
                     arousal: chunk[1],
                 },
-                time: TimeDim::Static,
+                time: TimeDim::Static.as_byte(),
             });
         }
         Self(mols)
@@ -566,16 +698,16 @@ impl MolecularChain {
     /// Decode chain → f64 if it's a numeric chain.
     ///
     /// Returns Some(f64) if chain is exactly 4 molecules with
-    /// shape=Sphere, relation=Equiv, time=Static (numeric marker).
+    /// shape base=Sphere, relation base=Equiv, time base=Static (numeric marker).
     pub fn to_number(&self) -> Option<f64> {
         if self.0.len() != 4 {
             return None;
         }
-        // Check all molecules have numeric marker
+        // Check all molecules have numeric marker (base categories)
         for m in &self.0 {
-            if m.shape != ShapeBase::Sphere
-                || m.relation != RelationBase::Equiv
-                || m.time != TimeDim::Static
+            if m.shape_base() != ShapeBase::Sphere
+                || m.relation_base() != RelationBase::Equiv
+                || m.time_base() != TimeDim::Static
             {
                 return None;
             }
@@ -607,13 +739,13 @@ mod tests {
     /// Production code dùng encoder::encode_codepoint().
     fn test_mol(shape: u8, relation: u8, v: u8, a: u8, t: u8) -> Molecule {
         Molecule {
-            shape: ShapeBase::from_byte(shape).unwrap(),
-            relation: RelationBase::from_byte(relation).unwrap(),
+            shape,
+            relation,
             emotion: EmotionDim {
                 valence: v,
                 arousal: a,
             },
-            time: TimeDim::from_byte(t).unwrap(),
+            time: t,
         }
     }
 
@@ -632,9 +764,24 @@ mod tests {
     }
 
     #[test]
-    fn molecule_invalid_shape() {
-        let bytes = [0x00, 0x01, 0x80, 0x80, 0x03]; // shape=0x00 invalid
-        assert!(Molecule::from_bytes(&bytes).is_none());
+    fn molecule_invalid_zero() {
+        // shape=0x00 invalid (must be > 0)
+        assert!(Molecule::from_bytes(&[0x00, 0x01, 0x80, 0x80, 0x03]).is_none());
+        // relation=0x00 invalid
+        assert!(Molecule::from_bytes(&[0x01, 0x00, 0x80, 0x80, 0x03]).is_none());
+        // time=0x00 invalid
+        assert!(Molecule::from_bytes(&[0x01, 0x01, 0x80, 0x80, 0x00]).is_none());
+    }
+
+    #[test]
+    fn molecule_hierarchical_roundtrip() {
+        // Hierarchical values: shape=0x09 (Sphere sub 1), relation=0x0E (Causes sub 1), time=0x09 (Fast sub 1)
+        let bytes = [0x09, 0x0E, 0xC0, 0xFF, 0x09];
+        let m = Molecule::from_bytes(&bytes).unwrap();
+        assert_eq!(m.shape_base(), ShapeBase::Sphere);
+        assert_eq!(m.relation_base(), RelationBase::Causes);
+        assert_eq!(m.time_base(), TimeDim::Fast);
+        assert_eq!(m.to_bytes(), bytes);
     }
 
     #[test]
@@ -760,6 +907,7 @@ mod tests {
 
     #[test]
     fn fuzz_all_valid_shapes_relations() {
+        // All base values
         for s in 0x01u8..=0x08 {
             for r in 0x01u8..=0x08 {
                 let bytes = [s, r, 0x7F, 0x80, 0x03u8];
@@ -768,6 +916,49 @@ mod tests {
                 assert_eq!(m.to_bytes()[1], r);
             }
         }
+        // Hierarchical values (sub > 0)
+        for s in [0x09u8, 0x11, 0x19, 0xF1] {
+            let bytes = [s, 0x01, 0x80, 0x80, 0x03];
+            let m = Molecule::from_bytes(&bytes).unwrap();
+            assert_eq!(m.shape, s);
+            assert_eq!(m.shape_base(), ShapeBase::Sphere);
+        }
+    }
+
+    #[test]
+    fn hierarchical_encoding_decode() {
+        // ShapeBase: base + sub*8
+        assert_eq!(ShapeBase::from_hierarchical(0x01), Some(ShapeBase::Sphere));
+        assert_eq!(ShapeBase::from_hierarchical(0x09), Some(ShapeBase::Sphere)); // sub=1
+        assert_eq!(ShapeBase::from_hierarchical(0x02), Some(ShapeBase::Capsule));
+        assert_eq!(ShapeBase::from_hierarchical(0x0A), Some(ShapeBase::Capsule)); // sub=1
+        assert_eq!(ShapeBase::sub_index(0x01), 0);
+        assert_eq!(ShapeBase::sub_index(0x09), 1);
+        assert_eq!(ShapeBase::sub_index(0xF1), 30);
+
+        // RelationBase: same scheme
+        assert_eq!(
+            RelationBase::from_hierarchical(0x06),
+            Some(RelationBase::Causes)
+        );
+        assert_eq!(
+            RelationBase::from_hierarchical(0x0E),
+            Some(RelationBase::Causes)
+        ); // sub=1
+
+        // TimeDim: base + sub*5
+        assert_eq!(TimeDim::from_hierarchical(0x01), Some(TimeDim::Static));
+        assert_eq!(TimeDim::from_hierarchical(0x06), Some(TimeDim::Static)); // sub=1
+        assert_eq!(TimeDim::from_hierarchical(0x04), Some(TimeDim::Fast));
+        assert_eq!(TimeDim::from_hierarchical(0x09), Some(TimeDim::Fast)); // sub=1
+        assert_eq!(TimeDim::sub_index(0x01), 0);
+        assert_eq!(TimeDim::sub_index(0x06), 1);
+
+        // Encode roundtrip
+        assert_eq!(ShapeBase::Sphere.encode(0), 0x01);
+        assert_eq!(ShapeBase::Sphere.encode(1), 0x09);
+        assert_eq!(RelationBase::Causes.encode(1), 0x0E);
+        assert_eq!(TimeDim::Fast.encode(1), 0x09);
     }
 
     // ── Tagged encoding ─────────────────────────────────────────────────

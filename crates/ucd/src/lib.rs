@@ -153,8 +153,8 @@ mod tests {
         let e = lookup(0x1F525).expect("🔥 FIRE phải có trong UCD");
         assert_eq!(e.cp, 0x1F525);
         assert_eq!(e.group, 0x03, "FIRE thuộc EMOTICON group");
-        assert_eq!(e.shape, 0x01, "FIRE shape = Sphere");
-        assert_eq!(e.relation, 0x01, "FIRE relation = Member");
+        assert_eq!((e.shape - 1) % 8 + 1, 0x01, "FIRE shape base = Sphere");
+        assert_eq!((e.relation - 1) % 8 + 1, 0x01, "FIRE relation base = Member");
         assert!(
             e.valence >= 0xC0,
             "FIRE valence phải cao, got 0x{:02X}",
@@ -165,7 +165,7 @@ mod tests {
             "FIRE arousal phải cao, got 0x{:02X}",
             e.arousal
         );
-        assert_eq!(e.time, 0x04, "FIRE time = Fast");
+        assert_eq!((e.time - 1) % 5 + 1, 0x04, "FIRE time base = Fast");
     }
 
     #[test]
@@ -174,9 +174,9 @@ mod tests {
             return;
         }
         let e = lookup(0x25CF).expect("● BLACK CIRCLE phải có");
-        assert_eq!(e.shape, 0x01, "● = Sphere = 0x01");
+        assert_eq!((e.shape - 1) % 8 + 1, 0x01, "● = Sphere base");
         assert_eq!(e.group, 0x01, "Geometric Shapes = SDF group");
-        assert_eq!(e.time, 0x01, "SDF shapes = Static");
+        assert_eq!((e.time - 1) % 5 + 1, 0x01, "SDF shapes = Static base");
     }
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
             return;
         }
         let e = lookup(0x25CB).expect("○ WHITE CIRCLE phải có");
-        assert_eq!(e.shape, 0x05, "○ = Torus = 0x05");
+        assert_eq!((e.shape - 1) % 8 + 1, 0x05, "○ = Torus base");
     }
 
     #[test]
@@ -194,8 +194,8 @@ mod tests {
             return;
         }
         let e = lookup(0x2208).expect("∈ ELEMENT OF phải có");
-        assert_eq!(e.relation, 0x01, "∈ = Member = 0x01");
-        assert_eq!(e.time, 0x01, "Math relation = Static");
+        assert_eq!((e.relation - 1) % 8 + 1, 0x01, "∈ = Member base");
+        assert_eq!((e.time - 1) % 5 + 1, 0x01, "Math relation = Static base");
     }
 
     #[test]
@@ -204,8 +204,8 @@ mod tests {
             return;
         }
         let e = lookup(0x2192).expect("→ RIGHTWARDS ARROW phải có");
-        assert_eq!(e.relation, 0x06, "→ = Causes = 0x06");
-        assert_eq!(e.time, 0x05, "Arrow = Instant");
+        assert_eq!((e.relation - 1) % 8 + 1, 0x06, "→ = Causes base");
+        assert_eq!((e.time - 1) % 5 + 1, 0x05, "Arrow = Instant base");
     }
 
     #[test]
@@ -217,7 +217,7 @@ mod tests {
         // Nhưng ∂ = U+2202 thuộc Math Operators
         let e = lookup(0x2202).expect("∂ PARTIAL DIFFERENTIAL phải có");
         assert_eq!(e.group, 0x02, "∂ thuộc MATH group");
-        assert_eq!(e.time, 0x01, "Math = Static");
+        assert_eq!((e.time - 1) % 5 + 1, 0x01, "Math = Static base");
     }
 
     #[test]
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(e.group, 0x03, "DROPLET = EMOTICON");
         assert!(e.valence >= 0x80, "DROPLET valence moderate+");
         assert!(e.arousal <= 0x80, "DROPLET arousal thấp (calm)");
-        assert_eq!(e.time, 0x02, "DROPLET = Slow");
+        assert_eq!((e.time - 1) % 5 + 1, 0x02, "DROPLET = Slow base");
     }
 
     #[test]
@@ -388,11 +388,14 @@ mod tests {
         if table_len() == 0 {
             return;
         }
-        assert_eq!(shape_of(0x1F525), 0x01);
-        assert_eq!(relation_of(0x1F525), 0x01);
+        let s = shape_of(0x1F525);
+        assert_eq!((s - 1) % 8 + 1, 0x01, "FIRE shape base = Sphere");
+        let r = relation_of(0x1F525);
+        assert_eq!((r - 1) % 8 + 1, 0x01, "FIRE relation base = Member");
         assert!(valence_of(0x1F525) >= 0xC0);
         assert!(arousal_of(0x1F525) >= 0xC0);
-        assert_eq!(time_of(0x1F525), 0x04);
+        let t = time_of(0x1F525);
+        assert_eq!((t - 1) % 5 + 1, 0x04, "FIRE time base = Fast");
         assert_eq!(group_of(0x1F525), 0x03);
     }
 

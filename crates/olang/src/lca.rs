@@ -119,11 +119,11 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         // Collect dimension values từ mọi chain tại vị trí mol_idx
         let shapes: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].shape.as_byte(), *w))
+            .map(|(c, w)| (c.0[mol_idx].shape, *w))
             .collect();
         let relations: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].relation.as_byte(), *w))
+            .map(|(c, w)| (c.0[mol_idx].relation, *w))
             .collect();
         let valences: Vec<(u8, u32)> = valid
             .iter()
@@ -135,14 +135,14 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
             .collect();
         let times: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].time.as_byte(), *w))
+            .map(|(c, w)| (c.0[mol_idx].time, *w))
             .collect();
 
-        let shape_byte = mode_or_wavg(&shapes, total_weight);
-        let relation_byte = mode_or_wavg(&relations, total_weight);
+        let shape_byte = mode_or_wavg_base(&shapes, total_weight, 8);
+        let relation_byte = mode_or_wavg_base(&relations, total_weight, 8);
         let valence = mode_or_wavg(&valences, total_weight);
         let arousal = mode_or_wavg(&arousals, total_weight);
-        let time_byte = mode_or_wavg(&times, total_weight);
+        let time_byte = mode_or_wavg_base(&times, total_weight, 5);
 
         // Per-dimension weighted variance: Σ w_i × (val_i - mean)² / Σ w_i
         let all_dims: [&[(u8, u32)]; 5] = [&shapes, &relations, &valences, &arousals, &times];
@@ -171,9 +171,21 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         }
 
         // Fallback nếu invalid byte (ví dụ shape=0x00)
-        let shape = ShapeBase::from_byte(shape_byte).unwrap_or(ShapeBase::Sphere);
-        let relation = RelationBase::from_byte(relation_byte).unwrap_or(RelationBase::Member);
-        let time = TimeDim::from_byte(time_byte).unwrap_or(TimeDim::Medium);
+        let shape = if shape_byte == 0 {
+            ShapeBase::Sphere.as_byte()
+        } else {
+            shape_byte
+        };
+        let relation = if relation_byte == 0 {
+            RelationBase::Member.as_byte()
+        } else {
+            relation_byte
+        };
+        let time = if time_byte == 0 {
+            TimeDim::Medium.as_byte()
+        } else {
+            time_byte
+        };
 
         result_mols.push(Molecule {
             shape,
@@ -219,6 +231,79 @@ fn extremity_single(valence: u8, arousal: u8) -> f32 {
 // ─────────────────────────────────────────────────────────────────────────────
 // Mode or Weighted Average
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Mode detection trên base categories (hierarchical encoding).
+///
+/// Group by base category (modulo n_bases) thay vì exact value.
+/// Nếu ≥ 60% weight cùng base → trả weighted avg CỦA NHÓM THẮNG.
+/// Nếu không → weighted average toàn bộ.
+fn mode_or_wavg_base(values: &[(u8, u32)], total: u32, n_bases: u8) -> u8 {
+    if values.is_empty() || total == 0 || n_bases == 0 {
+        return 0x80;
+    }
+
+    // Group weight by base category
+    let mut base_weights = [0u32; 9]; // max 8 bases (index 1..=8)
+    for &(val, w) in values {
+        if val == 0 {
+            continue;
+        }
+        let base = ((val - 1) % n_bases) + 1;
+        base_weights[base as usize] += w;
+    }
+
+    // Find dominant base
+    let mut best_base = 1u8;
+    let mut best_weight = 0u32;
+    for base in 1..=n_bases {
+        if base_weights[base as usize] > best_weight {
+            best_weight = base_weights[base as usize];
+            best_base = base;
+        }
+    }
+
+    let threshold = (total * 6).div_ceil(10);
+    if best_weight >= threshold {
+        // Check if ALL values in the winning base are identical → return exact value (idempotent).
+        let mut unanimous_val: Option<u8> = None;
+        let mut all_same = true;
+        for &(val, _w) in values {
+            if val == 0 {
+                continue;
+            }
+            let base = ((val - 1) % n_bases) + 1;
+            if base == best_base {
+                match unanimous_val {
+                    None => unanimous_val = Some(val),
+                    Some(prev) if prev != val => {
+                        all_same = false;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if all_same {
+            if let Some(v) = unanimous_val {
+                return v;
+            }
+        }
+        // Diverse within same base → return base byte (sub=0) for commutativity.
+        return best_base;
+    }
+
+    // No mode → weighted average of BASE values (not raw hierarchical values).
+    // Using raw hierarchical values for avg can produce non-commutative results.
+    let mut numerator: u64 = 0;
+    for &(val, w) in values {
+        if val == 0 {
+            continue;
+        }
+        let base = ((val - 1) % n_bases) + 1;
+        numerator += base as u64 * w as u64;
+    }
+    (numerator / total as u64) as u8
+}
 
 /// Mode nếu ≥ 60% weight; weighted average nếu không có mode.
 fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
@@ -499,7 +584,7 @@ mod tests {
 
         let result = lca_many(&[sphere1, sphere2, sphere3, capsule]);
         assert_eq!(
-            result.0[0].shape,
+            result.0[0].shape_base(),
             ShapeBase::Sphere,
             "Mode detection: 3 Sphere + 1 Capsule → Sphere"
         );

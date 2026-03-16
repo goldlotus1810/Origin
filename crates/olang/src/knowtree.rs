@@ -106,14 +106,14 @@ impl KnowTree {
         if word_hashes.len() >= 2 {
             for w in word_hashes.windows(2) {
                 self.store
-                    .store_edge(w[0], w[1], 0.6, RelationBase::Compose, 2);
+                    .store_edge(w[0], w[1], 0.6, RelationBase::Compose.as_byte(), 2);
             }
         }
 
         // Edge from sentence node to each word (Member relation)
         for &wh in word_hashes {
             self.store
-                .store_edge(hash, wh, 0.5, RelationBase::Member, 2);
+                .store_edge(hash, wh, 0.5, RelationBase::Member.as_byte(), 2);
         }
 
         hash
@@ -137,7 +137,7 @@ impl KnowTree {
         // Edges from concept to sources (DerivedFrom)
         for &src in sources {
             self.store
-                .store_edge(hash, src, 0.7, RelationBase::DerivedFrom, layer);
+                .store_edge(hash, src, 0.7, RelationBase::DerivedFrom.as_byte(), layer);
         }
 
         hash
@@ -202,7 +202,7 @@ impl KnowTree {
             // Sequential edge (sentence → next sentence)
             if prev_hash != 0 {
                 self.store
-                    .store_edge(prev_hash, hash, 0.4, RelationBase::Causes, 2);
+                    .store_edge(prev_hash, hash, 0.4, RelationBase::Causes.as_byte(), 2);
             }
             prev_hash = hash;
         }
@@ -298,13 +298,13 @@ mod tests {
 
     fn test_chain(v: u8) -> MolecularChain {
         MolecularChain::single(Molecule {
-            shape: ShapeBase::Sphere,
-            relation: RelationBase::Member,
+            shape: ShapeBase::Sphere.as_byte(),
+            relation: RelationBase::Member.as_byte(),
             emotion: EmotionDim {
                 valence: v,
                 arousal: 0x80,
             },
-            time: TimeDim::Medium,
+            time: TimeDim::Medium.as_byte(),
         })
     }
 
@@ -358,7 +358,7 @@ mod tests {
         let h1 = kt.store_sentence(&c1, None, &[], 1000);
         let _h2 = kt.store_sentence(&c2, None, &[], 1001);
         kt.store_mut()
-            .store_edge(h1, _h2, 0.8, RelationBase::Similar, 2);
+            .store_edge(h1, _h2, 0.8, RelationBase::Similar.as_byte(), 2);
 
         let result = kt.query(h1, 2, 1);
         assert!(result.is_some());
