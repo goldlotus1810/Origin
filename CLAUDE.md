@@ -135,6 +135,7 @@ ucd (build.rs đọc UnicodeData.txt → bảng tĩnh lúc compile)
      ├→ silk (SilkGraph, Hebbian learning, EmotionTag per edge, WalkWeighted)
      │   └→ context (EmotionTag V/A/D/I, ConversationCurve, Intent, Modality Fusion)
      │       └→ agents (ContentEncoder, LearningLoop, BookReader, SecurityGate, LeoAI, Chief, Worker)
+     │           ├→ hal (Hardware Abstraction Layer: arch detect, platform probe, security scan)
      │           └→ memory (ShortTermMemory, DreamCycle, Proposals, AAM)
      │               └→ runtime (HomeRuntime — entry point, ○{} Parser)
      │                   └→ wasm (WebAssembly bindings cho browser)
@@ -338,6 +339,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 | **agents** | Encoder, Learning, Gate, Skill, Instinct, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `instinct.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
 | **memory** | STM, Dream, Proposals, AAM | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
 | **runtime** | HomeRuntime entry point, ○{} Parser | `origin.rs`, `parser.rs`, `response_template.rs` | `cargo test -p runtime` |
+| **hal** | Hardware Abstraction Layer: arch detect, platform probe, security scan | `arch.rs`, `platform.rs`, `probe.rs`, `security.rs` | `cargo test -p hal` |
 | **isl** | Inter-system messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs`, `queue.rs` | `cargo test -p isl` |
 | **vsdf** | 18 SDF + ∇f + FFR Fibonacci render | `sdf.rs`, `ffr.rs`, `physics.rs`, `vector.rs`, `fit.rs` | `cargo test -p vsdf` |
 | **wasm** | Browser WebAssembly bindings | `lib.rs` | `cargo test -p homeos-wasm` |
@@ -357,7 +359,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (932 tests)
+# Test toàn bộ (980 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)

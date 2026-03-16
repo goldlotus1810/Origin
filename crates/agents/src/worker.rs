@@ -458,6 +458,10 @@ pub struct DriverProbeResult {
 ///
 /// Mỗi Worker type khai báo hardware cần → probe → report lên Chief.
 /// Chief tổng hợp → SystemManifest biết thiết bị nào đang sống/chết.
+///
+/// Hai chế độ:
+///   1. Software probe (hiện tại): từ internal state
+///   2. HAL probe: từ HalPlatform trait → phần cứng thật
 impl Worker {
     /// Probe phần cứng — Worker tự kiểm tra device mình quản lý.
     ///
@@ -523,6 +527,147 @@ impl Worker {
         WorkerReport {
             frame,
             emotion: EmotionTag::NEUTRAL,
+        }
+    }
+
+    /// HAL probe — probe qua HalPlatform trait (phần cứng thật hoặc mock).
+    ///
+    /// Trả DriverProbeResult với capabilities từ platform HAL thay vì hardcode.
+    pub fn probe_with_hal(&self, platform: &dyn hal::HalPlatform, ts: i64) -> DriverProbeResult {
+        let devices = platform.scan_devices();
+
+        let device_id = alloc::format!("{}@{}", self.kind_name(), self.addr);
+
+        // Map platform capabilities → Worker capabilities
+        let capabilities = match self.kind {
+            WorkerKind::Sensor => {
+                let mut caps = Vec::new();
+                if platform.has_capability(hal::PlatformCapability::SensorRead) {
+                    caps.push(SensorUnit::Temperature as u8);
+                    caps.push(SensorUnit::Humidity as u8);
+                }
+                if platform.has_capability(hal::PlatformCapability::I2c) {
+                    caps.push(SensorUnit::Pressure as u8);
+                }
+                if platform.has_capability(hal::PlatformCapability::Gpio) {
+                    caps.push(SensorUnit::Motion as u8);
+                }
+                caps
+            }
+            WorkerKind::Actuator => {
+                let mut caps = Vec::new();
+                if platform.has_capability(hal::PlatformCapability::ActuatorCtrl) {
+                    caps.push(0x01); // on/off
+                    caps.push(0x02); // dim
+                }
+                if platform.has_capability(hal::PlatformCapability::Gpio) {
+                    caps.push(0x03); // gpio toggle
+                }
+                caps
+            }
+            WorkerKind::Camera => {
+                let mut caps = Vec::new();
+                if platform.has_capability(hal::PlatformCapability::Camera) {
+                    caps.push(0x01); // video
+                }
+                caps
+            }
+            WorkerKind::Network => {
+                let mut caps = Vec::new();
+                if platform.has_capability(hal::PlatformCapability::NetworkMon) {
+                    caps.push(0x01); // monitor
+                }
+                if platform.has_capability(hal::PlatformCapability::Wifi) {
+                    caps.push(0x02); // wifi
+                }
+                if platform.has_capability(hal::PlatformCapability::Bluetooth) {
+                    caps.push(0x03); // bluetooth
+                }
+                caps
+            }
+            WorkerKind::Generic => Vec::new(),
+        };
+
+        // Status: check if relevant devices exist and are ready
+        let status = self.check_device_status(&devices);
+
+        DriverProbeResult {
+            kind: self.kind,
+            status,
+            device_id,
+            capabilities,
+            probed_at: ts,
+        }
+    }
+
+    /// HAL probe report → ISLFrame (gửi lên Chief).
+    pub fn probe_report_hal(&self, platform: &dyn hal::HalPlatform, ts: i64) -> WorkerReport {
+        let probe = self.probe_with_hal(platform, ts);
+        let status_byte = match probe.status {
+            HardwareStatus::Ready       => 0x01,
+            HardwareStatus::Unreachable => 0x02,
+            HardwareStatus::Error(c)    => 0x80 | c,
+            HardwareStatus::Unknown     => 0x00,
+        };
+
+        let mut body = Vec::new();
+        body.push(self.kind as u8);
+        body.push(status_byte);
+        body.push(probe.capabilities.len() as u8);
+        body.extend_from_slice(&probe.capabilities);
+
+        // Thêm arch byte cho Chief biết platform
+        let arch = platform.architecture();
+        body.push(arch as u8);
+
+        let msg = ISLMessage::new(self.addr, self.chief, MsgType::Ack);
+        let frame = ISLFrame { header: msg, body };
+
+        WorkerReport {
+            frame,
+            emotion: EmotionTag::NEUTRAL,
+        }
+    }
+
+    /// Tên loại Worker.
+    fn kind_name(&self) -> &'static str {
+        match self.kind {
+            WorkerKind::Sensor   => "sensor",
+            WorkerKind::Actuator => "actuator",
+            WorkerKind::Camera   => "camera",
+            WorkerKind::Network  => "network",
+            WorkerKind::Generic  => "generic",
+        }
+    }
+
+    /// Kiểm tra status từ danh sách devices của platform.
+    fn check_device_status(&self, devices: &[hal::DeviceDescriptor]) -> HardwareStatus {
+        let target_type = match self.kind {
+            WorkerKind::Sensor   => hal::DeviceType::Sensor,
+            WorkerKind::Actuator => hal::DeviceType::Actuator,
+            WorkerKind::Camera   => hal::DeviceType::Camera,
+            WorkerKind::Network  => hal::DeviceType::Network,
+            WorkerKind::Generic  => return HardwareStatus::Unknown,
+        };
+
+        let relevant: Vec<&hal::DeviceDescriptor> = devices.iter()
+            .filter(|d| d.device_type == target_type)
+            .collect();
+
+        if relevant.is_empty() {
+            return HardwareStatus::Unreachable;
+        }
+
+        // Nếu tất cả error → Error, nếu có ít nhất 1 Ready → Ready
+        let any_ready = relevant.iter().any(|d| d.status == hal::DeviceStatus::Ready);
+        let any_error = relevant.iter().any(|d| d.status == hal::DeviceStatus::Error);
+
+        if any_ready {
+            HardwareStatus::Ready
+        } else if any_error {
+            HardwareStatus::Error(0x01)
+        } else {
+            HardwareStatus::Unknown
         }
     }
 }
@@ -844,5 +989,73 @@ mod tests {
         let w = Worker::new(waddr(), chief(), WorkerKind::Network);
         let probe = w.probe_hardware(1000);
         assert_eq!(probe.capabilities.len(), 2, "Network: monitor + firewall");
+    }
+
+    // ── HAL probe ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn hal_probe_sensor_on_esp32() {
+        let platform = hal::MockPlatform::esp32();
+        let w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        let probe = w.probe_with_hal(&platform, 1000);
+        assert_eq!(probe.status, HardwareStatus::Ready, "ESP32 có sensor");
+        assert!(!probe.capabilities.is_empty(), "ESP32 sensor caps từ HAL");
+        assert!(probe.device_id.contains("sensor"));
+    }
+
+    #[test]
+    fn hal_probe_camera_on_smartphone() {
+        let platform = hal::MockPlatform::smartphone();
+        let w = Worker::new(waddr(), chief(), WorkerKind::Camera);
+        let probe = w.probe_with_hal(&platform, 1000);
+        assert_eq!(probe.status, HardwareStatus::Ready, "Phone có camera");
+        assert!(!probe.capabilities.is_empty(), "Camera cap từ HAL");
+    }
+
+    #[test]
+    fn hal_probe_camera_on_esp32_unreachable() {
+        let platform = hal::MockPlatform::esp32();
+        let w = Worker::new(waddr(), chief(), WorkerKind::Camera);
+        let probe = w.probe_with_hal(&platform, 1000);
+        // ESP32 không có camera device → Unreachable
+        assert_eq!(probe.status, HardwareStatus::Unreachable);
+    }
+
+    #[test]
+    fn hal_probe_network_on_pc() {
+        let platform = hal::MockPlatform::pc();
+        let w = Worker::new(waddr(), chief(), WorkerKind::Network);
+        let probe = w.probe_with_hal(&platform, 1000);
+        assert_eq!(probe.status, HardwareStatus::Ready);
+        assert!(!probe.capabilities.is_empty());
+    }
+
+    #[test]
+    fn hal_probe_actuator_on_rpi() {
+        let platform = hal::MockPlatform::raspberry_pi();
+        let w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let probe = w.probe_with_hal(&platform, 1000);
+        // RPi không có actuator device trong mock → Unreachable
+        // Nhưng có GPIO capability
+        assert!(probe.capabilities.len() > 0 || probe.status == HardwareStatus::Unreachable);
+    }
+
+    #[test]
+    fn hal_probe_report_contains_arch() {
+        let platform = hal::MockPlatform::esp32();
+        let w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        let report = w.probe_report_hal(&platform, 1000);
+        // Body cuối = arch byte
+        let body = &report.frame.body;
+        let arch_byte = body[body.len() - 1];
+        assert_eq!(arch_byte, hal::Architecture::Xtensa as u8);
+    }
+
+    #[test]
+    fn hal_probe_riscv_sensor() {
+        let platform = hal::MockPlatform::riscv_embedded();
+        let w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
+        let probe = w.probe_with_hal(&platform, 1000);
+        assert_eq!(probe.status, HardwareStatus::Ready, "RISC-V có sensor");
     }
 }
