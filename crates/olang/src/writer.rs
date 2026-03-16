@@ -100,6 +100,14 @@ impl OlangWriter {
         }
     }
 
+    /// Tạo writer rỗng KHÔNG có header — dùng khi append vào file đã có header.
+    pub fn new_append() -> Self {
+        Self {
+            buf: Vec::new(),
+            write_count: 0,
+        }
+    }
+
     fn write_header(&mut self, created_at: i64) {
         self.buf.extend_from_slice(&MAGIC);
         self.buf.push(VERSION);

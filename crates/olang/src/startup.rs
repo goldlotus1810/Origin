@@ -23,6 +23,19 @@ use crate::registry::Registry;
 // BootResult
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Edge đã load từ file — để restore Silk graph.
+#[derive(Debug, Clone)]
+pub struct BootEdge {
+    /// FNV-1a hash of source chain
+    pub from_hash: u64,
+    /// FNV-1a hash of target chain
+    pub to_hash: u64,
+    /// Edge type byte (SilkEdgeKind)
+    pub edge_type: u8,
+    /// Timestamp khi tạo
+    pub timestamp: i64,
+}
+
 /// Kết quả boot.
 #[derive(Debug)]
 #[allow(missing_docs)]
@@ -34,6 +47,8 @@ pub struct BootResult {
     pub errors: Vec<String>,
     /// SystemManifest — hệ thống biết mình đang có gì sau boot.
     pub manifest: SystemManifest,
+    /// Silk edges đã load từ file — restore vào SilkGraph.
+    pub edges: Vec<BootEdge>,
 }
 
 /// Stage boot đã đạt được.
@@ -86,10 +101,12 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     }
 
     // Stage 4: Load từ file
+    let mut edges = Vec::new();
     if let Some(bytes) = file_bytes {
         if !bytes.is_empty() {
             match load_from_bytes(bytes, &mut registry) {
-                Ok(()) => {
+                Ok(loaded_edges) => {
+                    edges = loaded_edges;
                     stage = BootStage::Loaded;
                 }
                 Err(e) => {
@@ -124,6 +141,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         stage,
         errors,
         manifest,
+        edges,
     }
 }
 
@@ -174,7 +192,7 @@ fn seed_axioms(registry: &mut Registry) {
 // Load từ file bytes
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<(), ParseError> {
+fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<Vec<BootEdge>, ParseError> {
     let reader = OlangReader::new(bytes)?;
     let parsed = reader.parse_all()?;
 
@@ -197,7 +215,19 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<(), ParseErr
         }
     }
 
-    Ok(())
+    // Collect edges → trả về để restore Silk graph
+    let edges: Vec<BootEdge> = parsed
+        .edges
+        .iter()
+        .map(|e| BootEdge {
+            from_hash: e.from_hash,
+            to_hash: e.to_hash,
+            edge_type: e.edge_type,
+            timestamp: e.timestamp,
+        })
+        .collect();
+
+    Ok(edges)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

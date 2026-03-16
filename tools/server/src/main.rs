@@ -99,7 +99,7 @@ fn main() {
 
     // Final persist: serialize remaining learned data
     let final_bytes = rt.serialize_learned(now_ns());
-    if final_bytes.len() > olang::writer::HEADER_SIZE {
+    if !final_bytes.is_empty() {
         if let Err(e) = append_to_file(OLANG_FILE, &final_bytes) {
             eprintln!("[persist] Error writing final state: {}", e);
         } else {

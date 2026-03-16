@@ -61,6 +61,7 @@ static GROUPS: &[Group] = &[
         byte: 0x03, // EMOTICON
         _name: "EMOTICON",
         ranges: &[
+            (0x23F0, 0x23FF),   // Clocks + misc technical (⏰⏱⏲⏳)
             (0x2600, 0x26FF),   // Miscellaneous Symbols
             (0x1F300, 0x1F5FF), // Misc Symbols and Pictographs
             (0x1F600, 0x1F64F), // Emoticons (faces)
@@ -289,6 +290,9 @@ fn valence_of(cp: u32, name: &str) -> u8 {
     if name.contains("STAR") || name.contains("SPARKL") {
         return 0xE0;
     }
+    if name.contains("SUN WITH FACE") {
+        return 0xE8;
+    }
     if name.contains("SUN") || name.contains("BRIGHT") {
         return 0xE0;
     }
@@ -312,6 +316,64 @@ fn valence_of(cp: u32, name: &str) -> u8 {
     }
     if name.contains("CROSS") {
         return 0x10;
+    }
+    // ── Codepoints hay collide vào default 0x80 ────────────────────────
+    if name.contains("LIGHT BULB") || name.contains("ELECTRIC") {
+        return 0xB0;
+    }
+    if name.contains("HIGH VOLTAGE") || name.contains("LIGHTNING") {
+        return 0xA0;
+    }
+    if name.contains("BLOWING") || name.contains("WIND") {
+        return 0x90;
+    }
+    if name.contains("SPEAKER") || name.contains("SOUND") {
+        return 0x98;
+    }
+    if name.contains("BANDAGE") || name.contains("INJURED") {
+        return 0x18;
+    }
+    if name.contains("FORK") || name.contains("KNIFE") {
+        return 0x88;
+    }
+    if name.contains("POLICE") || name.contains("REVOLVING") {
+        return 0x38;
+    }
+    if name.contains("GARDEN") {
+        return 0xBC;
+    }
+    if name.contains("HOUSE") || name.contains("HOME") || name.contains("BUILDING") {
+        return 0xA8;
+    }
+    if name.contains("TREE") || name.contains("DECIDUOUS") {
+        return 0xA4;
+    }
+    if name.contains("WAVE") {
+        return 0xB8;
+    }
+    if name.contains("GLOBE") || name.contains("EARTH") {
+        return 0x94;
+    }
+    if name.contains("SILHOUETTE") || name.contains("BUST") {
+        return 0x78;
+    }
+    if name.contains("EYE") {
+        return 0x84;
+    }
+    if name.contains("PERMANENT") || name.contains("INFINITY") {
+        return 0x7C;
+    }
+    if name.contains("OCTAGONAL") {
+        return 0x28;
+    }
+    if name.contains("ALARM") && name.contains("CLOCK") {
+        return 0x48;
+    }
+    if name.contains("OPEN LOCK") {
+        return 0x8C;
+    }
+    if name.contains("LOCK") {
+        return 0x58;
     }
     // Math → neutral
     if (0x2200..=0x22FF).contains(&cp) {
@@ -374,13 +436,83 @@ fn arousal_of(cp: u32, name: &str) -> u8 {
         return 0x40;
     }
     if name.contains("BRAIN") {
-        return 0x80;
+        return 0x60;
     }
     if name.contains("RUNNER") {
         return 0xD0;
     }
     if name.contains("STOP") {
         return 0x20;
+    }
+    // ── Codepoints hay collide vào default 0x80 ────────────────────────
+    if name.contains("LIGHT BULB") || name.contains("ELECTRIC") {
+        return 0x60;
+    }
+    if name.contains("HIGH VOLTAGE") {
+        return 0xF0;
+    }
+    if name.contains("BLOWING") || name.contains("WIND") {
+        return 0x58;
+    }
+    if name.contains("SPEAKER") || name.contains("SOUND") {
+        return 0xA0;
+    }
+    if name.contains("BANDAGE") || name.contains("INJURED") {
+        return 0x48;
+    }
+    if name.contains("FORK") || name.contains("KNIFE") {
+        return 0x50;
+    }
+    if name.contains("POLICE") || name.contains("REVOLVING") {
+        return 0xC8;
+    }
+    if name.contains("GARDEN") {
+        return 0x44;
+    }
+    if name.contains("HOUSE") || name.contains("HOME") || name.contains("BUILDING") {
+        return 0x28;
+    }
+    if name.contains("TREE") || name.contains("DECIDUOUS") {
+        return 0x30;
+    }
+    if name.contains("WAVE") {
+        return 0xA8;
+    }
+    if name.contains("GLOBE") || name.contains("EARTH") {
+        return 0x48;
+    }
+    if name.contains("SILHOUETTE") || name.contains("BUST") {
+        return 0x40;
+    }
+    if name.contains("EYE") {
+        return 0x90;
+    }
+    if name.contains("PERMANENT") || name.contains("INFINITY") {
+        return 0x18;
+    }
+    if name.contains("OCTAGONAL") {
+        return 0xB0;
+    }
+    if name.contains("ALARM") && name.contains("CLOCK") {
+        return 0xD8;
+    }
+    if name.contains("OPEN LOCK") {
+        return 0x48;
+    }
+    if name.contains("LOCK") {
+        return 0x28;
+    }
+    if name.contains("SUN WITH FACE") {
+        return 0x90;
+    }
+    if name.contains("SPARKL") {
+        return 0xB8;
+    }
+    if name.contains("HEART") {
+        return 0xC0;
+    }
+    if name.contains("CHECK") {
+        return 0x58;
     }
     // Math → static (arousal near 0)
     if (0x2200..=0x22FF).contains(&cp) {
@@ -461,6 +593,36 @@ fn time_of(cp: u32, name: &str) -> u8 {
     if name.contains("CLOCK") {
         return 0x05;
     } // Instant
+    if name.contains("HIGH VOLTAGE") {
+        return 0x05;
+    } // Instant — lightning
+    if name.contains("HOUSE") || name.contains("HOME") || name.contains("BUILDING") {
+        return 0x01;
+    } // Static — permanent structure
+    if name.contains("LOCK") {
+        return 0x01;
+    } // Static — security
+    if name.contains("TREE") || name.contains("DECIDUOUS") {
+        return 0x02;
+    } // Slow — growth
+    if name.contains("GLOBE") || name.contains("EARTH") {
+        return 0x01;
+    } // Static — planet
+    if name.contains("PERMANENT") || name.contains("INFINITY") {
+        return 0x01;
+    } // Static — eternal
+    if name.contains("EYE") {
+        return 0x04;
+    } // Fast — quick perception
+    if name.contains("WAVE") {
+        return 0x04;
+    } // Fast — dynamic
+    if name.contains("POLICE") || name.contains("REVOLVING") {
+        return 0x04;
+    } // Fast — urgent
+    if name.contains("SPEAKER") || name.contains("SOUND") {
+        return 0x04;
+    } // Fast — transient
       // General EMOTICON = medium (thực thể có vận động bình thường)
     if (0x2600..=0x26FF).contains(&cp) {
         return 0x03;

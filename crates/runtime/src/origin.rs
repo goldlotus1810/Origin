@@ -116,11 +116,23 @@ impl HomeRuntime {
         Self::with_file(session_id, None)
     }
 
-    /// Boot với file bytes — load registry từ origin.olang.
+    /// Boot với file bytes — load registry + Silk edges từ origin.olang.
     pub fn with_file(session_id: u64, file_bytes: Option<&[u8]>) -> Self {
         let boot_result = boot(file_bytes);
+        let mut learning = LearningLoop::new(session_id);
+
+        // Restore Silk edges từ file → SilkGraph
+        for edge in &boot_result.edges {
+            learning.graph_mut().restore_edge(
+                edge.from_hash,
+                edge.to_hash,
+                edge.edge_type,
+                edge.timestamp,
+            );
+        }
+
         Self {
-            learning: LearningLoop::new(session_id),
+            learning,
             parser: OlangParser::new(),
             dream: DreamCycle::new(DreamConfig::default()),
             alias_to_cp: build_alias_map(file_bytes),
@@ -769,11 +781,11 @@ impl HomeRuntime {
     ///
     /// Caller chịu trách nhiệm ghi bytes vào file:
     ///   `std::fs::OpenOptions::new().append(true).open("origin.olang")?.write_all(&bytes)?`
-    pub fn serialize_learned(&self, ts: i64) -> alloc::vec::Vec<u8> {
+    pub fn serialize_learned(&self, _ts: i64) -> alloc::vec::Vec<u8> {
         use olang::writer::OlangWriter;
 
-        // Bắt đầu từ rỗng — chỉ serialize phần mới (delta)
-        let mut writer = OlangWriter::new(ts);
+        // Append mode — không ghi header (file đã có header)
+        let mut writer = OlangWriter::new_append();
 
         // 1. Silk EdgeAssoc edges đủ mạnh (weight >= 0.3 → đáng lưu)
         let graph = self.learning.graph();
@@ -1790,10 +1802,18 @@ mod integration_tests {
         }
 
         let saveable = rt.saveable_edges();
-        let bytes = rt.serialize_learned(30000);
+        let append_bytes = rt.serialize_learned(30000);
+
+        // serialize_learned() returns append-only bytes (no header).
+        // Wrap with header to parse standalone.
+        let mut full_bytes = alloc::vec::Vec::new();
+        full_bytes.extend_from_slice(&olang::writer::MAGIC);
+        full_bytes.push(olang::writer::VERSION_V03);
+        full_bytes.extend_from_slice(&30000i64.to_le_bytes());
+        full_bytes.extend_from_slice(&append_bytes);
 
         // Parse bytes back
-        let reader = OlangReader::new(&bytes).expect("parse header");
+        let reader = OlangReader::new(&full_bytes).expect("parse header");
         let pf = reader.parse_all().expect("parse all");
 
         assert_eq!(pf.created_at, 30000, "Timestamp roundtrip");

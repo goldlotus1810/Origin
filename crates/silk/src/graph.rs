@@ -116,6 +116,33 @@ impl SilkGraph {
         }
     }
 
+    // ── Restore từ file ────────────────────────────────────────────────────
+
+    /// Restore edge từ file — dùng khi boot từ origin.olang.
+    ///
+    /// Không dùng Hebbian strengthen — giữ nguyên weight ban đầu.
+    /// Edge đã có thì skip (idempotent).
+    pub fn restore_edge(&mut self, from: u64, to: u64, edge_type: u8, ts: i64) {
+        use crate::edge::ModalitySource;
+        let kind = EdgeKind::from_byte(edge_type).unwrap_or(EdgeKind::Assoc);
+        if self.find_edge(from, to, kind).is_some() {
+            return; // đã có — skip
+        }
+        let edge = SilkEdge {
+            from_hash: from,
+            to_hash: to,
+            kind,
+            weight: 0.30, // minimum saveable weight
+            emotion: EmotionTag::NEUTRAL,
+            fire_count: 1,
+            created_at: ts,
+            updated_at: ts,
+            source: ModalitySource::Text,
+            confidence: 0.5,
+        };
+        self.insert_sorted(edge);
+    }
+
     // ── Decay ────────────────────────────────────────────────────────────────
 
     /// Decay tất cả associative edges theo thời gian đã trôi qua.
