@@ -1699,6 +1699,46 @@ impl HomeRuntime {
         self.learning.graph().edges_from(hash).len()
     }
 
+    /// Silk node count (distinct hashes).
+    pub fn silk_node_count(&self) -> usize {
+        self.learning.graph().node_count()
+    }
+
+    /// Silk associative edge count.
+    pub fn silk_assoc_count(&self) -> usize {
+        self.learning.graph().assoc_count()
+    }
+
+    /// Silk structural edge count.
+    pub fn silk_structural_count(&self) -> usize {
+        self.learning.graph().structural_count()
+    }
+
+    /// ConversationCurve valence now.
+    pub fn curve_valence(&self) -> f32 {
+        self.learning.context().curve().current_v()
+    }
+
+    /// ConversationCurve first derivative.
+    pub fn curve_d1(&self) -> f32 {
+        self.learning.context().curve().d1_now()
+    }
+
+    /// ConversationCurve second derivative.
+    pub fn curve_d2(&self) -> f32 {
+        self.learning.context().curve().d2_now()
+    }
+
+    /// ConversationCurve window variance.
+    pub fn curve_variance(&self) -> f32 {
+        self.learning.context().curve().window_variance()
+    }
+
+    /// ConversationCurve instability flag.
+    pub fn curve_unstable(&self) -> bool {
+        self.learning.context().curve().is_unstable()
+    }
+
     /// Dream cycles completed.
     pub fn dream_cycles(&self) -> u64 {
         self.dream_cycles
