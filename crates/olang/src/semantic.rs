@@ -523,9 +523,9 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             }
         }
 
-        Expr::Int(_) => {
-            // Push empty chain as placeholder (ints used mainly for loop count)
-            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+        Expr::Int(n) => {
+            // Push numeric chain (Phase 1: Math Runtime)
+            ctx.emit(Op::PushNum(*n as f64));
         }
 
         Expr::Compose(a, b) => {
@@ -1014,5 +1014,27 @@ mod tests {
         let stmts = parse("explain fire;").unwrap();
         let prog = lower(&stmts);
         assert!(prog.ops.contains(&Op::Explain));
+    }
+
+    // ── Phase 1: Math Runtime — numeric lowering ────────────────────────────
+
+    #[test]
+    fn lower_int_to_pushnum() {
+        let stmts = parse("42").unwrap();
+        let prog = lower(&stmts);
+        assert!(
+            prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if (*n - 42.0).abs() < f64::EPSILON)),
+            "Int literal should lower to PushNum(42.0)"
+        );
+    }
+
+    #[test]
+    fn lower_addition_computes() {
+        // "1 + 2" → PushNum(1), PushNum(2), Call(__hyp_add)
+        let stmts = parse("1 + 2").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if (*n - 1.0).abs() < f64::EPSILON)));
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if (*n - 2.0).abs() < f64::EPSILON)));
+        assert!(prog.ops.contains(&Op::Call("__hyp_add".into())));
     }
 }

@@ -351,6 +351,60 @@ impl MolecularChain {
     pub fn push(&mut self, m: Molecule) {
         self.0.push(m);
     }
+
+    // ── Numeric encoding ─────────────────────────────────────────────────
+
+    /// Encode f64 → 4-molecule chain.
+    ///
+    /// Marker: shape=Sphere, relation=Equiv, time=Static (signals "number").
+    /// 8 bytes of f64 stored in valence+arousal of 4 molecules (2 bytes each).
+    pub fn from_number(n: f64) -> Self {
+        let bits = n.to_bits().to_le_bytes();
+        let mut mols = Vec::with_capacity(4);
+        for chunk in bits.chunks(2) {
+            mols.push(Molecule {
+                shape: ShapeBase::Sphere,
+                relation: RelationBase::Equiv,
+                emotion: EmotionDim {
+                    valence: chunk[0],
+                    arousal: chunk[1],
+                },
+                time: TimeDim::Static,
+            });
+        }
+        Self(mols)
+    }
+
+    /// Decode chain → f64 if it's a numeric chain.
+    ///
+    /// Returns Some(f64) if chain is exactly 4 molecules with
+    /// shape=Sphere, relation=Equiv, time=Static (numeric marker).
+    pub fn to_number(&self) -> Option<f64> {
+        if self.0.len() != 4 {
+            return None;
+        }
+        // Check all molecules have numeric marker
+        for m in &self.0 {
+            if m.shape != ShapeBase::Sphere
+                || m.relation != RelationBase::Equiv
+                || m.time != TimeDim::Static
+            {
+                return None;
+            }
+        }
+        // Extract 8 bytes
+        let mut bits = [0u8; 8];
+        for (i, m) in self.0.iter().enumerate() {
+            bits[i * 2] = m.emotion.valence;
+            bits[i * 2 + 1] = m.emotion.arousal;
+        }
+        Some(f64::from_bits(u64::from_le_bytes(bits)))
+    }
+
+    /// Check if this chain represents a number.
+    pub fn is_number(&self) -> bool {
+        self.to_number().is_some()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -462,6 +516,58 @@ mod tests {
         let c3 = c1.concat(&c2);
         assert_eq!(c3.len(), 2);
         assert_eq!(c3.to_bytes().len(), 10);
+    }
+
+    // ── Numeric encoding ──────────────────────────────────────────────────
+
+    #[test]
+    fn numeric_roundtrip_integer() {
+        let chain = MolecularChain::from_number(42.0);
+        assert_eq!(chain.len(), 4);
+        assert!(chain.is_number());
+        let n = chain.to_number().unwrap();
+        assert!((n - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn numeric_roundtrip_float() {
+        let chain = MolecularChain::from_number(3.14159);
+        let n = chain.to_number().unwrap();
+        assert!((n - 3.14159).abs() < 1e-10);
+    }
+
+    #[test]
+    fn numeric_roundtrip_negative() {
+        let chain = MolecularChain::from_number(-7.5);
+        let n = chain.to_number().unwrap();
+        assert!((n - (-7.5)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn numeric_roundtrip_zero() {
+        let chain = MolecularChain::from_number(0.0);
+        let n = chain.to_number().unwrap();
+        assert!((n - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn numeric_roundtrip_large() {
+        let chain = MolecularChain::from_number(1e15);
+        let n = chain.to_number().unwrap();
+        assert!((n - 1e15).abs() < 1.0);
+    }
+
+    #[test]
+    fn numeric_non_numeric_chain() {
+        // Regular chain is NOT numeric
+        let c = MolecularChain::single(test_mol(0x02, 0x06, 0x30, 0x20, 0x02));
+        assert!(!c.is_number());
+        assert!(c.to_number().is_none());
+    }
+
+    #[test]
+    fn numeric_empty_not_number() {
+        assert!(!MolecularChain::empty().is_number());
     }
 
     #[test]

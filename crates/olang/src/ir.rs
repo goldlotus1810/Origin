@@ -20,6 +20,7 @@
 //! HALT               → dừng
 //! DREAM              → trigger dream cycle
 //! STATS              → emit system stats
+//! PUSH_NUM f64       → push numeric chain (4-molecule encoding)
 //! FUSE               → pop 1, check chain for infinite loops (QT2: ∞-1)
 //! TRACE              → toggle execution tracing
 //! INSPECT            → pop 1, emit chain structure info
@@ -81,6 +82,8 @@ pub enum Op {
     Store(String),
     /// Push biến cục bộ lên stack
     LoadLocal(String),
+    /// Push numeric literal → encode as 4-molecule chain
+    PushNum(f64),
     /// QT2: FUSE — pop 1 chain, kiểm tra không có vòng lặp vô hạn trong DNA.
     /// Nếu chain tham chiếu chính nó (cycle) → push empty chain (∞ = sai).
     /// Nếu chain hữu hạn → push lại chain (∞-1 = đúng).
@@ -125,6 +128,7 @@ impl Op {
             Self::Nop => "NOP",
             Self::Store(_) => "STORE",
             Self::LoadLocal(_) => "LOAD_LOCAL",
+            Self::PushNum(_) => "PUSH_NUM",
             Self::Fuse => "FUSE",
             Self::Trace => "TRACE",
             Self::Inspect => "INSPECT",
@@ -193,6 +197,11 @@ impl Op {
                 let sb = s.as_bytes();
                 let mut b = alloc::vec![0x34, sb.len() as u8];
                 b.extend_from_slice(sb);
+                b
+            }
+            Self::PushNum(n) => {
+                let mut b = alloc::vec![0x35];
+                b.extend_from_slice(&n.to_le_bytes());
                 b
             }
             Self::Fuse => alloc::vec![0x0A],
@@ -485,6 +494,7 @@ mod tests {
             Op::Call("f".into()),
             Op::Store("v".into()),
             Op::LoadLocal("v".into()),
+            Op::PushNum(3.14),
             Op::Fuse,
             Op::Trace,
             Op::Inspect,

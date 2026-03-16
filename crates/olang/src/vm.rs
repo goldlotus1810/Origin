@@ -225,6 +225,13 @@ impl OlangVM {
                     }
                 }
 
+                Op::PushNum(n) => {
+                    if let Err(e) = stack.push(MolecularChain::from_number(*n)) {
+                        events.push(VmEvent::Error(e));
+                        break;
+                    }
+                }
+
                 Op::Load(alias) => {
                     // Emit event — caller sẽ inject chain
                     events.push(VmEvent::LookupAlias(alias.clone()));
@@ -376,8 +383,75 @@ impl OlangVM {
                 }
 
                 Op::Call(name) => {
-                    // Simple call — emit event, không có call stack thật
-                    events.push(VmEvent::LookupAlias(name.clone()));
+                    // Dispatch built-in functions first, otherwise emit lookup
+                    match name.as_str() {
+                        "__hyp_add" | "__hyp_sub" | "__hyp_mul" | "__hyp_div"
+                        | "__phys_add" | "__phys_sub" => {
+                            let b = match stack.pop() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    events.push(VmEvent::Error(e));
+                                    break;
+                                }
+                            };
+                            let a = match stack.pop() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    events.push(VmEvent::Error(e));
+                                    break;
+                                }
+                            };
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let result = match name.as_str() {
+                                "__hyp_add" | "__phys_add" => na + nb,
+                                "__hyp_sub" | "__phys_sub" => na - nb,
+                                "__hyp_mul" => na * nb,
+                                "__hyp_div" => {
+                                    if nb.abs() < f64::EPSILON {
+                                        events.push(VmEvent::Error(VmError::StackUnderflow));
+                                        break;
+                                    }
+                                    na / nb
+                                }
+                                _ => 0.0,
+                            };
+                            let _ = stack.push(MolecularChain::from_number(result));
+                        }
+                        "__assert_truth" => {
+                            let b = match stack.pop() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    events.push(VmEvent::Error(e));
+                                    break;
+                                }
+                            };
+                            let a = match stack.pop() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    events.push(VmEvent::Error(e));
+                                    break;
+                                }
+                            };
+                            // Truth: chains equal OR numeric values equal
+                            let is_true = if let (Some(na), Some(nb)) =
+                                (a.to_number(), b.to_number())
+                            {
+                                (na - nb).abs() < f64::EPSILON
+                            } else {
+                                a == b
+                            };
+                            if is_true {
+                                let _ = stack.push(a); // push back (truthy)
+                            } else {
+                                let _ = stack.push(MolecularChain::empty()); // falsy
+                            }
+                        }
+                        _ => {
+                            // Unknown function → emit lookup event
+                            events.push(VmEvent::LookupAlias(name.clone()));
+                        }
+                    }
                 }
 
                 Op::Ret => {
@@ -1002,5 +1076,163 @@ mod tests {
             .any(|e| matches!(e, VmEvent::WhyConnection { .. })));
         // LCA result on stack
         assert_eq!(result.stack_depth, 1);
+    }
+
+    // ── Phase 1: Math Runtime — arithmetic execution ────────────────────────
+
+    #[test]
+    fn math_addition() {
+        // 1 + 2 = 3
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(1.0))
+            .push_op(Op::PushNum(2.0))
+            .push_op(Op::Call("__hyp_add".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let n = outputs[0].to_number().unwrap();
+        assert!((n - 3.0).abs() < f64::EPSILON, "1 + 2 should = 3, got {}", n);
+    }
+
+    #[test]
+    fn math_subtraction() {
+        // 10 - 3 = 7
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__hyp_sub".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 7.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn math_multiplication() {
+        // 6 × 7 = 42
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(6.0))
+            .push_op(Op::PushNum(7.0))
+            .push_op(Op::Call("__hyp_mul".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn math_division() {
+        // 10 ÷ 4 = 2.5
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(4.0))
+            .push_op(Op::Call("__hyp_div".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 2.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn math_division_by_zero() {
+        // 5 ÷ 0 → error
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(5.0))
+            .push_op(Op::PushNum(0.0))
+            .push_op(Op::Call("__hyp_div".into()))
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(result.has_error(), "Division by zero should error");
+    }
+
+    #[test]
+    fn math_physical_add() {
+        // Physical add: same as hyp_add but for proven values
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(100.0))
+            .push_op(Op::PushNum(50.0))
+            .push_op(Op::Call("__phys_add".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 150.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn math_truth_equal() {
+        // fire == fire → truthy (push back)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(42.0))
+            .push_op(Op::PushNum(42.0))
+            .push_op(Op::Call("__assert_truth".into()))
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        // Stack should have non-empty chain (truthy)
+        assert_eq!(result.stack_depth, 1);
+    }
+
+    #[test]
+    fn math_truth_not_equal() {
+        // 1 == 2 → falsy (empty chain)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(1.0))
+            .push_op(Op::PushNum(2.0))
+            .push_op(Op::Call("__assert_truth".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        assert!(outputs[0].is_empty(), "1 == 2 should be falsy (empty chain)");
+    }
+
+    #[test]
+    fn math_chained_operations() {
+        // (2 + 3) * 4 = 20
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(2.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__hyp_add".into()))
+            .push_op(Op::PushNum(4.0))
+            .push_op(Op::Call("__hyp_mul".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 20.0).abs() < f64::EPSILON, "(2+3)*4 = {}", n);
+    }
+
+    #[test]
+    fn math_negative_result() {
+        // 3 - 7 = -4
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(3.0))
+            .push_op(Op::PushNum(7.0))
+            .push_op(Op::Call("__hyp_sub".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - (-4.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn math_pushnum_roundtrip() {
+        // PushNum → Emit → to_number roundtrip
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(3.14159))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let n = result.outputs()[0].to_number().unwrap();
+        assert!((n - 3.14159).abs() < 1e-10);
     }
 }

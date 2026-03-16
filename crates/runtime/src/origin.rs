@@ -239,12 +239,21 @@ impl HomeRuntime {
                 VmEvent::Output(chain) => {
                     // Output chain → STM
                     if !chain.is_empty() {
-                        self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
-                        learned.push(chain.clone());
-                        // LCA result: show chain info
-                        let lca_emoji = chain_to_emoji(chain);
-                        let info = chain_info(chain, None);
-                        output_text.push_str(&format!("∘→{} {}", lca_emoji, info));
+                        // Check if numeric result
+                        if let Some(num) = chain.to_number() {
+                            // Display number cleanly
+                            if (num - num.round()).abs() < 1e-10 && num.abs() < 1e15 {
+                                output_text.push_str(&format!("= {} ", num.round() as i64));
+                            } else {
+                                output_text.push_str(&format!("= {:.6} ", num));
+                            }
+                        } else {
+                            self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
+                            learned.push(chain.clone());
+                            let lca_emoji = chain_to_emoji(chain);
+                            let info = chain_info(chain, None);
+                            output_text.push_str(&format!("∘→{} {}", lca_emoji, info));
+                        }
                     } else {
                         output_text.push('○');
                     }
