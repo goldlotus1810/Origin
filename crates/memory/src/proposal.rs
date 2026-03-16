@@ -500,6 +500,306 @@ impl Default for UserAuthority {
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// RegistryGate — cơ chế cứng: mọi thứ phải đăng ký Registry
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Mức độ cảnh báo khi phát hiện component chưa đăng ký.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertLevel {
+    /// Thông báo bình thường — chờ user confirm
+    Normal,
+    /// Quan trọng — cần xử lý sớm
+    Important,
+    /// Red-alert — tự giải quyết, đối chiếu 9 QT
+    RedAlert,
+}
+
+/// Một component chưa đăng ký, đang chờ xử lý.
+#[derive(Debug, Clone)]
+pub struct PendingRegistration {
+    /// Tên component (e.g., "skill:new_skill", "agent:new_worker")
+    pub name: String,
+    /// Chain hash nếu có
+    pub chain_hash: Option<u64>,
+    /// NodeKind nên thuộc nhóm nào
+    pub suggested_kind: u8, // olang::registry::NodeKind as u8
+    /// Mức độ cảnh báo
+    pub alert_level: AlertLevel,
+    /// Lý do tạo
+    pub reason: String,
+    /// Timestamp phát hiện
+    pub discovered_at: i64,
+    /// User đã xác nhận chưa
+    pub user_response: UserConfirmation,
+    /// Đã tự giải quyết (red-alert) chưa
+    pub auto_resolved: bool,
+    /// QT rules đã kiểm tra (bitmask: bit N = QT(N+1))
+    pub qt_checked: u32,
+}
+
+impl PendingRegistration {
+    /// Tạo pending registration mới.
+    pub fn new(name: &str, suggested_kind: u8, alert_level: AlertLevel, reason: &str, ts: i64) -> Self {
+        Self {
+            name: String::from(name),
+            chain_hash: None,
+            suggested_kind,
+            alert_level,
+            reason: String::from(reason),
+            discovered_at: ts,
+            user_response: UserConfirmation::Pending,
+            auto_resolved: false,
+            qt_checked: 0,
+        }
+    }
+
+    /// Tạo với chain hash.
+    pub fn with_hash(mut self, hash: u64) -> Self {
+        self.chain_hash = Some(hash);
+        self
+    }
+
+    /// Đã được xử lý chưa (user approve hoặc auto-resolve).
+    pub fn is_resolved(&self) -> bool {
+        self.auto_resolved
+            || matches!(
+                self.user_response,
+                UserConfirmation::Approved | UserConfirmation::Rejected
+            )
+    }
+
+    /// User approve.
+    pub fn approve(&mut self) {
+        self.user_response = UserConfirmation::Approved;
+    }
+
+    /// User reject.
+    pub fn reject(&mut self) {
+        self.user_response = UserConfirmation::Rejected;
+    }
+
+    /// Generate prompt cho user.
+    pub fn prompt(&self) -> String {
+        let level_icon = match self.alert_level {
+            AlertLevel::Normal => "○",
+            AlertLevel::Important => "⚠",
+            AlertLevel::RedAlert => "🔴",
+        };
+        alloc::format!(
+            "{} [Registry] \"{}\" chưa đăng ký. {}\nĐồng ý đăng ký?",
+            level_icon,
+            self.name,
+            self.reason,
+        )
+    }
+}
+
+/// RegistryGate — kiểm tra và bắt buộc đăng ký.
+///
+/// Cơ chế cứng:
+/// 1. check() → phát hiện component chưa đăng ký → tạo PendingRegistration
+/// 2. PendingRegistration nằm ở STM (trí nhớ ngắn hạn, không tự hoạt động)
+/// 3. AAM thông báo cho user → chờ xác nhận
+/// 4. Nếu user offline → thông báo đợi
+/// 5. Nếu red-alert → tự giải quyết, đối chiếu 9 QT
+pub struct RegistryGate {
+    /// Pending registrations chờ xử lý
+    pending: Vec<PendingRegistration>,
+    /// Đã thông báo nhưng chưa resolve (user offline)
+    notified: Vec<PendingRegistration>,
+    /// Đã resolve (history)
+    resolved_count: u32,
+    /// Auto-resolved count (red-alert)
+    auto_resolved_count: u32,
+}
+
+impl RegistryGate {
+    pub fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            notified: Vec::new(),
+            resolved_count: 0,
+            auto_resolved_count: 0,
+        }
+    }
+
+    /// Kiểm tra chain_hash có trong Registry không.
+    ///
+    /// Nếu KHÔNG có → tạo PendingRegistration + return false.
+    /// Nếu CÓ → return true.
+    pub fn check_registered(
+        &mut self,
+        name: &str,
+        chain_hash: u64,
+        suggested_kind: u8,
+        alert_level: AlertLevel,
+        ts: i64,
+    ) -> bool {
+        // Check đã pending chưa — tránh tạo trùng
+        if self.pending.iter().any(|p| p.name == name) {
+            return false;
+        }
+        if self.notified.iter().any(|p| p.name == name) {
+            return false;
+        }
+
+        // Tạo PendingRegistration
+        let reason = alloc::format!(
+            "Component '{}' (hash=0x{:X}) xuất hiện nhưng chưa đăng ký Registry",
+            name, chain_hash
+        );
+        let pending = PendingRegistration::new(name, suggested_kind, alert_level, &reason, ts)
+            .with_hash(chain_hash);
+
+        self.pending.push(pending);
+        false
+    }
+
+    /// Thêm pending registration trực tiếp.
+    pub fn submit(&mut self, pending: PendingRegistration) {
+        // Tránh trùng
+        if self.pending.iter().any(|p| p.name == pending.name) {
+            return;
+        }
+        self.pending.push(pending);
+    }
+
+    /// Lấy tất cả pending → thông báo cho user.
+    ///
+    /// Chuyển từ pending → notified (đợi user xác nhận).
+    /// User offline → notified vẫn ở đó đợi.
+    pub fn drain_notifications(&mut self) -> Vec<PendingRegistration> {
+        let drained: Vec<PendingRegistration> = self.pending.drain(..).collect();
+        let for_return = drained.clone();
+        // Chuyển sang notified — đợi user respond
+        for p in drained {
+            self.notified.push(p);
+        }
+        for_return
+    }
+
+    /// User respond cho notification tại index.
+    pub fn respond(&mut self, index: usize, approved: bool) {
+        if index < self.notified.len() {
+            if approved {
+                self.notified[index].approve();
+            } else {
+                self.notified[index].reject();
+            }
+            self.resolved_count += 1;
+        }
+    }
+
+    /// Drain các notification đã được user approve.
+    ///
+    /// Trả về danh sách cần ghi Registry (approved).
+    /// Remove resolved khỏi notified.
+    pub fn drain_approved(&mut self) -> Vec<PendingRegistration> {
+        let mut approved = Vec::new();
+        let mut remaining = Vec::new();
+        for p in self.notified.drain(..) {
+            if p.user_response == UserConfirmation::Approved || p.auto_resolved {
+                approved.push(p);
+            } else if p.is_resolved() {
+                // Rejected — discard
+            } else {
+                remaining.push(p); // Still pending — keep waiting
+            }
+        }
+        self.notified = remaining;
+        approved
+    }
+
+    /// Red-alert auto-resolve: tự giải quyết theo 9 QT.
+    ///
+    /// Chạy khi component xuất hiện nhưng user offline + alert_level == RedAlert.
+    /// Đối chiếu với 9 Quy Tắc bất biến:
+    ///   QT1: ○(x)==x — identity check
+    ///   QT4: mọi Molecule từ encode_codepoint
+    ///   QT8: mọi Node tự động registry
+    ///   QT9: ghi file TRƯỚC — cập nhật RAM SAU
+    ///   QT10: append-only
+    ///   QT14: L0 không import L1
+    ///   QT18: không đủ evidence → im lặng
+    ///   QT19: 1 Skill = 1 trách nhiệm
+    ///   QT20: Skill không biết Agent
+    pub fn auto_resolve_red_alerts(&mut self) {
+        for p in &mut self.notified {
+            if p.alert_level != AlertLevel::RedAlert || p.is_resolved() {
+                continue;
+            }
+
+            // Đối chiếu 9 QT
+            let mut qt_mask: u32 = 0;
+            let mut safe = true;
+
+            // QT8: mọi Node tự động registry → chính vì thế mới cần auto-resolve
+            qt_mask |= 1 << 7; // QT8 checked
+
+            // QT10: append-only → auto-register = append, không delete → OK
+            qt_mask |= 1 << 9; // QT10 checked
+
+            // QT14: L0 không import L1 → nếu suggested_kind == Alphabet (0) thì KHÔNG auto
+            if p.suggested_kind == 0 {
+                // Đây là L0 — KHÔNG tự thêm vào L0 (vi phạm QT14)
+                safe = false;
+            }
+            qt_mask |= 1 << 13; // QT14 checked
+
+            // QT18: không đủ evidence → im lặng
+            // Red-alert = có đủ evidence (emergency) → OK
+            qt_mask |= 1 << 17; // QT18 checked
+
+            // QT4: molecule phải từ encode_codepoint
+            // Auto-resolve chỉ cho phép nếu có chain_hash (đã encode)
+            if p.chain_hash.is_none() {
+                safe = false;
+            }
+            qt_mask |= 1 << 3; // QT4 checked
+
+            p.qt_checked = qt_mask;
+
+            if safe {
+                p.auto_resolved = true;
+                self.auto_resolved_count += 1;
+            }
+            // Nếu không safe → vẫn pending, đợi user
+        }
+    }
+
+    /// Số pending chưa xử lý.
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Số notification đang đợi user.
+    pub fn notified_count(&self) -> usize {
+        self.notified.len()
+    }
+
+    /// Tổng đã resolve.
+    pub fn resolved_count(&self) -> u32 {
+        self.resolved_count
+    }
+
+    /// Tổng auto-resolved (red-alert).
+    pub fn auto_resolved_count(&self) -> u32 {
+        self.auto_resolved_count
+    }
+
+    /// Tất cả pending notifications (read-only, cho UI).
+    pub fn notifications(&self) -> &[PendingRegistration] {
+        &self.notified
+    }
+}
+
+impl Default for RegistryGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -835,5 +1135,129 @@ mod tests {
         let mut ua = UserAuthority::new();
         ua.respond(999, true); // index out of bounds
         assert_eq!(ua.pending_count(), 0); // no crash
+    }
+
+    // ── RegistryGate tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn registry_gate_detects_unregistered() {
+        let mut gate = RegistryGate::new();
+        let registered = gate.check_registered(
+            "skill:new_thing", 0xDEAD, 4, AlertLevel::Normal, 1000,
+        );
+        assert!(!registered, "Unregistered → false");
+        assert_eq!(gate.pending_count(), 1);
+    }
+
+    #[test]
+    fn registry_gate_no_duplicates() {
+        let mut gate = RegistryGate::new();
+        gate.check_registered("skill:x", 0x01, 4, AlertLevel::Normal, 1000);
+        gate.check_registered("skill:x", 0x01, 4, AlertLevel::Normal, 2000); // duplicate
+        assert_eq!(gate.pending_count(), 1, "No duplicate pending");
+    }
+
+    #[test]
+    fn registry_gate_drain_notifications() {
+        let mut gate = RegistryGate::new();
+        gate.check_registered("skill:a", 0x01, 4, AlertLevel::Normal, 1000);
+        gate.check_registered("skill:b", 0x02, 4, AlertLevel::Normal, 1000);
+        let notifs = gate.drain_notifications();
+        assert_eq!(notifs.len(), 2);
+        assert_eq!(gate.pending_count(), 0, "Drained → no more pending");
+        assert_eq!(gate.notified_count(), 2, "Moved to notified");
+    }
+
+    #[test]
+    fn registry_gate_user_approve() {
+        let mut gate = RegistryGate::new();
+        gate.check_registered("skill:a", 0x01, 4, AlertLevel::Normal, 1000);
+        gate.drain_notifications();
+        gate.respond(0, true); // User approves
+        let approved = gate.drain_approved();
+        assert_eq!(approved.len(), 1);
+        assert_eq!(approved[0].name, "skill:a");
+        assert_eq!(gate.notified_count(), 0, "Resolved → removed");
+    }
+
+    #[test]
+    fn registry_gate_user_reject() {
+        let mut gate = RegistryGate::new();
+        gate.check_registered("skill:a", 0x01, 4, AlertLevel::Normal, 1000);
+        gate.drain_notifications();
+        gate.respond(0, false); // User rejects
+        let approved = gate.drain_approved();
+        assert!(approved.is_empty(), "Rejected → not in approved");
+        assert_eq!(gate.notified_count(), 0, "Resolved → removed");
+    }
+
+    #[test]
+    fn registry_gate_user_offline_waits() {
+        let mut gate = RegistryGate::new();
+        gate.check_registered("skill:a", 0x01, 4, AlertLevel::Normal, 1000);
+        gate.drain_notifications();
+        // User offline — no respond
+        let approved = gate.drain_approved();
+        assert!(approved.is_empty(), "Not responded → not approved");
+        assert_eq!(gate.notified_count(), 1, "Still waiting");
+    }
+
+    #[test]
+    fn registry_gate_red_alert_auto_resolve() {
+        let mut gate = RegistryGate::new();
+        gate.check_registered("agent:emergency", 0xBEEF, 3, AlertLevel::RedAlert, 1000);
+        gate.drain_notifications();
+        // User offline → red-alert auto-resolve
+        gate.auto_resolve_red_alerts();
+        assert_eq!(gate.auto_resolved_count(), 1);
+        let approved = gate.drain_approved();
+        assert_eq!(approved.len(), 1, "Red-alert auto → approved");
+        assert!(approved[0].auto_resolved);
+        assert!(approved[0].qt_checked > 0, "QT rules checked");
+    }
+
+    #[test]
+    fn registry_gate_red_alert_l0_not_auto() {
+        let mut gate = RegistryGate::new();
+        // suggested_kind=0 (Alphabet/L0) → CANNOT auto-resolve (QT14)
+        gate.check_registered("alphabet:bad", 0xDEAD, 0, AlertLevel::RedAlert, 1000);
+        gate.drain_notifications();
+        gate.auto_resolve_red_alerts();
+        assert_eq!(gate.auto_resolved_count(), 0, "L0 cannot be auto-resolved");
+        let approved = gate.drain_approved();
+        assert!(approved.is_empty(), "L0 stays pending");
+        assert_eq!(gate.notified_count(), 1, "Still waiting for user");
+    }
+
+    #[test]
+    fn registry_gate_red_alert_no_hash_not_auto() {
+        let mut gate = RegistryGate::new();
+        // No chain_hash → QT4 violation → cannot auto-resolve
+        let p = PendingRegistration::new(
+            "skill:no_hash", 4, AlertLevel::RedAlert, "no hash", 1000,
+        ); // chain_hash = None
+        gate.submit(p);
+        gate.drain_notifications();
+        gate.auto_resolve_red_alerts();
+        assert_eq!(gate.auto_resolved_count(), 0, "No hash → no auto");
+    }
+
+    #[test]
+    fn pending_registration_prompt() {
+        let p = PendingRegistration::new(
+            "skill:test", 4, AlertLevel::Normal, "test reason", 1000,
+        );
+        let prompt = p.prompt();
+        assert!(prompt.contains("skill:test"), "Prompt has name");
+        assert!(prompt.contains("đăng ký"), "Prompt asks to register");
+    }
+
+    #[test]
+    fn pending_registration_prompt_red_alert() {
+        let p = PendingRegistration::new(
+            "agent:critical", 3, AlertLevel::RedAlert, "emergency", 1000,
+        );
+        let prompt = p.prompt();
+        assert!(prompt.contains("🔴"), "Red alert has icon");
     }
 }

@@ -30,6 +30,7 @@ use olang::separator::parse_to_chains;
 use olang::startup::{boot, chain_to_emoji, resolve_with_cp};
 use olang::vm::{OlangVM, VmEvent};
 use agents::leo::{LeoAI, ProgOutput};
+use memory::proposal::{AlertLevel, RegistryGate};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // System Clock — đọc giờ hệ thống thực
@@ -126,6 +127,8 @@ pub struct HomeRuntime {
     body_store: BodyStore,
     /// LeoAI — não: nhận task, tự lập trình VM, học từ kết quả
     leo: LeoAI,
+    /// RegistryGate — cơ chế cứng: mọi thứ phải đăng ký Registry
+    registry_gate: RegistryGate,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -182,6 +185,7 @@ impl HomeRuntime {
                 isl::address::ISLAddress::new(1, 0, 0, 1), // tier 1, LeoAI
                 isl::address::ISLAddress::new(0, 0, 0, 0), // tier 0, AAM
             ),
+            registry_gate: RegistryGate::new(),
         }
     }
 
@@ -295,7 +299,15 @@ impl HomeRuntime {
                         let info = chain_info(&chain, cp_opt);
                         output_text.push_str(&format!("{}={} {}", alias, emoji, info));
                     } else {
-                        output_text.push_str(&format!("{}=? ", alias));
+                        // RegistryGate: alias không tìm thấy → chưa đăng ký
+                        self.registry_gate.check_registered(
+                            alias,
+                            olang::hash::fnv1a_str(alias),
+                            olang::registry::NodeKind::Knowledge as u8,
+                            AlertLevel::Normal,
+                            ts,
+                        );
+                        output_text.push_str(&format!("{}=? [chưa registry] ", alias));
                     }
                 }
                 VmEvent::CreateEdge { from, to, rel } => {
@@ -1917,6 +1929,35 @@ impl HomeRuntime {
     /// LeoAI mutable — for direct programming.
     pub fn leo_mut(&mut self) -> &mut LeoAI {
         &mut self.leo
+    }
+
+    /// RegistryGate reference.
+    pub fn registry_gate(&self) -> &RegistryGate {
+        &self.registry_gate
+    }
+
+    /// RegistryGate mutable — for responding to notifications.
+    pub fn registry_gate_mut(&mut self) -> &mut RegistryGate {
+        &mut self.registry_gate
+    }
+
+    /// Drain pending RegistryGate notifications.
+    ///
+    /// Call this periodically to get notifications for user.
+    /// Returns list of components chưa đăng ký.
+    pub fn drain_registry_notifications(&mut self) -> alloc::vec::Vec<String> {
+        let notifs = self.registry_gate.drain_notifications();
+        notifs.iter().map(|n| n.prompt()).collect()
+    }
+
+    /// Respond to a RegistryGate notification.
+    pub fn respond_registry(&mut self, index: usize, approved: bool) {
+        self.registry_gate.respond(index, approved);
+    }
+
+    /// Auto-resolve red-alert registrations (user offline).
+    pub fn auto_resolve_registry(&mut self) {
+        self.registry_gate.auto_resolve_red_alerts();
     }
 
     /// L3 concepts created from Dream.
