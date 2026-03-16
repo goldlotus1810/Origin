@@ -17,3 +17,4 @@ pub mod metrics;
 pub mod origin;
 pub mod parser;
 pub mod response_template;
+pub mod router;

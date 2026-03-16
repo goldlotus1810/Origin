@@ -16,6 +16,7 @@ olang   = { workspace = true }
 silk    = { workspace = true }
 context = { workspace = true }
 agents  = { workspace = true }
+isl     = { path = "../isl" }
 memory  = { workspace = true }
 hal     = { workspace = true }
 libm    = { workspace = true }
