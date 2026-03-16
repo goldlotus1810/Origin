@@ -27,6 +27,7 @@ use olang::vm::{OlangVM, VmEvent};
 use olang::startup::{boot, resolve_with_cp, chain_to_emoji};
 use olang::self_model::SelfModel;
 use olang::registry::Registry;
+use olang::knowtree::KnowTree;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Response
@@ -69,6 +70,8 @@ pub struct HomeRuntime {
     last_dream_turn:  u64,  // turn khi Dream lần cuối chạy
     /// QT9: bytes chờ ghi disk — caller (server) drain và flush.
     pending_writes:   alloc::vec::Vec<u8>,
+    /// L2-Ln knowledge storage — TieredStore compact encoding.
+    knowtree:         KnowTree,
 }
 
 impl HomeRuntime {
@@ -91,6 +94,7 @@ impl HomeRuntime {
             turn_count:       0,
             last_dream_turn:  0,
             pending_writes:   alloc::vec::Vec::new(),
+            knowtree:         KnowTree::for_pc(),
         }
     }
 
@@ -249,18 +253,21 @@ impl HomeRuntime {
                 // Update self-model tại thời điểm query
                 self.self_model.update(&self.registry, ts);
                 let summary = self.self_model.summary();
+                let kt_summary = self.knowtree.summary();
                 let text = format!(
                     "HomeOS ○\n\
                      Turns   : {}\n\
                      STM     : {} observations\n\
                      Silk    : {} edges\n\
                      f(x)    : {:.3}\n\
+                     {}\n\
                      {}",
                     self.turn_count,
                     self.learning.stm().len(),
                     self.learning.graph().len(),
                     self.learning.context().fx(),
                     summary,
+                    kt_summary,
                 );
                 Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
             }
@@ -465,6 +472,16 @@ impl HomeRuntime {
         // ── T6: Learning pipeline — BẢN NĂNG: mọi modality ─────────────────
         let proc_result = self.learning.process_one(input.clone());
 
+        // ── T6b: KnowTree — store text as L2 compact node ───────────────
+        if let ProcessResult::Ok { ref chain, .. } = proc_result {
+            if let ContentInput::Text { ref content, .. } = input {
+                let word_hashes = olang::knowtree::text_to_word_hashes(content);
+                if !word_hashes.is_empty() {
+                    self.knowtree.store_sentence(chain, None, &word_hashes, ts);
+                }
+            }
+        }
+
         // ── T7: Decide action → render response ────────────────────────────
         let action = decide_action(&est, cur_v);
         let fx = self.learning.context().fx();
@@ -628,11 +645,56 @@ impl HomeRuntime {
             .count()
     }
 
+    // ── BookReader → KnowTree ──────────────────────────────────────────────
+
+    /// Read book text → encode sentences → store in KnowTree as L2 nodes.
+    ///
+    /// BookReader.read() → SentenceRecord → encode → KnowTree.store_chapter()
+    /// Returns number of sentences stored.
+    pub fn read_book(&mut self, text: &str, ts: i64) -> usize {
+        use agents::book::BookReader;
+
+        let reader = BookReader::new();
+        let records = reader.read(text);
+        if records.is_empty() { return 0; }
+
+        // Encode each sentence → MolecularChain + word_hashes
+        let mut chains: alloc::vec::Vec<(olang::molecular::MolecularChain, alloc::vec::Vec<u64>)>
+            = alloc::vec::Vec::new();
+
+        for record in &records {
+            // Encode sentence text → chain via learning pipeline encoder
+            let input = ContentInput::Text {
+                content: record.text.clone(),
+                timestamp: ts,
+            };
+            let encoded = agents::encoder::ContentEncoder::new().encode(input);
+            if encoded.chain.is_empty() { continue; }
+
+            let word_hashes = olang::knowtree::text_to_word_hashes(&record.text);
+
+            // Also feed into STM + Silk (learning pipeline)
+            self.learning.stm_mut().push(
+                encoded.chain.clone(), record.emotion, ts,
+            );
+
+            chains.push((encoded.chain, word_hashes));
+        }
+
+        let stored = chains.len();
+        if !chains.is_empty() {
+            self.knowtree.store_chapter(&chains, None, ts);
+        }
+        stored
+    }
+
     // ── Accessors ─────────────────────────────────────────────────────────────
 
     pub fn turn_count(&self) -> u64 { self.turn_count }
     pub fn fx(&self) -> f32 { self.learning.context().fx() }
     pub fn tone(&self) -> ResponseTone { self.learning.context().tone() }
+    pub fn knowtree(&self) -> &KnowTree { &self.knowtree }
+    pub fn knowtree_mut(&mut self) -> &mut KnowTree { &mut self.knowtree }
 
     // ── Persistence — QT9: ghi file TRƯỚC, cập nhật RAM SAU ────────────────
 
@@ -809,6 +871,42 @@ mod tests {
             assert_eq!(rt.turn_count(), i as u64);
         }
     }
+
+    #[test]
+    fn knowtree_stores_on_text() {
+        let mut rt = rt();
+        assert_eq!(rt.knowtree().sentences(), 0);
+        rt.process_text("Andrei nằm trên chiến trường xanh", 1000);
+        // Text with >2-char words → stored as L2 sentence in KnowTree
+        assert!(rt.knowtree().sentences() > 0,
+            "KnowTree phải store sentences từ text input");
+        assert!(rt.knowtree().total_nodes() > 0,
+            "KnowTree phải có nodes");
+    }
+
+    #[test]
+    fn knowtree_stats_in_output() {
+        let mut rt = rt();
+        rt.process_text("hôm nay trời đẹp", 1000);
+        let r = rt.process_text("○{stats}", 2000);
+        assert!(r.text.contains("KnowTree"),
+            "Stats output phải có KnowTree info");
+    }
+
+    #[test]
+    fn read_book_stores_in_knowtree() {
+        if ucd::table_len() == 0 { return; }
+        let mut rt = rt();
+        let n = rt.read_book(
+            "Andrei nằm trên chiến trường. Bầu trời xanh vô tận. Tất cả vô nghĩa.",
+            1000,
+        );
+        assert!(n >= 2, "read_book phải store >=2 sentences, got {}", n);
+        assert!(rt.knowtree().sentences() >= 2,
+            "KnowTree sentences={}", rt.knowtree().sentences());
+        assert!(rt.knowtree().total_edges() > 0,
+            "KnowTree phải có edges từ word silk");
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -970,12 +1068,16 @@ impl HomeRuntime {
             for proposal in &result.proposals {
                 if matches!(aam.review(proposal), AAMDecision::Approved) {
                     match &proposal.kind {
-                        ProposalKind::NewNode { chain, .. } => {
+                        ProposalKind::NewNode { chain, sources, .. } => {
                             self.registry.insert(chain, 3, 0, ts, false);
+                            // L2-Ln: store concept in KnowTree
+                            self.knowtree.store_concept(chain, None, 3, sources, ts);
                         }
-                        ProposalKind::PromoteQR { chain_hash, fire_count: _ } => {
+                        ProposalKind::PromoteQR { chain_hash, fire_count } => {
                             if let Some(obs) = self.learning.stm().find_by_hash(*chain_hash) {
                                 self.registry.insert(&obs.chain, 0, 0, ts, true);
+                                // L2-Ln: promote to KnowTree
+                                self.knowtree.promote_from_stm(&obs.chain, None, *fire_count, ts);
                             }
                             let _ = chain_hash;
                         }
