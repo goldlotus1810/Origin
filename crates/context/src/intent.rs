@@ -352,6 +352,12 @@ pub struct IntentEstimate {
     pub signals: Vec<String>, // lý do (debug)
     pub need_clarify: bool,
     pub clarify_kind: Option<ClarifyKind>,
+    /// Input là thán từ ngắn (Ah!, ya!, ôi!...) — cần listening mode
+    pub is_exclamation: bool,
+    /// Input chứa đại từ chưa rõ (bà ấy, anh ta, nó...) — cần reference resolution
+    pub has_unresolved_ref: bool,
+    /// Input là cảm xúc thoáng qua, không rõ intent (chán, mệt, buồn...)
+    pub is_vague_emotion: bool,
 }
 
 /// Loại câu hỏi cần làm rõ — caller quyết định text cụ thể.
@@ -512,6 +518,43 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
         }
     }
 
+    // ── Listening signals ─────────────────────────────────────────────────────
+
+    // Exclamation detection: rất ngắn + có dấu ! hoặc thán từ
+    let is_exclamation = words <= 2
+        && (lo.contains('!')
+            || matches!(
+                lo.trim_matches(|c: char| !c.is_alphanumeric()),
+                "ah" | "ôi" | "ya" | "ui" | "ơi" | "trời" | "ối"
+                | "hả" | "huh" | "oh" | "wow" | "ooh" | "uh"
+                | "chà" | "ồ" | "á" | "ơ" | "ê" | "hé"
+            ));
+
+    // Unresolved reference: chứa đại từ chỉ người thứ 3 không rõ
+    let has_unresolved_ref = lo.contains("bà ấy")
+        || lo.contains("ông ấy")
+        || lo.contains("anh ấy")
+        || lo.contains("chị ấy")
+        || lo.contains("cô ấy")
+        || lo.contains("nó ")
+        || lo.contains("người đó")
+        || lo.contains("họ ")
+        || lo.contains("she ")
+        || lo.contains("he ")
+        || lo.contains("they ")
+        || lo.contains("that person");
+
+    // Vague emotion: cảm xúc thoáng qua không có hành động cụ thể
+    let vague_emotion_kws = [
+        "chán", "mệt", "buồn", "bored", "tired", "meh", "ugh",
+        "chán quá", "mệt quá", "chán ghê", "không vui",
+    ];
+    let is_vague_emotion = words <= 5
+        && vague_emotion_kws.iter().any(|kw| lo.contains(kw))
+        && !lo.contains("vì")
+        && !lo.contains("tại")
+        && !lo.contains("because");
+
     // Emotional amplifiers — dùng cur_v/cur_a từ ConversationCurve
     // Không hardcode "buồn" vào đây — dùng đường cong số
     if cur_v < V_CRISIS_LOW && cur_a < A_CRISIS_QUIET {
@@ -548,6 +591,9 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
         signals: best_bucket.reasons,
         need_clarify,
         clarify_kind,
+        is_exclamation,
+        has_unresolved_ref,
+        is_vague_emotion,
     }
 }
 
@@ -597,30 +643,77 @@ pub enum IntentAction {
     ForceLearnQR,
     /// User xác nhận kiến thức → promote last learned item lên QR
     ConfirmLearnQR,
+    /// Im lặng quan sát — chưa đủ ngữ cảnh để trả lời.
+    /// Ghi nhận input, đợi thêm thông tin.
+    Observe,
+    /// Ghi nhận nhẹ — phát hiện cảm xúc nhưng không cần response đầy đủ.
+    /// Ví dụ: "Ah!", "ya..!", thán từ đơn.
+    SilentAck,
 }
 
 /// Quyết định hành động từ IntentEstimate + emotional state.
+///
+/// Ưu tiên: Crisis > Risk > Manipulate > Heal > Listening signals > Clarify > Proceed
+///
+/// Listening signals (mới):
+///   - Exclamation + không crisis → SilentAck (ghi nhận, đợi)
+///   - Unresolved ref + không crisis/heal → Observe (cần context để phản hồi)
+///   - Vague emotion + không rõ intent → Observe (đợi thêm)
 pub fn decide_action(est: &IntentEstimate, cur_v: f32) -> IntentAction {
+    // Sensitive intents luôn được xử lý trước — không bao giờ silent
     match est.primary {
-        IntentKind::Crisis => IntentAction::CrisisOverride,
-        IntentKind::Risk => IntentAction::AskContext {
-            angry: cur_v < V_RISK_ANGRY,
-        },
-        IntentKind::Manipulate => IntentAction::SoftRefusal,
-        IntentKind::Heal => IntentAction::EmpathizeFirst,
-        IntentKind::Confirm => IntentAction::UserConfirm,
-        IntentKind::Deny => IntentAction::UserDeny,
-        IntentKind::LearnCommand => IntentAction::ForceLearnQR,
-        IntentKind::ConfirmKnowledge => IntentAction::ConfirmLearnQR,
-        _ => {
-            if est.need_clarify {
-                IntentAction::AddClarify {
-                    kind: est.clarify_kind.unwrap_or(ClarifyKind::WhatContext),
-                }
-            } else {
-                IntentAction::Proceed
+        IntentKind::Crisis => return IntentAction::CrisisOverride,
+        IntentKind::Risk => {
+            return IntentAction::AskContext {
+                angry: cur_v < V_RISK_ANGRY,
             }
         }
+        IntentKind::Manipulate => return IntentAction::SoftRefusal,
+        _ => {}
+    }
+
+    // Heal vẫn ưu tiên — nhưng nếu vague emotion → Observe thay vì Empathize
+    if est.primary == IntentKind::Heal {
+        if est.is_vague_emotion && est.confidence < CLARIFY_THRESHOLD {
+            // "Hôm nay thật chán!!!" → chưa rõ cần gì → observe
+            return IntentAction::Observe;
+        }
+        return IntentAction::EmpathizeFirst;
+    }
+
+    // User commands
+    match est.primary {
+        IntentKind::Confirm => return IntentAction::UserConfirm,
+        IntentKind::Deny => return IntentAction::UserDeny,
+        IntentKind::LearnCommand => return IntentAction::ForceLearnQR,
+        IntentKind::ConfirmKnowledge => return IntentAction::ConfirmLearnQR,
+        _ => {}
+    }
+
+    // ── Listening signals — im lặng thông minh ───────────────────────────────
+
+    // Thán từ đơn: "Ah!", "ya!" → ghi nhận, đợi
+    if est.is_exclamation {
+        return IntentAction::SilentAck;
+    }
+
+    // Đại từ chưa rõ: "Bà ấy mới mất" → cần resolve trước khi trả lời
+    if est.has_unresolved_ref {
+        return IntentAction::Observe;
+    }
+
+    // Cảm xúc mơ hồ: "chán quá" → đợi thêm context
+    if est.is_vague_emotion {
+        return IntentAction::Observe;
+    }
+
+    // ── Normal flow ──────────────────────────────────────────────────────────
+    if est.need_clarify {
+        IntentAction::AddClarify {
+            kind: est.clarify_kind.unwrap_or(ClarifyKind::WhatContext),
+        }
+    } else {
+        IntentAction::Proceed
     }
 }
 

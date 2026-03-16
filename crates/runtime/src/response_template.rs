@@ -66,6 +66,10 @@ pub fn render(p: &ResponseParams) -> String {
         IntentAction::ForceLearnQR | IntentAction::ConfirmLearnQR => {
             proceed_text(p.tone, p.valence, p.original.as_deref())
         }
+
+        IntentAction::Observe => observe_text(p.valence, p.original.as_deref()),
+
+        IntentAction::SilentAck => silent_ack_text(p.valence),
     }
 }
 
@@ -182,6 +186,38 @@ pub fn tone_fallback(tone: ResponseTone, cur_v: f32) -> String {
         ResponseTone::Celebratory => "Tuyệt!".to_string(),
         ResponseTone::Engaged => "Ừ.".to_string(),
     }
+}
+
+/// Observe — im lặng thông minh.
+///
+/// Khi không đủ context để trả lời đầy đủ → ghi nhận nhẹ nhàng,
+/// không phán đoán, không hỏi dồn dập.
+///
+/// Nếu caller đã resolve được reference → dùng original.
+/// Nếu chưa → im lặng tối giản.
+fn observe_text(cur_v: f32, original: Option<&str>) -> String {
+    // Nếu có original (reference đã resolve) → dùng nó
+    if let Some(s) = original {
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    // Im lặng tối giản — đủ để user biết mình được lắng nghe
+    if cur_v < -0.40 {
+        "Mình đang nghe.".to_string()
+    } else {
+        // Gần neutral hoặc positive → im lặng hơn
+        String::new()
+    }
+}
+
+/// SilentAck — ghi nhận thán từ.
+///
+/// "Ah!", "ya..!", "ôi!" → chỉ cần acknowledge rất nhẹ.
+/// Trả về chuỗi rỗng = runtime sẽ hiểu là silence.
+fn silent_ack_text(_cur_v: f32) -> String {
+    // Thán từ → không cần response text. Runtime ghi nhận emotion.
+    String::new()
 }
 
 fn confirm_text(_cur_v: f32) -> String {

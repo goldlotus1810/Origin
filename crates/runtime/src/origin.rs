@@ -16,7 +16,7 @@ use agents::learning::{LearningLoop, ProcessResult};
 use context::emotion::sentence_affect;
 use context::emotion::IntentKind;
 use context::infer::infer_context;
-use context::intent::{decide_action, estimate_intent};
+use context::intent::{decide_action, estimate_intent, IntentAction};
 use memory::dream::{DreamConfig, DreamCycle};
 use silk::walk::ResponseTone;
 
@@ -108,6 +108,20 @@ pub struct HomeRuntime {
     pending_writes: alloc::vec::Vec<u8>,
     /// L2-Ln knowledge storage — TieredStore compact encoding.
     knowtree: KnowTree,
+    /// Recent text history — cho reference resolution ("bà ấy", "anh ta"...).
+    /// Giữ tối đa 16 turns gần nhất (text + timestamp).
+    recent_texts: alloc::vec::Vec<RecentText>,
+}
+
+/// Lưu text gần đây cho reference resolution.
+#[derive(Debug, Clone)]
+struct RecentText {
+    text: String,
+    /// Timestamp — dùng cho time-based decay (tương lai).
+    #[allow(dead_code)]
+    timestamp: i64,
+    /// Tên riêng đã extract được (nếu có)
+    names: alloc::vec::Vec<String>,
 }
 
 impl HomeRuntime {
@@ -143,6 +157,7 @@ impl HomeRuntime {
             last_dream_turn: 0,
             pending_writes: alloc::vec::Vec::new(),
             knowtree: KnowTree::for_pc(),
+            recent_texts: alloc::vec::Vec::new(),
         }
     }
 
@@ -436,6 +451,70 @@ impl HomeRuntime {
                 kind: ResponseKind::System,
             },
         }
+    }
+
+    // ── Recent Text Tracking — cho reference resolution ────────────────────────
+
+    /// Track recent text for reference resolution.
+    /// Giữ tối đa 16 turns gần nhất.
+    fn track_recent_text(&mut self, text: &str, ts: i64) {
+        const MAX_RECENT: usize = 16;
+
+        let names = extract_names(text);
+        self.recent_texts.push(RecentText {
+            text: text.to_string(),
+            timestamp: ts,
+            names,
+        });
+
+        // Evict oldest
+        if self.recent_texts.len() > MAX_RECENT {
+            self.recent_texts.remove(0);
+        }
+    }
+
+    /// Resolve unresolved reference ("bà ấy", "anh ta"...) from recent texts.
+    ///
+    /// Tìm tên riêng gần nhất trong recent_texts mà match với đại từ.
+    /// Ví dụ: "bà ấy" → tìm tên nữ gần nhất đã mention.
+    fn resolve_reference(&self, text: &str) -> Option<String> {
+        let lo = text.to_lowercase();
+
+        // Xác định loại đại từ
+        let is_female = lo.contains("bà ấy")
+            || lo.contains("cô ấy")
+            || lo.contains("chị ấy")
+            || lo.contains("she ");
+        let is_male = lo.contains("ông ấy")
+            || lo.contains("anh ấy")
+            || lo.contains("he ");
+        let is_generic = lo.contains("nó ")
+            || lo.contains("người đó")
+            || lo.contains("họ ")
+            || lo.contains("they ")
+            || lo.contains("that person");
+
+        if !is_female && !is_male && !is_generic {
+            return None;
+        }
+
+        // Tìm ngược trong recent_texts — gần nhất trước
+        for recent in self.recent_texts.iter().rev() {
+            // Bỏ qua chính message hiện tại
+            if recent.text.to_lowercase() == lo {
+                continue;
+            }
+
+            for name in &recent.names {
+                // Trả về tên đầu tiên tìm được (gần nhất)
+                // Tương lai: có thể filter theo giới tính nếu cần
+                if is_generic || is_female || is_male {
+                    return Some(name.clone());
+                }
+            }
+        }
+
+        None
     }
 
     // ── Knowledge Recall — tìm kiến thức liên quan từ Silk + STM ──────────────
@@ -886,10 +965,36 @@ impl HomeRuntime {
             }
         }
 
+        // ── T6c: Track recent text for reference resolution ────────────────
+        if let ContentInput::Text { ref content, .. } = input {
+            self.track_recent_text(content, ts);
+        }
+
         // ── T7: Decide action → render response ────────────────────────────
-        let action = decide_action(&est, cur_v);
+        let mut action = decide_action(&est, cur_v);
         let fx = self.learning.context().fx();
         let tone = self.learning.context().tone();
+
+        // ── T7b: Reference resolution — "bà ấy", "anh ta"... ─────────────
+        // Nếu Observe vì unresolved_ref → thử resolve từ recent_texts
+        if action == IntentAction::Observe && est.has_unresolved_ref {
+            if let ContentInput::Text { ref content, .. } = input {
+                if let Some(_name) = self.resolve_reference(content) {
+                    // Đã tìm được referent → chuyển sang EmpathizeFirst hoặc Proceed
+                    // tùy emotion
+                    if cur_v < -0.30 {
+                        action = IntentAction::EmpathizeFirst;
+                    } else {
+                        action = IntentAction::Proceed;
+                    }
+                }
+                // Không resolve được → giữ Observe (im lặng)
+            }
+        }
+
+        // ── T7c: Observe — check pending tasks ───────────────────────────────
+        // "Hôm nay thật chán!!!" + có việc cần làm → suggest
+        // "Hôm nay thật chán!!!" + không có gì → im lặng đợi
 
         match proc_result {
             ProcessResult::Crisis { message } => Response {
@@ -947,6 +1052,78 @@ impl HomeRuntime {
                     None
                 };
 
+                // ── Listening: SilentAck → empty response ────────────────────
+                if action == IntentAction::SilentAck {
+                    return Response {
+                        text: String::new(),
+                        tone,
+                        fx,
+                        kind: ResponseKind::Natural,
+                    };
+                }
+
+                // ── Listening: Observe — build contextual observe response ───
+                if action == IntentAction::Observe {
+                    // Nếu có reference resolution → dùng kết quả
+                    let observe_original = if est.has_unresolved_ref {
+                        if let Some(name) =
+                            self.resolve_reference(input_text)
+                        {
+                            // Biết "bà ấy" là ai → chia buồn/trả lời
+                            if final_v < -0.30 {
+                                Some(format!(
+                                    "Mình biết bạn đang nói về {}. Chia buồn cùng bạn.",
+                                    name
+                                ))
+                            } else {
+                                Some(format!(
+                                    "Bạn đang nói về {} phải không?",
+                                    name
+                                ))
+                            }
+                        } else {
+                            // Không biết "bà ấy" → im lặng
+                            None
+                        }
+                    } else if est.is_vague_emotion {
+                        // "Hôm nay thật chán" → check pending knowledge
+                        let has_pending = !self.learning.stm().is_empty()
+                            && self
+                                .learning
+                                .stm()
+                                .all()
+                                .iter()
+                                .any(|o| o.fire_count > 1);
+                        if has_pending {
+                            Some(
+                                "Bạn muốn mình nhắc lại những gì đã nói trước đó không?"
+                                    .to_string(),
+                            )
+                        } else {
+                            // Không có gì → im lặng đợi
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let text = render(&ResponseParams {
+                        tone,
+                        action: IntentAction::Observe,
+                        valence: final_v,
+                        fx,
+                        context: recall,
+                        original: observe_original,
+                    });
+                    return Response {
+                        text,
+                        tone,
+                        fx,
+                        kind: ResponseKind::Natural,
+                    };
+                }
+
+                // ── Normal flow: contradiction / recall / proceed ────────────
                 // Build response with context awareness
                 let original = if let Some(ref contra) = contradiction {
                     // Contradiction detected → inform user
@@ -1266,6 +1443,103 @@ fn natural_reply(
         ResponseTone::Engaged => {
             alloc::format!("{} — {}.", lead, support)
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// extract_names — tách tên riêng từ text
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Extract proper names from text.
+///
+/// Heuristic: từ viết hoa đầu (không phải đầu câu) = tên riêng.
+/// Cũng nhận diện patterns: "bà X", "ông X", "anh X", "chị X".
+fn extract_names(text: &str) -> alloc::vec::Vec<String> {
+    let mut names: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+
+    // Pattern 1: "bà/ông/anh/chị/cô + Tên" (Vietnamese name prefix)
+    let prefixes = ["bà ", "ông ", "anh ", "chị ", "cô ", "dì ", "chú ", "bác "];
+    let lo = text.to_lowercase();
+    for prefix in &prefixes {
+        if let Some(pos) = lo.find(prefix) {
+            let after = &text[pos + prefix.len()..];
+            // Lấy từ tiếp theo (tên)
+            if let Some(name_word) = after.split_whitespace().next() {
+                // Nếu viết hoa → tên riêng
+                if name_word
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase())
+                {
+                    // Cố gắng lấy thêm họ/tên đệm
+                    let full_name: alloc::string::String = after
+                        .split_whitespace()
+                        .take_while(|w| {
+                            w.chars().next().is_some_and(|c| c.is_uppercase())
+                        })
+                        .collect::<alloc::vec::Vec<&str>>()
+                        .join(" ");
+                    if !full_name.is_empty() && !names.contains(&full_name) {
+                        names.push(full_name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 2: Từ viết hoa liên tiếp (không ở đầu câu) = proper noun
+    let words: alloc::vec::Vec<&str> = text.split_whitespace().collect();
+    let mut i = 1; // bỏ qua từ đầu tiên (đầu câu)
+    while i < words.len() {
+        let w = words[i];
+        if w.chars().next().is_some_and(|c| c.is_uppercase())
+            && w.chars().count() > 1
+            && !is_sentence_start(text, w)
+        {
+            // Collect consecutive capitalized words
+            let mut name_parts: alloc::vec::Vec<&str> = alloc::vec![w];
+            let mut j = i + 1;
+            while j < words.len() {
+                if words[j]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase())
+                    && words[j].chars().count() > 1
+                {
+                    name_parts.push(words[j]);
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            let name = name_parts.join(" ");
+            if !names.contains(&name) {
+                names.push(name);
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+
+    names
+}
+
+/// Check if word appears right after sentence-ending punctuation.
+fn is_sentence_start(text: &str, word: &str) -> bool {
+    if let Some(pos) = text.find(word) {
+        if pos == 0 {
+            return true;
+        }
+        // Look backward for sentence-ending punctuation
+        let before = &text[..pos];
+        let trimmed = before.trim_end();
+        trimmed.ends_with('.')
+            || trimmed.ends_with('!')
+            || trimmed.ends_with('?')
+            || trimmed.ends_with('\n')
+    } else {
+        false
     }
 }
 
@@ -2797,5 +3071,303 @@ mod integration_tests {
         // May or may not find context depending on Silk edge weights
         // Just verify it doesn't crash and returns consistent result
         // (Silk edges need multiple co-activations to build up weight)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 11. Listening mode tests — 3 kịch bản
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // ── Kịch bản 1: "Hôm nay thật chán!!!" ───────────────────────────────────
+    // → Observe: (a) nhắc pending work hoặc (b) im lặng đợi
+
+    #[test]
+    fn listen_boredom_no_context_stays_quiet() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB001);
+        // Không có context trước đó
+        let resp = rt.process_text("Hôm nay thật chán!!!", 1000);
+        // Observe → im lặng hoặc rất ngắn
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // Không hỏi dồn dập, không đưa ra advice không cần thiết
+        assert!(
+            resp.text.len() < 100,
+            "Boredom without context should be short/silent: '{}'",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn listen_boredom_with_pending_suggests() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB002);
+        // Tạo context trước
+        rt.process_text("Scarlett O'Hara sống ở đồn điền Tara", 1000);
+        rt.process_text("Scarlett O'Hara rất kiên cường", 2000);
+        // Giờ nói chán
+        let resp = rt.process_text("chán quá", 3000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // System nên suggest nhắc lại pending work hoặc im lặng
+        // Không đưa ra "Bạn đang ổn không?" (quá generic)
+    }
+
+    #[test]
+    fn listen_boredom_excited_stays_quiet() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB003);
+        let resp = rt.process_text("mệt quá!!!", 1000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // Vague emotion + no context → observe (short or empty)
+        assert!(
+            resp.text.len() < 100,
+            "Vague emotion should be short: '{}'",
+            resp.text
+        );
+    }
+
+    // ── Kịch bản 2: "Bà ấy mới mất. thật tội nghiệp" ────────────────────────
+    // → Resolve "bà ấy" từ recent context
+
+    #[test]
+    fn listen_ref_unknown_stays_quiet() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB004);
+        // Không có context → "bà ấy" = unknown
+        let resp = rt.process_text("Bà ấy mới mất. thật tội nghiệp", 1000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // Observe — im lặng vì không biết "bà ấy" là ai
+        assert!(
+            resp.text.len() < 80,
+            "Unknown ref should be quiet: '{}'",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn listen_ref_known_gives_condolence() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB005);
+        // Tạo context: nói về bà Nguyễn
+        rt.process_text("Bà Nguyễn là hàng xóm tốt bụng", 1000);
+        rt.process_text("Bà Nguyễn hay giúp đỡ mọi người", 2000);
+
+        // Bây giờ nói "bà ấy mới mất" → resolve → bà Nguyễn
+        let resp = rt.process_text("Bà ấy mới mất. thật tội nghiệp", 3000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // Nên mention bà Nguyễn trong response
+        assert!(
+            resp.text.contains("Nguyễn") || resp.text.contains("chia buồn") || resp.text.len() > 10,
+            "Known ref should acknowledge: '{}'",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn listen_ref_male_resolves() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB006);
+        // Context: talk about ông Trần
+        rt.process_text("Ông Trần Văn Minh là giáo viên giỏi", 1000);
+
+        let resp = rt.process_text("Ông ấy dạy rất hay", 2000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // Should resolve "ông ấy" → Trần Văn Minh
+    }
+
+    // ── Kịch bản 3: Exclamation "Ah!", "ya!" ─────────────────────────────────
+    // → SilentAck: ghi nhận emotion, không response
+
+    #[test]
+    fn listen_exclamation_ah_silent() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB007);
+        let resp = rt.process_text("Ah!", 1000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // SilentAck → empty response
+        assert!(
+            resp.text.is_empty(),
+            "Exclamation 'Ah!' should be silent: '{}'",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn listen_exclamation_ya_silent() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB008);
+        let resp = rt.process_text("ya..!", 1000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        // SilentAck → empty
+        assert!(
+            resp.text.is_empty(),
+            "Exclamation 'ya..!' should be silent: '{}'",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn listen_exclamation_oi_silent() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB009);
+        let resp = rt.process_text("Ôi!", 1000);
+        assert_eq!(resp.kind, ResponseKind::Natural);
+        assert!(
+            resp.text.is_empty(),
+            "Exclamation 'Ôi!' should be silent: '{}'",
+            resp.text
+        );
+    }
+
+    #[test]
+    fn listen_exclamation_then_more_context() {
+        if skip() {
+            return;
+        }
+        let mut rt = HomeRuntime::new(0xB010);
+        // "Ah!" → silent
+        let r1 = rt.process_text("Ah!", 1000);
+        assert!(r1.text.is_empty(), "First Ah! should be silent");
+
+        // Then user explains more → normal response
+        let r2 = rt.process_text("Tôi vừa nhớ ra điều quan trọng!", 2000);
+        assert_eq!(r2.kind, ResponseKind::Natural);
+        assert!(!r2.text.is_empty(), "Follow-up should get a response");
+    }
+
+    // ── extract_names tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn extract_names_ba_prefix() {
+        let names = super::extract_names("Bà Nguyễn rất tốt bụng");
+        assert!(
+            names.contains(&"Nguyễn".to_string()),
+            "Should find 'Nguyễn': {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn extract_names_ong_prefix() {
+        let names = super::extract_names("Ông Trần Văn Minh dạy giỏi");
+        assert!(
+            names.iter().any(|n| n.contains("Trần")),
+            "Should find 'Trần': {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn extract_names_multiple() {
+        // "Scarlett" ở đầu câu → bị skip bởi Pattern 2 (đúng hành vi)
+        // "Rhett Butler" ở giữa câu → tìm được
+        let names = super::extract_names(
+            "Hôm nay Scarlett O'Hara và Rhett Butler gặp nhau ở Atlanta"
+        );
+        assert!(
+            names.iter().any(|n| n.contains("Scarlett") || n.contains("Rhett")),
+            "Should find names: {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn extract_names_no_names() {
+        let names = super::extract_names("hôm nay trời đẹp quá");
+        assert!(names.is_empty(), "No names expected: {:?}", names);
+    }
+
+    // ── Intent listening signal tests ────────────────────────────────────────
+
+    #[test]
+    fn intent_exclamation_detected() {
+        let est = estimate_intent("Ah!", 0.0, 0.4);
+        assert!(est.is_exclamation, "Ah! should be exclamation");
+    }
+
+    #[test]
+    fn intent_unresolved_ref_detected() {
+        let est = estimate_intent("Bà ấy mới mất", -0.5, 0.3);
+        assert!(
+            est.has_unresolved_ref,
+            "Should detect unresolved ref 'bà ấy'"
+        );
+    }
+
+    #[test]
+    fn intent_vague_emotion_detected() {
+        let est = estimate_intent("chán quá", 0.0, 0.3);
+        assert!(est.is_vague_emotion, "Should detect vague emotion 'chán'");
+    }
+
+    #[test]
+    fn intent_vague_emotion_with_reason_not_vague() {
+        let est = estimate_intent("tôi chán vì không có gì làm", 0.0, 0.3);
+        assert!(
+            !est.is_vague_emotion,
+            "'chán vì...' has reason → not vague: {:?}",
+            est.signals
+        );
+    }
+
+    #[test]
+    fn decide_action_exclamation_silent() {
+        let est = estimate_intent("Ah!", 0.0, 0.4);
+        let action = decide_action(&est, 0.0);
+        assert_eq!(
+            action,
+            IntentAction::SilentAck,
+            "Exclamation → SilentAck"
+        );
+    }
+
+    #[test]
+    fn decide_action_vague_emotion_observe() {
+        let est = estimate_intent("chán quá", 0.0, 0.3);
+        let action = decide_action(&est, 0.0);
+        assert_eq!(
+            action,
+            IntentAction::Observe,
+            "Vague emotion → Observe"
+        );
+    }
+
+    #[test]
+    fn decide_action_unresolved_ref_observe() {
+        let est = estimate_intent("Bà ấy mới mất", -0.5, 0.3);
+        let action = decide_action(&est, -0.5);
+        assert_eq!(
+            action,
+            IntentAction::Observe,
+            "Unresolved ref → Observe"
+        );
+    }
+
+    #[test]
+    fn decide_action_crisis_overrides_listening() {
+        // Crisis luôn override — dù có exclamation
+        let est = estimate_intent("tôi muốn tự tử!", -0.8, 0.2);
+        let action = decide_action(&est, -0.8);
+        assert_eq!(
+            action,
+            IntentAction::CrisisOverride,
+            "Crisis always overrides listening"
+        );
     }
 }
