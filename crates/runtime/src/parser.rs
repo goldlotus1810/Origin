@@ -360,6 +360,7 @@ fn is_command(s: &str) -> bool {
             | "status"
             | "help"
     ) || is_math_command(s)
+        || is_constant_command(s)
 }
 
 /// Check if input is a math command (prefix-based).
@@ -369,6 +370,11 @@ fn is_math_command(s: &str) -> bool {
         "integrate ", "integral ", "tich-phan ", "simplify ", "eval ",
     ];
     prefixes.iter().any(|p| s.starts_with(p))
+}
+
+/// Check if input is a constant/fibonacci command.
+fn is_constant_command(s: &str) -> bool {
+    s.starts_with("const ") || s.starts_with("hang-so ") || s.starts_with("fib ") || s.starts_with("fibonacci ")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -617,6 +623,38 @@ mod tests {
             r,
             ParseResult::OlangExpr(OlangExpr::Command("eval \"x^2 + 1\" x=3".to_string()))
         );
+    }
+
+    // ── Constant commands ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_const_command() {
+        let r = parser().parse("○{const pi}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("const pi".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_const_all_command() {
+        let r = parser().parse("○{const all}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+    }
+
+    #[test]
+    fn parse_fib_command() {
+        let r = parser().parse("○{fib 10}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("fib 10".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_fib_ratio_command() {
+        let r = parser().parse("○{fib ratio 20}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
     }
 
     #[test]

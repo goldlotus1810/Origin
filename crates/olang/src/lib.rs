@@ -14,6 +14,7 @@ pub mod alphabet;
 pub mod clone;
 pub mod compact;
 pub mod compiler;
+pub mod constants;
 pub mod encoder;
 pub mod hash;
 pub mod ir;

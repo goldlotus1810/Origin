@@ -15,6 +15,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::constants::{MathConstant, Precision};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MathExpr — symbolic expression tree
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,9 +287,9 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     "sin" | "cos" | "tan" | "ln" | "log" | "sqrt" => {
                         tokens.push(Token::Func(word));
                     }
-                    "pi" => tokens.push(Token::Num(core::f64::consts::PI)),
+                    "pi" => tokens.push(Token::Num(MathConstant::Pi.compute(Precision::High))),
                     "e" if (i >= chars.len() || !chars[i].is_alphabetic()) => {
-                        tokens.push(Token::Num(core::f64::consts::E));
+                        tokens.push(Token::Num(MathConstant::E.compute(Precision::High)));
                     }
                     _ => {
                         // Multi-char variable or split into single chars
@@ -317,7 +319,19 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 i += 1;
             }
             'π' => {
-                tokens.push(Token::Num(core::f64::consts::PI));
+                tokens.push(Token::Num(MathConstant::Pi.compute(Precision::High)));
+                i += 1;
+            }
+            'φ' => {
+                tokens.push(Token::Num(MathConstant::Phi.compute(Precision::High)));
+                i += 1;
+            }
+            'τ' => {
+                tokens.push(Token::Num(MathConstant::Tau.compute(Precision::High)));
+                i += 1;
+            }
+            'γ' => {
+                tokens.push(Token::Num(MathConstant::EulerGamma.compute(Precision::High)));
                 i += 1;
             }
             _ => {

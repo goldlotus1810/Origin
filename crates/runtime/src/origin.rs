@@ -582,6 +582,11 @@ impl HomeRuntime {
                      ○{integrate \"2x\"}     — symbolic integral\n\
                      ○{simplify \"2x+3x\"}  — simplify expression\n\
                      ○{eval \"x^2+1\" x=3}  — evaluate expression\n\
+                     ○{const pi}           — compute π (adaptive precision)\n\
+                     ○{const all}          — list all constants\n\
+                     ○{const compare}      — compare precision tiers\n\
+                     ○{fib 10}             — Fibonacci(10)\n\
+                     ○{fib ratio 20}       — F(21)/F(20) → φ\n\
                      ○{help}               — this message",
                 ),
                 tone: ResponseTone::Engaged,
@@ -596,8 +601,23 @@ impl HomeRuntime {
                     "d/dx ", "integrate ", "integral ", "tich-phan ",
                     "simplify ", "eval ",
                 ];
+                // Constant/Fibonacci commands
+                let const_prefixes = [
+                    "const ", "hang-so ", "fib ", "fibonacci ",
+                ];
                 if math_prefixes.iter().any(|p| cmd.starts_with(p)) {
                     let text = olang::math::process_math_command(cmd);
+                    Response {
+                        text,
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    }
+                } else if const_prefixes.iter().any(|p| cmd.starts_with(p)) {
+                    let precision = olang::constants::Precision::from_tier_byte(
+                        self.hal_tier_byte()
+                    );
+                    let text = olang::constants::process_constant_command(cmd, precision);
                     Response {
                         text,
                         tone: ResponseTone::Engaged,
@@ -1483,6 +1503,14 @@ impl HomeRuntime {
     // ── Observability ─────────────────────────────────────────────────────────
 
     /// Snapshot metrics cho observability.
+    /// HAL tier as byte for precision selection.
+    /// 1=Full, 2=Compact, 3=Worker, 4=Sensor.
+    /// Default: 1 (Full) — will be wired to hal::HardwareTier when HAL is connected.
+    fn hal_tier_byte(&self) -> u8 {
+        // Future: self.hal.tier().as_byte()
+        1 // Full precision by default
+    }
+
     pub fn metrics(&self) -> crate::metrics::RuntimeMetrics {
         let stm = self.learning.stm();
         let graph = self.learning.graph();

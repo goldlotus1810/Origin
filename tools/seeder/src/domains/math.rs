@@ -183,11 +183,11 @@ pub static GREEK_NODES: &[SeedNode] = &[
     SeedNode { name: "lambda_letter", codepoint: 0x03BB, aliases: &["\\lambda", "λ"] },
     SeedNode { name: "mu_letter", codepoint: 0x03BC, aliases: &["\\mu", "μ"] },
     SeedNode { name: "pi_const", codepoint: 0x03C0, aliases: &[
-        "\\pi", "pi", "3.14159", "số pi",
+        "\\pi", "pi", "số pi", "pi=16·arctan(1/5)-4·arctan(1/239)",
     ]},
     SeedNode { name: "sigma_letter", codepoint: 0x03C3, aliases: &["\\sigma", "σ"] },
-    SeedNode { name: "tau", codepoint: 0x03C4, aliases: &["\\tau", "τ"] },
-    SeedNode { name: "phi_letter", codepoint: 0x03C6, aliases: &["\\phi", "\\varphi", "φ"] },
+    SeedNode { name: "tau", codepoint: 0x03C4, aliases: &["\\tau", "τ", "tau=2pi"] },
+    SeedNode { name: "phi_letter", codepoint: 0x03C6, aliases: &["\\phi", "\\varphi", "φ", "phi=(1+sqrt(5))/2"] },
     SeedNode { name: "omega_letter", codepoint: 0x03C9, aliases: &["\\omega", "ω"] },
     SeedNode { name: "capital_sigma", codepoint: 0x03A3, aliases: &["\\Sigma", "Σ"] },
     SeedNode { name: "capital_pi", codepoint: 0x03A0, aliases: &["\\Pi", "Π"] },
@@ -221,13 +221,26 @@ pub static CONCEPT_NODES: &[SeedNode] = &[
         "\\det", "dinh-thuc", "định thức", "determinant",
     ]},
     SeedNode { name: "euler_e", codepoint: 0x1D452, aliases: &[
-        "e", "so-e", "số e", "euler number", "2.71828",
+        "e", "so-e", "số e", "euler number", "e=sum(1/n!,n=0..inf)",
     ]},
     SeedNode { name: "golden_ratio", codepoint: 0x03C6, aliases: &[
-        "\\varphi", "ti-le-vang", "tỉ lệ vàng", "golden ratio", "1.61803", "φ",
+        "\\varphi", "ti-le-vang", "tỉ lệ vàng", "golden ratio", "φ",
+        "phi=(1+sqrt(5))/2", "phi^2=phi+1",
     ]},
     SeedNode { name: "imaginary_i", codepoint: 0x1D456, aliases: &[
         "don-vi-ao", "đơn vị ảo", "imaginary unit", "i",
+    ]},
+    SeedNode { name: "euler_gamma", codepoint: 0x03B3, aliases: &[
+        "\\gamma", "euler-mascheroni", "hằng số Euler-Mascheroni",
+        "gamma=lim(sum(1/k,k=1..n)-ln(n))",
+    ]},
+    SeedNode { name: "ln2_const", codepoint: 0x2113, aliases: &[
+        "ln2", "ln(2)", "log-tu-nhien-2",
+        "ln2=sum(1/(n*2^n),n=1..inf)",
+    ]},
+    SeedNode { name: "sqrt2_const", codepoint: 0x221A, aliases: &[
+        "\\sqrt{2}", "sqrt2", "căn 2", "căn bậc hai của 2",
+        "sqrt2=Newton(x^2-2=0)",
     ]},
     // Number theory
     SeedNode { name: "prime_number", codepoint: 0x2119, aliases: &[
