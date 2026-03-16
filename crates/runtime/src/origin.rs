@@ -242,8 +242,8 @@ impl HomeRuntime {
                         // Check if numeric result
                         if let Some(num) = chain.to_number() {
                             // Display number cleanly
-                            if (num - num.round()).abs() < 1e-10 && num.abs() < 1e15 {
-                                output_text.push_str(&format!("= {} ", num.round() as i64));
+                            if (num - libm::round(num)).abs() < 1e-10 && num.abs() < 1e15 {
+                                output_text.push_str(&format!("= {} ", libm::round(num) as i64));
                             } else {
                                 output_text.push_str(&format!("= {:.6} ", num));
                             }
@@ -304,11 +304,39 @@ impl HomeRuntime {
                     ));
                 }
                 VmEvent::QueryRelation { hash, rel } => {
-                    output_text.push_str(&format!(
-                        "query(0x{:04X} rel=0x{:02X}) ",
-                        hash & 0xFFFF,
-                        rel
-                    ));
+                    // Real graph query: find all nodes reachable via this relation type
+                    let kind_filter =
+                        silk::edge::EdgeKind::from_byte(*rel);
+                    let reachable_nodes = silk::walk::reachable(
+                        self.learning.graph(),
+                        *hash,
+                        kind_filter,
+                        13, // Fib[7] max depth
+                    );
+                    if reachable_nodes.is_empty() {
+                        output_text.push_str(&format!(
+                            "query(0x{:04X} rel=0x{:02X}) → (no results) ",
+                            hash & 0xFFFF,
+                            rel
+                        ));
+                    } else {
+                        output_text.push_str(&format!(
+                            "query(0x{:04X} rel=0x{:02X}) → {} nodes: ",
+                            hash & 0xFFFF,
+                            rel,
+                            reachable_nodes.len()
+                        ));
+                        for (i, n) in reachable_nodes.iter().take(8).enumerate() {
+                            if i > 0 {
+                                output_text.push_str(", ");
+                            }
+                            output_text.push_str(&format!("0x{:04X}", n & 0xFFFF));
+                        }
+                        if reachable_nodes.len() > 8 {
+                            output_text.push_str(&format!(" (+{})", reachable_nodes.len() - 8));
+                        }
+                        output_text.push(' ');
+                    }
                 }
                 VmEvent::TriggerDream => {
                     return self.handle_command("dream", ts);
@@ -353,15 +381,48 @@ impl HomeRuntime {
                     ));
                 }
                 VmEvent::WhyConnection { from, to } => {
-                    output_text.push_str(&format!(
-                        "[why 0x{:04X} ↔ 0x{:04X}] ",
-                        from & 0xFFFF,
-                        to & 0xFFFF
-                    ));
+                    // Real graph traversal: BFS find path from → to
+                    let path = silk::walk::find_path(
+                        self.learning.graph(),
+                        *from,
+                        *to,
+                        13, // Fib[7] max depth
+                    );
+                    if path.is_empty() {
+                        output_text.push_str(&format!(
+                            "[why 0x{:04X} ↔ 0x{:04X}: no path found] ",
+                            from & 0xFFFF,
+                            to & 0xFFFF
+                        ));
+                    } else {
+                        let formatted = silk::walk::format_path(&path);
+                        output_text.push_str(&format!(
+                            "[why: {} ({} steps)] ",
+                            formatted,
+                            path.len() - 1
+                        ));
+                    }
                 }
                 VmEvent::ExplainOrigin { hash } => {
-                    output_text
-                        .push_str(&format!("[explain origin of 0x{:016X}] ", hash));
+                    // Real graph traversal: trace all incoming edges
+                    let origins = silk::walk::trace_origin(
+                        self.learning.graph(),
+                        *hash,
+                        5, // reasonable depth for explain
+                    );
+                    if origins.is_empty() {
+                        output_text.push_str(&format!(
+                            "[explain 0x{:04X}: no known origins] ",
+                            hash & 0xFFFF
+                        ));
+                    } else {
+                        let formatted = silk::walk::format_origin(&origins);
+                        output_text.push_str(&format!(
+                            "[explain: {} ({} connections)] ",
+                            formatted,
+                            origins.len()
+                        ));
+                    }
                 }
             }
         }
