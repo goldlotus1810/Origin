@@ -493,6 +493,13 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<Vec<BootEdge
         }
     }
 
+    // Nạp NodeKind records → gán đúng kind cho từng node
+    for nk in &parsed.node_kinds {
+        if let Some(kind) = crate::registry::NodeKind::from_byte(nk.kind) {
+            registry.set_kind(nk.chain_hash, kind);
+        }
+    }
+
     // Collect edges → trả về để restore Silk graph
     let edges: Vec<BootEdge> = parsed
         .edges

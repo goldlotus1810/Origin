@@ -169,6 +169,12 @@ fn main() {
 
         // Flush pending writes → origin.olang (QT9: ghi file TRƯỚC)
         flush_pending(&mut rt);
+
+        // RegistryGate: drain + display notifications
+        let notifs = rt.drain_registry_notifications();
+        for n in &notifs {
+            eprintln!("[gate] {}", n);
+        }
     }
 
     // Final persist: serialize remaining learned data

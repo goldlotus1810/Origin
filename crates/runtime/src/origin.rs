@@ -1188,8 +1188,8 @@ impl HomeRuntime {
 
         self.pending_writes.extend_from_slice(writer.as_bytes());
 
-        // Cập nhật Registry (RAM SAU)
-        self.registry.insert(chain, 1, 0, ts, true);
+        // Cập nhật Registry (RAM SAU) — gated with NodeKind::Memory
+        self.gated_insert(chain, 1, ts, true, olang::registry::NodeKind::Memory, "qr:learn");
 
         // Tăng fire_count trong STM
         self.learning
@@ -1251,8 +1251,8 @@ impl HomeRuntime {
 
         self.pending_writes.extend_from_slice(writer.as_bytes());
 
-        // Cập nhật Registry
-        self.registry.insert(&obs.chain, 1, 0, ts, true);
+        // Cập nhật Registry — gated with NodeKind::Memory
+        self.gated_insert(&obs.chain, 1, ts, true, olang::registry::NodeKind::Memory, "qr:confirm");
 
         let fx = self.learning.context().fx();
         Response {
@@ -1488,8 +1488,8 @@ impl HomeRuntime {
                                     .extend_from_slice(evo_writer.as_bytes());
                             }
 
-                            // QT9: Registry SAU khi đã ghi file
-                            self.registry.insert(&evolved_chain, 2, 0, ts, false);
+                            // QT9: Registry SAU khi đã ghi file — gated with NodeKind::Knowledge
+                            self.gated_insert(&evolved_chain, 2, ts, false, olang::registry::NodeKind::Knowledge, "evolved");
 
                             // Tạo body cho evolved node (RAM cache — sau file)
                             if let Some(evolved_mol) = evolved_chain.first() {
@@ -2039,6 +2039,40 @@ impl HomeRuntime {
     }
     pub fn knowtree_mut(&mut self) -> &mut KnowTree {
         &mut self.knowtree
+    }
+
+    // ── QT9: Gated Registry Insert — mọi node PHẢI qua đây ─────────────────
+
+    /// Gated insert: RegistryGate check TRƯỚC → Registry insert SAU.
+    ///
+    /// Đây là điểm duy nhất để tạo node mới trong runtime.
+    /// 1. RegistryGate.check_registered() → kiểm tra node hợp lệ
+    /// 2. Registry.insert_with_kind() → đăng ký với đúng NodeKind
+    ///
+    /// Returns: chain_hash (u64)
+    fn gated_insert(
+        &mut self,
+        chain: &olang::molecular::MolecularChain,
+        layer: u8,
+        ts: i64,
+        is_qr: bool,
+        kind: olang::registry::NodeKind,
+        name: &str,
+    ) -> u64 {
+        let hash = chain.chain_hash();
+
+        // RegistryGate: pre-check (kiểm tra trước khi đăng ký)
+        let alert = if is_qr {
+            AlertLevel::Important
+        } else {
+            AlertLevel::Normal
+        };
+        self.registry_gate
+            .check_registered(name, hash, kind as u8, alert, ts);
+
+        // Registry: insert with correct NodeKind
+        self.registry
+            .insert_with_kind(chain, layer, 0, ts, is_qr, kind)
     }
 
     // ── Persistence — QT9: ghi file TRƯỚC, cập nhật RAM SAU ────────────────
@@ -3202,7 +3236,7 @@ impl HomeRuntime {
                             sources,
                             emotion,
                         } => {
-                            self.registry.insert(chain, 3, 0, ts, false);
+                            self.gated_insert(chain, 3, ts, false, olang::registry::NodeKind::Knowledge, "dream:l3");
                             // L3 concept in KnowTree — with source edges
                             self.knowtree.store_concept(chain, None, 3, sources, ts);
                             l3_this_cycle += 1;
@@ -3224,10 +3258,12 @@ impl HomeRuntime {
                             fire_count,
                         } => {
                             if let Some(obs) = self.learning.stm().find_by_hash(*chain_hash) {
-                                self.registry.insert(&obs.chain, 0, 0, ts, true);
+                                let obs_chain = obs.chain.clone();
+                                let obs_fc = *fire_count;
+                                self.gated_insert(&obs_chain, 0, ts, true, olang::registry::NodeKind::Memory, "dream:qr");
                                 // L2: promote to KnowTree
                                 self.knowtree
-                                    .promote_from_stm(&obs.chain, None, *fire_count, ts);
+                                    .promote_from_stm(&obs_chain, None, obs_fc, ts);
                                 // Track for STM cleanup
                                 promoted_hashes.push(*chain_hash);
                             }
