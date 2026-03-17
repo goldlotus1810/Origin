@@ -735,6 +735,64 @@ impl CompactPage {
 
         buf
     }
+
+    /// Deserialize page from bytes (reverse of `to_bytes()`).
+    ///
+    /// Format: [CPAG:4][page_id:4][layer:1][node_count:4][edge_count:4]
+    ///         [nodes...][edges...][checksum:8]
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        if b.len() < 4 + 4 + 1 + 4 + 4 + 8 {
+            return None; // too short for header + checksum
+        }
+        // Verify magic
+        if b[0..4] != PAGE_MAGIC {
+            return None;
+        }
+        let page_id = u32::from_be_bytes(b[4..8].try_into().ok()?);
+        let layer = b[8];
+        let node_count = u32::from_be_bytes(b[9..13].try_into().ok()?) as usize;
+        let edge_count = u32::from_be_bytes(b[13..17].try_into().ok()?) as usize;
+
+        // Verify checksum (covers everything except last 8 bytes)
+        if b.len() < 8 {
+            return None;
+        }
+        let payload = &b[..b.len() - 8];
+        let stored_checksum = u64::from_be_bytes(b[b.len() - 8..].try_into().ok()?);
+        if fnv1a(payload) != stored_checksum {
+            return None; // corrupted
+        }
+
+        // Parse nodes
+        let mut offset = 17;
+        let mut nodes = Vec::with_capacity(node_count);
+        for _ in 0..node_count {
+            if offset >= b.len() - 8 {
+                return None;
+            }
+            let node = CompactNode::from_bytes(&b[offset..])?;
+            offset += node.total_size();
+            nodes.push(node);
+        }
+
+        // Parse edges (10 bytes each)
+        let mut edges = Vec::with_capacity(edge_count);
+        for _ in 0..edge_count {
+            if offset + 10 > b.len() - 8 {
+                return None;
+            }
+            let edge_bytes: [u8; 10] = b[offset..offset + 10].try_into().ok()?;
+            edges.push(CompactEdge::from_bytes(&edge_bytes));
+            offset += 10;
+        }
+
+        Some(Self {
+            page_id,
+            layer,
+            nodes,
+            edges,
+        })
+    }
 }
 
 /// Thống kê compression.
@@ -1491,11 +1549,11 @@ impl TieredStore {
     }
 
     fn load_page_from_cold(&mut self, page_id: u32) {
-        // Find in cold storage
+        // Find in cold storage and deserialize
         if let Some(idx) = self.cold_storage.iter().position(|(id, _)| *id == page_id) {
-            let (_, _bytes) = &self.cold_storage[idx];
-            // Simplified: just create empty page (real impl would deserialize)
-            let page = CompactPage::new(page_id, 0);
+            let bytes = self.cold_storage[idx].1.clone();
+            let page = CompactPage::from_bytes(&bytes)
+                .unwrap_or_else(|| CompactPage::new(page_id, 0));
             if let Some(evicted) = self.cache.put(page_id, page) {
                 self.flush_page(evicted);
             }
@@ -1814,6 +1872,43 @@ mod tests {
         assert_eq!(u32::from_be_bytes(bytes[4..8].try_into().unwrap()), 42);
         // Check checksum at end
         assert!(bytes.len() > 8, "Page has content + checksum");
+    }
+
+    #[test]
+    fn page_roundtrip() {
+        let mut page = CompactPage::new(42, 3);
+        let chain = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
+        let mut dict = ChainDictionary::new(100);
+        let node = CompactNode::encode(&chain, None, &mut dict, 3, 1000);
+        let node_hash = node.hash;
+        page.push_node(node);
+        page.push_edge(CompactEdge::encode(1, 2, 0.5, RelationBase::Member.as_byte()));
+
+        let bytes = page.to_bytes();
+        let restored = CompactPage::from_bytes(&bytes).expect("roundtrip should succeed");
+
+        assert_eq!(restored.page_id, 42);
+        assert_eq!(restored.layer, 3);
+        assert_eq!(restored.nodes.len(), 1);
+        assert_eq!(restored.edges.len(), 1);
+        assert_eq!(restored.nodes[0].hash, node_hash);
+        assert_eq!(restored.edges[0].from_hash, 1);
+        assert_eq!(restored.edges[0].to_hash, 2);
+    }
+
+    #[test]
+    fn page_from_bytes_corrupted() {
+        let mut page = CompactPage::new(1, 0);
+        let chain = MolecularChain::single(test_mol(0x01, 0x01, 0x80, 0x80, 0x03));
+        let mut dict = ChainDictionary::new(100);
+        page.push_node(CompactNode::encode(&chain, None, &mut dict, 0, 0));
+
+        let mut bytes = page.to_bytes();
+        // Corrupt a byte
+        if bytes.len() > 20 {
+            bytes[20] ^= 0xFF;
+        }
+        assert!(CompactPage::from_bytes(&bytes).is_none(), "Corrupted data should fail");
     }
 
     // ── SilkPruner ──────────────────────────────────────────────────────────

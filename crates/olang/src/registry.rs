@@ -598,6 +598,34 @@ impl Registry {
         (entries_bytes, aliases_bytes, misc_bytes, total)
     }
 
+    // ── Tiered eviction ──────────────────────────────────────────────────
+
+    /// Evict L2+ entries from RAM — returns evicted entries for TieredStore.
+    ///
+    /// Keeps L0 + L1 in RAM (always hot). Removes L2+ entries from
+    /// `entries` Vec, freeing memory. Caller stores them in TieredStore.
+    ///
+    /// At 1B nodes: 139 GB → ~196 KB (L0+L1 only).
+    pub fn evict_cold(&mut self, min_layer: u8) -> Vec<(u64, RegistryEntry)> {
+        let mut evicted = Vec::new();
+        let mut kept = Vec::new();
+
+        for (hash, entry) in self.entries.drain(..) {
+            if entry.layer >= min_layer {
+                evicted.push((hash, entry));
+            } else {
+                kept.push((hash, entry));
+            }
+        }
+        self.entries = kept;
+        evicted
+    }
+
+    /// Count entries by layer.
+    pub fn count_by_layer(&self, layer: u8) -> usize {
+        self.entries.iter().filter(|(_, e)| e.layer == layer).count()
+    }
+
     /// Summary: đếm từng nhóm NodeKind.
     pub fn kind_summary(&self) -> Vec<(NodeKind, usize)> {
         let kinds = [
@@ -924,6 +952,79 @@ mod tests {
         let summary = r.kind_summary();
         assert!(summary.iter().any(|(k, c)| *k == NodeKind::Skill && *c == 1));
         assert!(summary.iter().any(|(k, c)| *k == NodeKind::Agent && *c == 1));
+    }
+
+    #[test]
+    fn evict_cold_removes_l2_plus() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let c0 = encode_codepoint(0x1F525); // L0
+        let c1 = encode_codepoint(0x2654);  // L1
+        let c2 = encode_codepoint(0x2655);  // L2
+        let c3 = encode_codepoint(0x2656);  // L3
+
+        r.insert(&c0, 0, 0, 0, false);
+        r.insert(&c1, 1, 1, 0, false);
+        let h2 = r.insert(&c2, 2, 2, 0, false);
+        let h3 = r.insert(&c3, 3, 3, 0, false);
+
+        assert_eq!(r.len(), 4);
+
+        // Evict L2+
+        let evicted = r.evict_cold(2);
+        assert_eq!(evicted.len(), 2, "Should evict 2 L2+ entries");
+        assert_eq!(r.len(), 2, "Should keep 2 L0+L1 entries");
+
+        // L2+ hashes are gone from RAM
+        assert!(r.lookup_hash(h2).is_none());
+        assert!(r.lookup_hash(h3).is_none());
+
+        // L0+L1 still in RAM
+        assert!(r.lookup_hash(c0.chain_hash()).is_some());
+        assert!(r.lookup_hash(c1.chain_hash()).is_some());
+    }
+
+    #[test]
+    fn memory_usage_returns_nonzero() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let chain = encode_codepoint(0x1F525);
+        r.insert(&chain, 0, 0, 0, false);
+        r.register_alias("fire", chain.chain_hash());
+
+        let (entries, aliases, _misc, total) = r.memory_usage();
+        assert!(entries > 0, "Entries bytes > 0");
+        assert!(aliases > 0, "Aliases bytes > 0");
+        assert!(total > 0, "Total > 0");
+        assert_eq!(total, entries + aliases + _misc);
+    }
+
+    #[test]
+    fn reverse_index_after_bulk() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        r.begin_bulk();
+        let chain = encode_codepoint(0x1F525);
+        let hash = r.insert(&chain, 0, 0, 0, false);
+        r.register_alias("fire", hash);
+        r.finalize_bulk();
+
+        // Reverse index should work after finalize
+        let name = r.alias_for_hash(hash);
+        assert_eq!(name, Some("fire"));
+    }
+
+    #[test]
+    fn reverse_index_normal_mode() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let chain = encode_codepoint(0x1F525);
+        let hash = r.insert(&chain, 0, 0, 0, false);
+        r.register_alias("fire", hash);
+
+        // Reverse index should work in normal mode
+        assert_eq!(r.alias_for_hash(hash), Some("fire"));
+        assert_eq!(r.lookup_name_by_hash(hash), Some(String::from("fire")));
     }
 }
 
