@@ -401,6 +401,8 @@ pub enum Token {
     Ident(String),
     /// Số nguyên
     Int(u32),
+    /// Số thực (float)
+    Float(f64),
     /// Chuỗi ký tự trong ngoặc kép: "text"
     Str(String),
 
@@ -768,6 +770,29 @@ impl<'a> Lexer<'a> {
                 self.chars.next();
             } else {
                 break;
+            }
+        }
+        // Check for float: integer part followed by '.' and digit
+        if let Some(&(_, '.')) = self.chars.peek() {
+            // Peek ahead to see if next after '.' is a digit (not a field access)
+            let mut clone = self.chars.clone();
+            clone.next(); // skip '.'
+            if let Some(&(_, c)) = clone.peek() {
+                if c.is_ascii_digit() {
+                    self.chars.next(); // consume '.'
+                    let mut frac = 0.0_f64;
+                    let mut divisor = 10.0_f64;
+                    while let Some(&(_, c)) = self.chars.peek() {
+                        if let Some(d) = c.to_digit(10) {
+                            frac += d as f64 / divisor;
+                            divisor *= 10.0;
+                            self.chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    return Token::Float(n as f64 + frac);
+                }
             }
         }
         Token::Int(n)

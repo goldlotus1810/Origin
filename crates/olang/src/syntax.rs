@@ -199,6 +199,9 @@ pub enum Expr {
     /// Integer literal
     Int(u32),
 
+    /// Float literal
+    Float(f64),
+
     /// String literal: "text"
     Str(String),
 
@@ -1066,6 +1069,12 @@ impl<'a> Parser<'a> {
             Token::Int(val) => {
                 self.advance();
                 Expr::Int(val)
+            }
+
+            Token::Float(val) => {
+                let v = val;
+                self.advance();
+                Expr::Float(v)
             }
 
             Token::Str(s) => {

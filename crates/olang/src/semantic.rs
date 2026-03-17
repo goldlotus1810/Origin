@@ -349,7 +349,7 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // We don't error on undefined — registry lookup happens at runtime.
         }
 
-        Expr::Int(_) => {}
+        Expr::Int(_) | Expr::Float(_) => {}
 
         Expr::Compose(a, b) => {
             validate_expr(a, scope, errors);
@@ -516,7 +516,7 @@ pub enum ChainKind {
 /// Infer chain kind cho expression (best-effort, static analysis).
 pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
     match expr {
-        Expr::Int(_) => ChainKind::Numeric,
+        Expr::Int(_) | Expr::Float(_) => ChainKind::Numeric,
         Expr::Ident(_) | Expr::Str(_) => ChainKind::Unknown,
         Expr::Compose(a, b) => {
             // LCA of two chains: if both same kind → same kind; otherwise Unknown
@@ -1200,8 +1200,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Int(n) => {
-            // Push numeric chain (Phase 1: Math Runtime)
             ctx.emit(Op::PushNum(*n as f64));
+        }
+
+        Expr::Float(f) => {
+            ctx.emit(Op::PushNum(*f));
         }
 
         Expr::Compose(a, b) => {
