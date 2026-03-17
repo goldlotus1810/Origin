@@ -20,7 +20,7 @@ use context::intent::{decide_action, estimate_intent, IntentAction};
 use memory::dream::{DreamConfig, DreamCycle};
 use silk::walk::ResponseTone;
 
-use crate::parser::{OlangExpr, OlangParser, ParseResult, RelationOp};
+use crate::parser::{CmpOp, OlangExpr, OlangParser, ParseResult, RelationOp};
 use olang::compiler::{Compiler, Target};
 use olang::ir::{compile_expr, OlangIrExpr};
 use olang::optimize::{self, OptLevel};
@@ -3670,6 +3670,25 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
             start,
             end,
             body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::While { cond, body } => OlangIrExpr::While {
+            cond: alloc::boxed::Box::new(olang_expr_to_ir(*cond)),
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::Compare { lhs, op, rhs } => {
+            let builtin = match op {
+                CmpOp::Lt => "__cmp_lt",
+                CmpOp::Gt => "__cmp_gt",
+                CmpOp::Le => "__cmp_le",
+                CmpOp::Ge => "__cmp_ge",
+            };
+            OlangIrExpr::Compare {
+                lhs: alloc::boxed::Box::new(olang_expr_to_ir(*lhs)),
+                builtin: builtin.into(),
+                rhs: alloc::boxed::Box::new(olang_expr_to_ir(*rhs)),
+            }
         },
     }
 }

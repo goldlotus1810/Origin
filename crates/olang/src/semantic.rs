@@ -50,7 +50,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::ir::{OlangProgram, Op};
-use crate::syntax::{Expr, Stmt};
+use crate::syntax::{CmpOp, Expr, Stmt};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SemError — lỗi ngữ nghĩa
@@ -247,6 +247,14 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.exit();
         }
 
+        Stmt::While { cond: _, body } => {
+            scope.enter();
+            for s in body {
+                validate_stmt(s, scope, errors);
+            }
+            scope.exit();
+        }
+
         Stmt::TryCatch { try_block, catch_block } => {
             scope.enter();
             for s in try_block {
@@ -347,6 +355,11 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             validate_expr(rhs, scope, errors);
         }
 
+        Expr::Compare { lhs, rhs, .. } => {
+            validate_expr(lhs, scope, errors);
+            validate_expr(rhs, scope, errors);
+        }
+
         Expr::Str(_) => {
             // String literals are always valid
         }
@@ -414,6 +427,7 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::Truth { .. } => ChainKind::Unknown,
         Expr::RelEdge { .. } | Expr::RelQuery { .. } | Expr::Chain { .. } => ChainKind::Unknown,
         Expr::Call { .. } => ChainKind::Unknown,
+        Expr::Compare { .. } => ChainKind::Numeric,
         Expr::Group(inner) => infer_expr_kind(inner),
         Expr::MolLiteral { shape, valence, .. } => {
             // Heuristic: check shape and valence to classify
@@ -437,7 +451,8 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         }
         Stmt::Expr(expr) => infer_expr_kind(expr),
         Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. }
-        | Stmt::Match { .. } | Stmt::TryCatch { .. } | Stmt::ForIn { .. } => ChainKind::Void,
+        | Stmt::Match { .. } | Stmt::TryCatch { .. } | Stmt::ForIn { .. }
+        | Stmt::While { .. } => ChainKind::Void,
     }
 }
 
@@ -599,6 +614,28 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 }
                 ctx.locals.truncate(saved);
             }
+        }
+
+        Stmt::While { cond, body } => {
+            // while cond { body }
+            // Layout: Loop(1024) ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd [end:] Pop
+            // Jz peeks, so Pop needed on both true path (after Jz) and false path (at end)
+            // QT2: ∞-1 — capped at 1024 iterations
+            ctx.emit(Op::Loop(1024));
+            ctx.emit(Op::ScopeBegin);
+            lower_expr(cond, ctx);
+            let jz_pos = ctx.current_pos();
+            ctx.emit(Op::Jz(0)); // placeholder — patched to end
+            ctx.emit(Op::Pop); // pop cond result (true path continues)
+            let saved = ctx.locals.len();
+            for s in body {
+                lower_stmt(s, ctx);
+            }
+            ctx.locals.truncate(saved);
+            ctx.emit(Op::ScopeEnd); // triggers loop jump-back
+            let end = ctx.current_pos();
+            ctx.patch_jump(jz_pos, end);
+            ctx.emit(Op::Pop); // pop cond result (false path, jumped here)
         }
 
         Stmt::ForIn { var, start, end, body } => {
@@ -935,6 +972,20 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
             ctx.emit(Op::Call("__assert_truth".into()));
+        }
+
+        Expr::Compare { lhs, op, rhs } => {
+            // Compare: lhs < rhs → PushNum(lhs), PushNum(rhs), Call(__cmp_<op>)
+            // Returns 1.0 (true) or 0.0 (false)
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            let builtin = match op {
+                CmpOp::Lt => "__cmp_lt",
+                CmpOp::Gt => "__cmp_gt",
+                CmpOp::Le => "__cmp_le",
+                CmpOp::Ge => "__cmp_ge",
+            };
+            ctx.emit(Op::Call(builtin.into()));
         }
 
         Expr::Str(s) => {
@@ -1512,5 +1563,45 @@ mod tests {
     fn infer_try_catch_is_void() {
         let stmts = parse("try { emit fire; } catch { dream; }").unwrap();
         assert_eq!(infer_stmt_kind(&stmts[0]), ChainKind::Void);
+    }
+
+    #[test]
+    fn validate_while_basic() {
+        let stmts = parse("while x < 10 { emit x; }").unwrap();
+        let warnings = validate(&stmts);
+        // No errors expected
+        assert!(!warnings.iter().any(|w| w.message.contains("Error")), "Unexpected errors: {:?}", warnings);
+    }
+
+    #[test]
+    fn lower_while_has_loop_and_jz() {
+        let stmts = parse("while x < 10 { emit x; }").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Loop(1024))), "Should have Loop(1024)");
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))), "Should have Jz for condition");
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Call(ref n) if n == "__cmp_lt")),
+            "Should have __cmp_lt call");
+    }
+
+    #[test]
+    fn infer_while_is_void() {
+        let stmts = parse("while x < 10 { emit x; }").unwrap();
+        assert_eq!(infer_stmt_kind(&stmts[0]), ChainKind::Void);
+    }
+
+    #[test]
+    fn validate_compare_expr() {
+        let stmts = parse("emit x >= 5;").unwrap();
+        let warnings = validate(&stmts);
+        assert!(!warnings.iter().any(|w| w.message.contains("Error")), "Unexpected errors: {:?}", warnings);
+    }
+
+    #[test]
+    fn infer_compare_is_numeric() {
+        let stmts = parse("emit x < 10;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(expr) => assert_eq!(infer_expr_kind(expr), ChainKind::Numeric),
+            _ => panic!("Expected Emit"),
+        }
     }
 }

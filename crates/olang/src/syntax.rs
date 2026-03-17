@@ -110,6 +110,12 @@ pub enum Stmt {
         end: u32,
         body: Vec<Stmt>,
     },
+
+    /// `while cond { body }`
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
 }
 
 /// Match arm — pattern + body.
@@ -138,6 +144,19 @@ pub enum MatchPattern {
     },
     /// Wildcard: `_` — matches anything (default arm)
     Wildcard,
+}
+
+/// Comparison operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    /// `<`
+    Lt,
+    /// `>`
+    Gt,
+    /// `<=`
+    Le,
+    /// `>=`
+    Ge,
 }
 
 /// Expression — mọi expression evaluate → MolecularChain.
@@ -197,6 +216,13 @@ pub enum Expr {
 
     /// `(expr)` — grouping
     Group(Box<Expr>),
+
+    /// `a < b`, `a > b`, `a <= b`, `a >= b` — comparison (returns 1.0 or 0.0)
+    Compare {
+        lhs: Box<Expr>,
+        op: CmpOp,
+        rhs: Box<Expr>,
+    },
 
     /// Molecular literal: `{ S=1 R=2 V=128 A=128 T=3 }`
     ///
@@ -287,6 +313,7 @@ impl<'a> Parser<'a> {
             Token::Match => self.parse_match(),
             Token::Try => self.parse_try_catch(),
             Token::For => self.parse_for_in(),
+            Token::While => self.parse_while(),
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -469,6 +496,17 @@ impl<'a> Parser<'a> {
             end,
             body,
         })
+    }
+
+    /// `while` expr `{` stmts `}`
+    fn parse_while(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'while'
+        let cond = self.parse_expr()?;
+        let body = self.parse_block()?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::While { cond, body })
     }
 
     /// command (STR)? ';'?
@@ -720,17 +758,40 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// compose = arith ('∘' arith)*
+    /// compose = compare ('∘' compare)*
     fn parse_compose_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_arith_expr()?;
+        let mut left = self.parse_compare_expr()?;
 
         while self.check_rel(RelOp::Compose) {
             self.advance();
-            let right = self.parse_arith_expr()?;
+            let right = self.parse_compare_expr()?;
             left = Expr::Compose(Box::new(left), Box::new(right));
         }
 
         Ok(left)
+    }
+
+    /// compare = arith (('<' | '>' | '<=' | '>=') arith)?
+    fn parse_compare_expr(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_arith_expr()?;
+        let cmp_op = match self.peek() {
+            Token::Lt => Some(CmpOp::Lt),
+            Token::Gt => Some(CmpOp::Gt),
+            Token::Le => Some(CmpOp::Le),
+            Token::Ge => Some(CmpOp::Ge),
+            _ => None,
+        };
+        if let Some(op) = cmp_op {
+            self.advance();
+            let right = self.parse_arith_expr()?;
+            Ok(Expr::Compare {
+                lhs: Box::new(left),
+                op,
+                rhs: Box::new(right),
+            })
+        } else {
+            Ok(left)
+        }
     }
 
     /// arith = primary ((ARITH_OP | PHYS_OP) primary)*
@@ -1640,5 +1701,58 @@ mod tests {
         assert_eq!(tokens[3], Token::Int(0));
         assert_eq!(tokens[4], Token::DotDot);
         assert_eq!(tokens[5], Token::Int(5));
+    }
+
+    #[test]
+    fn parse_while_basic() {
+        let stmts = parse("while x < 10 { emit x; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::While { cond, body } => {
+                // cond should be Compare(x < 10)
+                match cond {
+                    Expr::Compare { op, .. } => assert_eq!(*op, CmpOp::Lt),
+                    _ => panic!("Expected Compare, got {:?}", cond),
+                }
+                assert!(!body.is_empty());
+            }
+            _ => panic!("Expected While, got {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn parse_compare_lt() {
+        let stmts = parse("emit x < 10;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::Compare { op, .. } => assert_eq!(*op, CmpOp::Lt),
+                _ => panic!("Expected Compare, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn parse_compare_ge() {
+        let stmts = parse("emit x >= 5;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::Compare { op, .. } => assert_eq!(*op, CmpOp::Ge),
+                _ => panic!("Expected Compare, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn lex_comparison_tokens() {
+        use crate::alphabet::{Lexer, Token};
+        let tokens = Lexer::tokenize_all("x < 10");
+        assert!(tokens.contains(&Token::Lt));
+        let tokens2 = Lexer::tokenize_all("x >= 5");
+        assert!(tokens2.contains(&Token::Ge));
+        let tokens3 = Lexer::tokenize_all("x <= 3");
+        assert!(tokens3.contains(&Token::Le));
     }
 }

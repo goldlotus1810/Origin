@@ -432,6 +432,26 @@ impl OlangVM {
                             };
                             let _ = stack.push(MolecularChain::from_number(result));
                         }
+                        "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let truthy = match name.as_str() {
+                                "__cmp_lt" => na < nb,
+                                "__cmp_gt" => na > nb,
+                                "__cmp_le" => na <= nb,
+                                "__cmp_ge" => na >= nb,
+                                _ => false,
+                            };
+                            // true → non-empty chain (1.0), false → empty chain
+                            // Jz checks is_empty() so empty = falsy
+                            if truthy {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
                         "__assert_truth" => {
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
@@ -1766,5 +1786,87 @@ mod tests {
         assert!((v0 - 0.0).abs() < f64::EPSILON, "First should be 0, got {}", v0);
         assert!((v1 - 1.0).abs() < f64::EPSILON, "Second should be 1, got {}", v1);
         assert!((v2 - 2.0).abs() < f64::EPSILON, "Third should be 2, got {}", v2);
+    }
+
+    #[test]
+    fn cmp_lt_true() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(3.0))
+            .push_op(Op::PushNum(5.0))
+            .push_op(Op::Call("__cmp_lt".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON, "3 < 5 should be true (1.0)");
+    }
+
+    #[test]
+    fn cmp_lt_false() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(7.0))
+            .push_op(Op::PushNum(5.0))
+            .push_op(Op::Call("__cmp_lt".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        // False comparisons return empty chain (falsy for Jz)
+        assert!(result.outputs()[0].is_empty(), "7 < 5 should be false (empty)");
+    }
+
+    #[test]
+    fn cmp_ge_true() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(5.0))
+            .push_op(Op::PushNum(5.0))
+            .push_op(Op::Call("__cmp_ge".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON, "5 >= 5 should be true");
+    }
+
+    #[test]
+    fn while_loop_counts_to_three() {
+        // while i < 3 { emit i; i = i + 1 }
+        // Simulate: counter on stack, Loop(1024), cond check via __cmp_lt + Jz
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(0.0));          // counter on stack
+        prog.push_op(Op::Loop(1024));
+        prog.push_op(Op::ScopeBegin);
+        // Check: counter < 3?
+        prog.push_op(Op::Dup);                    // dup counter for cmp
+        prog.push_op(Op::PushNum(3.0));
+        prog.push_op(Op::Call("__cmp_lt".into()));
+        let jz_idx = prog.ops.len();
+        prog.push_op(Op::Jz(0));                  // placeholder → jumps to end
+        prog.push_op(Op::Pop);                    // pop cmp result (true path)
+        // Body: emit counter
+        prog.push_op(Op::Dup);
+        prog.push_op(Op::Emit);
+        // Increment
+        prog.push_op(Op::PushNum(1.0));
+        prog.push_op(Op::Call("__hyp_add".into()));
+        prog.push_op(Op::ScopeEnd);               // loop back
+        let end = prog.ops.len();
+        prog.ops[jz_idx] = Op::Jz(end);
+        prog.push_op(Op::Pop);                    // pop cmp result (false path, jumped here)
+        prog.push_op(Op::Pop);                    // discard counter
+        prog.push_op(Op::Halt);
+
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "while errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 3, "Should emit 3 values");
+        let v0 = outputs[0].to_number().unwrap();
+        let v1 = outputs[1].to_number().unwrap();
+        let v2 = outputs[2].to_number().unwrap();
+        assert!((v0 - 0.0).abs() < f64::EPSILON);
+        assert!((v1 - 1.0).abs() < f64::EPSILON);
+        assert!((v2 - 2.0).abs() < f64::EPSILON);
     }
 }

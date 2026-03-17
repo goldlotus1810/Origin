@@ -30,6 +30,7 @@
 //! EXPLAIN            → pop 1, trace chain's origin
 
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -388,6 +389,18 @@ pub enum OlangIrExpr {
         end: u32,
         body: Vec<OlangIrExpr>,
     },
+    /// while cond { body } — conditional loop (QT2: capped at 1024)
+    While {
+        cond: Box<OlangIrExpr>,
+        body: Vec<OlangIrExpr>,
+    },
+    /// x < 10 — comparison → PushNum(lhs), PushNum(rhs), Call("__cmp_*")
+    Compare {
+        lhs: Box<OlangIrExpr>,
+        /// "__cmp_lt", "__cmp_gt", "__cmp_le", "__cmp_ge"
+        builtin: String,
+        rhs: Box<OlangIrExpr>,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -671,6 +684,30 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
                 prog.push_op(Op::ScopeEnd);
             }
             prog.push_op(Op::Pop);
+        }
+
+        OlangIrExpr::While { cond, body } => {
+            // QT2: ∞-1 — capped at 1024 iterations
+            // Layout: Loop(1024) ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd [end:] Pop
+            prog.push_op(Op::Loop(1024));
+            prog.push_op(Op::ScopeBegin);
+            emit_expr(cond, prog);
+            let jz_idx = prog.ops.len();
+            prog.push_op(Op::Jz(0)); // placeholder
+            prog.push_op(Op::Pop); // pop cond (true path)
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd); // loop jump-back
+            let end = prog.ops.len();
+            prog.ops[jz_idx] = Op::Jz(end);
+            prog.push_op(Op::Pop); // pop cond (false path)
+        }
+
+        OlangIrExpr::Compare { lhs, builtin, rhs } => {
+            emit_expr(lhs, prog);
+            emit_expr(rhs, prog);
+            prog.push_op(Op::Call(builtin.clone()));
         }
     }
 }

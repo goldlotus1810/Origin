@@ -327,6 +327,8 @@ pub enum Keyword {
     For,
     /// `in` — range iteration
     In,
+    /// `while` — conditional loop
+    While,
 }
 
 /// Check xem string có phải keyword không.
@@ -343,6 +345,7 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "catch" => Some(Keyword::Catch),
         "for" => Some(Keyword::For),
         "in" => Some(Keyword::In),
+        "while" => Some(Keyword::While),
         _ => None,
     }
 }
@@ -457,6 +460,16 @@ pub enum Token {
     In,
     /// `..` — range operator
     DotDot,
+    /// `while`
+    While,
+    /// `<` — less than
+    Lt,
+    /// `>` — greater than
+    Gt,
+    /// `<=` — less than or equal
+    Le,
+    /// `>=` — greater than or equal
+    Ge,
 
     // ── End ──
     /// End of input
@@ -583,13 +596,27 @@ impl<'a> Lexer<'a> {
             }
             '.' => {
                 self.chars.next();
-                // .. → DotDot (range)
                 if let Some(&(_, '.')) = self.chars.peek() {
                     self.chars.next();
                     return Token::DotDot;
                 }
-                // Single dot: treat as identifier character (shouldn't normally occur)
                 return Token::Ident(".".into());
+            }
+            '<' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Le;
+                }
+                return Token::Lt;
+            }
+            '>' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Ge;
+                }
+                return Token::Gt;
             }
             _ => {}
         }
@@ -682,6 +709,7 @@ impl<'a> Lexer<'a> {
                 Keyword::Catch => Token::Catch,
                 Keyword::For => Token::For,
                 Keyword::In => Token::In,
+                Keyword::While => Token::While,
             };
         }
 

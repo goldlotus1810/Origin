@@ -120,6 +120,19 @@ impl RelationOp {
 // OlangExpr — parsed expression
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Comparison operator trong ○{}.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    /// < less than
+    Lt,
+    /// > greater than
+    Gt,
+    /// <= less or equal
+    Le,
+    /// >= greater or equal
+    Ge,
+}
+
 /// Arithmetic operator trong ○{}.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArithOp {
@@ -215,6 +228,17 @@ pub enum OlangExpr {
         var: String,
         start: u32,
         end: u32,
+        body: Vec<OlangExpr>,
+    },
+    /// ○{x < 10} — comparison expression
+    Compare {
+        lhs: alloc::boxed::Box<OlangExpr>,
+        op: CmpOp,
+        rhs: alloc::boxed::Box<OlangExpr>,
+    },
+    /// ○{while x < 10 { emit x; let x = x + 1 }} — conditional loop
+    While {
+        cond: alloc::boxed::Box<OlangExpr>,
         body: Vec<OlangExpr>,
     },
 }
@@ -346,6 +370,11 @@ impl OlangParser {
             return Ok(for_expr);
         }
 
+        // While (conditional loop): while cond { body }
+        if let Some(while_expr) = self.try_parse_while(trimmed) {
+            return Ok(while_expr);
+        }
+
         // Use (Python-style import): use <skill>
         if let Some(use_expr) = try_parse_use(trimmed) {
             return Ok(use_expr);
@@ -366,6 +395,11 @@ impl OlangParser {
             if let Some(pipe_expr) = self.try_parse_pipe(trimmed) {
                 return Ok(pipe_expr);
             }
+        }
+
+        // Comparison: x < 10, x >= 5, etc.
+        if let Some(cmp_expr) = self.try_parse_compare(trimmed) {
+            return Ok(cmp_expr);
         }
 
         // Arithmetic: detect numeric expressions like "1 + 2", "3.5 × 4", "10 - 3", "8 ÷ 2"
@@ -695,6 +729,56 @@ impl OlangParser {
             var,
             start,
             end,
+            body,
+        })
+    }
+
+    /// Try to parse comparison: "x < 10", "count >= 5", "3 <= y"
+    fn try_parse_compare(&self, s: &str) -> Option<OlangExpr> {
+        // Try two-char operators first (<=, >=), then single-char (<, >)
+        for (pat, op) in &[("<=", CmpOp::Le), (">=", CmpOp::Ge), ("<", CmpOp::Lt), (">", CmpOp::Gt)] {
+            if let Some(pos) = s.find(pat) {
+                let lhs_str = s[..pos].trim();
+                let rhs_str = s[pos + pat.len()..].trim();
+                if lhs_str.is_empty() || rhs_str.is_empty() {
+                    continue;
+                }
+                // Don't match if it's inside braces (could be part of block)
+                if lhs_str.contains('{') || rhs_str.contains('{') {
+                    continue;
+                }
+                let lhs = self.parse_expr(lhs_str).ok()?;
+                let rhs = self.parse_expr(rhs_str).ok()?;
+                return Some(OlangExpr::Compare {
+                    lhs: alloc::boxed::Box::new(lhs),
+                    op: *op,
+                    rhs: alloc::boxed::Box::new(rhs),
+                });
+            }
+        }
+        None
+    }
+
+    /// Try to parse while loop: while COND { body }
+    fn try_parse_while(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("while ") {
+            return None;
+        }
+        let rest = trimmed.strip_prefix("while ")?.trim();
+        // Find the opening brace for the body
+        let open = rest.find('{')?;
+        let cond_str = rest[..open].trim();
+        if cond_str.is_empty() {
+            return None;
+        }
+        let close = find_matching_brace(rest, open)?;
+        let body_str = rest[open + 1..close].trim();
+        // Parse condition as an expression
+        let cond = self.parse_expr(cond_str).ok()?;
+        let body = self.parse_block(body_str);
+        Some(OlangExpr::While {
+            cond: alloc::boxed::Box::new(cond),
             body,
         })
     }
@@ -1797,6 +1881,45 @@ mod tests {
                 assert_eq!(arms[1].0, "_");
             }
             other => panic!("expected Match, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_compare_lt() {
+        let r = parser().parse("○{x < 10}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Compare { lhs, op, rhs }) => {
+                assert_eq!(*lhs, OlangExpr::Query("x".to_string()));
+                assert_eq!(op, CmpOp::Lt);
+                assert_eq!(*rhs, OlangExpr::Query("10".to_string()));
+            }
+            other => panic!("expected Compare, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_compare_ge() {
+        let r = parser().parse("○{count >= 5}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Compare { op, .. }) => {
+                assert_eq!(op, CmpOp::Ge);
+            }
+            other => panic!("expected Compare, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_while_basic() {
+        let r = parser().parse("○{while x < 3 { emit x }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::While { cond, body }) => {
+                match *cond {
+                    OlangExpr::Compare { op, .. } => assert_eq!(op, CmpOp::Lt),
+                    other => panic!("expected Compare cond, got {:?}", other),
+                }
+                assert!(!body.is_empty());
+            }
+            other => panic!("expected While, got {:?}", other),
         }
     }
 }
