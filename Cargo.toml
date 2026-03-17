@@ -34,5 +34,4 @@ memory  = { path = "crates/memory" }
 runtime = { path = "crates/runtime" }
 hal      = { path = "crates/hal" }
 homemath = { path = "crates/homemath" }
-ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc"] }
 aes-gcm       = { version = "0.10", default-features = false, features = ["alloc", "aes"] }

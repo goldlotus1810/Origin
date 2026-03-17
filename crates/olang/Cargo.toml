@@ -13,5 +13,4 @@ std     = []
 [dependencies]
 ucd = { workspace = true }
 
-ed25519-dalek = { workspace = true }
 homemath      = { workspace = true }
