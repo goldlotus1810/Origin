@@ -379,6 +379,14 @@ impl Registry {
         self.names.len()
     }
 
+    /// Reverse lookup: tìm alias đầu tiên cho chain_hash — O(n).
+    pub fn alias_for_hash(&self, hash: u64) -> Option<&str> {
+        self.names
+            .iter()
+            .find(|(_, h)| *h == hash)
+            .map(|(name, _)| name.as_str())
+    }
+
     /// Tất cả entries theo tầng.
     pub fn entries_in_layer(&self, layer: u8) -> Vec<&RegistryEntry> {
         self.entries

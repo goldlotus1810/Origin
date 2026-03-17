@@ -677,31 +677,57 @@ impl HomeRuntime {
                 let result = self
                     .dream
                     .run(self.learning.stm(), self.learning.graph(), ts);
-                let text = format!(
-                    "Dream cycle ○\n\
-                     Scanned    : {}\n\
-                     Clusters   : {}\n\
-                     Proposals  : {}\n\
-                     Approved   : {}\n\
-                     ─── Lifetime ───\n\
-                     Total cycles: {}\n\
-                     Total approved: {}\n\
-                     L3 concepts : {}\n\
-                     Fib interval: {} turns\n\
-                     KnowTree    : {} nodes, {} L3",
-                    result.scanned,
-                    result.clusters_found,
-                    result.proposals.len(),
-                    result.approved,
-                    self.dream_cycles,
-                    self.dream_approved_total,
-                    self.dream_l3_created,
-                    silk::hebbian::fib(self.dream_fib_index),
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(String::from("Dream cycle ○"));
+                lines.push(format!("Scanned    : {}", result.scanned));
+                lines.push(format!("Clusters   : {}", result.clusters_found));
+                lines.push(format!("Proposals  : {}", result.proposals.len()));
+                lines.push(format!("Approved   : {}", result.approved));
+
+                // Show what was discovered
+                if !result.proposals.is_empty() {
+                    lines.push(String::from("─── Discovered ───"));
+                    for p in &result.proposals {
+                        match &p.kind {
+                            memory::proposal::ProposalKind::NewNode { chain, sources, .. } => {
+                                let hash = chain.chain_hash();
+                                let label = self.registry.alias_for_hash(hash)
+                                    .unwrap_or("(new concept)");
+                                lines.push(format!(
+                                    "  L3 concept: {} (from {} sources, confidence {:.2})",
+                                    label, sources.len(), p.confidence
+                                ));
+                            }
+                            memory::proposal::ProposalKind::PromoteQR { chain_hash, fire_count } => {
+                                let label = self.registry.alias_for_hash(*chain_hash)
+                                    .unwrap_or("(memory)");
+                                lines.push(format!(
+                                    "  Promote QR: {} (fire={})",
+                                    label, fire_count
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                lines.push(String::from("─── Lifetime ───"));
+                lines.push(format!("Total cycles: {}", self.dream_cycles));
+                lines.push(format!("Total approved: {}", self.dream_approved_total));
+                lines.push(format!("L3 concepts : {}", self.dream_l3_created));
+                lines.push(format!(
+                    "Fib interval: {} turns",
+                    silk::hebbian::fib(self.dream_fib_index)
+                ));
+                lines.push(format!(
+                    "KnowTree    : {} nodes, {} L3",
                     self.knowtree.total_nodes(),
-                    self.knowtree.concepts(),
-                );
+                    self.knowtree.concepts()
+                ));
+
                 Response {
-                    text,
+                    text: lines.join("\n"),
                     tone: ResponseTone::Engaged,
                     fx: 0.0,
                     kind: ResponseKind::System,
@@ -743,6 +769,71 @@ impl HomeRuntime {
                 }
             }
 
+            "memory" | "nho" => {
+                // ○{memory} — show what the system remembers
+                let stm = self.learning.stm();
+                if stm.is_empty() {
+                    return Response {
+                        text: String::from("Trí nhớ ngắn hạn trống — chưa học gì."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(format!("Trí nhớ ngắn hạn ○ ({} observations)", stm.len()));
+                lines.push(String::from("────────────────────────────────"));
+
+                // Top observations by fire_count
+                let top = stm.top_n(10);
+                for (i, obs) in top.iter().enumerate() {
+                    let hash = obs.chain.chain_hash();
+                    let v = obs.emotion.valence;
+                    let a = obs.emotion.arousal;
+                    let fire = obs.fire_count;
+
+                    // Try to find alias in registry
+                    let label = self.registry.alias_for_hash(hash)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("{:016X}", hash));
+
+                    let mood = if v > 0.3 { "+" } else if v < -0.3 { "-" } else { "~" };
+                    lines.push(format!(
+                        "  {}. {} [{}] fire={} V={:.2} A={:.2}",
+                        i + 1, label, mood, fire, v, a
+                    ));
+                }
+
+                // Silk connections summary
+                let silk_edges = self.learning.graph().len();
+                let silk_nodes = self.learning.graph().node_count();
+                if silk_edges > 0 {
+                    lines.push(String::new());
+                    lines.push(format!("Silk: {} liên kết giữa {} concepts", silk_edges, silk_nodes));
+                }
+
+                // LeoAI knowledge expression
+                let expressed = self.leo.express_all();
+                if !expressed.is_empty() {
+                    lines.push(String::new());
+                    lines.push(format!("LeoAI biểu đạt: {} patterns", expressed.len()));
+                    for (i, expr) in expressed.iter().take(5).enumerate() {
+                        lines.push(format!("  {}. {}", i + 1, expr));
+                    }
+                    if expressed.len() > 5 {
+                        lines.push(format!("  ... và {} nữa", expressed.len() - 5));
+                    }
+                }
+
+                Response {
+                    text: lines.join("\n"),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
             "help" => Response {
                 text: String::from(
                     "HomeOS ○{} Commands:\n\
@@ -754,6 +845,7 @@ impl HomeRuntime {
                      ○{dream}              — run Dream cycle\n\
                      ○{stats}              — system statistics\n\
                      ○{health}             — system health check\n\
+                     ○{memory}             — show learned knowledge\n\
                      ○{solve \"2x+3=7\"}     — solve equation\n\
                      ○{derive \"x^2+3x\"}   — symbolic derivative\n\
                      ○{integrate \"2x\"}     — symbolic integral\n\
