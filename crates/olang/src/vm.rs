@@ -71,10 +71,12 @@ pub enum VmEvent {
 #[allow(missing_docs)]
 pub enum VmError {
     StackUnderflow,
+    StackOverflow,
     InfiniteLoop,
     InvalidJump(usize),
     MaxStepsExceeded,
     MaxCallDepthExceeded,
+    DivisionByZero,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,6 +85,19 @@ pub enum VmError {
 
 const STACK_MAX: usize = 256;
 const STEPS_MAX: u32 = 65_536;
+
+/// Pop 1 chain từ stack, break nếu underflow.
+macro_rules! vm_pop {
+    ($stack:expr, $events:expr) => {
+        match $stack.pop() {
+            Ok(c) => c,
+            Err(e) => {
+                $events.push(VmEvent::Error(e));
+                break;
+            }
+        }
+    };
+}
 
 struct VmStack {
     data: Vec<MolecularChain>,
@@ -97,7 +112,7 @@ impl VmStack {
 
     fn push(&mut self, c: MolecularChain) -> Result<(), VmError> {
         if self.data.len() >= STACK_MAX {
-            return Err(VmError::StackUnderflow); // reuse error type
+            return Err(VmError::StackOverflow);
         }
         self.data.push(c);
         Ok(())
@@ -272,20 +287,8 @@ impl OlangVM {
                 }
 
                 Op::Lca => {
-                    let b = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
-                    let a = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let b = vm_pop!(stack, events);
+                    let a = vm_pop!(stack, events);
                     let result = if a.is_empty() || b.is_empty() {
                         if !a.is_empty() {
                             a
@@ -302,20 +305,8 @@ impl OlangVM {
                 }
 
                 Op::Edge(rel) => {
-                    let b = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
-                    let a = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let b = vm_pop!(stack, events);
+                    let a = vm_pop!(stack, events);
                     events.push(VmEvent::CreateEdge {
                         from: a.chain_hash(),
                         to: b.chain_hash(),
@@ -326,13 +317,7 @@ impl OlangVM {
                 }
 
                 Op::Query(rel) => {
-                    let a = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let a = vm_pop!(stack, events);
                     events.push(VmEvent::QueryRelation {
                         hash: a.chain_hash(),
                         rel: *rel,
@@ -342,13 +327,7 @@ impl OlangVM {
                 }
 
                 Op::Emit => {
-                    let c = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let c = vm_pop!(stack, events);
                     events.push(VmEvent::Output(c));
                 }
 
@@ -364,27 +343,12 @@ impl OlangVM {
                 }
 
                 Op::Pop => {
-                    if let Err(e) = stack.pop() {
-                        events.push(VmEvent::Error(e));
-                        break;
-                    }
+                    let _ = vm_pop!(stack, events);
                 }
 
                 Op::Swap => {
-                    let b = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
-                    let a = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let b = vm_pop!(stack, events);
+                    let a = vm_pop!(stack, events);
                     let _ = stack.push(b);
                     let _ = stack.push(a);
                 }
@@ -419,20 +383,8 @@ impl OlangVM {
                     match name.as_str() {
                         "__hyp_add" | "__hyp_sub" | "__hyp_mul" | "__hyp_div"
                         | "__phys_add" | "__phys_sub" => {
-                            let b = match stack.pop() {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    events.push(VmEvent::Error(e));
-                                    break;
-                                }
-                            };
-                            let a = match stack.pop() {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    events.push(VmEvent::Error(e));
-                                    break;
-                                }
-                            };
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
                             let na = a.to_number().unwrap_or(0.0);
                             let nb = b.to_number().unwrap_or(0.0);
                             let result = match name.as_str() {
@@ -441,7 +393,7 @@ impl OlangVM {
                                 "__hyp_mul" => na * nb,
                                 "__hyp_div" => {
                                     if nb.abs() < f64::EPSILON {
-                                        events.push(VmEvent::Error(VmError::StackUnderflow));
+                                        events.push(VmEvent::Error(VmError::DivisionByZero));
                                         break;
                                     }
                                     na / nb
@@ -451,20 +403,8 @@ impl OlangVM {
                             let _ = stack.push(MolecularChain::from_number(result));
                         }
                         "__assert_truth" => {
-                            let b = match stack.pop() {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    events.push(VmEvent::Error(e));
-                                    break;
-                                }
-                            };
-                            let a = match stack.pop() {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    events.push(VmEvent::Error(e));
-                                    break;
-                                }
-                            };
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
                             // Truth: chains equal OR numeric values equal
                             let is_true = if let (Some(na), Some(nb)) =
                                 (a.to_number(), b.to_number())
@@ -499,13 +439,7 @@ impl OlangVM {
                 }
 
                 Op::Store(name) => {
-                    let val = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let val = vm_pop!(stack, events);
                     // Store in current (innermost) scope.
                     // Update existing in current scope, else insert new.
                     // SAFETY: scopes always has root scope (initialized above)
@@ -555,13 +489,7 @@ impl OlangVM {
                     // Pop chain, check nó hữu hạn (không có self-reference loop).
                     // Nếu chain hữu hạn → push lại (∞-1 = đúng).
                     // Nếu chain rỗng hoặc bất thường → push empty (∞ = sai).
-                    let chain = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let chain = vm_pop!(stack, events);
                     // Finite check: chain must have bounded length
                     // (MolecularChain is always finite by construction,
                     //  but FUSE ensures no runtime-generated infinite loops)
@@ -584,13 +512,7 @@ impl OlangVM {
                 }
 
                 Op::Inspect => {
-                    let chain = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let chain = vm_pop!(stack, events);
                     let bytes = chain.to_bytes();
                     events.push(VmEvent::InspectChain {
                         hash: chain.chain_hash(),
@@ -603,13 +525,7 @@ impl OlangVM {
                 }
 
                 Op::Assert => {
-                    let chain = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let chain = vm_pop!(stack, events);
                     if chain.is_empty() {
                         events.push(VmEvent::AssertFailed);
                     }
@@ -618,13 +534,7 @@ impl OlangVM {
                 }
 
                 Op::TypeOf => {
-                    let chain = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let chain = vm_pop!(stack, events);
                     // Classify based on molecule bytes
                     let classification = classify_chain(&chain);
                     events.push(VmEvent::TypeInfo {
@@ -635,20 +545,8 @@ impl OlangVM {
                 }
 
                 Op::Why => {
-                    let b = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
-                    let a = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let b = vm_pop!(stack, events);
+                    let a = vm_pop!(stack, events);
                     events.push(VmEvent::WhyConnection {
                         from: a.chain_hash(),
                         to: b.chain_hash(),
@@ -667,13 +565,7 @@ impl OlangVM {
                 }
 
                 Op::Explain => {
-                    let chain = match stack.pop() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            events.push(VmEvent::Error(e));
-                            break;
-                        }
-                    };
+                    let chain = vm_pop!(stack, events);
                     events.push(VmEvent::ExplainOrigin {
                         hash: chain.chain_hash(),
                     });
@@ -1204,6 +1096,10 @@ mod tests {
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
         assert!(result.has_error(), "Division by zero should error");
+        assert!(
+            result.errors().contains(&&VmError::DivisionByZero),
+            "Should be DivisionByZero, not StackUnderflow"
+        );
     }
 
     #[test]
