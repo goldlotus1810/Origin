@@ -199,6 +199,11 @@ pub enum OlangExpr {
     Emit(alloc::boxed::Box<OlangExpr>),
     /// ○{return fire} — return value from function
     Return(alloc::boxed::Box<OlangExpr>),
+    /// ○{match fire { SDF => { stats } _ => { dream } }} — pattern matching
+    Match {
+        subject: alloc::boxed::Box<OlangExpr>,
+        arms: Vec<(String, Vec<OlangExpr>)>, // (pattern_name, body)
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,6 +316,11 @@ impl OlangParser {
         // Spawn (Go-style concurrency): spawn { <body> }
         if let Some(spawn_expr) = self.try_parse_spawn(trimmed) {
             return Ok(spawn_expr);
+        }
+
+        // Match (pattern matching): match <expr> { <arm> => { <body> } ... }
+        if let Some(match_expr) = self.try_parse_match(trimmed) {
+            return Ok(match_expr);
         }
 
         // Use (Python-style import): use <skill>
@@ -542,6 +552,58 @@ impl OlangParser {
         let body_str = rest[brace_open + 1..brace_close].trim();
         let body = self.parse_block(body_str);
         Some(OlangExpr::Spawn { body })
+    }
+
+    /// Try to parse match: "match fire { SDF => { stats } _ => { dream } }"
+    fn try_parse_match(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("match ") {
+            return None;
+        }
+        let rest = trimmed.strip_prefix("match ")?.trim();
+
+        // Find the outer { that starts the match arms
+        let brace_open = rest.find('{')?;
+        let subject_str = rest[..brace_open].trim();
+        if subject_str.is_empty() {
+            return None;
+        }
+        let subject = self.parse_expr(subject_str).ok()?;
+
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let arms_str = rest[brace_open + 1..brace_close].trim();
+
+        // Parse arms: "pattern => { body }, pattern => { body }"
+        let mut arms = Vec::new();
+        let mut remaining = arms_str;
+        while !remaining.is_empty() {
+            remaining = remaining.trim();
+            if remaining.is_empty() {
+                break;
+            }
+            // Find =>
+            let arrow = remaining.find("=>")?;
+            let pattern = remaining[..arrow].trim().to_string();
+            remaining = remaining[arrow + 2..].trim();
+
+            // Parse body: { ... }
+            let body_open = remaining.find('{')?;
+            let body_close = find_matching_brace(remaining, body_open)?;
+            let body_str = remaining[body_open + 1..body_close].trim();
+            let body = self.parse_block(body_str);
+
+            arms.push((pattern, body));
+            remaining = remaining[body_close + 1..].trim();
+            // Skip comma/semicolon separator
+            if remaining.starts_with(',') || remaining.starts_with(';') {
+                remaining = &remaining[1..];
+            }
+        }
+
+        Some(OlangExpr::Match {
+            subject: alloc::boxed::Box::new(subject),
+            arms,
+        })
     }
 
     /// Try to parse pipe (Julia-style): "fire |> typeof |> emit"
@@ -1628,6 +1690,20 @@ mod tests {
                 assert_eq!(*inner, OlangExpr::Query("fire".to_string()));
             }
             other => panic!("expected Return, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_match_expr() {
+        let r = parser().parse("○{match fire { SDF => { stats } _ => { dream } }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Match { subject, arms }) => {
+                assert_eq!(*subject, OlangExpr::Query("fire".to_string()));
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].0, "SDF");
+                assert_eq!(arms[1].0, "_");
+            }
+            other => panic!("expected Match, got {:?}", other),
         }
     }
 }

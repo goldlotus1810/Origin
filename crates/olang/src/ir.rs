@@ -357,6 +357,12 @@ pub enum OlangIrExpr {
     EmitExpr(alloc::boxed::Box<OlangIrExpr>),
     /// return <expr> — return from function
     ReturnExpr(alloc::boxed::Box<OlangIrExpr>),
+    /// match <expr> { pattern => { body }, _ => { body } }
+    Match {
+        subject: alloc::boxed::Box<OlangIrExpr>,
+        /// (pattern_name, body) — pattern is type name or "_" for wildcard
+        arms: Vec<(String, Vec<OlangIrExpr>)>,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -542,6 +548,55 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
         OlangIrExpr::ReturnExpr(inner) => {
             emit_expr(inner, prog);
             prog.push_op(Op::Ret);
+        }
+
+        OlangIrExpr::Match { subject, arms } => {
+            // Evaluate subject
+            emit_expr(subject, prog);
+
+            let mut end_jumps: Vec<usize> = Vec::new();
+
+            for (pattern, body) in arms {
+                if pattern == "_" {
+                    // Wildcard: always execute
+                    prog.push_op(Op::ScopeBegin);
+                    for e in body {
+                        emit_expr(e, prog);
+                    }
+                    prog.push_op(Op::ScopeEnd);
+                    break;
+                }
+                // Type match: DUP subject, TypeOf, Load pattern, compare
+                prog.push_op(Op::Dup);
+                prog.push_op(Op::TypeOf);
+                prog.push_op(Op::Load(pattern.clone()));
+                prog.push_op(Op::Call("__match_type".into()));
+                let jz_idx = prog.ops.len();
+                prog.push_op(Op::Jz(0)); // placeholder
+                prog.push_op(Op::Pop); // pop match result
+
+                prog.push_op(Op::ScopeBegin);
+                for e in body {
+                    emit_expr(e, prog);
+                }
+                prog.push_op(Op::ScopeEnd);
+
+                end_jumps.push(prog.ops.len());
+                prog.push_op(Op::Jmp(0)); // placeholder
+
+                let next = prog.ops.len();
+                prog.ops[jz_idx] = Op::Jz(next);
+                prog.push_op(Op::Pop); // pop match result on no-match
+            }
+
+            // Pop subject
+            prog.push_op(Op::Pop);
+
+            // Patch end jumps
+            let end = prog.ops.len();
+            for jmp_pos in end_jumps {
+                prog.ops[jmp_pos] = Op::Jmp(end);
+            }
         }
     }
 }

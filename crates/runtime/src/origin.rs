@@ -23,6 +23,7 @@ use silk::walk::ResponseTone;
 use crate::parser::{OlangExpr, OlangParser, ParseResult, RelationOp};
 use olang::compiler::{Compiler, Target};
 use olang::ir::{compile_expr, OlangIrExpr};
+use olang::optimize::{self, OptLevel};
 use olang::semantic;
 use olang::syntax;
 use olang::knowtree::KnowTree;
@@ -1291,7 +1292,7 @@ impl HomeRuntime {
                 };
 
                 // Try full Olang syntax pipeline first (with semantic validation)
-                let prog = match syntax::parse(source) {
+                let mut prog = match syntax::parse(source) {
                     Ok(stmts) => {
                         // Semantic validation
                         let errors = semantic::validate(&stmts);
@@ -1333,20 +1334,38 @@ impl HomeRuntime {
                         compile_expr(&ir_expr)
                     }
                 };
+                // Optimize before compilation
+                let before_ops = prog.ops.len();
+                let opt_stats = optimize::optimize(&mut prog, OptLevel::O2);
                 let compiler = Compiler::new(target);
                 match compiler.emit(&prog) {
-                    Ok(output) => Response {
-                        text: format!(
-                            "Compiled to {} ({} bytes, {} ops):\n{}",
-                            target.name(),
-                            output.len(),
-                            prog.ops.len(),
-                            output
-                        ),
-                        tone: ResponseTone::Engaged,
-                        fx: self.learning.context().fx(),
-                        kind: ResponseKind::OlangResult,
-                    },
+                    Ok(output) => {
+                        let opt_info = if opt_stats.folds > 0 || opt_stats.dead_removed > 0
+                            || opt_stats.nops_removed > 0 || opt_stats.identities_removed > 0
+                        {
+                            format!(
+                                "\nOptimized: {} → {} ops (folded:{}, dead:{}, nop:{}, identity:{})",
+                                before_ops, prog.ops.len(),
+                                opt_stats.folds, opt_stats.dead_removed,
+                                opt_stats.nops_removed, opt_stats.identities_removed,
+                            )
+                        } else {
+                            String::new()
+                        };
+                        Response {
+                            text: format!(
+                                "Compiled to {} ({} bytes, {} ops):\n{}{}",
+                                target.name(),
+                                output.len(),
+                                prog.ops.len(),
+                                output,
+                                opt_info,
+                            ),
+                            tone: ResponseTone::Engaged,
+                            fx: self.learning.context().fx(),
+                            kind: ResponseKind::OlangResult,
+                        }
+                    }
                     Err(e) => Response {
                         text: format!("Compile error: {:?}", e),
                         tone: ResponseTone::Engaged,
@@ -3630,6 +3649,16 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
         OlangExpr::Return(inner) => {
             OlangIrExpr::ReturnExpr(alloc::boxed::Box::new(olang_expr_to_ir(*inner)))
         }
+
+        OlangExpr::Match { subject, arms } => OlangIrExpr::Match {
+            subject: alloc::boxed::Box::new(olang_expr_to_ir(*subject)),
+            arms: arms
+                .into_iter()
+                .map(|(pat, body)| {
+                    (pat, body.into_iter().map(olang_expr_to_ir).collect())
+                })
+                .collect(),
+        },
     }
 }
 

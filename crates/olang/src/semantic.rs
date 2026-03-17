@@ -232,6 +232,26 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
         Stmt::CommandArg { .. } => {
             // Commands with args are always valid
         }
+
+        Stmt::Match { subject, arms } => {
+            validate_expr(subject, scope, errors);
+            let mut has_wildcard = false;
+            for (i, arm) in arms.iter().enumerate() {
+                if has_wildcard {
+                    errors.push(SemError::new(&alloc::format!(
+                        "Match arm {} is unreachable after wildcard '_'", i
+                    )));
+                }
+                if arm.pattern == crate::syntax::MatchPattern::Wildcard {
+                    has_wildcard = true;
+                }
+                scope.enter();
+                for s in &arm.body {
+                    validate_stmt(s, scope, errors);
+                }
+                scope.exit();
+            }
+        }
     }
 }
 
@@ -389,7 +409,9 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
             ChainKind::Void
         }
         Stmt::Expr(expr) => infer_expr_kind(expr),
-        Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. } => ChainKind::Void,
+        Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. } | Stmt::Match { .. } => {
+            ChainKind::Void
+        }
     }
 }
 
@@ -588,6 +610,102 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                     ctx.emit(Op::Explain);
                 }
                 _ => ctx.emit(Op::Call(name.clone())),
+            }
+        }
+
+        Stmt::Match { subject, arms } => {
+            // Compile match as chained if/else:
+            //   evaluate subject → DUP + TypeOf for each arm → compare → execute body
+            //
+            // Strategy: subject on stack, then for each arm:
+            //   DUP, TypeOf (pushes type string), compare with pattern,
+            //   if match → execute body → jump to end
+            //   else → next arm
+            lower_expr(subject, ctx);
+
+            let mut end_jumps: Vec<usize> = Vec::new();
+            let mut wildcard_idx = None;
+
+            for (i, arm) in arms.iter().enumerate() {
+                match &arm.pattern {
+                    crate::syntax::MatchPattern::Wildcard => {
+                        wildcard_idx = Some(i);
+                        break; // wildcard must be last
+                    }
+                    crate::syntax::MatchPattern::TypeName(name) => {
+                        // DUP subject, TypeOf → compare with type name
+                        ctx.emit(Op::Dup);
+                        ctx.emit(Op::TypeOf);
+                        // Load expected type name for comparison
+                        ctx.emit(Op::Load(name.clone()));
+                        // Call __match_type: pops type_result + expected, pushes match boolean
+                        ctx.emit(Op::Call("__match_type".into()));
+                        let jz_pos = ctx.current_pos();
+                        ctx.emit(Op::Jz(0)); // skip body if no match
+                        ctx.emit(Op::Pop); // pop match result
+
+                        // Execute body
+                        let saved = ctx.locals.len();
+                        for s in &arm.body {
+                            lower_stmt(s, ctx);
+                        }
+                        ctx.locals.truncate(saved);
+
+                        // Jump to end
+                        end_jumps.push(ctx.current_pos());
+                        ctx.emit(Op::Jmp(0)); // placeholder
+
+                        // Patch Jz → next arm
+                        let next = ctx.current_pos();
+                        ctx.patch_jump(jz_pos, next);
+                        ctx.emit(Op::Pop); // pop match result on no-match path
+                    }
+                    crate::syntax::MatchPattern::MolLiteral { shape, relation, valence, arousal, time } => {
+                        // DUP subject, push expected mol, compare
+                        ctx.emit(Op::Dup);
+                        let s = shape.unwrap_or(1) as u8;
+                        let r = relation.unwrap_or(1) as u8;
+                        let v = valence.unwrap_or(128) as u8;
+                        let a = arousal.unwrap_or(128) as u8;
+                        let t = time.unwrap_or(3) as u8;
+                        ctx.emit(Op::PushMol(s, r, v, a, t));
+                        ctx.emit(Op::Call("__match_mol".into()));
+                        let jz_pos = ctx.current_pos();
+                        ctx.emit(Op::Jz(0));
+                        ctx.emit(Op::Pop);
+
+                        let saved = ctx.locals.len();
+                        for s_stmt in &arm.body {
+                            lower_stmt(s_stmt, ctx);
+                        }
+                        ctx.locals.truncate(saved);
+
+                        end_jumps.push(ctx.current_pos());
+                        ctx.emit(Op::Jmp(0));
+
+                        let next = ctx.current_pos();
+                        ctx.patch_jump(jz_pos, next);
+                        ctx.emit(Op::Pop);
+                    }
+                }
+            }
+
+            // Wildcard arm (default)
+            if let Some(wi) = wildcard_idx {
+                let saved = ctx.locals.len();
+                for s in &arms[wi].body {
+                    lower_stmt(s, ctx);
+                }
+                ctx.locals.truncate(saved);
+            }
+
+            // Pop the subject from stack
+            ctx.emit(Op::Pop);
+
+            // Patch all end jumps
+            let end = ctx.current_pos();
+            for jmp_pos in end_jumps {
+                ctx.patch_jump(jmp_pos, end);
             }
         }
     }
@@ -1234,6 +1352,46 @@ mod tests {
     #[test]
     fn infer_let_is_void() {
         let stmts = parse("let x = fire;").unwrap();
+        assert_eq!(infer_stmt_kind(&stmts[0]), ChainKind::Void);
+    }
+
+    // ── Match ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_match_basic() {
+        let stmts = parse("match fire { SDF => { emit water; } _ => { stats; } }").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Basic match should be valid: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_match_unreachable_after_wildcard() {
+        let stmts = parse("match fire { _ => { stats; } SDF => { dream; } }").unwrap();
+        let errors = validate(&stmts);
+        assert!(
+            errors.iter().any(|e| e.message.contains("unreachable")),
+            "Arms after wildcard should be unreachable: {:?}", errors
+        );
+    }
+
+    #[test]
+    fn lower_match_produces_typeof() {
+        let stmts = parse("match fire { SDF => { emit water; } _ => { stats; } }").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::TypeOf), "Match should use TypeOf");
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))), "Match should have conditional jumps");
+    }
+
+    #[test]
+    fn lower_match_wildcard_only() {
+        let stmts = parse("match fire { _ => { stats; } }").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.contains(&Op::Stats), "Wildcard arm should emit Stats");
+    }
+
+    #[test]
+    fn infer_match_is_void() {
+        let stmts = parse("match fire { SDF => { stats; } }").unwrap();
         assert_eq!(infer_stmt_kind(&stmts[0]), ChainKind::Void);
     }
 }

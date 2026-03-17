@@ -317,6 +317,8 @@ pub enum Keyword {
     Loop,
     /// `emit` = ○
     Emit,
+    /// `match` — pattern matching
+    Match,
 }
 
 /// Check xem string có phải keyword không.
@@ -328,6 +330,7 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "else" => Some(Keyword::Else),
         "loop" => Some(Keyword::Loop),
         "emit" => Some(Keyword::Emit),
+        "match" => Some(Keyword::Match),
         _ => None,
     }
 }
@@ -428,6 +431,10 @@ pub enum Token {
     Wild,
     /// `|`
     Pipe,
+    /// `match`
+    Match,
+    /// `=>`
+    FatArrow,
 
     // ── End ──
     /// End of input
@@ -534,6 +541,11 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     return Token::Truth;
                 }
+                // => → FatArrow (match arm)
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::FatArrow;
+                }
                 return Token::Eq;
             }
             '?' => {
@@ -633,6 +645,7 @@ impl<'a> Lexer<'a> {
                 Keyword::Else => Token::Else,
                 Keyword::Loop => Token::Loop,
                 Keyword::Emit => Token::Emit,
+                Keyword::Match => Token::Match,
             };
         }
 

@@ -90,6 +90,40 @@ pub enum Stmt {
 
     /// Command with argument: `learn "text"`, `seed L0`
     CommandArg { name: String, arg: String },
+
+    /// `match expr { pattern => { body }, _ => { body } }`
+    Match {
+        subject: Expr,
+        arms: Vec<MatchArm>,
+    },
+}
+
+/// Match arm — pattern + body.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub struct MatchArm {
+    /// Pattern: Ident (type name), MolLiteral, or Wildcard ("_")
+    pub pattern: MatchPattern,
+    /// Body statements
+    pub body: Vec<Stmt>,
+}
+
+/// Match pattern.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub enum MatchPattern {
+    /// Match by type name: SDF, MATH, EMOTICON, MUSICAL, Mixed, Empty
+    TypeName(String),
+    /// Match by molecular literal: { S=1 R=6 }
+    MolLiteral {
+        shape: Option<u32>,
+        relation: Option<u32>,
+        valence: Option<u32>,
+        arousal: Option<u32>,
+        time: Option<u32>,
+    },
+    /// Wildcard: `_` — matches anything (default arm)
+    Wildcard,
 }
 
 /// Expression — mọi expression evaluate → MolecularChain.
@@ -236,6 +270,7 @@ impl<'a> Parser<'a> {
             Token::If => self.parse_if(),
             Token::Loop => self.parse_loop_kw(),
             Token::Fn => self.parse_fn(),
+            Token::Match => self.parse_match(),
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -331,6 +366,58 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         Ok(Stmt::FnDef { name, params, body })
+    }
+
+    /// `match expr { pattern => { body }, ... }`
+    fn parse_match(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'match'
+        let subject = self.parse_expr()?;
+        self.expect(&Token::LBrace)?;
+
+        let mut arms = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let pattern = self.parse_match_pattern()?;
+            self.expect(&Token::FatArrow)?;
+            let body = self.parse_block()?;
+            // Optional comma or semicolon separator
+            if self.check(&Token::Comma) || self.check(&Token::Semi) {
+                self.advance();
+            }
+            arms.push(MatchArm { pattern, body });
+        }
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::Match { subject, arms })
+    }
+
+    /// Parse match pattern: TypeName, MolLiteral, or Wildcard
+    fn parse_match_pattern(&mut self) -> Result<MatchPattern, ParseError> {
+        match self.peek() {
+            // _ → wildcard
+            Token::Ident(s) if s == "_" => {
+                self.advance();
+                Ok(MatchPattern::Wildcard)
+            }
+            // { S=1 R=2 ... } → molecular literal pattern
+            Token::LBrace => {
+                // Parse as mol literal using existing parse_mol_literal
+                let expr = self.try_parse_mol_literal()?;
+                match expr {
+                    Expr::MolLiteral { shape, relation, valence, arousal, time } => {
+                        Ok(MatchPattern::MolLiteral { shape, relation, valence, arousal, time })
+                    }
+                    _ => Err(ParseError::new("Expected molecular literal pattern")),
+                }
+            }
+            // Ident → type name (SDF, MATH, EMOTICON, etc.)
+            Token::Ident(_) => {
+                let name = self.expect_ident()?;
+                Ok(MatchPattern::TypeName(name))
+            }
+            _ => Err(ParseError::new("Expected match pattern (type name, { mol }, or _)")),
+        }
     }
 
     /// command (STR)? ';'?
@@ -1390,5 +1477,48 @@ mod tests {
     fn parse_mol_literal_unknown_dim_errors() {
         let result = parse("{ X=1 }");
         assert!(result.is_err());
+    }
+
+    // ── Match expression ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_match_basic() {
+        let stmts = parse("match fire { SDF => { emit water; } _ => { stats; } }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Match { subject, arms } => {
+                assert_eq!(*subject, Expr::Ident("fire".into()));
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].pattern, MatchPattern::TypeName("SDF".into()));
+                assert_eq!(arms[1].pattern, MatchPattern::Wildcard);
+            }
+            _ => panic!("Expected Match statement"),
+        }
+    }
+
+    #[test]
+    fn parse_match_multiple_arms() {
+        let stmts = parse("match fire { SDF => { stats; } MATH => { dream; } EMOTICON => { fuse; } _ => { trace; } }").unwrap();
+        match &stmts[0] {
+            Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 4);
+                assert_eq!(arms[0].pattern, MatchPattern::TypeName("SDF".into()));
+                assert_eq!(arms[1].pattern, MatchPattern::TypeName("MATH".into()));
+                assert_eq!(arms[2].pattern, MatchPattern::TypeName("EMOTICON".into()));
+                assert_eq!(arms[3].pattern, MatchPattern::Wildcard);
+            }
+            _ => panic!("Expected Match"),
+        }
+    }
+
+    #[test]
+    fn parse_match_no_wildcard() {
+        let stmts = parse("match fire { SDF => { stats; } }").unwrap();
+        match &stmts[0] {
+            Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 1);
+            }
+            _ => panic!("Expected Match"),
+        }
     }
 }
