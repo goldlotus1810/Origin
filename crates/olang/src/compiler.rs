@@ -184,17 +184,18 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Stats => "/* stats */".into(),
         Op::Nop => "".into(),
         Op::Store(name) => format!("olang_store(\"{}\", pop(&s));", escape(name)),
+        Op::StoreUpdate(name) => format!("olang_store_update(\"{}\", pop(&s));", escape(name)),
         Op::LoadLocal(name) => format!("push(&s, olang_load_local(\"{}\"));", escape(name)),
         Op::PushNum(n) => format!("push(&s, (Chain){:.17e});", n),
         Op::Fuse => "/* QT2: FUSE — verify chain finite */ { Chain c = peek(&s); if (c == 0) pop(&s); }".into(),
         Op::ScopeBegin => "{ /* scope begin */".into(),
         Op::ScopeEnd => "} /* scope end */".into(),
-        Op::Trace => "/* trace */".into(),
-        Op::Inspect => "/* inspect */ printf(\"inspect: %p\\n\", peek(&s));".into(),
-        Op::Assert => "/* assert */ if (peek(&s) == 0) { fprintf(stderr, \"ASSERT FAILED\\n\"); }".into(),
-        Op::TypeOf => "/* typeof */".into(),
-        Op::Why => "/* why */ { pop(&s); } /* pop second, keep first */".into(),
-        Op::Explain => "/* explain */".into(),
+        Op::Trace => "fprintf(stderr, \"[TRACE] pc=%d depth=%zu\\n\", __LINE__, s.top);".into(),
+        Op::Inspect => "{ Chain c = peek(&s); fprintf(stderr, \"[INSPECT] hash=0x%016llX depth=%zu\\n\", (unsigned long long)c, s.top); }".into(),
+        Op::Assert => "if (peek(&s) == 0) { fprintf(stderr, \"[ASSERT FAILED] at line %d\\n\", __LINE__); return; }".into(),
+        Op::TypeOf => "{ Chain c = pop(&s); fprintf(stderr, \"[TYPEOF] 0x%016llX\\n\", (unsigned long long)c); push(&s, c); }".into(),
+        Op::Why => "{ Chain b = pop(&s); Chain a = peek(&s); fprintf(stderr, \"[WHY] 0x%llX <-> 0x%llX\\n\", (unsigned long long)a, (unsigned long long)b); }".into(),
+        Op::Explain => "{ Chain c = peek(&s); fprintf(stderr, \"[EXPLAIN] 0x%016llX\\n\", (unsigned long long)c); }".into(),
         Op::PushMol(s, r, v, a, t) => format!(
             "push(&s, olang_mol(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}));",
             s, r, v, a, t
@@ -285,12 +286,18 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Call(name) => format!("{}();", name.replace(' ', "_")),
         Op::Jmp(_) | Op::Jz(_) => "// unreachable in linear mode".into(),
         Op::Store(name) => format!("// store local: {}", name),
+        Op::StoreUpdate(name) => format!("// store update: {}", name),
         Op::LoadLocal(name) => format!("// load local: {}", name),
         Op::PushNum(n) => format!("stack.push(({:.17e}_f64).to_bits());", n),
         Op::Fuse => "// QT2: FUSE — verify chain finite (∞-1)".into(),
         Op::ScopeBegin => "{ // scope begin".into(),
         Op::ScopeEnd => "} // scope end".into(),
-        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => "// debug primitive (runtime only)".into(),
+        Op::Trace => "eprintln!(\"[TRACE] depth={}\", stack.len());".into(),
+        Op::Inspect => "{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[INSPECT] hash=0x{:016X} depth={}\", c, stack.len()); }".into(),
+        Op::Assert => "if stack.last().copied().unwrap_or(0) == 0 { eprintln!(\"[ASSERT FAILED]\"); return; }".into(),
+        Op::TypeOf => "{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[TYPEOF] 0x{:016X}\", c); }".into(),
+        Op::Why => "{ let b = stack.pop().unwrap_or(0); let a = *stack.last().unwrap_or(&0); eprintln!(\"[WHY] 0x{:X} <-> 0x{:X}\", a, b); }".into(),
+        Op::Explain => "{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[EXPLAIN] 0x{:016X}\", c); }".into(),
         Op::PushMol(s, r, v, a, t) => format!(
             "stack.push(Molecule::new(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}).into());",
             s, r, v, a, t
@@ -327,13 +334,18 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
         Op::Jmp(t)  => format!("_pc = {};", t),
         Op::Jz(t)   => format!("if stack.pop().unwrap_or(0) == 0 {{ _pc = {}; }} else {{ _pc = {}; }}", t, next),
         Op::Store(name) => format!("/* store {} */ _pc = {};", escape(name), next),
+        Op::StoreUpdate(name) => format!("/* store_update {} */ _pc = {};", escape(name), next),
         Op::LoadLocal(name) => format!("/* load {} */ _pc = {};", escape(name), next),
         Op::PushNum(n) => format!("stack.push(({:.17e}_f64).to_bits()); _pc = {};", n, next),
         Op::Fuse => format!("/* QT2: FUSE */ _pc = {};", next),
         Op::ScopeBegin => format!("/* scope begin */ _pc = {};", next),
         Op::ScopeEnd => format!("/* scope end */ _pc = {};", next),
-        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain =>
-            format!("/* debug primitive */ _pc = {};", next),
+        Op::Trace => format!("eprintln!(\"[TRACE] pc={} depth={{}}\", stack.len()); _pc = {};", idx, next),
+        Op::Inspect => format!("{{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[INSPECT] hash=0x{{:016X}} depth={{}}\", c, stack.len()); }} _pc = {};", next),
+        Op::Assert => format!("if stack.last().copied().unwrap_or(0) == 0 {{ eprintln!(\"[ASSERT FAILED] pc={}\"); break; }} _pc = {};", idx, next),
+        Op::TypeOf => format!("{{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[TYPEOF] 0x{{:016X}}\", c); }} _pc = {};", next),
+        Op::Why => format!("{{ let b = stack.pop().unwrap_or(0); let a = *stack.last().unwrap_or(&0); eprintln!(\"[WHY] 0x{{:X}} <-> 0x{{:X}}\", a, b); }} _pc = {};", next),
+        Op::Explain => format!("{{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[EXPLAIN] 0x{{:016X}}\", c); }} _pc = {};", next),
         Op::PushMol(s, r, v, a, t) => format!(
             "stack.push(Molecule::new(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}).into()); _pc = {};",
             s, r, v, a, t, next
@@ -469,12 +481,18 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         Op::Call(name) => format!("call ${}", name.replace(' ', "_")),
         Op::Jmp(_) | Op::Jz(_) => ";; unreachable in linear mode".into(),
         Op::Store(_) => "local.set $local ;; store".into(),
+        Op::StoreUpdate(_) => "local.set $local ;; store_update".into(),
         Op::LoadLocal(_) => "local.get $local ;; load_local".into(),
         Op::PushNum(n) => format!("f64.const {:.17e}", n),
         Op::Fuse => ";; QT2: FUSE — verify chain finite".into(),
         Op::ScopeBegin => "block $scope ;; scope begin".into(),
         Op::ScopeEnd => "end ;; scope end".into(),
-        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => ";; debug primitive (runtime only)".into(),
+        Op::Trace => ";; [TRACE] — debug hook (import olang_trace for full support)".into(),
+        Op::Inspect => ";; [INSPECT] top of stack — debug hook".into(),
+        Op::Assert => ";; [ASSERT] check top non-zero, trap if zero\n    local.get $local\n    i64.eqz\n    (if (then unreachable))".into(),
+        Op::TypeOf => ";; [TYPEOF] — debug hook".into(),
+        Op::Why => ";; [WHY] — pop second, keep first".into(),
+        Op::Explain => ";; [EXPLAIN] — debug hook".into(),
         Op::PushMol(s, r, v, a, t) => format!(
             "i32.const 0x{:02X}{:02X}{:02X}{:02X}{:02X} ;; mol S={} R={} V={} A={} T={}",
             s, r, v, a, t, s, r, v, a, t
@@ -520,6 +538,8 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!("(i64.eqz) (if (then (local.set $pc (i32.const {})) (br $dispatch)) (else (local.set $pc (i32.const {})) (br $dispatch)))", t, next),
         Op::Store(_) =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; store", next),
+        Op::StoreUpdate(_) =>
+            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; store_update", next),
         Op::LoadLocal(_) =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; load_local", next),
         Op::PushNum(n) =>
@@ -528,8 +548,14 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; fuse", next),
         Op::ScopeBegin | Op::ScopeEnd =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; scope", next),
-        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain =>
-            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; debug", next),
+        Op::Trace =>
+            format!(";; [TRACE] pc={}\n    (local.set $pc (i32.const {})) (br $dispatch)", idx, next),
+        Op::Inspect =>
+            format!(";; [INSPECT]\n    (local.set $pc (i32.const {})) (br $dispatch)", next),
+        Op::Assert =>
+            format!(";; [ASSERT] trap if zero\n    (local.get $local) (i64.eqz) (if (then (unreachable)))\n    (local.set $pc (i32.const {})) (br $dispatch)", next),
+        Op::TypeOf | Op::Why | Op::Explain =>
+            format!(";; debug primitive\n    (local.set $pc (i32.const {})) (br $dispatch)", next),
         Op::PushMol(s, r, v, a, t) =>
             format!("(i32.const 0x{:02X}{:02X}{:02X}{:02X}{:02X}) (local.set $pc (i32.const {})) (br $dispatch) ;; mol", s, r, v, a, t, next),
         Op::TryBegin(_target) =>
