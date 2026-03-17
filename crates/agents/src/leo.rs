@@ -22,7 +22,7 @@ use crate::chief::IngestedReport;
 use crate::encoder::ContentInput;
 use crate::instinct::innate_instincts;
 use crate::learning::LearningLoop;
-use crate::skill::ExecContext;
+use crate::skill::{ExecContext, SkillPatternStore};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LeoState
@@ -129,6 +129,9 @@ pub struct LeoAI {
     /// Số QR đã promote (AAM approved + ghi file).
     qr_promoted: u32,
 
+    /// Learned skill patterns — auto-promote to ComposedSkill
+    pub skill_patterns: SkillPatternStore,
+
     /// Stats
     pub ingested: u32,
     pub dreamed: u32,
@@ -153,6 +156,7 @@ impl LeoAI {
             inbox: Vec::new(),
             pending_writes: Vec::new(),
             qr_promoted: 0,
+            skill_patterns: SkillPatternStore::new(),
             ingested: 0,
             dreamed: 0,
             last_event_ts: 0,
@@ -328,6 +332,12 @@ impl LeoAI {
     pub fn qr_count(&self) -> u32 {
         self.qr_promoted
     }
+    pub fn skill_pattern_count(&self) -> usize {
+        self.skill_patterns.pattern_count()
+    }
+    pub fn composed_skill_count(&self) -> usize {
+        self.skill_patterns.composed_count()
+    }
 
     /// Có bytes chờ ghi disk?
     pub fn has_pending_writes(&self) -> bool {
@@ -416,7 +426,7 @@ impl LeoAI {
     ///
     /// Trả về ExecContext sau khi tất cả instincts đã xử lý.
     /// Agent đọc state từ context: epistemic_grade, curiosity_level, v.v.
-    pub fn run_instincts(&self, ctx: &mut ExecContext) {
+    pub fn run_instincts(&mut self, ctx: &mut ExecContext) {
         let instincts = innate_instincts();
 
         // Chuẩn bị state cho Reflection từ learning stats
@@ -439,8 +449,21 @@ impl LeoAI {
 
         // Chạy từng instinct theo thứ tự ưu tiên
         // Honesty → Contradiction → Causality → Abstraction → Analogy → Curiosity → Reflection
+        // Track which instincts produced results → record as skill pattern
+        let mut active_steps = Vec::new();
+        let mut any_success = false;
         for skill in instincts {
-            let _ = skill.execute(ctx);
+            let result = skill.execute(ctx);
+            if result.is_ok() {
+                active_steps.push(alloc::string::String::from(skill.name()));
+                any_success = true;
+            }
+        }
+
+        // Record observed skill sequence → auto-promote effective patterns
+        if !active_steps.is_empty() {
+            self.skill_patterns
+                .record(active_steps, any_success, ctx.timestamp);
         }
     }
 

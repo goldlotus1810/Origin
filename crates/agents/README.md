@@ -41,7 +41,7 @@ pub fn SecurityGate::check_text(&self, text: &str) -> GateVerdict
 pub trait Skill { fn execute(&self, ctx: &mut ExecContext) -> SkillResult; }
 pub fn innate_instincts() -> [&'static dyn Skill; 7]
 pub fn LeoAI::ingest(&mut self, report: IngestedReport, ts: i64)
-pub fn LeoAI::run_instincts(&self, ctx: &mut ExecContext)
+pub fn LeoAI::run_instincts(&mut self, ctx: &mut ExecContext)
 pub fn Chief::receive_frame(&mut self, frame: ISLFrame, ts: i64)
 pub fn Worker::process(&mut self, event: WorkerEvent, ts: i64)
 ```

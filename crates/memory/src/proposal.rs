@@ -129,6 +129,12 @@ pub enum InsightKind {
     Analogy { result_chain: MolecularChain },
     /// High curiosity — node mới đáng explore
     Curiosity { chain_hash: u64, novelty: f32 },
+    /// Learned skill sequence pattern
+    SkillPattern {
+        skill_names: Vec<String>,
+        effectiveness: f32,
+        observations: u32,
+    },
 }
 
 /// Proposal từ instinct Skills → AAM.
@@ -301,6 +307,28 @@ impl AAM {
                 } else {
                     AAMDecision::Rejected {
                         reason: alloc::format!("novelty={:.2} too low", novelty),
+                    }
+                }
+            }
+
+            InsightKind::SkillPattern {
+                observations,
+                effectiveness,
+                ..
+            } => {
+                // SkillPattern: cần ≥3 observations + effectiveness ≥ 0.6
+                if *observations >= 3 && *effectiveness >= 0.6 {
+                    AAMDecision::Approved
+                } else if *observations < 3 {
+                    AAMDecision::Pending {
+                        needed_fire_count: 3 - *observations,
+                    }
+                } else {
+                    AAMDecision::Rejected {
+                        reason: alloc::format!(
+                            "effectiveness={:.2} < 0.6",
+                            effectiveness
+                        ),
                     }
                 }
             }
@@ -1259,5 +1287,58 @@ mod tests {
         );
         let prompt = p.prompt();
         assert!(prompt.contains("🔴"), "Red alert has icon");
+    }
+
+    // ── SkillPattern AAM review tests ────────────────────────────────────────
+
+    #[test]
+    fn aam_skill_pattern_approved() {
+        let p = SkillProposal::new(
+            "DreamSkill",
+            InsightKind::SkillPattern {
+                skill_names: vec!["Ingest".to_string(), "Cluster".to_string()],
+                effectiveness: 0.8,
+                observations: 5,
+            },
+            0.7,
+            1000,
+        );
+        assert_eq!(AAM::new().review_skill(&p), AAMDecision::Approved);
+    }
+
+    #[test]
+    fn aam_skill_pattern_pending_few_observations() {
+        let p = SkillProposal::new(
+            "DreamSkill",
+            InsightKind::SkillPattern {
+                skill_names: vec!["A".to_string()],
+                effectiveness: 0.9,
+                observations: 2, // < 3
+            },
+            0.7,
+            1000,
+        );
+        assert!(matches!(
+            AAM::new().review_skill(&p),
+            AAMDecision::Pending { needed_fire_count: 1 }
+        ));
+    }
+
+    #[test]
+    fn aam_skill_pattern_rejected_low_effectiveness() {
+        let p = SkillProposal::new(
+            "DreamSkill",
+            InsightKind::SkillPattern {
+                skill_names: vec!["A".to_string()],
+                effectiveness: 0.3, // < 0.6
+                observations: 5,
+            },
+            0.7,
+            1000,
+        );
+        assert!(matches!(
+            AAM::new().review_skill(&p),
+            AAMDecision::Rejected { .. }
+        ));
     }
 }

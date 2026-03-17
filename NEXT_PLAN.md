@@ -12,7 +12,7 @@
 ## Trạng thái thật (verify bằng code)
 
 ```
-Tests:    1,759 pass · 0 fail · 0 clippy warnings
+Tests:    1,774 pass · 0 fail · 0 clippy warnings
 Deps:     0 external runtime (native SHA-256, Ed25519, AES-256-GCM, homemath)
 origin:   313 nodes (35 L0 + 278 domain) · 236 edges · 2246 aliases · 72KB
 ```
@@ -40,6 +40,41 @@ origin:   313 nodes (35 L0 + 278 domain) · 236 edges · 2246 aliases · 72KB
 ✅ Phase 5: Agent Orchestration — MessageRouter + Chiefs wired vào runtime
 ✅ Phase 4: Math → Silk — solve/derive/integrate kết quả vào STM + Silk
 ✅ Phase 3: Domain Knowledge — 313 nodes seeded (6 domains)
+✅ SkillProposal — ComposedSkill + SkillPattern + SkillPatternStore + wired vào LeoAI
+```
+
+---
+
+## ĐÃ HOÀN THÀNH (Phiên I)
+
+### SkillProposal — ComposedSkill pipeline ✅
+```
+ComposedSkill: pipe N skills in sequence, respects QT4③
+  execute_with() + resolver callback → skills don't know each other
+  Pipeline: skill[0].output_chains → skill[1].input_chains → ...
+
+SkillPattern: learned skill execution sequences
+  observe_success/failure → running average effectiveness
+  to_composed() when observations ≥ 3 AND effectiveness ≥ 0.6
+
+SkillPatternStore: accumulate + auto-promote patterns
+  record(steps, success, ts) → auto-promote effective patterns
+  Sits in LeoAI.skill_patterns — wired into run_instincts()
+
+AAM review_skill(InsightKind::SkillPattern):
+  ≥3 obs + ≥0.6 eff → Approved
+  <3 obs → Pending
+  <0.6 eff → Rejected
+
+15 new tests: ComposedSkill pipeline/error/insufficient,
+  SkillPattern observe/promote/threshold,
+  SkillPatternStore record/promote/dedup/mixed,
+  AAM SkillPattern review approved/pending/rejected
+
+Files đã sửa:
+  crates/agents/src/skill.rs — ComposedSkill, SkillPattern, SkillPatternStore + tests
+  crates/agents/src/leo.rs — skill_patterns field, wired into run_instincts()
+  crates/memory/src/proposal.rs — InsightKind::SkillPattern + AAM review + tests
 ```
 
 ---
@@ -101,11 +136,10 @@ docs/ chỉ giữ: olang_guide.md
 ## Tiếp theo (ưu tiên)
 
 ```
-1. [CAO]        SkillProposal — DreamSkill → pattern → ComposedSkill
-2. [TRUNG BÌNH] Multilingual Seeding — multilang.olang integrate
-3. [TRUNG BÌNH] Giảm unwrap() (291 → <100)
-4. [THẤP]       WASM Browser Demo
-5. [THẤP]       API documentation cho core crates
+1. [TRUNG BÌNH] Multilingual Seeding — multilang.olang integrate
+2. [TRUNG BÌNH] Giảm unwrap() (291 → <100)
+3. [THẤP]       WASM Browser Demo
+4. [THẤP]       API documentation cho core crates
 ```
 
 ---
@@ -131,6 +165,7 @@ E: Đồng bộ docs, reseed origin.olang
 F: P1 RelOps 18/18, Dream STM cleanup
 G: Verify Phase 2-5 thực trạng, cập nhật NEXT_PLAN
 H: Dọn docs → old/, Phase 5+4+3 HOÀN THÀNH, 1759 tests
+I: SkillProposal HOÀN THÀNH (ComposedSkill + SkillPattern + wire LeoAI), 1774 tests
 ```
 
 ---
@@ -144,4 +179,4 @@ Chỉ giữ: CLAUDE.md, NEXT_PLAN.md, README.md, docs/olang_guide.md
 
 ---
 
-*HomeOS · 2026-03-17 · 1,759 tests · 313 nodes · ○(∅)==○*
+*HomeOS · 2026-03-17 · 1,774 tests · 313 nodes · ○(∅)==○*
