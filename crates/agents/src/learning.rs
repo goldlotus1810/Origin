@@ -280,16 +280,12 @@ impl LearningLoop {
                 continue;
             }
 
-            // Emotion của câu này (blend paragraph + word-level)
+            // Emotion của câu này (blend paragraph + word-level qua Silk amplify)
             let sent_tag = {
                 let wt = context::emotion::sentence_affect(sent);
-                // 50/50 paragraph context vs câu riêng
-                EmotionTag {
-                    valence: (paragraph_emotion.valence + wt.valence) / 2.0,
-                    arousal: (paragraph_emotion.arousal + wt.arousal) / 2.0,
-                    dominance: (paragraph_emotion.dominance + wt.dominance) / 2.0,
-                    intensity: (paragraph_emotion.intensity + wt.intensity) / 2.0,
-                }
+                // Amplify: paragraph context (60%) blend sentence (40%)
+                // Dùng EmotionTag::blend thay vì trung bình đơn giản (QT: KHÔNG average)
+                paragraph_emotion.blend(wt, 0.6)
             };
 
             let words = content_words(sent);
@@ -888,6 +884,34 @@ mod word_level_tests {
         ll.learn_text("Natasha yêu Andrei. Pierre tìm kiếm ý nghĩa.", emo, 1000);
         let edges = ll.graph().len();
         assert!(edges > 0, "Multi-sentence phải có edges");
+    }
+
+    #[test]
+    fn sentence_emotion_uses_blend_not_average() {
+        // Verify rằng emotion blending dùng EmotionTag::blend (amplify)
+        // thay vì trung bình đơn giản (/ 2.0) — invariant rule.
+        let paragraph = silk::edge::EmotionTag::new(-0.80, 0.70, 0.30, 0.90);
+        let sentence = silk::edge::EmotionTag::new(-0.40, 0.50, 0.60, 0.50);
+
+        // Kết quả blend(0.6) = paragraph*0.6 + sentence*0.4
+        let blended = paragraph.blend(sentence, 0.6);
+        // Kết quả average = (paragraph + sentence) / 2.0
+        let averaged_v = (paragraph.valence + sentence.valence) / 2.0;
+
+        // blend(0.6) phải KHÁC average (/ 2.0 = blend(0.5))
+        assert!(
+            (blended.valence - averaged_v).abs() > 0.001,
+            "Blend(0.6) phải khác average: blend={}, avg={}",
+            blended.valence,
+            averaged_v
+        );
+
+        // paragraph weight nặng hơn (0.6) nên valence gần paragraph hơn
+        assert!(
+            (blended.valence - paragraph.valence).abs()
+                < (blended.valence - sentence.valence).abs(),
+            "Paragraph context (0.6) phải ảnh hưởng mạnh hơn sentence (0.4)"
+        );
     }
 }
 
