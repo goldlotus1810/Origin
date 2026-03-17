@@ -1040,7 +1040,7 @@ impl HomeRuntime {
 
             _ if cmd.starts_with("similar ") => {
                 // ○{similar fire water} — compare 2 concepts using SimilaritySkill
-                let args: Vec<&str> = cmd[8..].split_whitespace().collect();
+                let args: alloc::vec::Vec<&str> = cmd[8..].split_whitespace().collect();
                 if args.len() < 2 {
                     return Response {
                         text: String::from("Cần 2 terms: ○{similar term1 term2}"),
@@ -1057,7 +1057,7 @@ impl HomeRuntime {
                     })
                     .unwrap_or_else(|| {
                         // Fallback: encode as text
-                        let chains: Vec<_> = args[0].chars()
+                        let chains: alloc::vec::Vec<_> = args[0].chars()
                             .map(|c| olang::encoder::encode_codepoint(c as u32))
                             .filter(|ch| !ch.is_empty())
                             .collect();
@@ -1071,7 +1071,7 @@ impl HomeRuntime {
                         Some(olang::encoder::encode_codepoint(entry.chain_hash as u32))
                     })
                     .unwrap_or_else(|| {
-                        let chains: Vec<_> = args[1].chars()
+                        let chains: alloc::vec::Vec<_> = args[1].chars()
                             .map(|c| olang::encoder::encode_codepoint(c as u32))
                             .filter(|ch| !ch.is_empty())
                             .collect();
