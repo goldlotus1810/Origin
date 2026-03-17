@@ -259,6 +259,12 @@ pub enum Expr {
         arousal: Option<u32>,
         time: Option<u32>,
     },
+
+    /// Array literal: `[a, b, c]`
+    Array(Vec<Expr>),
+
+    /// Array indexing: `arr[idx]`
+    Index { array: Box<Expr>, index: Box<Expr> },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -920,6 +926,17 @@ impl<'a> Parser<'a> {
                     return Ok(Expr::Call { name, args });
                 }
 
+                // Check for array indexing: name[idx]
+                if self.check(&Token::LBracket) {
+                    self.advance();
+                    let index = self.parse_expr()?;
+                    self.expect(&Token::RBracket)?;
+                    return Ok(Expr::Index {
+                        array: Box::new(Expr::Ident(name)),
+                        index: Box::new(index),
+                    });
+                }
+
                 Ok(Expr::Ident(name))
             }
 
@@ -949,6 +966,22 @@ impl<'a> Parser<'a> {
             // Molecular literal: { S=1 R=2 V=128 A=128 T=3 }
             Token::LBrace => {
                 self.try_parse_mol_literal()
+            }
+
+            // Array literal: [a, b, c]
+            Token::LBracket => {
+                self.advance(); // consume [
+                let mut elements = Vec::new();
+                if !self.check(&Token::RBracket) {
+                    elements.push(self.parse_expr()?);
+                    while self.check(&Token::Comma) {
+                        self.advance();
+                        if self.check(&Token::RBracket) { break; } // trailing comma
+                        elements.push(self.parse_expr()?);
+                    }
+                }
+                self.expect(&Token::RBracket)?;
+                Ok(Expr::Array(elements))
             }
 
             // Logical not: !expr

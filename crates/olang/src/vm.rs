@@ -152,6 +152,29 @@ impl VmStack {
 /// Classify chain by dominant molecule characteristics.
 ///
 /// Maps ShapeBase to Unicode group categories:
+/// Split an array-encoded MolecularChain by separator molecules (shape=0, relation=0).
+fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
+    if chain.is_empty() {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    let mut current = Vec::new();
+    for mol in &chain.0 {
+        if mol.shape == 0 && mol.relation == 0
+            && mol.emotion.valence == 0 && mol.emotion.arousal == 0
+            && mol.time == 0
+        {
+            // Separator — finalize current element
+            result.push(MolecularChain(core::mem::take(&mut current)));
+        } else {
+            current.push(*mol);
+        }
+    }
+    // Last element (no trailing separator)
+    result.push(MolecularChain(current));
+    result
+}
+
 /// - SDF shapes (Sphere●, Capsule▬, Box■, Cone▲) → geometric primitives
 /// - CSG ops (Torus○, Union∪, Intersect∩, Subtract∖) → mathematical composition
 /// - High emotion valence → emoticon-like
@@ -526,6 +549,68 @@ impl OlangVM {
                             } else {
                                 let _ = stack.push(MolecularChain::empty());
                             }
+                        }
+                        "__array_new" => {
+                            // Stack: [... elem0, elem1, ..., elemN-1, count]
+                            // Pop count first (on top), then elements in reverse order
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut elements = Vec::new();
+                            for _ in 0..count {
+                                elements.push(vm_pop!(stack, events));
+                            }
+                            elements.reverse(); // restore original order
+                            // Build array chain: elem0 | sep | elem1 | sep | elem2 ...
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (i, elem) in elements.into_iter().enumerate() {
+                                if i > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_get" => {
+                            // Stack: [array, index]
+                            let idx_chain = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let idx = idx_chain.to_number().unwrap_or(0.0) as usize;
+                            // Split array by separator molecules (shape=0, relation=0)
+                            let elements = split_array_chain(&arr);
+                            if idx < elements.len() {
+                                let _ = stack.push(elements[idx].clone());
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__array_len" => {
+                            let arr = vm_pop!(stack, events);
+                            if arr.is_empty() {
+                                let _ = stack.push(MolecularChain::from_number(0.0));
+                            } else {
+                                let count = split_array_chain(&arr).len();
+                                let _ = stack.push(MolecularChain::from_number(count as f64));
+                            }
+                        }
+                        "__array_push" => {
+                            // Stack: [array, element]
+                            let elem = vm_pop!(stack, events);
+                            let mut arr = vm_pop!(stack, events);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            if !arr.is_empty() {
+                                arr.0.push(sep);
+                            }
+                            arr.0.extend(elem.0.iter().cloned());
+                            let _ = stack.push(arr);
                         }
                         _ => {
                             // Unknown function → emit lookup event
@@ -2017,5 +2102,48 @@ mod tests {
         assert!(!result.has_error());
         let outer = result.outputs()[0].to_number().unwrap();
         assert!((outer - 10.0).abs() < f64::EPSILON, "Store shadows, outer still 10: {}", outer);
+    }
+
+    // ── Array builtins ───────────────────────────────────────────────────────
+
+    #[test]
+    fn array_new_and_get() {
+        // [10, 20, 30] then get index 1
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::PushNum(30.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__array_new".into()))
+            .push_op(Op::Store("arr".into()))
+            .push_op(Op::LoadLocal("arr".into()))
+            .push_op(Op::PushNum(1.0))
+            .push_op(Op::Call("__array_get".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "array errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number();
+        assert!(v.is_some(), "arr[1] should be number, mol_count={}", outputs[0].len());
+        assert!((v.unwrap() - 20.0).abs() < f64::EPSILON, "arr[1]=20, got {}", v.unwrap());
+    }
+
+    #[test]
+    fn array_len() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::PushNum(30.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__array_new".into()))
+            .push_op(Op::Call("__array_len".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "len=3, got {}", v);
     }
 }

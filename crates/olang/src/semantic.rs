@@ -398,6 +398,17 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             validate_expr(inner, scope, errors);
         }
 
+        Expr::Array(elements) => {
+            for e in elements {
+                validate_expr(e, scope, errors);
+            }
+        }
+
+        Expr::Index { array, index } => {
+            validate_expr(array, scope, errors);
+            validate_expr(index, scope, errors);
+        }
+
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
             // Validate dimension values are in valid byte range (0-255)
             for (name, val) in [("S", shape), ("R", relation), ("V", valence), ("A", arousal), ("T", time)] {
@@ -460,6 +471,8 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::Compare { .. } => ChainKind::Numeric,
         Expr::LogicAnd(..) | Expr::LogicOr(..) | Expr::LogicNot(..) => ChainKind::Unknown,
         Expr::Group(inner) => infer_expr_kind(inner),
+        Expr::Array(_) => ChainKind::Unknown,
+        Expr::Index { .. } => ChainKind::Unknown,
         Expr::MolLiteral { shape, valence, .. } => {
             // Heuristic: check shape and valence to classify
             match shape {
@@ -992,6 +1005,18 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Call { name, args } => {
+            // Built-in function mappings
+            let builtin = match name.as_str() {
+                "len" => Some("__array_len"),
+                "push" => Some("__array_push"),
+                _ => None,
+            };
+            if let Some(builtin_name) = builtin {
+                for arg in args {
+                    lower_expr(arg, ctx);
+                }
+                ctx.emit(Op::Call(builtin_name.into()));
+            } else
             // Check if it's a user-defined function
             if let Some(fn_def) = ctx.lookup_fn(name) {
                 // Inline the function: bind args to params
@@ -1134,6 +1159,23 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::Group(inner) => {
             lower_expr(inner, ctx);
+        }
+
+        Expr::Array(elements) => {
+            // Push each element, then count, then call __array_new
+            // Stack layout before call: [... elem0, elem1, ..., elemN-1, count]
+            for e in elements {
+                lower_expr(e, ctx);
+            }
+            ctx.emit(Op::PushNum(elements.len() as f64));
+            ctx.emit(Op::Call("__array_new".into()));
+        }
+
+        Expr::Index { array, index } => {
+            // Push array, push index, call __array_get
+            lower_expr(array, ctx);
+            lower_expr(index, ctx);
+            ctx.emit(Op::Call("__array_get".into()));
         }
 
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
@@ -1876,5 +1918,81 @@ mod tests {
         assert!(outputs.len() >= 1, "Should have output, got {}", outputs.len());
         let v = outputs[0].to_number().unwrap();
         assert!((v - 42.0).abs() < f64::EPSILON, "double(21)=42, got {}", v);
+    }
+
+    // ── Array Tests ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_array_literal() {
+        let stmts = parse("let arr = [1, 2, 3];").unwrap();
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Let { value: Expr::Array(elems), .. } = &stmts[0] {
+            assert_eq!(elems.len(), 3);
+        } else {
+            panic!("Expected Let with Array, got {:?}", stmts[0]);
+        }
+    }
+
+    #[test]
+    fn parse_array_indexing() {
+        let stmts = parse("emit arr[0];").unwrap();
+        assert_eq!(stmts.len(), 1, "stmts: {:?}", stmts);
+        match &stmts[0] {
+            Stmt::Emit(Expr::Index { .. }) => { /* ok */ }
+            other => panic!("Expected Emit with Index, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_empty_array() {
+        let stmts = parse("let arr = [];").unwrap();
+        if let Stmt::Let { value: Expr::Array(elems), .. } = &stmts[0] {
+            assert_eq!(elems.len(), 0);
+        } else {
+            panic!("Expected empty array");
+        }
+    }
+
+    #[test]
+    fn lower_array_ops() {
+        let stmts = parse("let arr = [10, 20, 30]; emit arr[1];").unwrap();
+        let prog = lower(&stmts);
+        let op_names: Vec<_> = prog.ops.iter().map(|op| op.name()).collect();
+        // Expected: PushNum(10), PushNum(20), PushNum(30), PushNum(3), CALL(__array_new), STORE(arr)
+        // then LOAD_LOCAL(arr), PushNum(1), CALL(__array_get), EMIT, HALT
+        assert!(op_names.contains(&"PUSH_NUM"), "ops: {:?}", op_names);
+        assert!(op_names.contains(&"CALL"), "ops: {:?}", op_names);
+        assert!(op_names.contains(&"STORE"), "ops: {:?}", op_names);
+        assert!(op_names.contains(&"EMIT"), "ops: {:?}", op_names);
+    }
+
+    #[test]
+    fn e2e_array_get() {
+        let stmts = parse("let arr = [10, 20, 30]; emit arr[1];").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 20.0).abs() < f64::EPSILON, "arr[1]=20, got {}", v);
+    }
+
+    #[test]
+    fn e2e_array_len() {
+        let stmts = parse("let arr = [10, 20, 30]; emit len(arr);").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "len([10,20,30])=3, got {}", v);
     }
 }

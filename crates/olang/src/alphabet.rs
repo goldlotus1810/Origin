@@ -79,7 +79,7 @@ pub fn classify(c: char) -> CharClass {
         // Physical (QT3: proven — đã chứng minh)
         '⧺' | '⊖' => CharClass::Physical,
         // Delimiters
-        '{' | '}' | '(' | ')' | ';' | ',' | '=' | '?' | '"' | '|' => CharClass::Delimiter,
+        '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',' | '=' | '?' | '"' | '|' => CharClass::Delimiter,
         // Whitespace
         ' ' | '\t' | '\n' | '\r' => CharClass::Whitespace,
         // Digits
@@ -493,6 +493,10 @@ pub enum Token {
     Continue,
     /// `return`
     Return,
+    /// `[`
+    LBracket,
+    /// `]`
+    RBracket,
 
     // ── End ──
     /// End of input
@@ -583,6 +587,14 @@ impl<'a> Lexer<'a> {
             ')' => {
                 self.chars.next();
                 return Token::RParen;
+            }
+            '[' => {
+                self.chars.next();
+                return Token::LBracket;
+            }
+            ']' => {
+                self.chars.next();
+                return Token::RBracket;
             }
             ';' => {
                 self.chars.next();
