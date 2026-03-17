@@ -164,6 +164,13 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.define_local(name);
         }
 
+        Stmt::LetDestructure { names, value } => {
+            validate_expr(value, scope, errors);
+            for name in names {
+                scope.define_local(name);
+            }
+        }
+
         Stmt::Emit(expr) => {
             validate_expr(expr, scope, errors);
         }
@@ -290,7 +297,7 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // Module imports are valid at any point
         }
 
-        Stmt::FieldAssign { object, field: _, value } => {
+        Stmt::FieldAssign { object, fields: _, value } => {
             validate_expr(value, scope, errors);
             if !scope.is_defined(object) {
                 errors.push(SemError::new(&alloc::format!(
@@ -342,7 +349,7 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // We don't error on undefined — registry lookup happens at runtime.
         }
 
-        Expr::Int(_) => {}
+        Expr::Int(_) | Expr::Float(_) => {}
 
         Expr::Compose(a, b) => {
             validate_expr(a, scope, errors);
@@ -457,6 +464,12 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.exit();
         }
 
+        Expr::IfExpr { cond, then_expr, else_expr } => {
+            validate_expr(cond, scope, errors);
+            validate_expr(then_expr, scope, errors);
+            validate_expr(else_expr, scope, errors);
+        }
+
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
             // Validate dimension values are in valid byte range (0-255)
             for (name, val) in [("S", shape), ("R", relation), ("V", valence), ("A", arousal), ("T", time)] {
@@ -503,7 +516,7 @@ pub enum ChainKind {
 /// Infer chain kind cho expression (best-effort, static analysis).
 pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
     match expr {
-        Expr::Int(_) => ChainKind::Numeric,
+        Expr::Int(_) | Expr::Float(_) => ChainKind::Numeric,
         Expr::Ident(_) | Expr::Str(_) => ChainKind::Unknown,
         Expr::Compose(a, b) => {
             // LCA of two chains: if both same kind → same kind; otherwise Unknown
@@ -525,6 +538,7 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::FieldAccess { .. } => ChainKind::Unknown,
         Expr::Pipe(_, right) => infer_expr_kind(right),
         Expr::Lambda { .. } => ChainKind::Unknown,
+        Expr::IfExpr { then_expr, .. } => infer_expr_kind(then_expr),
         Expr::MolLiteral { shape, valence, .. } => {
             // Heuristic: check shape and valence to classify
             match shape {
@@ -542,7 +556,8 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
 /// Infer kind cho statement (most statements → Void).
 pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
     match stmt {
-        Stmt::Let { .. } | Stmt::Emit(_) | Stmt::Command(_) | Stmt::CommandArg { .. } => {
+        Stmt::Let { .. } | Stmt::LetDestructure { .. }
+        | Stmt::Emit(_) | Stmt::Command(_) | Stmt::CommandArg { .. } => {
             ChainKind::Void
         }
         Stmt::Expr(expr) => infer_expr_kind(expr),
@@ -631,6 +646,12 @@ struct LowerCtx {
     break_jumps: Vec<Vec<usize>>,
     /// Continue targets: Jmp placeholders to patch to ScopeEnd
     continue_jumps: Vec<Vec<usize>>,
+    /// Unique call site counter — prevents param name clashes when
+    /// the same function is called multiple times in one expression
+    call_id: u32,
+    /// Depth of function inlining — when > 0, `return` should not emit Op::Ret
+    /// but instead just leave the value on stack (since function is inlined)
+    inline_depth: u32,
 }
 
 impl LowerCtx {
@@ -641,7 +662,15 @@ impl LowerCtx {
             fns: Vec::new(),
             break_jumps: Vec::new(),
             continue_jumps: Vec::new(),
+            call_id: 0,
+            inline_depth: 0,
         }
+    }
+
+    fn next_call_id(&mut self) -> u32 {
+        let id = self.call_id;
+        self.call_id += 1;
+        id
     }
 
     fn is_local(&self, name: &str) -> bool {
@@ -676,6 +705,21 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             lower_expr(value, ctx);
             ctx.emit(Op::Store(name.clone()));
             ctx.locals.push(name.clone());
+        }
+
+        Stmt::LetDestructure { names, value } => {
+            // let { a, b } = dict → lower dict, then extract each field
+            lower_expr(value, ctx);
+            // Store dict as temporary
+            ctx.emit(Op::Store("__destructure_tmp".into()));
+            ctx.locals.push("__destructure_tmp".into());
+            for name in names {
+                ctx.emit(Op::LoadLocal("__destructure_tmp".into()));
+                ctx.emit(Op::Push(string_to_key_chain(name)));
+                ctx.emit(Op::Call("__dict_get".into()));
+                ctx.emit(Op::Store(name.clone()));
+                ctx.locals.push(name.clone());
+            }
         }
 
         Stmt::Emit(expr) => {
@@ -909,17 +953,55 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::StoreUpdate(name.clone()));
         }
 
-        Stmt::FieldAssign { object, field, value } => {
+        Stmt::FieldAssign { object, fields, value } => {
             // obj.field = value → load obj, push field key chain, lower value, __dict_set, store back
-            if ctx.is_local(object) {
-                ctx.emit(Op::LoadLocal(object.clone()));
+            // For nested: obj.a.b = value → load obj, get a, set b=value, set a=modified, store obj
+            if fields.len() == 1 {
+                // Simple: obj.field = value
+                if ctx.is_local(object) {
+                    ctx.emit(Op::LoadLocal(object.clone()));
+                } else {
+                    ctx.emit(Op::Load(object.clone()));
+                }
+                ctx.emit(Op::Push(string_to_key_chain(&fields[0])));
+                lower_expr(value, ctx);
+                ctx.emit(Op::Call("__dict_set".into()));
+                ctx.emit(Op::StoreUpdate(object.clone()));
             } else {
-                ctx.emit(Op::Load(object.clone()));
+                // Nested: obj.a.b.c = value
+                // Strategy: load obj, navigate to parent dict, set last field, rebuild path
+                // Store intermediate dicts as locals for reassembly
+                let depth = fields.len();
+                // Load root
+                if ctx.is_local(object) {
+                    ctx.emit(Op::LoadLocal(object.clone()));
+                } else {
+                    ctx.emit(Op::Load(object.clone()));
+                }
+                // Navigate down, storing intermediate dicts
+                for i in 0..depth - 1 {
+                    ctx.emit(Op::Dup); // keep copy for later reassembly
+                    let local_name: String = alloc::format!("__nested_{}", i);
+                    ctx.emit(Op::Store(local_name.clone()));
+                    ctx.locals.push(local_name);
+                    ctx.emit(Op::Push(string_to_key_chain(&fields[i])));
+                    ctx.emit(Op::Call("__dict_get".into()));
+                }
+                // Set the last field on the innermost dict
+                ctx.emit(Op::Push(string_to_key_chain(&fields[depth - 1])));
+                lower_expr(value, ctx);
+                ctx.emit(Op::Call("__dict_set".into()));
+                // Rebuild path from inside out
+                for i in (0..depth - 1).rev() {
+                    let local_name: String = alloc::format!("__nested_{}", i);
+                    ctx.emit(Op::LoadLocal(local_name));
+                    ctx.emit(Op::Swap); // [parent, modified_child]
+                    ctx.emit(Op::Push(string_to_key_chain(&fields[i])));
+                    ctx.emit(Op::Swap); // [parent, key, modified_child]
+                    ctx.emit(Op::Call("__dict_set".into()));
+                }
+                ctx.emit(Op::StoreUpdate(object.clone()));
             }
-            ctx.emit(Op::Push(string_to_key_chain(field)));
-            lower_expr(value, ctx);
-            ctx.emit(Op::Call("__dict_set".into()));
-            ctx.emit(Op::StoreUpdate(object.clone()));
         }
 
         Stmt::Use(module) => {
@@ -929,11 +1011,21 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         }
 
         Stmt::Return(expr) => {
-            if let Some(e) = expr {
-                lower_expr(e, ctx);
-                ctx.emit(Op::Emit); // return value = emit it
+            if ctx.inline_depth > 0 {
+                // Inside inlined function: just leave value on stack (no Ret)
+                if let Some(e) = expr {
+                    lower_expr(e, ctx);
+                    // Value stays on stack as function's return value
+                }
+                // No Op::Ret — inlined functions continue after the call site
+            } else {
+                // Top-level return
+                if let Some(e) = expr {
+                    lower_expr(e, ctx);
+                    ctx.emit(Op::Emit); // return value = emit it
+                }
+                ctx.emit(Op::Ret);
             }
-            ctx.emit(Op::Ret);
         }
 
         Stmt::Continue => {
@@ -1132,8 +1224,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Int(n) => {
-            // Push numeric chain (Phase 1: Math Runtime)
             ctx.emit(Op::PushNum(*n as f64));
+        }
+
+        Expr::Float(f) => {
+            ctx.emit(Op::PushNum(*f));
         }
 
         Expr::Compose(a, b) => {
@@ -1179,11 +1274,61 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "to_string" => Some("__to_string"),
                 "to_number" => Some("__to_number"),
                 "print" => Some("__print"),
+                "println" => Some("__println"),
+                "abs" => Some("__hyp_abs"),
+                "min" => Some("__hyp_min"),
+                "max" => Some("__hyp_max"),
+                "neg" => Some("__hyp_neg"),
+                "mod" => Some("__hyp_mod"),
+                "array_set" => Some("__array_set"),
+                "slice" => Some("__array_slice"),
+                "is_empty" => Some("__is_empty"),
+                "eq" => Some("__eq"),
+                // String builtins
+                "str_split" => Some("__str_split"),
+                "str_contains" => Some("__str_contains"),
+                "str_replace" => Some("__str_replace"),
+                "str_starts_with" => Some("__str_starts_with"),
+                "str_ends_with" => Some("__str_ends_with"),
+                "str_index_of" => Some("__str_index_of"),
+                "str_trim" => Some("__str_trim"),
+                "str_upper" => Some("__str_upper"),
+                "str_lower" => Some("__str_lower"),
+                "str_substr" => Some("__str_substr"),
+                // Math builtins
+                "floor" => Some("__hyp_floor"),
+                "ceil" => Some("__hyp_ceil"),
+                "round" => Some("__hyp_round"),
+                "sqrt" => Some("__hyp_sqrt"),
+                "pow" => Some("__hyp_pow"),
+                "log" => Some("__hyp_log"),
+                "sin" => Some("__hyp_sin"),
+                "cos" => Some("__hyp_cos"),
+                // Dict builtins
+                "has_key" => Some("__dict_has_key"),
+                "values" => Some("__dict_values"),
+                "merge" => Some("__dict_merge"),
+                "remove" => Some("__dict_remove"),
+                // Array builtins
+                "pop" => Some("__array_pop"),
+                "reverse" => Some("__array_reverse"),
+                "contains" => Some("__array_contains"),
+                "join" => Some("__array_join"),
+                "map" => Some("__array_map"),
+                "filter" => Some("__array_filter"),
+                // ISL builtins
+                "isl_send" => Some("__isl_send"),
+                "isl_broadcast" => Some("__isl_broadcast"),
+                // Type/chain builtins
+                "type_of" => Some("__type_of"),
+                "chain_hash" => Some("__chain_hash"),
+                "chain_len" => Some("__chain_len"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
                 // For dict builtins, string args need key encoding
-                if builtin_name == "__dict_get" || builtin_name == "__dict_set" {
+                if builtin_name == "__dict_get" || builtin_name == "__dict_set"
+                   || builtin_name == "__dict_has_key" || builtin_name == "__dict_remove" {
                     // get(dict, "key") / set(dict, "key", value)
                     for arg in args {
                         // If arg is a string literal, encode as key chain
@@ -1202,20 +1347,67 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             } else
             // Check if it's a user-defined function
             if let Some(fn_def) = ctx.lookup_fn(name) {
-                // Inline the function: bind args to params
+                // Inline the function with unique param names per call site
+                // to prevent clashes when the same function is called multiple times
+                let call_id = ctx.next_call_id();
                 let saved = ctx.locals.len();
 
-                // Evaluate args and store as locals
-                for (param, arg) in fn_def.params.iter().zip(args.iter()) {
+                // Generate unique param names: __p{call_id}_{param}
+                let unique_params: Vec<String> = fn_def.params.iter()
+                    .map(|p| alloc::format!("__p{}_{}", call_id, p))
+                    .collect();
+
+                // Evaluate args and store with unique names
+                for (unique_name, arg) in unique_params.iter().zip(args.iter()) {
                     lower_expr(arg, ctx);
-                    ctx.emit(Op::Store(param.clone()));
-                    ctx.locals.push(param.clone());
+                    ctx.emit(Op::Store(unique_name.clone()));
+                    ctx.locals.push(unique_name.clone());
                 }
 
-                // Lower function body
-                for s in &fn_def.body {
-                    lower_stmt(s, ctx);
+                // Also register original param names as aliases to unique names
+                // so the function body can use them
+                for (orig, unique_name) in fn_def.params.iter().zip(unique_params.iter()) {
+                    ctx.emit(Op::LoadLocal(unique_name.clone()));
+                    ctx.emit(Op::Store(orig.clone()));
+                    ctx.locals.push(orig.clone());
                 }
+
+                // Lower function body (inside inline context)
+                ctx.inline_depth += 1;
+
+                // Lower all statements except the last one normally
+                let body_len = fn_def.body.len();
+                if body_len > 1 {
+                    for s in &fn_def.body[..body_len - 1] {
+                        lower_stmt(s, ctx);
+                    }
+                }
+
+                // Handle last statement specially: if it's an expression,
+                // don't Pop the result — it becomes the function's return value
+                if let Some(last) = fn_def.body.last() {
+                    match last {
+                        Stmt::Expr(expr) => {
+                            // Lower expression without Pop — value stays on stack
+                            lower_expr(expr, ctx);
+                        }
+                        Stmt::Return(Some(expr)) => {
+                            // Return value stays on stack
+                            lower_expr(expr, ctx);
+                        }
+                        _ => {
+                            // Other statements (emit, let, etc.) — lower normally
+                            // and push empty as dummy return value
+                            lower_stmt(last, ctx);
+                            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                        }
+                    }
+                } else {
+                    // Empty function body — push empty
+                    ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                }
+
+                ctx.inline_depth -= 1;
 
                 ctx.locals.truncate(saved);
             } else {
@@ -1261,6 +1453,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 crate::alphabet::ArithOp::Sub => "__hyp_sub",
                 crate::alphabet::ArithOp::Mul => "__hyp_mul",
                 crate::alphabet::ArithOp::Div => "__hyp_div",
+                crate::alphabet::ArithOp::Mod => "__hyp_mod",
             };
             ctx.emit(Op::Call(fn_name.into()));
         }
@@ -1336,8 +1529,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Str(s) => {
-            // String literal → Load as registry alias
-            ctx.emit(Op::Load(s.clone()));
+            // String literal → push as chain value (each byte → 1 molecule)
+            ctx.emit(Op::Push(string_to_key_chain(s)));
         }
 
         Expr::Group(inner) => {
@@ -1401,6 +1594,15 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                         "get" => Some("__dict_get"),
                         "set" => Some("__dict_set"),
                         "keys" => Some("__dict_keys"),
+                        "values" => Some("__dict_values"),
+                        "reverse" => Some("__array_reverse"),
+                        "contains" => Some("__array_contains"),
+                        "join" => Some("__array_join"),
+                        "str_split" => Some("__str_split"),
+                        "str_contains" => Some("__str_contains"),
+                        "str_trim" => Some("__str_trim"),
+                        "str_upper" => Some("__str_upper"),
+                        "str_lower" => Some("__str_lower"),
                         _ => None,
                     };
                     ctx.emit(Op::Call(builtin.unwrap_or(name.as_str()).into()));
@@ -1414,20 +1616,48 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                         "head" => Some("__head"),
                         "tail" => Some("__tail"),
                         "keys" => Some("__dict_keys"),
+                        "values" => Some("__dict_values"),
+                        "reverse" => Some("__array_reverse"),
+                        "str_trim" => Some("__str_trim"),
+                        "str_upper" => Some("__str_upper"),
+                        "str_lower" => Some("__str_lower"),
                         _ => None,
                     };
                     if let Some(b) = builtin {
                         ctx.emit(Op::Call(b.into()));
                     } else if let Some(fn_def) = ctx.lookup_fn(name) {
-                        // Inline: bind left (on stack) as first param
+                        // Inline: bind left (on stack) as first param with unique name
+                        let call_id = ctx.next_call_id();
                         let saved = ctx.locals.len();
                         if let Some(first_param) = fn_def.params.first() {
+                            let unique_name = alloc::format!("__p{}_{}", call_id, first_param);
+                            ctx.emit(Op::Store(unique_name.clone()));
+                            ctx.locals.push(unique_name.clone());
+                            ctx.emit(Op::LoadLocal(unique_name));
                             ctx.emit(Op::Store(first_param.clone()));
                             ctx.locals.push(first_param.clone());
                         }
-                        for s in &fn_def.body {
-                            lower_stmt(s, ctx);
+                        ctx.inline_depth += 1;
+                        // Handle last statement as return value
+                        let body_len = fn_def.body.len();
+                        if body_len > 1 {
+                            for s in &fn_def.body[..body_len - 1] {
+                                lower_stmt(s, ctx);
+                            }
                         }
+                        if let Some(last) = fn_def.body.last() {
+                            match last {
+                                Stmt::Expr(expr) => lower_expr(expr, ctx),
+                                Stmt::Return(Some(expr)) => lower_expr(expr, ctx),
+                                _ => {
+                                    lower_stmt(last, ctx);
+                                    ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                                }
+                            }
+                        } else {
+                            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                        }
+                        ctx.inline_depth -= 1;
                         ctx.locals.truncate(saved);
                     } else {
                         ctx.emit(Op::Call(name.clone()));
@@ -1456,6 +1686,23 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             }
             lower_expr(body, ctx);
             ctx.locals.truncate(saved);
+        }
+
+        Expr::IfExpr { cond, then_expr, else_expr } => {
+            // if cond { then } else { else } as expression
+            lower_expr(cond, ctx);
+            let jz_pos = ctx.current_pos();
+            ctx.emit(Op::Jz(0)); // if falsy → else branch
+            ctx.emit(Op::Pop); // pop cond (truthy)
+            lower_expr(then_expr, ctx);
+            let jmp_pos = ctx.current_pos();
+            ctx.emit(Op::Jmp(0)); // skip else
+            let else_target = ctx.current_pos();
+            ctx.patch_jump(jz_pos, else_target);
+            ctx.emit(Op::Pop); // pop cond (falsy)
+            lower_expr(else_expr, ctx);
+            let end = ctx.current_pos();
+            ctx.patch_jump(jmp_pos, end);
         }
 
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
@@ -1689,7 +1936,9 @@ mod tests {
     fn lower_string_literal() {
         let stmts = parse("emit \"hello\";").unwrap();
         let prog = lower(&stmts);
-        assert!(prog.ops.contains(&Op::Load("hello".into())));
+        // String literals are now pushed as chain values (not loaded as aliases)
+        let has_push = prog.ops.iter().any(|op| matches!(op, Op::Push(_)));
+        assert!(has_push, "String literal should produce Push(chain)");
         assert!(prog.ops.contains(&Op::Emit));
     }
 
@@ -2148,19 +2397,24 @@ mod tests {
 
     #[test]
     fn lower_return_value() {
+        // Inlined function: return 42 leaves value on stack (no Op::Ret)
         let stmts = parse("fn foo() { return 42; } emit foo();").unwrap();
         let prog = lower(&stmts);
-        let has_ret = prog.ops.iter().any(|op| matches!(op, Op::Ret));
-        assert!(has_ret, "return should produce Ret opcode");
+        let has_pushnum = prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if *n == 42.0));
+        assert!(has_pushnum, "return 42 should produce PushNum(42)");
+        assert!(prog.ops.contains(&Op::Emit), "should emit the return value");
     }
 
     #[test]
     fn lower_return_bare() {
-        // Functions are inlined at call site, so we need a call to produce Ret
-        let stmts = parse("fn foo() { return; } emit foo();").unwrap();
+        // Inlined function with bare return: no value left on stack
+        let stmts = parse("fn foo() { return; } foo();").unwrap();
         let prog = lower(&stmts);
-        let has_ret = prog.ops.iter().any(|op| matches!(op, Op::Ret));
-        assert!(has_ret, "bare return should produce Ret opcode");
+        // Bare return in inlined context pushes empty chain as dummy
+        let has_push_empty = prog.ops.iter().any(|op| {
+            matches!(op, Op::Push(c) if c.is_empty())
+        });
+        assert!(has_push_empty, "bare return in inline should push empty");
     }
 
     // ── End-to-End (parse → lower → VM execute) ─────────────────────────────
@@ -2344,9 +2598,9 @@ mod tests {
         let stmts = parse("let d = { x: 1 }; d.x = 42;").unwrap();
         assert_eq!(stmts.len(), 2);
         match &stmts[1] {
-            Stmt::FieldAssign { object, field, value } => {
+            Stmt::FieldAssign { object, fields, value } => {
                 assert_eq!(object, "d");
-                assert_eq!(field, "x");
+                assert_eq!(fields, &["x"]);
                 assert!(matches!(value, Expr::Int(42)));
             }
             other => panic!("Expected FieldAssign, got {:?}", other),
@@ -2463,5 +2717,797 @@ mod tests {
         assert!(!outputs.is_empty(), "Should have output");
         let v = outputs[0].to_number().unwrap();
         assert!((v - 77.0).abs() < f64::EPSILON, "d.y should be 77, got {}", v);
+    }
+
+    // ── Phase 2 Tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_comments() {
+        // Line comment
+        let stmts = parse("let x = 1; // this is a comment\nemit x;").unwrap();
+        assert_eq!(stmts.len(), 2);
+        // Block comment
+        let stmts2 = parse("let x = /* hidden */ 1; emit x;").unwrap();
+        assert_eq!(stmts2.len(), 2);
+    }
+
+    #[test]
+    fn parse_pipe_operator() {
+        let stmts = parse("emit 5 |> to_string;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Emit(Expr::Pipe(_, _)) => {}
+            other => panic!("Expected Emit(Pipe), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_lambda() {
+        let stmts = parse("let f = |x| x + 1;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value: Expr::Lambda { params, .. }, .. } => {
+                assert_eq!(params, &["x"]);
+            }
+            other => panic!("Expected Let with Lambda, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_if_expr() {
+        let stmts = parse("let x = if 1 { 10 } else { 20 };").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value: Expr::IfExpr { .. }, .. } => {}
+            other => panic!("Expected Let with IfExpr, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e2e_if_expr() {
+        let stmts = parse("let x = if 1 { 10 } else { 20 }; emit x;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 10.0).abs() < f64::EPSILON, "truthy condition → 10, got {}", v);
+    }
+
+    #[test]
+    fn parse_let_destructure() {
+        let stmts = parse("let { a, b } = { a: 1, b: 2 };").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::LetDestructure { names, .. } => {
+                assert_eq!(names, &["a", "b"]);
+            }
+            other => panic!("Expected LetDestructure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e2e_destructure() {
+        let stmts = parse("let { x, y } = { x: 10, y: 20 }; emit x; emit y;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2, "Should have 2 outputs, got {:?}", outputs);
+        let vx = outputs[0].to_number().unwrap();
+        let vy = outputs[1].to_number().unwrap();
+        assert!((vx - 10.0).abs() < f64::EPSILON, "x=10, got {}", vx);
+        assert!((vy - 20.0).abs() < f64::EPSILON, "y=20, got {}", vy);
+    }
+
+    #[test]
+    fn e2e_for_each() {
+        let stmts = parse("let arr = [10, 20, 30]; let sum = 0; for x in arr { sum = sum + x; } emit sum;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 60.0).abs() < f64::EPSILON, "sum=60, got {}", v);
+    }
+
+    #[test]
+    fn parse_method_call() {
+        // obj.method(args) desugars to Call { name: "method", args: [obj, ...] }
+        let stmts = parse("emit arr.len();").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Call { name, args }) => {
+                assert_eq!(name, "len");
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!("Expected Emit(Call), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e2e_method_call_len() {
+        let stmts = parse("let arr = [1, 2, 3]; emit arr.len();").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "arr.len()=3, got {}", v);
+    }
+
+    #[test]
+    fn parse_nested_field_assign() {
+        let stmts = parse("let d = { a: { b: 1 } }; d.a.b = 42;").unwrap();
+        match &stmts[1] {
+            Stmt::FieldAssign { object, fields, .. } => {
+                assert_eq!(object, "d");
+                assert_eq!(fields, &["a", "b"]);
+            }
+            other => panic!("Expected FieldAssign, got {:?}", other),
+        }
+    }
+
+    // ── Phase 5: String Builtins ────────────────────────────────────────────
+
+    #[test]
+    fn e2e_str_contains() {
+        let stmts = parse("emit str_contains(\"hello world\", \"world\");").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_str_index_of() {
+        let stmts = parse("emit str_index_of(\"abcdef\", \"cd\");").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+    }
+
+    #[test]
+    fn e2e_math_builtins() {
+        // floor(3.7) = 3, ceil(3.2) = 4, round(3.5) = 4
+        let stmts = parse("emit floor(3.7);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "floor(3.7)=3, got {}", v);
+    }
+
+    #[test]
+    fn e2e_ceil() {
+        let stmts = parse("emit ceil(3.2);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 4.0).abs() < f64::EPSILON, "ceil(3.2)=4, got {}", v);
+    }
+
+    #[test]
+    fn e2e_sqrt() {
+        let stmts = parse("emit sqrt(25);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 5.0).abs() < 0.01, "sqrt(25)=5, got {}", v);
+    }
+
+    #[test]
+    fn e2e_pow() {
+        let stmts = parse("emit pow(2, 10);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1024.0).abs() < f64::EPSILON, "pow(2,10)=1024, got {}", v);
+    }
+
+    #[test]
+    fn e2e_array_reverse() {
+        let stmts = parse("let arr = [1, 2, 3]; emit reverse(arr);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_array_contains() {
+        let stmts = parse("let arr = [10, 20, 30]; emit contains(arr, 20);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        // 20 is in the array → should be truthy (1.0)
+        assert!(!outputs[0].is_empty(), "contains should be truthy");
+    }
+
+    #[test]
+    fn e2e_dict_has_key() {
+        let stmts = parse("let d = { x: 10, y: 20 }; emit has_key(d, \"x\");").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs[0].is_empty(), "has_key should be truthy");
+    }
+
+    #[test]
+    fn e2e_dict_values() {
+        let stmts = parse("let d = { x: 10, y: 20 }; emit values(d);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_string_escape_sequences() {
+        // Test that escape sequences are parsed correctly
+        let stmts = parse("emit \"hello\\nworld\";").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Str(s)) => {
+                assert!(s.contains('\n'), "Should contain newline, got: {:?}", s);
+            }
+            _ => panic!("Expected Emit(Str)"),
+        }
+    }
+
+    #[test]
+    fn e2e_string_escape_tab() {
+        let stmts = parse("emit \"a\\tb\";").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Str(s)) => {
+                assert!(s.contains('\t'), "Should contain tab, got: {:?}", s);
+            }
+            _ => panic!("Expected Emit(Str)"),
+        }
+    }
+
+    #[test]
+    fn e2e_string_escape_quote() {
+        let stmts = parse("emit \"he said \\\"hi\\\"\";").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Str(s)) => {
+                assert!(s.contains('"'), "Should contain quote, got: {:?}", s);
+            }
+            _ => panic!("Expected Emit(Str)"),
+        }
+    }
+
+    #[test]
+    fn e2e_method_call_push() {
+        let stmts = parse("let arr = [1, 2]; emit arr.push(3);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_pipe_builtin() {
+        let stmts = parse("let arr = [1, 2, 3]; emit arr |> len;").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "arr |> len = 3, got {}", v);
+    }
+
+    #[test]
+    fn e2e_complex_program_fibonacci() {
+        // Test a real program: compute fibonacci(7)
+        let src = r#"
+            let a = 0;
+            let b = 1;
+            for i in 0..7 {
+                let temp = a + b;
+                a = b;
+                b = temp;
+            }
+            emit a;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 13.0).abs() < f64::EPSILON, "fib(7)=13, got {}", v);
+    }
+
+    #[test]
+    fn e2e_complex_program_array_ops() {
+        // Build an array, push elements, get length, access element
+        let src = r#"
+            let arr = [10, 20, 30, 40, 50];
+            emit arr.len();
+            emit arr[2];
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+        let len = outputs[0].to_number().unwrap();
+        let elem = outputs[1].to_number().unwrap();
+        assert!((len - 5.0).abs() < f64::EPSILON, "len=5, got {}", len);
+        assert!((elem - 30.0).abs() < f64::EPSILON, "arr[2]=30, got {}", elem);
+    }
+
+    #[test]
+    fn e2e_complex_program_dict_ops() {
+        // Create dict, access field, modify field
+        let src = r#"
+            let user = { name: "Leo", age: 5 };
+            emit user.age;
+            user.age = 6;
+            emit user.age;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2, "outputs: {:?}", outputs);
+        let age1 = outputs[0].to_number().unwrap();
+        let age2 = outputs[1].to_number().unwrap();
+        assert!((age1 - 5.0).abs() < f64::EPSILON, "initial age=5, got {}", age1);
+        assert!((age2 - 6.0).abs() < f64::EPSILON, "updated age=6, got {}", age2);
+    }
+
+    #[test]
+    fn e2e_complex_program_conditional() {
+        // if-else with nested conditions
+        let src = r#"
+            let x = 15;
+            if x > 10 {
+                if x > 20 {
+                    emit 3;
+                } else {
+                    emit 2;
+                }
+            } else {
+                emit 1;
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 2.0).abs() < f64::EPSILON, "x=15 (>10, <=20) → emit 2, got {}", v);
+    }
+
+    #[test]
+    fn e2e_complex_math_expression() {
+        // Test: complex numeric expression with chained operations
+        let src = r#"
+            let x = (3 + 4) * 2;
+            let y = x - 1;
+            emit y;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 13.0).abs() < f64::EPSILON, "(3+4)*2-1=13, got {}", v);
+    }
+
+    #[test]
+    fn e2e_if_expr_ternary() {
+        let src = "let x = if 1 > 0 { 42 } else { 0 }; emit x;";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON, "ternary=42, got {}", v);
+    }
+
+    #[test]
+    fn e2e_builtin_mapping_complete() {
+        // Verify all new builtin names map correctly
+        let builtins = [
+            "str_split", "str_contains", "str_replace", "str_starts_with",
+            "str_ends_with", "str_index_of", "str_trim", "str_upper",
+            "str_lower", "str_substr", "floor", "ceil", "round", "sqrt",
+            "pow", "log", "sin", "cos", "has_key", "values", "merge",
+            "remove", "pop", "reverse", "contains", "join", "map",
+            "filter", "isl_send", "isl_broadcast", "type_of",
+            "chain_hash", "chain_len",
+        ];
+        for name in builtins {
+            let src = alloc::format!("emit {}(1);", name);
+            let stmts = parse(&src).unwrap();
+            let prog = lower(&stmts);
+            // Check that the builtin was mapped (should have a Call with __ prefix)
+            let has_builtin = prog.ops.iter().any(|op| {
+                matches!(op, Op::Call(ref n) if n.starts_with("__"))
+            });
+            assert!(has_builtin, "Builtin '{}' should map to __* call", name);
+        }
+    }
+
+    // ── Phase 6: Real Usable Programs ───────────────────────────────────────
+
+    #[test]
+    fn e2e_string_value_as_chain() {
+        // String literals are now actual chain values (not registry lookups)
+        let stmts = parse(r#"emit "hello";"#).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let text = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(text, Some("hello".into()));
+    }
+
+    #[test]
+    fn e2e_string_concat_works() {
+        let stmts = parse(r#"let a = "hello"; let b = " world"; emit concat(a, b);"#).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let text = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(text, Some("hello world".into()));
+    }
+
+    #[test]
+    fn e2e_string_len() {
+        let stmts = parse(r#"emit str_len("test");"#).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let n = outputs[0].to_number().unwrap();
+        assert!((n - 4.0).abs() < f64::EPSILON, "str_len('test')=4, got {}", n);
+    }
+
+    #[test]
+    fn e2e_function_returns_value() {
+        // fn with return expression — should leave value on stack
+        let stmts = parse("fn square(x) { return x * x; } emit square(7);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 49.0).abs() < f64::EPSILON, "square(7)=49, got {}", v);
+    }
+
+    #[test]
+    fn e2e_function_implicit_return() {
+        // Last expression in function body = implicit return value
+        let stmts = parse("fn add(a, b) { a + b } emit add(3, 4);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 7.0).abs() < f64::EPSILON, "add(3,4)=7, got {}", v);
+    }
+
+    #[test]
+    fn e2e_multiple_function_calls_no_clash() {
+        // Same function called twice in one expression — param names should not clash
+        let stmts = parse("fn double(n) { return n * 2; } emit double(3) + double(4);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 14.0).abs() < f64::EPSILON, "double(3)+double(4)=14, got {}", v);
+    }
+
+    #[test]
+    fn e2e_function_call_as_statement() {
+        // Calling function as statement (not in emit) should not crash
+        let stmts = parse("fn greet() { emit 42; } greet();").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn e2e_real_program_fizzbuzz() {
+        // FizzBuzz — a real program users would actually write
+        let src = r#"
+            let i = 1;
+            while i < 16 {
+                if mod(i, 15) == 0 {
+                    emit "FizzBuzz";
+                } else {
+                    if mod(i, 3) == 0 {
+                        emit "Fizz";
+                    } else {
+                        if mod(i, 5) == 0 {
+                            emit "Buzz";
+                        } else {
+                            emit i;
+                        }
+                    }
+                }
+                i = i + 1;
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        // FizzBuzz 1-15: 1,2,Fizz,4,Buzz,Fizz,7,8,Fizz,Buzz,11,Fizz,13,14,FizzBuzz = 15 outputs
+        assert_eq!(outputs.len(), 15, "FizzBuzz should produce 15 outputs, got {}", outputs.len());
+        // Check specific values
+        let v1 = outputs[0].to_number().unwrap();
+        assert!((v1 - 1.0).abs() < f64::EPSILON, "first output should be 1");
+        let fizz = crate::vm::chain_to_string(&outputs[2]);
+        assert_eq!(fizz, Some("Fizz".into()), "3rd output should be Fizz");
+        let buzz = crate::vm::chain_to_string(&outputs[4]);
+        assert_eq!(buzz, Some("Buzz".into()), "5th output should be Buzz");
+        let fizzbuzz = crate::vm::chain_to_string(&outputs[14]);
+        assert_eq!(fizzbuzz, Some("FizzBuzz".into()), "15th output should be FizzBuzz");
+    }
+
+    #[test]
+    fn e2e_real_program_sum_array() {
+        // Sum all elements of an array — common real-world pattern
+        let src = r#"
+            let arr = [10, 20, 30, 40, 50];
+            let total = 0;
+            for i in 0..5 {
+                total = total + arr[i];
+            }
+            emit total;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1);
+        let total = outputs.last().unwrap().to_number().unwrap();
+        assert!((total - 150.0).abs() < f64::EPSILON, "sum should be 150, got {}", total);
+    }
+
+    #[test]
+    fn e2e_real_program_dict_lookup() {
+        // Dictionary field access — real-world usage
+        let src = r#"
+            let user = {name: "Leo", age: 3, level: 1};
+            emit user.name;
+            emit user.age;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2, "should have 2 outputs, got {}", outputs.len());
+        let name = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(name, Some("Leo".into()));
+        let age = outputs[1].to_number().unwrap();
+        assert!((age - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn e2e_chain_to_string_roundtrip() {
+        // Verify string→chain→string roundtrip
+        let original = "Hello, World! 123";
+        let chain = crate::vm::string_to_chain(original);
+        let recovered = crate::vm::chain_to_string(&chain);
+        assert_eq!(recovered, Some(original.into()));
+    }
+
+    #[test]
+    fn e2e_format_chain_display_number() {
+        let chain = crate::molecular::MolecularChain::from_number(42.0);
+        let display = crate::vm::format_chain_display(&chain);
+        assert_eq!(display, "42");
+    }
+
+    #[test]
+    fn e2e_format_chain_display_string() {
+        let chain = crate::vm::string_to_chain("hello");
+        let display = crate::vm::format_chain_display(&chain);
+        assert_eq!(display, "hello");
+    }
+
+    #[test]
+    fn e2e_format_chain_display_empty() {
+        let chain = crate::molecular::MolecularChain::empty();
+        let display = crate::vm::format_chain_display(&chain);
+        assert_eq!(display, "(empty)");
+    }
+
+    #[test]
+    fn e2e_emit_number_directly() {
+        // Direct emit of a number — the simplest real program
+        let stmts = parse("emit 42;").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn e2e_real_program_nested_functions() {
+        // Functions calling other functions — real-world pattern
+        let src = r#"
+            fn square(x) { return x * x; }
+            fn sum_of_squares(a, b) { return square(a) + square(b); }
+            emit sum_of_squares(3, 4);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 25.0).abs() < f64::EPSILON, "3^2 + 4^2 = 25, got {}", v);
+    }
+
+    #[test]
+    fn e2e_real_program_string_processing() {
+        // String processing — real-world pattern
+        let src = r#"
+            let greeting = "hello world";
+            emit str_upper(greeting);
+            emit str_contains(greeting, "world");
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 2, "should have 2 outputs, got {}", outputs.len());
+        let upper = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(upper, Some("HELLO WORLD".into()));
+        // str_contains returns non-empty chain (truthy) when found
+        assert!(!outputs[1].is_empty(), "str_contains should return truthy for match");
+    }
+
+    #[test]
+    fn e2e_real_program_for_each() {
+        // for-each iteration over array
+        let src = r#"
+            let arr = [10, 20, 30];
+            let sum = 0;
+            for x in arr {
+                sum = sum + x;
+            }
+            emit sum;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1);
+        let sum = outputs.last().unwrap().to_number().unwrap();
+        assert!((sum - 60.0).abs() < f64::EPSILON, "sum should be 60, got {}", sum);
+    }
+
+    #[test]
+    fn e2e_real_program_try_catch() {
+        // Error handling — real-world pattern
+        let src = r#"
+            try {
+                emit 1 / 0;
+            } catch {
+                emit 999;
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        // Division by zero should be caught
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "catch should produce output");
+        let v = outputs.last().unwrap().to_number().unwrap();
+        assert!((v - 999.0).abs() < f64::EPSILON, "catch block should emit 999");
+    }
+
+    #[test]
+    fn e2e_real_program_match() {
+        // Pattern matching with wildcard — real-world pattern
+        let src = r#"
+            let x = 42;
+            match x {
+                _ => { emit x; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "wildcard match should produce output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
     }
 }

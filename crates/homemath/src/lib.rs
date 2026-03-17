@@ -13,6 +13,22 @@ pub fn fabs(x: f64) -> f64 {
     if x < 0.0 { -x } else { x }
 }
 
+/// Floor: largest integer ≤ x (f64).
+#[inline]
+pub fn floor(x: f64) -> f64 {
+    let i = x as i64;
+    let f = i as f64;
+    if x < f { f - 1.0 } else { f }
+}
+
+/// Ceil: smallest integer ≥ x (f64).
+#[inline]
+pub fn ceil(x: f64) -> f64 {
+    let i = x as i64;
+    let f = i as f64;
+    if x > f { f + 1.0 } else { f }
+}
+
 /// Round to nearest integer (f64).
 #[inline]
 pub fn round(x: f64) -> f64 {
