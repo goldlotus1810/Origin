@@ -806,7 +806,28 @@ impl<'a> Lexer<'a> {
             if c == '"' {
                 break;
             }
-            s.push(c);
+            if c == '\\' {
+                // Escape sequences
+                if let Some(&(_, esc)) = self.chars.peek() {
+                    self.chars.next();
+                    match esc {
+                        'n' => s.push('\n'),
+                        't' => s.push('\t'),
+                        'r' => s.push('\r'),
+                        '\\' => s.push('\\'),
+                        '"' => s.push('"'),
+                        '0' => s.push('\0'),
+                        _ => {
+                            s.push('\\');
+                            s.push(esc);
+                        }
+                    }
+                } else {
+                    s.push('\\');
+                }
+            } else {
+                s.push(c);
+            }
         }
         Token::Str(s)
     }

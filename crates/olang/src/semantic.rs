@@ -1259,11 +1259,51 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "slice" => Some("__array_slice"),
                 "is_empty" => Some("__is_empty"),
                 "eq" => Some("__eq"),
+                // String builtins
+                "str_split" => Some("__str_split"),
+                "str_contains" => Some("__str_contains"),
+                "str_replace" => Some("__str_replace"),
+                "str_starts_with" => Some("__str_starts_with"),
+                "str_ends_with" => Some("__str_ends_with"),
+                "str_index_of" => Some("__str_index_of"),
+                "str_trim" => Some("__str_trim"),
+                "str_upper" => Some("__str_upper"),
+                "str_lower" => Some("__str_lower"),
+                "str_substr" => Some("__str_substr"),
+                // Math builtins
+                "floor" => Some("__hyp_floor"),
+                "ceil" => Some("__hyp_ceil"),
+                "round" => Some("__hyp_round"),
+                "sqrt" => Some("__hyp_sqrt"),
+                "pow" => Some("__hyp_pow"),
+                "log" => Some("__hyp_log"),
+                "sin" => Some("__hyp_sin"),
+                "cos" => Some("__hyp_cos"),
+                // Dict builtins
+                "has_key" => Some("__dict_has_key"),
+                "values" => Some("__dict_values"),
+                "merge" => Some("__dict_merge"),
+                "remove" => Some("__dict_remove"),
+                // Array builtins
+                "pop" => Some("__array_pop"),
+                "reverse" => Some("__array_reverse"),
+                "contains" => Some("__array_contains"),
+                "join" => Some("__array_join"),
+                "map" => Some("__array_map"),
+                "filter" => Some("__array_filter"),
+                // ISL builtins
+                "isl_send" => Some("__isl_send"),
+                "isl_broadcast" => Some("__isl_broadcast"),
+                // Type/chain builtins
+                "type_of" => Some("__type_of"),
+                "chain_hash" => Some("__chain_hash"),
+                "chain_len" => Some("__chain_len"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
                 // For dict builtins, string args need key encoding
-                if builtin_name == "__dict_get" || builtin_name == "__dict_set" {
+                if builtin_name == "__dict_get" || builtin_name == "__dict_set"
+                   || builtin_name == "__dict_has_key" || builtin_name == "__dict_remove" {
                     // get(dict, "key") / set(dict, "key", value)
                     for arg in args {
                         // If arg is a string literal, encode as key chain
@@ -1482,6 +1522,15 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                         "get" => Some("__dict_get"),
                         "set" => Some("__dict_set"),
                         "keys" => Some("__dict_keys"),
+                        "values" => Some("__dict_values"),
+                        "reverse" => Some("__array_reverse"),
+                        "contains" => Some("__array_contains"),
+                        "join" => Some("__array_join"),
+                        "str_split" => Some("__str_split"),
+                        "str_contains" => Some("__str_contains"),
+                        "str_trim" => Some("__str_trim"),
+                        "str_upper" => Some("__str_upper"),
+                        "str_lower" => Some("__str_lower"),
                         _ => None,
                     };
                     ctx.emit(Op::Call(builtin.unwrap_or(name.as_str()).into()));
@@ -1495,6 +1544,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                         "head" => Some("__head"),
                         "tail" => Some("__tail"),
                         "keys" => Some("__dict_keys"),
+                        "values" => Some("__dict_values"),
+                        "reverse" => Some("__array_reverse"),
+                        "str_trim" => Some("__str_trim"),
+                        "str_upper" => Some("__str_upper"),
+                        "str_lower" => Some("__str_lower"),
                         _ => None,
                     };
                     if let Some(b) = builtin {
@@ -2702,6 +2756,321 @@ mod tests {
                 assert_eq!(fields, &["a", "b"]);
             }
             other => panic!("Expected FieldAssign, got {:?}", other),
+        }
+    }
+
+    // ── Phase 5: String Builtins ────────────────────────────────────────────
+
+    #[test]
+    fn e2e_str_contains() {
+        let stmts = parse("emit str_contains(\"hello world\", \"world\");").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_str_index_of() {
+        let stmts = parse("emit str_index_of(\"abcdef\", \"cd\");").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+    }
+
+    #[test]
+    fn e2e_math_builtins() {
+        // floor(3.7) = 3, ceil(3.2) = 4, round(3.5) = 4
+        let stmts = parse("emit floor(3.7);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "floor(3.7)=3, got {}", v);
+    }
+
+    #[test]
+    fn e2e_ceil() {
+        let stmts = parse("emit ceil(3.2);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 4.0).abs() < f64::EPSILON, "ceil(3.2)=4, got {}", v);
+    }
+
+    #[test]
+    fn e2e_sqrt() {
+        let stmts = parse("emit sqrt(25);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 5.0).abs() < 0.01, "sqrt(25)=5, got {}", v);
+    }
+
+    #[test]
+    fn e2e_pow() {
+        let stmts = parse("emit pow(2, 10);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1024.0).abs() < f64::EPSILON, "pow(2,10)=1024, got {}", v);
+    }
+
+    #[test]
+    fn e2e_array_reverse() {
+        let stmts = parse("let arr = [1, 2, 3]; emit reverse(arr);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_array_contains() {
+        let stmts = parse("let arr = [10, 20, 30]; emit contains(arr, 20);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        // 20 is in the array → should be truthy (1.0)
+        assert!(!outputs[0].is_empty(), "contains should be truthy");
+    }
+
+    #[test]
+    fn e2e_dict_has_key() {
+        let stmts = parse("let d = { x: 10, y: 20 }; emit has_key(d, \"x\");").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs[0].is_empty(), "has_key should be truthy");
+    }
+
+    #[test]
+    fn e2e_dict_values() {
+        let stmts = parse("let d = { x: 10, y: 20 }; emit values(d);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_string_escape_sequences() {
+        // Test that escape sequences are parsed correctly
+        let stmts = parse("emit \"hello\\nworld\";").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Str(s)) => {
+                assert!(s.contains('\n'), "Should contain newline, got: {:?}", s);
+            }
+            _ => panic!("Expected Emit(Str)"),
+        }
+    }
+
+    #[test]
+    fn e2e_string_escape_tab() {
+        let stmts = parse("emit \"a\\tb\";").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Str(s)) => {
+                assert!(s.contains('\t'), "Should contain tab, got: {:?}", s);
+            }
+            _ => panic!("Expected Emit(Str)"),
+        }
+    }
+
+    #[test]
+    fn e2e_string_escape_quote() {
+        let stmts = parse("emit \"he said \\\"hi\\\"\";").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Str(s)) => {
+                assert!(s.contains('"'), "Should contain quote, got: {:?}", s);
+            }
+            _ => panic!("Expected Emit(Str)"),
+        }
+    }
+
+    #[test]
+    fn e2e_method_call_push() {
+        let stmts = parse("let arr = [1, 2]; emit arr.push(3);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn e2e_pipe_builtin() {
+        let stmts = parse("let arr = [1, 2, 3]; emit arr |> len;").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "arr |> len = 3, got {}", v);
+    }
+
+    #[test]
+    fn e2e_complex_program_fibonacci() {
+        // Test a real program: compute fibonacci(7)
+        let src = r#"
+            let a = 0;
+            let b = 1;
+            for i in 0..7 {
+                let temp = a + b;
+                a = b;
+                b = temp;
+            }
+            emit a;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 13.0).abs() < f64::EPSILON, "fib(7)=13, got {}", v);
+    }
+
+    #[test]
+    fn e2e_complex_program_array_ops() {
+        // Build an array, push elements, get length, access element
+        let src = r#"
+            let arr = [10, 20, 30, 40, 50];
+            emit arr.len();
+            emit arr[2];
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+        let len = outputs[0].to_number().unwrap();
+        let elem = outputs[1].to_number().unwrap();
+        assert!((len - 5.0).abs() < f64::EPSILON, "len=5, got {}", len);
+        assert!((elem - 30.0).abs() < f64::EPSILON, "arr[2]=30, got {}", elem);
+    }
+
+    #[test]
+    fn e2e_complex_program_dict_ops() {
+        // Create dict, access field, modify field
+        let src = r#"
+            let user = { name: "Leo", age: 5 };
+            emit user.age;
+            user.age = 6;
+            emit user.age;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2, "outputs: {:?}", outputs);
+        let age1 = outputs[0].to_number().unwrap();
+        let age2 = outputs[1].to_number().unwrap();
+        assert!((age1 - 5.0).abs() < f64::EPSILON, "initial age=5, got {}", age1);
+        assert!((age2 - 6.0).abs() < f64::EPSILON, "updated age=6, got {}", age2);
+    }
+
+    #[test]
+    fn e2e_complex_program_conditional() {
+        // if-else with nested conditions
+        let src = r#"
+            let x = 15;
+            if x > 10 {
+                if x > 20 {
+                    emit 3;
+                } else {
+                    emit 2;
+                }
+            } else {
+                emit 1;
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 2.0).abs() < f64::EPSILON, "x=15 (>10, <=20) → emit 2, got {}", v);
+    }
+
+    #[test]
+    fn e2e_complex_math_expression() {
+        // Test: complex numeric expression with chained operations
+        let src = r#"
+            let x = (3 + 4) * 2;
+            let y = x - 1;
+            emit y;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 13.0).abs() < f64::EPSILON, "(3+4)*2-1=13, got {}", v);
+    }
+
+    #[test]
+    fn e2e_if_expr_ternary() {
+        let src = "let x = if 1 > 0 { 42 } else { 0 }; emit x;";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON, "ternary=42, got {}", v);
+    }
+
+    #[test]
+    fn e2e_builtin_mapping_complete() {
+        // Verify all new builtin names map correctly
+        let builtins = [
+            "str_split", "str_contains", "str_replace", "str_starts_with",
+            "str_ends_with", "str_index_of", "str_trim", "str_upper",
+            "str_lower", "str_substr", "floor", "ceil", "round", "sqrt",
+            "pow", "log", "sin", "cos", "has_key", "values", "merge",
+            "remove", "pop", "reverse", "contains", "join", "map",
+            "filter", "isl_send", "isl_broadcast", "type_of",
+            "chain_hash", "chain_len",
+        ];
+        for name in builtins {
+            let src = alloc::format!("emit {}(1);", name);
+            let stmts = parse(&src).unwrap();
+            let prog = lower(&stmts);
+            // Check that the builtin was mapped (should have a Call with __ prefix)
+            let has_builtin = prog.ops.iter().any(|op| {
+                matches!(op, Op::Call(ref n) if n.starts_with("__"))
+            });
+            assert!(has_builtin, "Builtin '{}' should map to __* call", name);
         }
     }
 }
