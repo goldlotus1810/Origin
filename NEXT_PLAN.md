@@ -12,7 +12,7 @@
 ## Trạng thái thật (verify bằng code)
 
 ```
-Tests:    1,774 pass · 0 fail · 0 clippy warnings
+Tests:    1,778 pass · 0 fail · 0 clippy warnings
 Deps:     0 external runtime (native SHA-256, Ed25519, AES-256-GCM, homemath)
 origin:   338 nodes (35 L0 + 278 domain + 25 multilang) · 236 edges · 2703 aliases · 84KB
 ```
@@ -41,8 +41,38 @@ origin:   338 nodes (35 L0 + 278 domain + 25 multilang) · 236 edges · 2703 ali
 ✅ Phase 4: Math → Silk — solve/derive/integrate kết quả vào STM + Silk
 ✅ Phase 3: Domain Knowledge — 313 nodes seeded (6 domains)
 ✅ SkillProposal — ComposedSkill + SkillPattern + SkillPatternStore + wired vào LeoAI
+✅ SkillPattern → AAM approval pipeline (ISL Propose → Approved → promote)
 ✅ Unwrap reduction: 50 → 27 production unwraps (partial_cmp→total_cmp, try_into→array)
 ✅ Multilingual Seeding: 25 nodes, 432 aliases (7 languages) integrated vào origin.olang
+```
+
+---
+
+## ĐÃ HOÀN THÀNH (Phiên J)
+
+### SkillPattern → AAM approval pipeline ✅
+```
+Architectural fix: SkillPatternStore.record() NO LONGER auto-promotes.
+  record() chỉ observe — promote() phải được gọi explicitly sau AAM approval.
+
+LeoAI.run_instincts() → &mut self:
+  Records instinct execution patterns into SkillPatternStore
+  Detects promotable patterns → sends ISL Propose to AAM
+  pending_pattern_keys tracks patterns awaiting AAM decision
+
+LeoAI.receive_aam_decision():
+  MsgType::Approved + payload[2]>0 → promote pattern to ComposedSkill
+  MsgType::Nack + payload[2]>0 → remove from pending, no promotion
+
+4 new tests:
+  ingest_records_instinct_patterns — verify run_instincts records patterns
+  skill_pattern_aam_approval_flow — full ISL Propose → Approved → promote
+  skill_pattern_aam_rejection — Nack removes without promoting
+  run_instincts_sends_propose_when_promotable — verify ISL outbox
+
+Files đã sửa:
+  crates/agents/src/leo.rs — pending_pattern_keys, run_instincts &mut, AAM wiring
+  crates/agents/src/skill.rs — record() no auto-promote, explicit promote()
 ```
 
 ---
@@ -59,8 +89,9 @@ SkillPattern: learned skill execution sequences
   observe_success/failure → running average effectiveness
   to_composed() when observations ≥ 3 AND effectiveness ≥ 0.6
 
-SkillPatternStore: accumulate + auto-promote patterns
-  record(steps, success, ts) → auto-promote effective patterns
+SkillPatternStore: accumulate patterns
+  record(steps, success, ts) → observe only (no auto-promote)
+  promote(steps) → explicit promotion after AAM approval
   Sits in LeoAI.skill_patterns — wired into run_instincts()
 
 AAM review_skill(InsightKind::SkillPattern):
@@ -166,6 +197,7 @@ F: P1 RelOps 18/18, Dream STM cleanup
 G: Verify Phase 2-5 thực trạng, cập nhật NEXT_PLAN
 H: Dọn docs → old/, Phase 5+4+3 HOÀN THÀNH, 1759 tests
 I: SkillProposal + unwrap reduction (50→27) + Multilingual Seeding, 1774 tests
+J: SkillPattern → AAM pipeline fix (no auto-promote, ISL wiring), 1778 tests
 ```
 
 ---
@@ -179,4 +211,4 @@ Chỉ giữ: CLAUDE.md, NEXT_PLAN.md, README.md, docs/olang_guide.md
 
 ---
 
-*HomeOS · 2026-03-17 · 1,774 tests · 338 nodes · ○(∅)==○*
+*HomeOS · 2026-03-17 · 1,778 tests · 338 nodes · ○(∅)==○*

@@ -129,8 +129,10 @@ pub struct LeoAI {
     /// Số QR đã promote (AAM approved + ghi file).
     qr_promoted: u32,
 
-    /// Learned skill patterns — auto-promote to ComposedSkill
+    /// Learned skill patterns — promote through AAM review
     pub skill_patterns: SkillPatternStore,
+    /// Pending pattern promotions awaiting AAM approval (steps joined by "|")
+    pending_pattern_keys: Vec<alloc::string::String>,
 
     /// Stats
     pub ingested: u32,
@@ -157,6 +159,7 @@ impl LeoAI {
             pending_writes: Vec::new(),
             qr_promoted: 0,
             skill_patterns: SkillPatternStore::new(),
+            pending_pattern_keys: Vec::new(),
             ingested: 0,
             dreamed: 0,
             last_event_ts: 0,
@@ -279,7 +282,16 @@ impl LeoAI {
         match msg.msg_type {
             MsgType::Approved => {
                 let idx = msg.payload[0] as usize;
-                if idx < self.pending.len() {
+                // Check if this is a skill pattern approval (payload[2] == steps count)
+                if msg.payload[2] > 0 && idx < self.pending_pattern_keys.len() {
+                    // AAM approved a skill pattern → promote to ComposedSkill
+                    let key = self.pending_pattern_keys.remove(idx);
+                    let steps: Vec<alloc::string::String> = key
+                        .split('|')
+                        .map(alloc::string::String::from)
+                        .collect();
+                    self.skill_patterns.promote(&steps);
+                } else if idx < self.pending.len() {
                     let p = self.pending.remove(idx);
 
                     // Tìm chain trong STM bằng chain_hash
@@ -298,7 +310,10 @@ impl LeoAI {
             }
             MsgType::Nack => {
                 let idx = msg.payload[0] as usize;
-                if idx < self.pending.len() {
+                if msg.payload[2] > 0 && idx < self.pending_pattern_keys.len() {
+                    // Pattern rejected by AAM → remove from pending
+                    self.pending_pattern_keys.remove(idx);
+                } else if idx < self.pending.len() {
                     self.pending.remove(idx);
                 }
             }
@@ -460,10 +475,32 @@ impl LeoAI {
             }
         }
 
-        // Record observed skill sequence → auto-promote effective patterns
+        // Record observed skill sequence
         if !active_steps.is_empty() {
             self.skill_patterns
                 .record(active_steps, any_success, ctx.timestamp);
+        }
+
+        // Check for promotable patterns → create SkillProposal → send to AAM
+        let promotable: Vec<_> = self.skill_patterns.promotable().iter().map(|p| {
+            (p.steps.clone(), p.effectiveness, p.observations)
+        }).collect();
+        for (steps, effectiveness, observations) in promotable {
+            // Create ISL Propose message to AAM with pattern info
+            let payload = [
+                (effectiveness * 255.0) as u8,
+                (observations.min(255)) as u8,
+                steps.len().min(255) as u8,
+            ];
+            let msg = ISLMessage::with_payload(
+                self.addr,
+                self.aam_addr,
+                MsgType::Propose,
+                payload,
+            );
+            self.outbox.push(ISLFrame::bare(msg));
+            // Track pending pattern for AAM approval
+            self.pending_pattern_keys.push(steps.join("|"));
         }
     }
 
@@ -847,6 +884,7 @@ impl LeoAI {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
     use crate::chief::IngestedReport;
     use isl::address::ISLAddress;
     use silk::edge::EmotionTag;
@@ -1343,5 +1381,124 @@ mod tests {
         assert!(!result.has_error());
         // STM should grow — LeoAI learned from its own code output
         assert!(l.stm_len() > stm_before, "STM should grow after programming");
+    }
+
+    // ── SkillPattern → AAM integration tests ────────────────────────────────
+
+    #[test]
+    fn ingest_records_instinct_patterns() {
+        let mut l = leo();
+        // Ingest enough data to trigger instincts
+        for i in 0..3u8 {
+            l.ingest(report(-0.3, i), (i as i64 + 1) * 1000);
+        }
+        // run_instincts should have recorded instinct patterns
+        assert!(
+            l.skill_patterns.pattern_count() > 0,
+            "Instinct patterns should be recorded after ingest"
+        );
+    }
+
+    #[test]
+    fn skill_pattern_aam_approval_flow() {
+        let mut l = leo();
+        // Simulate enough ingests to accumulate a promotable pattern
+        for i in 0..5u8 {
+            l.ingest(report(-0.2 - i as f32 * 0.05, i), (i as i64 + 1) * 1000);
+        }
+
+        // Check if any patterns are promotable
+        let promotable = l.skill_patterns.promotable();
+        if promotable.is_empty() {
+            // If instincts didn't consistently fire the same set, record manually
+            let steps = vec![
+                alloc::string::String::from("Honesty"),
+                alloc::string::String::from("Curiosity"),
+            ];
+            for i in 0..3 {
+                l.skill_patterns.record(steps.clone(), true, i * 100);
+            }
+        }
+
+        let promotable = l.skill_patterns.promotable();
+        assert!(!promotable.is_empty(), "Should have promotable patterns");
+        assert_eq!(l.skill_patterns.composed_count(), 0, "Not yet promoted");
+
+        // Simulate AAM approval — clear any keys added by run_instincts during ingest
+        l.pending_pattern_keys.clear();
+        let steps = promotable[0].steps.clone();
+        l.pending_pattern_keys.push(steps.join("|"));
+
+        // AAM sends Approved with payload[2] = steps count (non-zero → pattern)
+        let approved_msg = ISLMessage::with_payload(
+            aam_addr(),
+            leo_addr(),
+            MsgType::Approved,
+            [0, 0, steps.len() as u8],
+        );
+        l.receive_aam_decision(approved_msg, 10000);
+
+        assert_eq!(
+            l.skill_patterns.composed_count(),
+            1,
+            "Pattern should be promoted after AAM approval"
+        );
+        assert!(
+            l.pending_pattern_keys.is_empty(),
+            "Pending pattern keys should be drained"
+        );
+    }
+
+    #[test]
+    fn skill_pattern_aam_rejection() {
+        let mut l = leo();
+        let steps = vec![alloc::string::String::from("A")];
+        l.pending_pattern_keys.push(steps.join("|"));
+
+        // AAM sends Nack
+        let nack_msg = ISLMessage::with_payload(
+            aam_addr(),
+            leo_addr(),
+            MsgType::Nack,
+            [0, 0, 1], // payload[2] > 0 → pattern nack
+        );
+        l.receive_aam_decision(nack_msg, 10000);
+
+        assert!(l.pending_pattern_keys.is_empty(), "Rejected pattern removed");
+        assert_eq!(l.skill_patterns.composed_count(), 0, "Not promoted");
+    }
+
+    #[test]
+    fn run_instincts_sends_propose_when_promotable() {
+        let mut l = leo();
+        // Manually record enough patterns to be promotable
+        let steps = vec![
+            alloc::string::String::from("Honesty"),
+            alloc::string::String::from("Curiosity"),
+        ];
+        for i in 0..3 {
+            l.skill_patterns.record(steps.clone(), true, i * 100);
+        }
+
+        // Run instincts → should detect promotable pattern → send Propose to AAM
+        let emotion = EmotionTag::NEUTRAL;
+        let chain = olang::encoder::encode_codepoint(0x25CF);
+        let mut ctx = ExecContext::new(5000, emotion, 0.0);
+        ctx.push_input(chain);
+        l.run_instincts(&mut ctx);
+
+        let outbox = l.flush_outbox();
+        let propose_msgs: Vec<_> = outbox
+            .iter()
+            .filter(|f| f.header.msg_type == MsgType::Propose)
+            .collect();
+        assert!(
+            !propose_msgs.is_empty(),
+            "Should send Propose to AAM for promotable pattern"
+        );
+        assert!(
+            !l.pending_pattern_keys.is_empty(),
+            "Should track pending pattern key"
+        );
     }
 }

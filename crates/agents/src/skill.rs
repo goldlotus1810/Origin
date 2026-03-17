@@ -335,6 +335,9 @@ impl SkillPatternStore {
     }
 
     /// Record an observed skill sequence.
+    ///
+    /// Does NOT auto-promote — caller must check `promotable()` and submit
+    /// to AAM for review. Only after AAM approval, call `promote()`.
     pub fn record(&mut self, steps: Vec<String>, success: bool, ts: i64) {
         let key = steps.join("|");
         if let Some(p) = self.patterns.iter_mut().find(|p| p.key() == key) {
@@ -343,15 +346,6 @@ impl SkillPatternStore {
             } else {
                 p.observe_failure(ts);
             }
-            // Auto-promote: if pattern is effective and observed enough
-            if p.effectiveness >= 0.6 && p.observations >= 3 {
-                let already = self.composed.iter().any(|c| c.steps == p.steps);
-                if !already {
-                    if let Some(cs) = p.to_composed() {
-                        self.composed.push(cs);
-                    }
-                }
-            }
         } else {
             let mut pat = SkillPattern::new(steps, ts);
             if !success {
@@ -359,6 +353,22 @@ impl SkillPatternStore {
             }
             self.patterns.push(pat);
         }
+    }
+
+    /// Promote a pattern to ComposedSkill (call after AAM approval).
+    pub fn promote(&mut self, steps: &[String]) -> bool {
+        let key = steps.join("|");
+        let already = self.composed.iter().any(|c| c.steps == steps);
+        if already {
+            return false;
+        }
+        if let Some(p) = self.patterns.iter().find(|p| p.key() == key) {
+            if let Some(cs) = p.to_composed() {
+                self.composed.push(cs);
+                return true;
+            }
+        }
+        false
     }
 
     /// Get all promoted ComposedSkills.
@@ -671,16 +681,21 @@ mod tests {
         let mut store = SkillPatternStore::new();
         let steps = vec![String::from("Ingest"), String::from("Cluster")];
 
-        // Record 3 successes → auto-promote
+        // Record 3 successes → promotable (but not auto-promoted)
         store.record(steps.clone(), true, 100);
         assert_eq!(store.pattern_count(), 1);
-        assert_eq!(store.composed_count(), 0); // not enough observations
+        assert_eq!(store.composed_count(), 0);
 
         store.record(steps.clone(), true, 200);
-        assert_eq!(store.composed_count(), 0); // 2 < 3
+        assert_eq!(store.promotable().len(), 0); // 2 < 3
 
         store.record(steps.clone(), true, 300);
-        assert_eq!(store.composed_count(), 1); // 3 observations, eff=1.0 → promoted!
+        assert_eq!(store.promotable().len(), 1); // 3 obs, eff=1.0 → promotable
+        assert_eq!(store.composed_count(), 0); // NOT auto-promoted
+
+        // Explicit promote (after AAM approval)
+        assert!(store.promote(&steps));
+        assert_eq!(store.composed_count(), 1);
         assert_eq!(store.composed_skills()[0].steps, steps);
     }
 
@@ -692,7 +707,10 @@ mod tests {
         for i in 0..5 {
             store.record(steps.clone(), true, i * 100);
         }
-        // Should only promote once
+        // Promote once
+        assert!(store.promote(&steps));
+        // Second promote returns false (already promoted)
+        assert!(!store.promote(&steps));
         assert_eq!(store.composed_count(), 1);
     }
 
@@ -721,6 +739,8 @@ mod tests {
         store.record(b.clone(), true, 400);
 
         assert_eq!(store.pattern_count(), 2);
-        assert_eq!(store.composed_count(), 1); // only pattern A promoted
+        assert_eq!(store.promotable().len(), 1); // only pattern A is promotable
+        store.promote(&a);
+        assert_eq!(store.composed_count(), 1);
     }
 }
