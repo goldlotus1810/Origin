@@ -88,9 +88,15 @@ impl QRRecord {
             return None;
         }
 
-        let hash = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        let hash = u64::from_le_bytes([
+            data[pos], data[pos+1], data[pos+2], data[pos+3],
+            data[pos+4], data[pos+5], data[pos+6], data[pos+7],
+        ]);
         pos += 8;
-        let ts = i64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        let ts = u64::from_le_bytes([
+            data[pos], data[pos+1], data[pos+2], data[pos+3],
+            data[pos+4], data[pos+5], data[pos+6], data[pos+7],
+        ]) as i64;
         pos += 8;
         let mut sig = [0u8; 64];
         sig.copy_from_slice(&data[pos..pos + 64]);
@@ -209,11 +215,17 @@ impl QRSupersessionRecord {
 
     /// Deserialize từ 120 bytes.
     pub fn from_bytes(data: &[u8; 120]) -> Self {
-        let old = u64::from_le_bytes(data[0..8].try_into().unwrap());
-        let new = u64::from_le_bytes(data[8..16].try_into().unwrap());
+        let old = u64::from_le_bytes([
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+        ]);
+        let new = u64::from_le_bytes([
+            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+        ]);
         let mut reason = [0u8; 32];
         reason.copy_from_slice(&data[16..48]);
-        let ts = i64::from_le_bytes(data[48..56].try_into().unwrap());
+        let ts = u64::from_le_bytes([
+            data[48], data[49], data[50], data[51], data[52], data[53], data[54], data[55],
+        ]) as i64;
         let mut sig = [0u8; 64];
         sig.copy_from_slice(&data[56..120]);
         Self {

@@ -596,8 +596,8 @@ impl CompactEdge {
     /// Deserialize từ 10 bytes.
     pub fn from_bytes(b: &[u8; 10]) -> Self {
         Self {
-            from_hash: u32::from_be_bytes(b[0..4].try_into().unwrap()),
-            to_hash: u32::from_be_bytes(b[4..8].try_into().unwrap()),
+            from_hash: u32::from_be_bytes([b[0], b[1], b[2], b[3]]),
+            to_hash: u32::from_be_bytes([b[4], b[5], b[6], b[7]]),
             weight: b[8],
             relation: b[9],
         }

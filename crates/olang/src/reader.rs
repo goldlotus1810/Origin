@@ -12,6 +12,22 @@ use crate::writer::{
     HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_EDGE, RT_NODE, VERSION, VERSION_V03, VERSION_V04,
 };
 
+/// Read a little-endian u64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
+#[inline]
+fn read_u64_le(data: &[u8], pos: usize) -> u64 {
+    let bytes: [u8; 8] = [
+        data[pos], data[pos+1], data[pos+2], data[pos+3],
+        data[pos+4], data[pos+5], data[pos+6], data[pos+7],
+    ];
+    u64::from_le_bytes(bytes)
+}
+
+/// Read a little-endian i64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
+#[inline]
+fn read_i64_le(data: &[u8], pos: usize) -> i64 {
+    read_u64_le(data, pos) as i64
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsed records
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,7 +119,7 @@ impl<'a> OlangReader<'a> {
             return Err(ParseError::UnsupportedVersion);
         }
 
-        let created_at = i64::from_le_bytes(data[5..13].try_into().unwrap());
+        let created_at = read_i64_le(data, 5);
         Ok(Self {
             data,
             created_at,
@@ -166,7 +182,7 @@ impl<'a> OlangReader<'a> {
                     pos += 1;
                     let is_qr = self.data[pos] != 0;
                     pos += 1;
-                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let ts = read_i64_le(self.data, pos);
                     pos += 8;
 
                     nodes.push(ParsedNode {
@@ -184,13 +200,13 @@ impl<'a> OlangReader<'a> {
                         return Err(ParseError::Truncated);
                     }
 
-                    let from = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let from = read_u64_le(self.data, pos);
                     pos += 8;
-                    let to = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let to = read_u64_le(self.data, pos);
                     pos += 8;
                     let et = self.data[pos];
                     pos += 1;
-                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let ts = read_i64_le(self.data, pos);
                     pos += 8;
 
                     edges.push(ParsedEdge {
@@ -217,9 +233,9 @@ impl<'a> OlangReader<'a> {
                     let name_bytes = &self.data[pos..pos + name_len];
                     pos += name_len;
                     let name = String::from_utf8_lossy(name_bytes).into_owned();
-                    let hash = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let hash = read_u64_le(self.data, pos);
                     pos += 8;
-                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let ts = read_i64_le(self.data, pos);
                     pos += 8;
 
                     aliases.push(ParsedAlias {
@@ -235,7 +251,7 @@ impl<'a> OlangReader<'a> {
                     if pos + 8 + 1 > self.data.len() {
                         return Err(ParseError::Truncated);
                     }
-                    let target = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let target = read_u64_le(self.data, pos);
                     pos += 8;
                     let reason_len = self.data[pos] as usize;
                     pos += 1;
@@ -247,7 +263,7 @@ impl<'a> OlangReader<'a> {
                     let reason_bytes = &self.data[pos..pos + reason_len];
                     pos += reason_len;
                     let reason = String::from_utf8_lossy(reason_bytes).into_owned();
-                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let ts = read_i64_le(self.data, pos);
                     pos += 8;
 
                     amends.push(ParsedAmend {
@@ -357,7 +373,7 @@ impl<'a> OlangReader<'a> {
                             let is_qr = self.data[pos] != 0;
                             pos += 1;
                             let ts =
-                                i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                                read_i64_le(self.data, pos);
                             pos += 8;
                             nodes.push(ParsedNode {
                                 chain,
@@ -380,13 +396,13 @@ impl<'a> OlangReader<'a> {
                         break;
                     }
 
-                    let from = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let from = read_u64_le(self.data, pos);
                     pos += 8;
-                    let to = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let to = read_u64_le(self.data, pos);
                     pos += 8;
                     let et = self.data[pos];
                     pos += 1;
-                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let ts = read_i64_le(self.data, pos);
                     pos += 8;
                     edges.push(ParsedEdge {
                         from_hash: from,
@@ -413,9 +429,9 @@ impl<'a> OlangReader<'a> {
                     let name_bytes = &self.data[pos..pos + name_len];
                     pos += name_len;
                     let name = String::from_utf8_lossy(name_bytes).into_owned();
-                    let hash = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let hash = read_u64_le(self.data, pos);
                     pos += 8;
-                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let ts = read_i64_le(self.data, pos);
                     pos += 8;
                     aliases.push(ParsedAlias {
                         name,
@@ -430,7 +446,7 @@ impl<'a> OlangReader<'a> {
                         error = Some(ParseError::Truncated);
                         break;
                     }
-                    let target = u64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let target = read_u64_le(self.data, pos);
                     pos += 8;
                     let reason_len = self.data[pos] as usize;
                     pos += 1;
@@ -441,7 +457,7 @@ impl<'a> OlangReader<'a> {
                     let reason_bytes = &self.data[pos..pos + reason_len];
                     pos += reason_len;
                     let reason = String::from_utf8_lossy(reason_bytes).into_owned();
-                    let ts = i64::from_le_bytes(self.data[pos..pos + 8].try_into().unwrap());
+                    let ts = read_i64_le(self.data, pos);
                     pos += 8;
                     amends.push(ParsedAmend {
                         target_offset: target,

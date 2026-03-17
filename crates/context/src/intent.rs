@@ -570,7 +570,7 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
     // Tìm winner
     let (best_kind, best_bucket) = buckets
         .iter()
-        .max_by(|a, b| a.1.score.partial_cmp(&b.1.score).unwrap())
+        .max_by(|a, b| a.1.score.total_cmp(&b.1.score))
         .map(|(k, b)| (*k, b.clone()))
         .unwrap();
 

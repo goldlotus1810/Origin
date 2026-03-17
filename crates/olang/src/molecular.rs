@@ -735,7 +735,7 @@ impl MolecularChain {
         }
         let mut ms = Vec::with_capacity(b.len() / 5);
         for chunk in b.chunks_exact(5) {
-            let arr: [u8; 5] = chunk.try_into().unwrap();
+            let arr: [u8; 5] = [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4]];
             ms.push(Molecule::from_bytes(&arr)?);
         }
         Some(Self(ms))

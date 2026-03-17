@@ -866,7 +866,7 @@ impl HomeRuntime {
         }
 
         // Sort by weight, deduplicate
-        related.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        related.sort_by(|a, b| b.1.total_cmp(&a.1));
         related.dedup_by_key(|r| r.0);
         related.truncate(8);
 
@@ -1178,7 +1178,7 @@ impl HomeRuntime {
         }
 
         // Sort by weight descending
-        found.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        found.sort_by(|a, b| b.2.total_cmp(&a.2));
         found.truncate(5);
         found
     }

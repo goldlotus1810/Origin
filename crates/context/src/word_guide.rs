@@ -295,7 +295,7 @@ pub fn select_words(target: EmotionTag, n: usize) -> Vec<WordCandidate> {
         })
         .collect();
 
-    candidates.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
+    candidates.sort_by(|a, b| a.score.total_cmp(&b.score));
     candidates.truncate(n);
     candidates
 }

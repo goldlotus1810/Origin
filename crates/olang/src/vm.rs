@@ -508,7 +508,8 @@ impl OlangVM {
                     };
                     // Store in current (innermost) scope.
                     // Update existing in current scope, else insert new.
-                    let scope = scopes.last_mut().unwrap();
+                    // SAFETY: scopes always has root scope (initialized above)
+                    let Some(scope) = scopes.last_mut() else { break };
                     if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
                         entry.1 = val;
                     } else {
