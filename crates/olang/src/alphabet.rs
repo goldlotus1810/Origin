@@ -75,7 +75,7 @@ pub fn classify(c: char) -> CharClass {
         // Symbol operators (control flow)
         '≔' | '⇒' | '↻' | '○' => CharClass::Symbol,
         // Arithmetic (QT3: hypothesis — chưa chứng minh)
-        '+' | '-' | '×' | '÷' => CharClass::Arithmetic,
+        '+' | '-' | '×' | '÷' | '%' | '*' | '/' => CharClass::Arithmetic,
         // Physical (QT3: proven — đã chứng minh)
         '⧺' | '⊖' => CharClass::Physical,
         // Delimiters
@@ -247,6 +247,8 @@ pub enum ArithOp {
     Mul,
     /// `÷` (U+00F7) — chia (giả thuyết)
     Div,
+    /// `%` — modulo (giả thuyết)
+    Mod,
 }
 
 impl ArithOp {
@@ -255,8 +257,9 @@ impl ArithOp {
         match c {
             '+' => Some(Self::Add),
             '-' => Some(Self::Sub),
-            '×' => Some(Self::Mul),
-            '÷' => Some(Self::Div),
+            '×' | '*' => Some(Self::Mul),
+            '÷' | '/' => Some(Self::Div),
+            '%' => Some(Self::Mod),
             _ => None,
         }
     }

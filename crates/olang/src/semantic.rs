@@ -1247,6 +1247,15 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "to_string" => Some("__to_string"),
                 "to_number" => Some("__to_number"),
                 "print" => Some("__print"),
+                "abs" => Some("__hyp_abs"),
+                "min" => Some("__hyp_min"),
+                "max" => Some("__hyp_max"),
+                "neg" => Some("__hyp_neg"),
+                "mod" => Some("__hyp_mod"),
+                "array_set" => Some("__array_set"),
+                "slice" => Some("__array_slice"),
+                "is_empty" => Some("__is_empty"),
+                "eq" => Some("__eq"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -1329,6 +1338,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 crate::alphabet::ArithOp::Sub => "__hyp_sub",
                 crate::alphabet::ArithOp::Mul => "__hyp_mul",
                 crate::alphabet::ArithOp::Div => "__hyp_div",
+                crate::alphabet::ArithOp::Mod => "__hyp_mod",
             };
             ctx.emit(Op::Call(fn_name.into()));
         }

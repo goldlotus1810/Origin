@@ -801,6 +801,95 @@ impl OlangVM {
                             let val = vm_pop!(stack, events);
                             events.push(VmEvent::Output(val));
                         }
+                        "__hyp_mod" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(1.0);
+                            let _ = stack.push(MolecularChain::from_number(na % nb));
+                        }
+                        "__hyp_neg" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(-na));
+                        }
+                        "__hyp_abs" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(na.abs()));
+                        }
+                        "__hyp_min" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(na.min(nb)));
+                        }
+                        "__hyp_max" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(na.max(nb)));
+                        }
+                        "__array_set" => {
+                            // Stack: [array, index, value]
+                            let value = vm_pop!(stack, events);
+                            let idx_chain = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let idx = idx_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut elements = split_array_chain(&arr);
+                            if idx < elements.len() {
+                                elements[idx] = value;
+                            }
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in elements.into_iter().enumerate() {
+                                if j > 0 { result.0.push(sep); }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_slice" => {
+                            // Stack: [array, start, end]
+                            let end_chain = vm_pop!(stack, events);
+                            let start_chain = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let start = start_chain.to_number().unwrap_or(0.0) as usize;
+                            let end = end_chain.to_number().unwrap_or(0.0) as usize;
+                            let elements = split_array_chain(&arr);
+                            let sliced: Vec<_> = elements.into_iter()
+                                .skip(start)
+                                .take(end.saturating_sub(start))
+                                .collect();
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in sliced.into_iter().enumerate() {
+                                if j > 0 { result.0.push(sep); }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__is_empty" => {
+                            let val = vm_pop!(stack, events);
+                            let result = if val.is_empty() { 1.0 } else { 0.0 };
+                            let _ = stack.push(MolecularChain::from_number(result));
+                        }
+                        "__eq" => {
+                            // Deep equality: compare two chains molecule by molecule
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let result = if a.0 == b.0 { 1.0 } else { 0.0 };
+                            let _ = stack.push(MolecularChain::from_number(result));
+                        }
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
