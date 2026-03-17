@@ -17,6 +17,89 @@ Mọi thứ là Node. Mọi Node kết nối bằng Silk.
 
 ---
 
+## Nguyên lý cốt lõi: Molecule = Công thức
+
+**Đây là điều quan trọng nhất cần hiểu trước khi đọc tiếp.**
+
+```
+Molecule [S][R][V][A][T] = 5 bytes = CÔNG THỨC, không phải dữ liệu.
+
+5 bytes này là tọa độ trong không gian 5 chiều.
+Từ tọa độ này, MỌI THỨ về một khái niệm đều TÍNH ĐƯỢC:
+
+  SDF      → công thức hình dạng (hữu hình — render được)
+  Spline   → công thức biến đổi (vô hình — cảm được)
+  Silk     → công thức quan hệ (kết nối — implicit từ 5D)
+```
+
+### Tại sao công thức, không phải dữ liệu?
+
+```
+❌ Cách truyền thống: lưu "lửa là khí ion hóa ở nhiệt độ cao..." = ~5 KB
+✅ Cách HomeOS:       lưu [Sphere, Causes, 0xC0, 0xC0, Fast]     = 5 bytes
+
+Từ 5 bytes:
+  Shape=Sphere      → SDF tính ra hình cầu
+  V=0xC0, A=0xC0    → Spline tính ra cảm xúc, nhiệt, sáng
+  Time=Fast         → Spline tính ra nhịp biến đổi nhanh
+  5D position       → Silk tính ra quan hệ với mọi concept khác
+  evolve(dim, val)  → Mutation tính ra biến thể ("lửa nhẹ", "cháy nổ", "tia lửa")
+```
+
+### evolve() — Thay 1 chiều → loài mới
+
+```
+Molecule.evolve(dim, new_value) → EvolveResult
+  — 5 mã trong chuỗi, thay 1 mã → node MỚI (loài mới)
+  — chain_hash mới, consistency check ≥3/4 rules
+
+🔥 evolve(Valence, 0x40)  → "lửa nhẹ"     — V giảm
+🔥 evolve(Time, Instant)  → "cháy nổ"      — thời gian cực nhanh
+🔥 evolve(Shape, Line)    → "tia lửa"      — hình dạng thay đổi
+```
+
+### Mỗi node = 1 điểm 5D → 3 công thức
+
+```
+Molecule [S][R][V][A][T]
+    │
+    ├── SDF      → công thức hình dạng (hữu hình)
+    │               Shape byte → SdfKind + params → render
+    │
+    ├── Spline   → công thức biến đổi (vô hình)
+    │               6 curves: intensity, force, temperature,
+    │               frequency, emotion_v, emotion_a
+    │
+    └── Silk     → công thức quan hệ (kết nối)
+                    So sánh 5D → Silk tự tồn tại, 0 bytes
+```
+
+### Bài toán 16GB — Tại sao HomeOS chạy trên điện thoại
+
+```
+Tri thức nhân loại (text thô):
+  Wikipedia:  ~60 triệu bài    ┐
+  PubMed:     ~36 triệu bài    │ Cách truyền thống: hàng trăm TB
+  UniProt:    ~250 triệu seq   │ → KHÔNG VỪA điện thoại
+  GenBank:    ~billions seq     ┘
+
+HomeOS (công thức):
+  1 concept = ~33 bytes (5 mol + 8 hash + 20 metadata)
+  500 triệu concepts = 16.5 GB → VỪA 1 CHIẾC ĐIỆN THOẠI
+
+  Cách lưu              1 concept    500M concepts
+  ──────────────────────────────────────────────────
+  Text (Wikipedia)       ~5 KB        ~2.5 TB
+  Embedding (768D)       3 KB         1.5 TB
+  Knowledge Graph        ~200 B       100 GB
+  HomeOS Molecule        ~33 B        16.5 GB
+
+CÔNG THỨC tạo ra VÔ HẠN ngữ nghĩa từ HỮU HẠN bytes.
+Đó là lý do HomeOS không cần GPU. Không cần cloud. Chạy local.
+```
+
+---
+
 ## Kiến trúc 1 phút
 
 ```
