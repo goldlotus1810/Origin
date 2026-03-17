@@ -132,6 +132,40 @@ pub enum VmEvent {
     },
     /// Liệt kê thiết bị. Runtime gọi HAL.scan_devices().
     DeviceListRequest,
+
+    // ── FFI & System I/O events ──────────────────────────────────────────────
+
+    /// Gọi foreign function. Runtime dispatch → extern fn → inject result.
+    FfiCall {
+        /// Function name (VD: "gpio_write", "http_get")
+        name: String,
+        /// Arguments (popped from stack before event)
+        args: Vec<MolecularChain>,
+    },
+    /// Đọc file. Runtime gọi HAL.read_file().
+    FileReadRequest {
+        /// File path (extracted from chain)
+        path: String,
+    },
+    /// Ghi file. Runtime gọi HAL.write_file().
+    FileWriteRequest {
+        /// File path
+        path: String,
+        /// Data to write
+        data: Vec<u8>,
+    },
+    /// Append file. Runtime gọi HAL.write_file() ở chế độ append.
+    FileAppendRequest {
+        /// File path
+        path: String,
+        /// Data to append
+        data: Vec<u8>,
+    },
+    /// Spawn request. Runtime tạo ISL message hoặc async task.
+    SpawnRequest {
+        /// Number of opcodes in the spawned block
+        body_ops_count: usize,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1448,6 +1482,75 @@ impl OlangVM {
                             let val = vm_pop!(stack, events);
                             let _ = stack.push(MolecularChain::from_number(val.0.len() as f64));
                         }
+                        // ── Device I/O builtins ──────────────────────────
+                        "__device_write" => {
+                            // Stack: [device_id_string, value_chain]
+                            let value_chain = vm_pop!(stack, events);
+                            let id_chain = vm_pop!(stack, events);
+                            let device_id = chain_to_string(&id_chain).unwrap_or_default();
+                            let value = value_chain.to_number().unwrap_or(0.0) as u8;
+                            events.push(VmEvent::DeviceWrite { device_id, value });
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        "__device_read" => {
+                            // Stack: [device_id_string]
+                            let id_chain = vm_pop!(stack, events);
+                            let device_id = chain_to_string(&id_chain).unwrap_or_default();
+                            events.push(VmEvent::DeviceRead { device_id });
+                            let _ = stack.push(MolecularChain::empty()); // placeholder
+                        }
+                        "__device_list" => {
+                            events.push(VmEvent::DeviceListRequest);
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                        // ── FFI builtins ─────────────────────────────────
+                        "__ffi" => {
+                            // Stack: [function_name_string, ...args]
+                            let name_chain = vm_pop!(stack, events);
+                            let fn_name = chain_to_string(&name_chain).unwrap_or_default();
+                            events.push(VmEvent::FfiCall { name: fn_name, args: Vec::new() });
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                        // ── File I/O builtins ────────────────────────────
+                        "__file_read" => {
+                            let path_chain = vm_pop!(stack, events);
+                            let path = chain_to_string(&path_chain).unwrap_or_default();
+                            events.push(VmEvent::FileReadRequest { path });
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                        "__file_write" => {
+                            let data_chain = vm_pop!(stack, events);
+                            let path_chain = vm_pop!(stack, events);
+                            let path = chain_to_string(&path_chain).unwrap_or_default();
+                            let data = if let Some(s) = chain_to_string(&data_chain) {
+                                s.into_bytes()
+                            } else {
+                                data_chain.to_tagged_bytes()
+                            };
+                            events.push(VmEvent::FileWriteRequest { path, data });
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        "__file_append" => {
+                            let data_chain = vm_pop!(stack, events);
+                            let path_chain = vm_pop!(stack, events);
+                            let path = chain_to_string(&path_chain).unwrap_or_default();
+                            let data = if let Some(s) = chain_to_string(&data_chain) {
+                                s.into_bytes()
+                            } else {
+                                data_chain.to_tagged_bytes()
+                            };
+                            events.push(VmEvent::FileAppendRequest { path, data });
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        // ── Time builtins ────────────────────────────────
+                        "__time" => {
+                            // Push 0 — Runtime injects actual timestamp
+                            let _ = stack.push(MolecularChain::from_number(0.0));
+                        }
+                        "__sleep" => {
+                            // Pop duration_ms — no-op in VM (Runtime handles)
+                            let _duration = vm_pop!(stack, events);
+                        }
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
@@ -1661,6 +1764,80 @@ impl OlangVM {
 
                 Op::DeviceList => {
                     events.push(VmEvent::DeviceListRequest);
+                }
+
+                // ── FFI & System I/O ──────────────────────────────────────────
+
+                Op::Ffi(name, arity) => {
+                    let mut args = Vec::new();
+                    for _ in 0..*arity {
+                        args.push(vm_pop!(stack, events));
+                    }
+                    args.reverse(); // stack order → call order
+                    events.push(VmEvent::FfiCall {
+                        name: name.clone(),
+                        args,
+                    });
+                    // Push placeholder — Runtime injects actual result
+                    let _ = stack.push(MolecularChain::empty());
+                }
+
+                Op::FileRead => {
+                    let path_chain = vm_pop!(stack, events);
+                    let path = chain_to_string(&path_chain)
+                        .unwrap_or_default();
+                    events.push(VmEvent::FileReadRequest { path });
+                    // Push placeholder — Runtime injects file contents
+                    let _ = stack.push(MolecularChain::empty());
+                }
+
+                Op::FileWrite => {
+                    let data_chain = vm_pop!(stack, events);
+                    let path_chain = vm_pop!(stack, events);
+                    let path = chain_to_string(&path_chain)
+                        .unwrap_or_default();
+                    let data = if let Some(s) = chain_to_string(&data_chain) {
+                        s.into_bytes()
+                    } else {
+                        data_chain.to_tagged_bytes()
+                    };
+                    events.push(VmEvent::FileWriteRequest { path, data });
+                }
+
+                Op::FileAppend => {
+                    let data_chain = vm_pop!(stack, events);
+                    let path_chain = vm_pop!(stack, events);
+                    let path = chain_to_string(&path_chain)
+                        .unwrap_or_default();
+                    let data = if let Some(s) = chain_to_string(&data_chain) {
+                        s.into_bytes()
+                    } else {
+                        data_chain.to_tagged_bytes()
+                    };
+                    events.push(VmEvent::FileAppendRequest { path, data });
+                }
+
+                Op::SpawnBegin => {
+                    // Count opcodes until SpawnEnd
+                    let mut count = 0usize;
+                    let mut search_pc = pc;
+                    while search_pc < prog.ops.len() {
+                        if matches!(prog.ops[search_pc], Op::SpawnEnd) {
+                            break;
+                        }
+                        count += 1;
+                        search_pc += 1;
+                    }
+                    events.push(VmEvent::SpawnRequest {
+                        body_ops_count: count,
+                    });
+                    // Skip past SpawnEnd — the body will be executed by Runtime as async
+                    pc = search_pc + 1;
+                    continue;
+                }
+
+                Op::SpawnEnd => {
+                    // Should not be reached — SpawnBegin skips past SpawnEnd
                 }
 
                 Op::TryBegin(catch_target) => {

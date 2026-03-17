@@ -143,6 +143,30 @@ pub enum Op {
     /// Liệt kê thiết bị có sẵn. Push danh sách device_id lên stack.
     /// VM emit DeviceList event → Runtime gọi HAL.scan_devices().
     DeviceList,
+
+    // ── FFI & System I/O ──────────────────────────────────────────────────────
+    // Olang gọi hàm bên ngoài (Rust/C) và tương tác hệ thống.
+    //
+    // FFI: gọi extern function bằng tên → VM emit FfiCall event
+    // FileRead/FileWrite: đọc/ghi file → VM emit event → Runtime dùng HAL
+    // Spawn: tạo task mới → VM emit SpawnRequest → Runtime tạo ISL message
+
+    /// Gọi foreign function. Pop N args (theo arity), push kết quả.
+    /// VM emit FfiCall event → Runtime dispatch → extern fn → push result.
+    Ffi(String, u8), // (function_name, arity)
+
+    /// Đọc file. Pop 1 chain (path), push nội dung lên stack.
+    FileRead,
+    /// Ghi file. Pop 2 chains (path, data).
+    FileWrite,
+    /// Append file. Pop 2 chains (path, data). QT9: Append-only.
+    FileAppend,
+
+    /// Spawn concurrent task. Marks begin of async block.
+    /// VM emit SpawnRequest event → Runtime tạo ISL message → Worker/Chief xử lý.
+    SpawnBegin,
+    /// End of spawn block.
+    SpawnEnd,
 }
 
 impl Op {
@@ -186,6 +210,12 @@ impl Op {
             Self::DeviceWrite(_) => "DEVICE_WRITE",
             Self::DeviceRead(_) => "DEVICE_READ",
             Self::DeviceList => "DEVICE_LIST",
+            Self::Ffi(..) => "FFI",
+            Self::FileRead => "FILE_READ",
+            Self::FileWrite => "FILE_WRITE",
+            Self::FileAppend => "FILE_APPEND",
+            Self::SpawnBegin => "SPAWN_BEGIN",
+            Self::SpawnEnd => "SPAWN_END",
         }
     }
 
@@ -289,6 +319,17 @@ impl Op {
                 b
             }
             Self::DeviceList => alloc::vec![0x42],
+            Self::Ffi(name, arity) => {
+                let sb = name.as_bytes();
+                let mut b = alloc::vec![0x50, sb.len() as u8, *arity];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::FileRead => alloc::vec![0x51],
+            Self::FileWrite => alloc::vec![0x52],
+            Self::FileAppend => alloc::vec![0x53],
+            Self::SpawnBegin => alloc::vec![0x60],
+            Self::SpawnEnd => alloc::vec![0x61],
         }
     }
 }
@@ -622,14 +663,15 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
         }
 
         OlangIrExpr::Spawn { body } => {
-            // Go-style: wrap body in scope, VM can detect spawn for async
-            // For now: sequential execution with spawn marker event
-            prog.push_op(Op::Nop); // placeholder: spawn marker
+            // Spawn: VM emit SpawnRequest → Runtime tạo ISL task.
+            // SpawnBegin/SpawnEnd wrap body cho Runtime collect opcodes.
+            prog.push_op(Op::SpawnBegin);
             prog.push_op(Op::ScopeBegin);
             for e in body {
                 emit_expr(e, prog);
             }
             prog.push_op(Op::ScopeEnd);
+            prog.push_op(Op::SpawnEnd);
         }
 
         OlangIrExpr::Pipe(exprs) => {

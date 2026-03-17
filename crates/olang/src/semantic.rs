@@ -1323,6 +1323,19 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "type_of" => Some("__type_of"),
                 "chain_hash" => Some("__chain_hash"),
                 "chain_len" => Some("__chain_len"),
+                // FFI: gọi extern function
+                "ffi" => Some("__ffi"),
+                // File I/O
+                "file_read" => Some("__file_read"),
+                "file_write" => Some("__file_write"),
+                "file_append" => Some("__file_append"),
+                // Device I/O (shorthand)
+                "device_write" => Some("__device_write"),
+                "device_read" => Some("__device_read"),
+                "device_list" => Some("__device_list"),
+                // System
+                "time" => Some("__time"),
+                "sleep" => Some("__sleep"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {

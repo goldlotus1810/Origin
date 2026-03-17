@@ -729,6 +729,42 @@ impl HomeRuntime {
                 VmEvent::DeviceListRequest => {
                     output_text.push_str("[device_list] ");
                 }
+
+                // ── FFI & System I/O events ────────────────────────────────
+                VmEvent::FfiCall { name, args } => {
+                    output_text.push_str(&format!(
+                        "[ffi \"{}\" ({} args)] ",
+                        name,
+                        args.len()
+                    ));
+                }
+                VmEvent::FileReadRequest { path } => {
+                    // Try reading via HAL if available, otherwise log
+                    output_text.push_str(&format!(
+                        "[file_read \"{}\"] ",
+                        path
+                    ));
+                }
+                VmEvent::FileWriteRequest { path, data } => {
+                    output_text.push_str(&format!(
+                        "[file_write \"{}\" ({} bytes)] ",
+                        path,
+                        data.len()
+                    ));
+                }
+                VmEvent::FileAppendRequest { path, data } => {
+                    output_text.push_str(&format!(
+                        "[file_append \"{}\" ({} bytes)] ",
+                        path,
+                        data.len()
+                    ));
+                }
+                VmEvent::SpawnRequest { body_ops_count } => {
+                    output_text.push_str(&format!(
+                        "[spawn {} ops] ",
+                        body_ops_count
+                    ));
+                }
             }
         }
 
