@@ -336,6 +336,151 @@ Không ai tạo. Không ai lưu. Chỉ cần NHÌN.
 
 ---
 
+## 9b. Molecule = Công thức, không phải dữ liệu
+
+> Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức. Đúng câu tuyên ngôn.
+
+Đây là điều cốt lõi nhất của HomeOS:
+
+```
+Molecule [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5 chiều
+
+Đây KHÔNG phải dữ liệu. Đây là CÔNG THỨC.
+5 bytes này là địa chỉ — trỏ đến 1 điểm trong không gian vô hạn.
+```
+
+### Mỗi node = 1 điểm trong 5D → 3 loại công thức
+
+```
+Molecule [S][R][V][A][T]
+    │
+    ├── SDF      → công thức hình dạng (hữu hình, render được)
+    │               Shape byte → SdfKind + params
+    │               "trông như thế nào" — sphere, capsule, box, cone...
+    │
+    ├── Spline   → công thức biến đổi (vô hình, cảm được)
+    │               6 curves: intensity, force, temperature, frequency, emotion_v, emotion_a
+    │               "thay đổi thế nào theo thời gian"
+    │
+    └── Silk     → công thức quan hệ (kết nối, implicit)
+                    So sánh 5D giữa 2 nodes → Silk tự tồn tại
+                    "liên kết với ai"
+```
+
+Ví dụ: 🔥 (lửa)
+
+```
+Molecule: [Sphere, Member, 0xC0, 0xC0, Fast]    = 5 bytes = CÔNG THỨC
+
+SDF:     Sphere + default params                  → hình cầu (render được)
+Spline:  temperature = high curve                  → nóng
+         intensity = flickering                    → sáng, nhấp nháy
+         emotion_v = positive (0xC0 → +0.5)       → gợi cảm xúc tích cực
+         emotion_a = high (0xC0 → +0.5)           → kích thích
+Silk:    Shape=Sphere → kết nối tự do với mọi node Sphere khác
+         Valence=0xC0 → kết nối với mọi node high-valence
+
+KHÔNG lưu "lửa là gì". Lưu CÔNG THỨC → tính ra lửa là gì.
+```
+
+### evolve() — Thay 1 chiều → loài mới
+
+```
+Molecule.evolve(dim, new_value) → EvolveResult
+
+Thay đổi 1 trong 5 chiều → chain_hash mới → node MỚI (loài mới)
+Consistency check: ≥3/4 semantic rules → valid
+
+🔥 evolve(Valence, 0x40)  → "lửa nhẹ"     (V giảm → cảm xúc nhẹ hơn)
+🔥 evolve(Time, Instant)  → "cháy nổ"      (thời gian cực nhanh)
+🔥 evolve(Shape, Line)    → "tia lửa"      (hình dạng thay đổi)
+
+dimension_delta(🔥, 💧):
+  1 chiều khác  → candidate evolve (loài gần)
+  0 chiều khác  → identical
+  2+ chiều khác → quá khác biệt → dùng LCA thay vì evolve
+```
+
+### NodeBody — Bridge giữa công thức và thực tế
+
+```rust
+NodeBody {
+    sdf_kind: Option<SdfKind>,     // Shape → hình dạng vật lý
+    sdf_params: SdfParams,         // Kích thước, tỉ lệ
+    material: MaterialProps,       // Chất liệu, màu sắc
+    splines: SplineSet {           // 6 curves vô hình
+        intensity,                 // Sáng/tối theo thời gian
+        force,                     // Lực/gió
+        temperature,               // Nóng/lạnh
+        frequency,                 // Tần số/âm thanh
+        emotion_v,                 // Valence theo thời gian
+        emotion_a,                 // Arousal theo thời gian
+    },
+    version: u32,                  // Append-only: mỗi learn() tăng version
+}
+
+// Học thêm = THÊM công thức, KHÔNG thay đổi bản chất
+body.learn_shape(Sphere);              // version 1
+body.learn_temperature(hot_curve);     // version 2 — "lửa nóng"
+body.learn_intensity(flicker_curve);   // version 3 — "lửa nhấp nháy"
+body.learn_emotion_v(positive_curve);  // version 4 — "lửa vui"
+// Mỗi lần learn = thêm 1 công thức → hiểu sâu hơn, KHÔNG overwrite
+```
+
+### Bài toán: Toàn bộ tri thức nhân loại → 16GB
+
+```
+Dữ liệu thô trên thế giới:
+  Wikipedia:     ~60 triệu bài viết
+  PubMed:        ~36 triệu bài y tế
+  UniProt:       ~250 triệu protein sequences
+  GenBank:       ~billions nucleotide sequences
+
+Cách truyền thống (text): hàng trăm TB → KHÔNG VỪA
+
+Cách HomeOS (công thức):
+  Mỗi concept = 5 bytes (Molecule) + 8 bytes (hash) + ~20 bytes (metadata)
+  = ~33 bytes/concept
+
+  1 triệu concepts = 33 MB
+  100 triệu concepts = 3.3 GB
+  500 triệu concepts = 16.5 GB → VỪA 1 CHIẾC ĐIỆN THOẠI
+
+Tại sao?
+  Không lưu "lửa là khí ion hóa ở nhiệt độ cao phát ra ánh sáng..."
+  Lưu: [Sphere, Causes, 0xC0, 0xC0, Fast] = 5 bytes
+  → SDF tính ra hình dạng
+  → Spline tính ra nhiệt, sáng, động
+  → Silk tính ra quan hệ với mọi concept khác
+  → evolve() tính ra biến thể
+
+  CÔNG THỨC tạo ra VÔ HẠN ngữ nghĩa từ HỮU HẠN bytes.
+```
+
+### Bảng so sánh storage
+
+```
+Cách lưu              1 concept    1M concepts    500M concepts
+─────────────────────────────────────────────────────────────────
+Text (Wikipedia)       ~5 KB        ~5 GB          ~2.5 TB
+Embedding (768D)       3 KB         3 GB           1.5 TB
+Knowledge Graph        ~200 B       200 MB         100 GB
+HomeOS Molecule        5 B          5 MB           2.5 GB
+HomeOS + metadata      ~33 B        33 MB          16.5 GB
+```
+
+```
+Vũ trụ không lưu "lửa nóng, sáng, tròn, nguy hiểm, đẹp, nhanh..."
+Vũ trụ lưu [S=1, R=6, V=0xC0, A=0xC0, T=4] = 5 bytes
+→ Từ công thức này, MỌI THỨ về lửa đều TÍNH ĐƯỢC.
+
+Đó là lý do HomeOS không cần GPU.
+Đó là lý do HomeOS chạy trên điện thoại 16GB.
+Đó là lý do HomeOS không phải AI truyền thống.
+```
+
+---
+
 ## 10. UCD — Bảng tuần hoàn của HomeOS
 
 ### 10.1 Từ Unicode 18.0 đến bảng tĩnh
