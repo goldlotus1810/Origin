@@ -255,6 +255,10 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.exit();
         }
 
+        Stmt::Break | Stmt::Continue => {
+            // Valid only inside loops — structural check, no scope impact
+        }
+
         Stmt::TryCatch { try_block, catch_block } => {
             scope.enter();
             for s in try_block {
@@ -360,6 +364,15 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             validate_expr(rhs, scope, errors);
         }
 
+        Expr::LogicAnd(a, b) | Expr::LogicOr(a, b) => {
+            validate_expr(a, scope, errors);
+            validate_expr(b, scope, errors);
+        }
+
+        Expr::LogicNot(inner) => {
+            validate_expr(inner, scope, errors);
+        }
+
         Expr::Str(_) => {
             // String literals are always valid
         }
@@ -428,6 +441,7 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::RelEdge { .. } | Expr::RelQuery { .. } | Expr::Chain { .. } => ChainKind::Unknown,
         Expr::Call { .. } => ChainKind::Unknown,
         Expr::Compare { .. } => ChainKind::Numeric,
+        Expr::LogicAnd(..) | Expr::LogicOr(..) | Expr::LogicNot(..) => ChainKind::Unknown,
         Expr::Group(inner) => infer_expr_kind(inner),
         Expr::MolLiteral { shape, valence, .. } => {
             // Heuristic: check shape and valence to classify
@@ -452,7 +466,8 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         Stmt::Expr(expr) => infer_expr_kind(expr),
         Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. }
         | Stmt::Match { .. } | Stmt::TryCatch { .. } | Stmt::ForIn { .. }
-        | Stmt::While { .. } => ChainKind::Void,
+        | Stmt::While { .. }
+        | Stmt::Break | Stmt::Continue => ChainKind::Void,
     }
 }
 
@@ -509,6 +524,10 @@ struct LowerCtx {
     locals: Vec<String>,
     /// Function definitions
     fns: Vec<FnDef>,
+    /// Break targets: Jmp placeholders to patch past loop end
+    break_jumps: Vec<Vec<usize>>,
+    /// Continue targets: Jmp placeholders to patch to ScopeEnd
+    continue_jumps: Vec<Vec<usize>>,
 }
 
 impl LowerCtx {
@@ -517,6 +536,8 @@ impl LowerCtx {
             prog: OlangProgram::new("olang"),
             locals: Vec::new(),
             fns: Vec::new(),
+            break_jumps: Vec::new(),
+            continue_jumps: Vec::new(),
         }
     }
 
@@ -619,7 +640,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         Stmt::While { cond, body } => {
             // while cond { body }
             // Layout: Loop(1024) ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd [end:] Pop
-            // Jz peeks, so Pop needed on both true path (after Jz) and false path (at end)
             // QT2: ∞-1 — capped at 1024 iterations
             ctx.emit(Op::Loop(1024));
             ctx.emit(Op::ScopeBegin);
@@ -627,14 +647,30 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             let jz_pos = ctx.current_pos();
             ctx.emit(Op::Jz(0)); // placeholder — patched to end
             ctx.emit(Op::Pop); // pop cond result (true path continues)
+            // Set up break/continue context (forward jump placeholders)
+            ctx.break_jumps.push(Vec::new());
+            ctx.continue_jumps.push(Vec::new());
             let saved = ctx.locals.len();
             for s in body {
                 lower_stmt(s, ctx);
             }
             ctx.locals.truncate(saved);
+            // Patch continue → ScopeEnd (triggers next iteration)
+            let scope_end_pos = ctx.current_pos();
+            if let Some(conts) = ctx.continue_jumps.pop() {
+                for cp in conts {
+                    ctx.patch_jump(cp, scope_end_pos);
+                }
+            }
             ctx.emit(Op::ScopeEnd); // triggers loop jump-back
             let end = ctx.current_pos();
             ctx.patch_jump(jz_pos, end);
+            // Patch break → end (past loop)
+            if let Some(breaks) = ctx.break_jumps.pop() {
+                for bp in breaks {
+                    ctx.patch_jump(bp, end);
+                }
+            }
             ctx.emit(Op::Pop); // pop cond result (false path, jumped here)
         }
 
@@ -657,17 +693,51 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 ctx.emit(Op::Dup);
                 ctx.emit(Op::Store(var.clone()));
                 ctx.locals.push(var.clone());
+                ctx.break_jumps.push(Vec::new());
+                ctx.continue_jumps.push(Vec::new());
                 let saved = ctx.locals.len();
                 for s in body {
                     lower_stmt(s, ctx);
                 }
                 ctx.locals.truncate(saved);
+                // Patch continue → increment (before ScopeEnd)
+                let inc_pos = ctx.current_pos();
+                if let Some(conts) = ctx.continue_jumps.pop() {
+                    for cp in conts {
+                        ctx.patch_jump(cp, inc_pos);
+                    }
+                }
                 // Increment counter on stack
                 ctx.emit(Op::PushNum(1.0));
                 ctx.emit(Op::Call("__hyp_add".into()));
                 ctx.emit(Op::ScopeEnd);
+                let end_pos = ctx.current_pos();
+                // Patch break → past loop
+                if let Some(breaks) = ctx.break_jumps.pop() {
+                    for bp in breaks {
+                        ctx.patch_jump(bp, end_pos);
+                    }
+                }
             }
             ctx.emit(Op::Pop);
+        }
+
+        Stmt::Break => {
+            // Emit Jmp(0) placeholder → patched to end of loop
+            let pos = ctx.current_pos();
+            ctx.emit(Op::Jmp(0));
+            if let Some(breaks) = ctx.break_jumps.last_mut() {
+                breaks.push(pos);
+            }
+        }
+
+        Stmt::Continue => {
+            // Emit Jmp(0) placeholder → patched to ScopeEnd / increment
+            let pos = ctx.current_pos();
+            ctx.emit(Op::Jmp(0));
+            if let Some(conts) = ctx.continue_jumps.last_mut() {
+                conts.push(pos);
+            }
         }
 
         Stmt::FnDef { .. } => {
@@ -984,8 +1054,44 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 CmpOp::Gt => "__cmp_gt",
                 CmpOp::Le => "__cmp_le",
                 CmpOp::Ge => "__cmp_ge",
+                CmpOp::Ne => "__cmp_ne",
             };
             ctx.emit(Op::Call(builtin.into()));
+        }
+
+        Expr::LogicAnd(a, b) => {
+            // Short-circuit: if a is empty, result is empty; else result is b
+            lower_expr(a, ctx);
+            let jz_pos = ctx.current_pos();
+            ctx.emit(Op::Jz(0)); // if a falsy → jump to end (leave empty on stack)
+            ctx.emit(Op::Pop); // pop a (truthy)
+            lower_expr(b, ctx);
+            let end = ctx.current_pos();
+            ctx.patch_jump(jz_pos, end);
+        }
+
+        Expr::LogicOr(a, b) => {
+            // Short-circuit: if a is non-empty, result is a; else result is b
+            lower_expr(a, ctx);
+            // Jz: if a empty → eval b
+            let jz_pos = ctx.current_pos();
+            ctx.emit(Op::Jz(0));
+            // a truthy: jump past b
+            let jmp_pos = ctx.current_pos();
+            ctx.emit(Op::Jmp(0));
+            // a falsy: pop empty, eval b
+            let false_branch = ctx.current_pos();
+            ctx.patch_jump(jz_pos, false_branch);
+            ctx.emit(Op::Pop);
+            lower_expr(b, ctx);
+            let end = ctx.current_pos();
+            ctx.patch_jump(jmp_pos, end);
+        }
+
+        Expr::LogicNot(inner) => {
+            // !expr: empty → non-empty (1.0), non-empty → empty
+            lower_expr(inner, ctx);
+            ctx.emit(Op::Call("__logic_not".into()));
         }
 
         Expr::Str(s) => {
@@ -1603,5 +1709,55 @@ mod tests {
             Stmt::Emit(expr) => assert_eq!(infer_expr_kind(expr), ChainKind::Numeric),
             _ => panic!("Expected Emit"),
         }
+    }
+
+    #[test]
+    fn lower_ne_has_cmp_ne() {
+        let stmts = parse("emit x != 5;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Call(ref n) if n == "__cmp_ne")),
+            "Should have __cmp_ne call");
+    }
+
+    #[test]
+    fn lower_logic_not_has_call() {
+        let stmts = parse("emit !x;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Call(ref n) if n == "__logic_not")),
+            "Should have __logic_not call");
+    }
+
+    #[test]
+    fn lower_logic_and_has_jz() {
+        let stmts = parse("emit a && b;").unwrap();
+        let prog = lower(&stmts);
+        // && uses short-circuit: Jz to skip b if a is falsy
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))),
+            "LogicAnd should use Jz for short-circuit");
+    }
+
+    #[test]
+    fn lower_logic_or_has_jz_and_jmp() {
+        let stmts = parse("emit a || b;").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))));
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jmp(_))));
+    }
+
+    #[test]
+    fn lower_break_has_jmp() {
+        let stmts = parse("while x < 10 { break; }").unwrap();
+        let prog = lower(&stmts);
+        // break emits Jmp → patched to end of loop
+        let jmp_count = prog.ops.iter().filter(|op| matches!(op, Op::Jmp(_))).count();
+        assert!(jmp_count >= 1, "break should produce Jmp");
+    }
+
+    #[test]
+    fn lower_continue_has_jmp() {
+        let stmts = parse("for i in 0..5 { continue; }").unwrap();
+        let prog = lower(&stmts);
+        let jmp_count = prog.ops.iter().filter(|op| matches!(op, Op::Jmp(_))).count();
+        assert!(jmp_count >= 1, "continue should produce Jmp");
     }
 }

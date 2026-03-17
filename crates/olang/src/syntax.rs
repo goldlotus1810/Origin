@@ -116,6 +116,12 @@ pub enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
     },
+
+    /// `break;` — exit innermost loop
+    Break,
+
+    /// `continue;` — skip to next iteration
+    Continue,
 }
 
 /// Match arm — pattern + body.
@@ -157,6 +163,8 @@ pub enum CmpOp {
     Le,
     /// `>=`
     Ge,
+    /// `!=`
+    Ne,
 }
 
 /// Expression — mọi expression evaluate → MolecularChain.
@@ -223,6 +231,15 @@ pub enum Expr {
         op: CmpOp,
         rhs: Box<Expr>,
     },
+
+    /// `a && b` — logical and (both non-empty)
+    LogicAnd(Box<Expr>, Box<Expr>),
+
+    /// `a || b` — logical or (either non-empty)
+    LogicOr(Box<Expr>, Box<Expr>),
+
+    /// `!a` — logical not (empty → non-empty, non-empty → empty)
+    LogicNot(Box<Expr>),
 
     /// Molecular literal: `{ S=1 R=2 V=128 A=128 T=3 }`
     ///
@@ -314,6 +331,16 @@ impl<'a> Parser<'a> {
             Token::Try => self.parse_try_catch(),
             Token::For => self.parse_for_in(),
             Token::While => self.parse_while(),
+            Token::Break => {
+                self.advance();
+                if self.check(&Token::Semi) { self.advance(); }
+                Ok(Stmt::Break)
+            }
+            Token::Continue => {
+                self.advance();
+                if self.check(&Token::Semi) { self.advance(); }
+                Ok(Stmt::Continue)
+            }
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -746,14 +773,36 @@ impl<'a> Parser<'a> {
 
     /// truth = compose ('==' compose)?    (QT3: sự thật chắc chắn)
     fn parse_truth_expr(&mut self) -> Result<Expr, ParseError> {
-        let left = self.parse_compose_expr()?;
+        let left = self.parse_logic_or()?;
         if self.check(&Token::Truth) {
             self.advance();
-            let right = self.parse_compose_expr()?;
+            let right = self.parse_logic_or()?;
             return Ok(Expr::Truth {
                 lhs: Box::new(left),
                 rhs: Box::new(right),
             });
+        }
+        Ok(left)
+    }
+
+    /// logic_or = logic_and ('||' logic_and)*
+    fn parse_logic_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_logic_and()?;
+        while self.check(&Token::Or) {
+            self.advance();
+            let right = self.parse_logic_and()?;
+            left = Expr::LogicOr(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    /// logic_and = compose ('&&' compose)*
+    fn parse_logic_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_compose_expr()?;
+        while self.check(&Token::And) {
+            self.advance();
+            let right = self.parse_compose_expr()?;
+            left = Expr::LogicAnd(Box::new(left), Box::new(right));
         }
         Ok(left)
     }
@@ -771,7 +820,8 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// compare = arith (('<' | '>' | '<=' | '>=') arith)?
+    /// compare = arith (('<' | '>' | '<=' | '>=' | '!=') arith)?
+    /// Note: '==' is handled at truth_expr level (QT3: sự thật chắc chắn)
     fn parse_compare_expr(&mut self) -> Result<Expr, ParseError> {
         let left = self.parse_arith_expr()?;
         let cmp_op = match self.peek() {
@@ -779,6 +829,7 @@ impl<'a> Parser<'a> {
             Token::Gt => Some(CmpOp::Gt),
             Token::Le => Some(CmpOp::Le),
             Token::Ge => Some(CmpOp::Ge),
+            Token::Ne => Some(CmpOp::Ne),
             _ => None,
         };
         if let Some(op) = cmp_op {
@@ -869,6 +920,13 @@ impl<'a> Parser<'a> {
             // Molecular literal: { S=1 R=2 V=128 A=128 T=3 }
             Token::LBrace => {
                 self.try_parse_mol_literal()
+            }
+
+            // Logical not: !expr
+            Token::Not => {
+                self.advance();
+                let inner = self.parse_primary()?;
+                Ok(Expr::LogicNot(Box::new(inner)))
             }
 
             other => Err(ParseError::new(&alloc::format!(
@@ -1754,5 +1812,93 @@ mod tests {
         assert!(tokens2.contains(&Token::Ge));
         let tokens3 = Lexer::tokenize_all("x <= 3");
         assert!(tokens3.contains(&Token::Le));
+    }
+
+    #[test]
+    fn parse_ne() {
+        let stmts = parse("emit x != 5;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::Compare { op, .. } => assert_eq!(*op, CmpOp::Ne),
+                _ => panic!("Expected Compare, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn lex_ne_and_not() {
+        use crate::alphabet::{Lexer, Token};
+        let tokens = Lexer::tokenize_all("x != 5");
+        assert!(tokens.contains(&Token::Ne));
+        let tokens2 = Lexer::tokenize_all("!x");
+        assert!(tokens2.contains(&Token::Not));
+    }
+
+    #[test]
+    fn lex_and_or() {
+        use crate::alphabet::{Lexer, Token};
+        let tokens = Lexer::tokenize_all("a && b");
+        assert!(tokens.contains(&Token::And));
+        let tokens2 = Lexer::tokenize_all("a || b");
+        assert!(tokens2.contains(&Token::Or));
+    }
+
+    #[test]
+    fn parse_logic_not() {
+        let stmts = parse("emit !x;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::LogicNot(_) => {} // ok
+                _ => panic!("Expected LogicNot, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn parse_logic_and() {
+        let stmts = parse("emit a && b;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::LogicAnd(_, _) => {} // ok
+                _ => panic!("Expected LogicAnd, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn parse_logic_or() {
+        let stmts = parse("emit a || b;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::LogicOr(_, _) => {} // ok
+                _ => panic!("Expected LogicOr, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn parse_break_stmt() {
+        let stmts = parse("while x < 10 { break; }").unwrap();
+        match &stmts[0] {
+            Stmt::While { body, .. } => {
+                assert!(matches!(&body[0], Stmt::Break));
+            }
+            _ => panic!("Expected While"),
+        }
+    }
+
+    #[test]
+    fn parse_continue_stmt() {
+        let stmts = parse("for i in 0..5 { continue; }").unwrap();
+        match &stmts[0] {
+            Stmt::ForIn { body, .. } => {
+                assert!(matches!(&body[0], Stmt::Continue));
+            }
+            _ => panic!("Expected ForIn"),
+        }
     }
 }

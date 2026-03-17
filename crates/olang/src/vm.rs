@@ -432,7 +432,7 @@ impl OlangVM {
                             };
                             let _ = stack.push(MolecularChain::from_number(result));
                         }
-                        "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" => {
+                        "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
                             let na = a.to_number().unwrap_or(0.0);
@@ -442,11 +442,21 @@ impl OlangVM {
                                 "__cmp_gt" => na > nb,
                                 "__cmp_le" => na <= nb,
                                 "__cmp_ge" => na >= nb,
+                                "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
                                 _ => false,
                             };
                             // true → non-empty chain (1.0), false → empty chain
                             // Jz checks is_empty() so empty = falsy
                             if truthy {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__logic_not" => {
+                            let a = vm_pop!(stack, events);
+                            // Invert: empty → 1.0 (truthy), non-empty → empty (falsy)
+                            if a.is_empty() {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
                             } else {
                                 let _ = stack.push(MolecularChain::empty());
@@ -1868,5 +1878,57 @@ mod tests {
         assert!((v0 - 0.0).abs() < f64::EPSILON);
         assert!((v1 - 1.0).abs() < f64::EPSILON);
         assert!((v2 - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cmp_ne_true() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(3.0))
+            .push_op(Op::PushNum(5.0))
+            .push_op(Op::Call("__cmp_ne".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON, "3 != 5 should be true");
+    }
+
+    #[test]
+    fn cmp_ne_false() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(5.0))
+            .push_op(Op::PushNum(5.0))
+            .push_op(Op::Call("__cmp_ne".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result.outputs()[0].is_empty(), "5 != 5 should be false");
+    }
+
+    #[test]
+    fn logic_not_empty_becomes_truthy() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(MolecularChain::empty()))
+            .push_op(Op::Call("__logic_not".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON, "!empty should be truthy (1.0)");
+    }
+
+    #[test]
+    fn logic_not_truthy_becomes_empty() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(42.0))
+            .push_op(Op::Call("__logic_not".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result.outputs()[0].is_empty(), "!42 should be empty (falsy)");
     }
 }

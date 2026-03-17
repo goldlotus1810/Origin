@@ -3683,6 +3683,7 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
                 CmpOp::Gt => "__cmp_gt",
                 CmpOp::Le => "__cmp_le",
                 CmpOp::Ge => "__cmp_ge",
+                CmpOp::Ne => "__cmp_ne",
             };
             OlangIrExpr::Compare {
                 lhs: alloc::boxed::Box::new(olang_expr_to_ir(*lhs)),

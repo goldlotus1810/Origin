@@ -329,6 +329,10 @@ pub enum Keyword {
     In,
     /// `while` — conditional loop
     While,
+    /// `break` — exit loop
+    Break,
+    /// `continue` — skip to next iteration
+    Continue,
 }
 
 /// Check xem string có phải keyword không.
@@ -346,6 +350,8 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "for" => Some(Keyword::For),
         "in" => Some(Keyword::In),
         "while" => Some(Keyword::While),
+        "break" => Some(Keyword::Break),
+        "continue" => Some(Keyword::Continue),
         _ => None,
     }
 }
@@ -470,6 +476,18 @@ pub enum Token {
     Le,
     /// `>=` — greater than or equal
     Ge,
+    /// `!=` — not equal
+    Ne,
+    /// `!` — logical not
+    Not,
+    /// `&&` — logical and
+    And,
+    /// `||` — logical or
+    Or,
+    /// `break`
+    Break,
+    /// `continue`
+    Continue,
 
     // ── End ──
     /// End of input
@@ -583,13 +601,34 @@ impl<'a> Lexer<'a> {
                 }
                 return Token::Eq;
             }
+            '!' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Ne;
+                }
+                return Token::Not;
+            }
             '?' => {
                 self.chars.next();
                 return Token::Wild;
             }
             '|' => {
                 self.chars.next();
+                if let Some(&(_, '|')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Or;
+                }
                 return Token::Pipe;
+            }
+            '&' => {
+                self.chars.next();
+                if let Some(&(_, '&')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::And;
+                }
+                // Single & is not a valid token, treat as ident
+                return Token::Ident("&".into());
             }
             '"' => {
                 return self.lex_string();
@@ -710,6 +749,8 @@ impl<'a> Lexer<'a> {
                 Keyword::For => Token::For,
                 Keyword::In => Token::In,
                 Keyword::While => Token::While,
+                Keyword::Break => Token::Break,
+                Keyword::Continue => Token::Continue,
             };
         }
 
