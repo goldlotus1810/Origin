@@ -1,156 +1,147 @@
-# HomeOS — Kế Hoạch Tiếp Theo
+# HomeOS — NEXT_PLAN
 
 > **AI mới vào: ĐỌC FILE NÀY TRƯỚC TIÊN. Không sửa file nào cho đến khi hiểu hết.**
 > Người dùng KHÔNG biết lập trình. AI tự quyết định kỹ thuật, chỉ hỏi về hướng đi.
 > Sau mỗi phiên: CẬP NHẬT file này với những gì đã làm và chưa làm.
 
 **Cập nhật:** 2026-03-17
-**Checkpoint an toàn:** commit `86dff81` · branch `backup/full-seed-2026-03-17`
+**Branch:** `claude/debug-github-issues-x8R9F`
 
 ---
 
-## Trạng thái thật (đã verify bằng code, không phải từ docs)
+## Trạng thái thật (verify bằng code)
 
 ```
-Tests:    1,744 pass · 0 fail · 0 clippy warnings
-Deps:     0 external (native SHA-256, Ed25519, AES-256-GCM, homemath)
-origin:   174 nodes (35 L0 + 139 domain) · 118 edges · 1181 aliases · 37KB
+Tests:    1,759 pass · 0 fail · 0 clippy warnings
+Deps:     0 external runtime (native SHA-256, Ed25519, AES-256-GCM, homemath)
+origin:   313 nodes (35 L0 + 278 domain) · 236 edges · 2246 aliases · 72KB
 ```
 
-### Cái gì THẬT SỰ hoạt động:
-
+### HOẠT ĐỘNG:
 ```
-✅ UCD Engine (5424 entries, lookup đúng)
-✅ Molecule/Chain 5D encoding
-✅ LCA weighted + variance
+✅ UCD Engine (5424 entries, hierarchical byte encoding)
+✅ Molecule/Chain 5D + tagged sparse encoding (1-6 bytes)
+✅ LCA weighted + variance + hierarchical base-aware mode
 ✅ Registry append-only + crash recovery
 ✅ Silk Hebbian + φ⁻¹ decay (82 tests)
 ✅ Emotion Pipeline 7 tầng (chạy trong runtime)
 ✅ VM 31 opcodes + arithmetic (○{1+2}=3)
-✅ Parser 18/18 RelOps (phiên gần nhất đã hoàn thành)
-✅ Phase 9: Zero external deps (SHA-256, Ed25519, AES-256-GCM tự viết)
-✅ Phase 2 Graph: find_path, trace_origin, reachable (34 tests, wire vào why/explain)
+✅ Parser 18/18 RelOps
+✅ Phase 9: Zero external deps
+✅ Phase 2: find_path, trace_origin, reachable (34 tests, wired vào why/explain)
+✅ Phase 1: VM arithmetic
 ✅ Dream auto-trigger Fibonacci + STM cleanup + disk flush
 ✅ SecurityGate (chặn Crisis input)
 ✅ ISL messaging (4-byte address, AES-256-GCM encrypted)
 ✅ HAL (x86/ARM/RISC-V/WASM detect)
 ✅ VSDF (18 SDF + FFR Fibonacci render)
-```
-
-### Cái gì CÓ CODE nhưng CHƯA ĐÚNG (ưu tiên sửa):
-
-```
-⚠️ Phase 5 — Agent Orchestration (VẤN ĐỀ LỚN NHẤT)
-   Code: MessageRouter, Chief, Worker, LeoAI, AAM — tất cả tồn tại, 130+ tests pass
-   Vấn đề: KHÔNG NỐI VÀO RUNTIME
-
-   Hiện tại có 2 đường SONG SONG không nối nhau:
-     Đường A (user thấy): process_text() → emotion pipeline → response
-       → Chỉ có phản xạ, không gọi LeoAI, không gọi MessageRouter
-     Đường B (chỉ trong test): Worker → Chief → LeoAI → AAM → approve
-       → Logic đúng, tests pass, nhưng HomeRuntime không bao giờ gọi
-
-   Cần: Nối Đường B vào Đường A
-   Files: crates/runtime/src/origin.rs (wire MessageRouter.tick() vào main loop)
-          crates/runtime/src/router.rs (đã có, cần gọi từ runtime)
-   Test: "tôi buồn vì mất việc" → learn → LeoAI nhận → propose → AAM review
-   Xem thêm: docs/roadmap.md Phase 5 [5.1-5.5] cho kế hoạch chi tiết
-
-⚠️ Phase 4 — Symbolic Math (bypass VM)
-   Code: math.rs hoàn chỉnh (60 tests) — solve, derive, integrate
-   Vấn đề: Math BYPASS VM, đi đường riêng, kết quả không học vào Silk
-
-   Hiện tại: ○{solve "2x+3=7"} → text "x=2" → DỪNG (không vào graph)
-   Cần: Kết quả math → encode → STM → Silk (để HomeOS HỌC từ toán)
-   Files: crates/runtime/src/origin.rs (handle_command math section)
-          crates/olang/src/ir.rs (thêm MathEq variant nếu cần)
-   Xem thêm: docs/roadmap.md Phase 4 [4.1-4.4]
-
-⚠️ Phase 3 — Domain Knowledge (thiếu nodes)
-   Code: 6 domains đã định nghĩa (math, physics, chemistry, biology, philosophy, algorithms)
-   Vấn đề: Khai báo ~250 nodes nhưng origin.olang chỉ có 139
-
-   Cần: Chạy lại seed_domains hoặc tìm tại sao 111 nodes bị thiếu
-   Files: tools/seeder/src/seed_domains.rs
-          tools/seeder/src/domains/ (6 modules)
-   Test: cargo run -p inspector -- origin.olang → verify node count
+✅ NodeBody + BodyStore (chain_hash → SDF + Spline)
+✅ Molecule.evolve() (mutation 1/5 chiều → loài mới)
+✅ Phase 5: Agent Orchestration — MessageRouter + Chiefs wired vào runtime
+✅ Phase 4: Math → Silk — solve/derive/integrate kết quả vào STM + Silk
+✅ Phase 3: Domain Knowledge — 313 nodes seeded (6 domains)
 ```
 
 ---
 
-## Thứ tự ưu tiên (ý đồ từ phiên trước, đã verify)
+## ĐÃ HOÀN THÀNH (Phiên H)
 
+### Phase 5 — Agent Orchestration ✅
 ```
-1. [CAO]        Phase 5: Nối Agent vào Runtime ← biến HomeOS từ "phản xạ" thành "tư duy"
-2. [CAO]        Phase 4: Nối Math vào Silk ← để HomeOS học từ toán
-3. [TRUNG BÌNH] Phase 3: Seed đủ 250 nodes ← bổ sung tri thức
-4. [TRUNG BÌNH] SkillProposal ← DreamSkill → pattern → ComposedSkill (code chưa có)
-5. [THẤP]       Multilingual Seeding ← multilang.olang có sẵn, chưa integrate
-6. [THẤP]       WASM Browser Demo ← bindings có, chưa có demo page
-7. [THẤP]       Giảm unwrap() (291 → <100)
-```
+Đường A (user) và Đường B (agent) ĐÃ NỐI:
 
----
+process_input()
+  → T6: learning.process_one()
+  → T6f: ISL Learn message → LeoAI.receive_isl() → poll_inbox()
+  → router.tick(workers, chiefs, leo, ts)
+  → drain router pending_writes
 
-## Điểm khôi phục nếu hỏng
+HomeRuntime giờ có:
+  router: MessageRouter     — central dispatcher
+  chiefs: Vec<Chief>        — 3 chiefs (Home, Vision, Network) auto-boot
+  workers: Vec<Worker>      — register_worker() API
 
-```bash
-git checkout backup/full-seed-2026-03-17   # quay lại điểm an toàn
-# hoặc
-git checkout backup-2026-03-17-full-seed   # tag cùng commit
-```
+Stats command hiển thị Router summary + Chief/Worker counts.
+6 tests mới: router ticks, multi-turn, stats display.
 
----
-
-## Quy trình mỗi phiên làm việc
-
-```
-1. TRƯỚC KHI LÀM:
-   Đọc NEXT_PLAN.md này              # biết đang ở đâu
-   git log --oneline -5               # xác nhận branch + commit gần nhất
-   cargo test --workspace             # confirm green
-
-2. TRONG KHI LÀM:
-   Commit thường xuyên                # phiên có thể kết thúc bất ngờ
-   origin.olang phải commit ngay sau mỗi thay đổi
-
-3. SAU KHI LÀM:
-   cargo test --workspace             # phải 0 fail
-   cargo clippy --workspace           # phải 0 warnings
-   CẬP NHẬT NEXT_PLAN.md             # ghi gì đã xong, gì tiếp theo
-   git commit + push                  # đẩy lên remote
-
-4. NẾU PHIÊN KẾT THÚC ĐỘT NGỘT:
-   AI mới vào → đọc NEXT_PLAN.md → biết ngay trạng thái
-   git log --oneline -5               # xem commit cuối
-   Nếu hỏng: git checkout backup/full-seed-2026-03-17
+Files đã sửa:
+  crates/runtime/src/origin.rs — imports, struct fields, boot_chiefs(),
+    process_input() T6f agent pump, handle_command() stats, accessors
 ```
 
----
-
-## Lịch sử (để AI mới hiểu dòng thời gian)
-
+### Phase 4 — Math → Silk ✅
 ```
-Phiên A: Viết Phase 1-8 liên tục, nhanh → code tồn tại nhưng chất lượng kém
-Phiên B: Molecule encoding, Dream pipeline
-Phiên C: Phase 9 Zero deps (SHA-256, Ed25519, AES-256-GCM) → HOÀN THÀNH TỐT
-Phiên D: Thấy Phase 2-5 có vấn đề → viết kế hoạch sửa (docs/roadmap.md) → KẾT THÚC ĐỘT NGỘT
-Phiên E: Đồng bộ docs, reseed origin.olang, tạo NEXT_PLAN.md
-Phiên F: P1 RelOps 18/18, Dream STM cleanup
-Phiên G (hiện tại): Phân tích thực trạng Phase 2-5, cập nhật NEXT_PLAN.md
+handle_command() math section giờ gọi process_one(ContentInput::Math)
+  → encode_math() → chain vào STM + Silk
+  → math kết quả ĐƯỢC HỌC vào graph
+
+2 tests mới: math_result_enters_learning, math_derive_enters_learning
+
+Files đã sửa:
+  crates/runtime/src/origin.rs — math handler gọi process_one()
 ```
 
-## Ghi chú quan trọng
-
+### Phase 3 — Domain Knowledge ✅
 ```
-- docs/roadmap.md = kế hoạch sửa của Phiên D (vẫn đúng, chưa thực hiện)
-- HomeOS_Roadmap.md = tầm nhìn lớn (lịch sử, tham khảo)
-- NEXT_PLAN.md = NGUỒN SỰ THẬT DUY NHẤT
-- 0 external deps — giữ nguyên
-- LeoAI biết tự lập trình — feature mạnh, chưa khai thác
-- Người dùng KHÔNG biết lập trình — AI tự quyết kỹ thuật, chỉ hỏi hướng đi
+Chạy seed_domains binary → 139 domain nodes seeded thêm vào origin.olang
+origin.olang: 174 → 313 nodes, 118 → 236 edges, 1181 → 2246 aliases
+
+6 domains: math(61), physics(26), chemistry(12), biology(10), philosophy(15), algorithms(15)
+```
+
+### Dọn dẹp docs ✅
+```
+Tất cả docs cũ → old/2026-03-17/ (13 files)
+Root chỉ giữ: CLAUDE.md, NEXT_PLAN.md, README.md
+docs/ chỉ giữ: olang_guide.md
 ```
 
 ---
 
-*HomeOS · 2026-03-17 · 1,744 tests · 174 nodes · ○(∅)==○*
+## Tiếp theo (ưu tiên)
+
+```
+1. [CAO]        SkillProposal — DreamSkill → pattern → ComposedSkill
+2. [TRUNG BÌNH] Multilingual Seeding — multilang.olang integrate
+3. [TRUNG BÌNH] Giảm unwrap() (291 → <100)
+4. [THẤP]       WASM Browser Demo
+5. [THẤP]       API documentation cho core crates
+```
+
+---
+
+## Quy trình mỗi phiên
+
+```
+1. TRƯỚC: Đọc NEXT_PLAN.md → git log -5 → cargo test --workspace
+2. TRONG: Commit thường xuyên (phiên có thể kết thúc bất ngờ)
+3. SAU:   cargo test + clippy → CẬP NHẬT NEXT_PLAN.md → commit + push
+```
+
+---
+
+## Lịch sử phiên
+
+```
+A: Viết Phase 1-8 liên tục → code tồn tại nhưng chất lượng kém
+B: Molecule encoding, Dream pipeline
+C: Phase 9 Zero deps (SHA-256, Ed25519, AES-256-GCM)
+D: Tagged encoding, hierarchical bytes, NodeBody, evolve(), benchmark, Phase 1 VM arithmetic
+E: Đồng bộ docs, reseed origin.olang
+F: P1 RelOps 18/18, Dream STM cleanup
+G: Verify Phase 2-5 thực trạng, cập nhật NEXT_PLAN
+H: Dọn docs → old/, Phase 5+4+3 HOÀN THÀNH, 1759 tests
+```
+
+---
+
+## Tài liệu cũ
+
+```
+old/2026-03-17/ chứa 13 files docs cũ
+Chỉ giữ: CLAUDE.md, NEXT_PLAN.md, README.md, docs/olang_guide.md
+```
+
+---
+
+*HomeOS · 2026-03-17 · 1,759 tests · 313 nodes · ○(∅)==○*

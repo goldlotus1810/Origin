@@ -30,6 +30,9 @@ use olang::separator::parse_to_chains;
 use olang::startup::{boot, chain_to_emoji, resolve_with_cp};
 use olang::vm::{OlangVM, VmEvent};
 use agents::leo::{LeoAI, ProgOutput};
+use agents::chief::{Chief, ChiefKind};
+use agents::worker::Worker;
+use crate::router::MessageRouter;
 use memory::proposal::{AlertLevel, RegistryGate};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +132,12 @@ pub struct HomeRuntime {
     leo: LeoAI,
     /// RegistryGate — cơ chế cứng: mọi thứ phải đăng ký Registry
     registry_gate: RegistryGate,
+    /// MessageRouter — central dispatcher cho agent hierarchy
+    router: MessageRouter,
+    /// Chiefs — tier 1 agents (Home, Vision, Network)
+    chiefs: alloc::vec::Vec<Chief>,
+    /// Workers — tier 2 agents (sensors, actuators)
+    workers: alloc::vec::Vec<Worker>,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -186,7 +195,21 @@ impl HomeRuntime {
                 isl::address::ISLAddress::new(0, 0, 0, 0), // tier 0, AAM
             ),
             registry_gate: RegistryGate::new(),
+            router: MessageRouter::new(),
+            chiefs: Self::boot_chiefs(),
+            workers: alloc::vec::Vec::new(),
         }
+    }
+
+    /// Boot default Chiefs — Home, Vision, Network.
+    fn boot_chiefs() -> alloc::vec::Vec<Chief> {
+        let aam = isl::address::ISLAddress::new(0, 0, 0, 0);
+        let leo_addr = isl::address::ISLAddress::new(1, 0, 0, 1);
+        alloc::vec![
+            Chief::new(isl::address::ISLAddress::new(1, 1, 0, 0), aam, leo_addr, ChiefKind::Home),
+            Chief::new(isl::address::ISLAddress::new(1, 2, 0, 0), aam, leo_addr, ChiefKind::Vision),
+            Chief::new(isl::address::ISLAddress::new(1, 3, 0, 0), aam, leo_addr, ChiefKind::Network),
+        ]
     }
 
     /// Xử lý một text input — entry point cho text.
@@ -491,13 +514,17 @@ impl HomeRuntime {
                 let reg_nodes = self.registry.len();
                 let reg_aliases = self.registry.alias_count();
                 let silk_nodes = self.learning.graph().node_count();
+                let router_summary = self.router.summary();
                 let text = format!(
                     "HomeOS ○\n\
                      Turns    : {}\n\
                      Registry : {} nodes, {} aliases\n\
                      STM      : {} observations\n\
                      Silk     : {} nodes, {} edges\n\
+                     Chiefs   : {}\n\
+                     Workers  : {}\n\
                      f(x)     : {:.3}\n\
+                     {}\n\
                      {}\n\
                      {}",
                     self.turn_count,
@@ -506,9 +533,12 @@ impl HomeRuntime {
                     self.learning.stm().len(),
                     silk_nodes,
                     self.learning.graph().len(),
+                    self.chiefs.len(),
+                    self.workers.len(),
                     self.learning.context().fx(),
                     summary,
                     kt_summary,
+                    router_summary,
                 );
                 Response {
                     text,
@@ -695,10 +725,16 @@ impl HomeRuntime {
                 ];
                 if math_prefixes.iter().any(|p| cmd.starts_with(p)) {
                     let text = olang::math::process_math_command(cmd);
+                    // Phase 4: Feed math result into learning pipeline
+                    let math_input = ContentInput::Math {
+                        expression: cmd.to_string(),
+                        timestamp: ts,
+                    };
+                    let _proc = self.learning.process_one(math_input);
                     Response {
                         text,
                         tone: ResponseTone::Engaged,
-                        fx: 0.0,
+                        fx: self.learning.context().fx(),
                         kind: ResponseKind::System,
                     }
                 } else if const_prefixes.iter().any(|p| cmd.starts_with(p)) {
@@ -1364,6 +1400,40 @@ impl HomeRuntime {
             self.learning.maintain_silk(elapsed_ns, 100_000);
         }
 
+        // ── T6f: Agent Orchestration — pump MessageRouter ─────────────────
+        // Feed learning result to LeoAI via ISL → tick router → AAM reviews
+        if let ProcessResult::Ok { ref chain, emotion: _ } = proc_result {
+            // Send chain to LeoAI as Learn message
+            let chain_hash = chain.chain_hash();
+            let payload = [
+                (chain_hash >> 16) as u8,
+                (chain_hash >> 8) as u8,
+                chain_hash as u8,
+            ];
+            let learn_msg = isl::message::ISLMessage {
+                from: isl::address::ISLAddress::new(0, 0, 0, 0), // from Runtime
+                to: self.leo.addr,
+                msg_type: isl::message::MsgType::Learn,
+                payload,
+            };
+            let frame = isl::message::ISLFrame::bare(learn_msg);
+            self.leo.receive_isl(frame);
+            self.leo.poll_inbox(ts);
+
+            // Tick router: Workers → Chiefs → LeoAI → AAM → feedback
+            let _tick_stats = self.router.tick(
+                &mut self.workers,
+                &mut self.chiefs,
+                &mut self.leo,
+                ts,
+            );
+
+            // Drain router pending writes → append to runtime pending_writes
+            if self.router.has_pending_writes() {
+                self.pending_writes.extend(self.router.drain_pending_writes());
+            }
+        }
+
         // ── T7: Decide action → render response ────────────────────────────
         let mut action = decide_action(&est, cur_v);
         let fx = self.learning.context().fx();
@@ -1993,6 +2063,33 @@ impl HomeRuntime {
     /// Số bytes đang chờ ghi.
     pub fn pending_bytes(&self) -> usize {
         self.pending_writes.len()
+    }
+
+    /// MessageRouter stats.
+    pub fn router_stats(&self) -> &crate::router::RouterStats {
+        self.router.stats()
+    }
+
+    /// Register a Worker with a Chief.
+    pub fn register_worker(&mut self, worker: Worker, chief_index: usize) -> bool {
+        if chief_index >= self.chiefs.len() {
+            return false;
+        }
+        let addr = worker.addr;
+        let kind = worker.kind as u8;
+        let ok = self.chiefs[chief_index].register_worker(addr, kind, 0);
+        self.workers.push(worker);
+        ok
+    }
+
+    /// Number of active chiefs.
+    pub fn chief_count(&self) -> usize {
+        self.chiefs.len()
+    }
+
+    /// Number of active workers.
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
     }
 }
 
@@ -4528,5 +4625,61 @@ mod leo_programming_tests {
         let stm_before = rt.leo().learning.stm().len();
         rt.leo_mut().program("emit { S=2 R=3 V=100 A=50 T=1 };", 1000);
         assert!(rt.leo().learning.stm().len() > stm_before, "LeoAI STM should grow");
+    }
+
+    // ── Phase 5: Agent Orchestration Tests ──────────────────────────────
+
+    #[test]
+    fn agent_orchestration_boots_chiefs() {
+        let rt = HomeRuntime::new(0xA001);
+        assert_eq!(rt.chief_count(), 3, "Should boot Home, Vision, Network chiefs");
+        assert_eq!(rt.worker_count(), 0, "No workers by default");
+    }
+
+    #[test]
+    fn agent_orchestration_router_ticks_on_text() {
+        let mut rt = HomeRuntime::new(0xA002);
+        rt.process_text("tôi buồn vì mất việc", 1000);
+        let stats = rt.router_stats();
+        assert!(stats.ticks > 0, "Router should have ticked after text: ticks={}", stats.ticks);
+    }
+
+    #[test]
+    fn agent_orchestration_multiple_turns() {
+        let mut rt = HomeRuntime::new(0xA003);
+        rt.process_text("hôm nay trời đẹp", 1000);
+        rt.process_text("mình rất vui", 2000);
+        rt.process_text("cảm ơn bạn", 3000);
+        let stats = rt.router_stats();
+        assert!(stats.ticks >= 3, "Router should tick each turn: ticks={}", stats.ticks);
+    }
+
+    #[test]
+    fn agent_orchestration_stats_include_router() {
+        let mut rt = HomeRuntime::new(0xA004);
+        rt.process_text("hello world", 1000);
+        let resp = rt.process_text("○{stats}", 2000);
+        assert!(resp.text.contains("Router"), "Stats should include Router summary: {}", resp.text);
+        assert!(resp.text.contains("Chiefs"), "Stats should show chief count: {}", resp.text);
+    }
+
+    // ── Phase 4: Math → Silk Tests ──────────────────────────────────────
+
+    #[test]
+    fn math_result_enters_learning() {
+        let mut rt = HomeRuntime::new(0xB001);
+        let stm_before = rt.stm_len();
+        rt.process_text("○{solve \"2x + 3 = 7\"}", 1000);
+        let stm_after = rt.stm_len();
+        assert!(stm_after > stm_before, "Math result should enter STM: before={} after={}", stm_before, stm_after);
+    }
+
+    #[test]
+    fn math_derive_enters_learning() {
+        let mut rt = HomeRuntime::new(0xB002);
+        let stm_before = rt.stm_len();
+        rt.process_text("○{derive \"x^2 + 3x\"}", 1000);
+        let stm_after = rt.stm_len();
+        assert!(stm_after > stm_before, "Derive result should enter STM");
     }
 }
