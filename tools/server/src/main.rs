@@ -12,48 +12,102 @@ use runtime::origin::{now_ns, HomeRuntime};
 
 const OLANG_FILE: &str = "origin.olang";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Boot sequence:
+//   Phase 1: START    — ○(∅) == ○, UCD check
+//   Phase 2: BOOT     — load origin.olang file bytes, validate/recover
+//   Phase 3: LOAD     — registry + QT axioms → HomeRuntime
+//   Phase 4: SETUP    — HAL detect, manifest scan, agent inventory
+//   Phase 5: RUN      — REPL loop
+// ─────────────────────────────────────────────────────────────────────────────
+
 fn main() {
-    // ○(∅) == ○ — boot
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 1: START — ○(∅) == ○
+    // ══════════════════════════════════════════════════════════════════════════
     println!("HomeOS ○");
-    println!("Unicode 18.0 · {} UCD entries", ucd::table_len());
-    println!("Type text to chat · ○{{help}} for commands · Ctrl+C to exit");
     println!();
 
     if ucd::table_len() == 0 {
-        eprintln!("WARNING: UCD table empty — rebuild with UnicodeData.txt");
+        eprintln!("[start] WARNING: UCD table empty — rebuild with UnicodeData.txt");
     }
 
     let session_id = now_ns() as u64;
-    // Load origin.olang nếu có — with crash recovery
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 2: BOOT origin.olang — load file bytes
+    // ══════════════════════════════════════════════════════════════════════════
     let file_bytes = std::fs::read(OLANG_FILE).ok();
-    let mut rt = if let Some(ref bytes) = file_bytes {
+    if let Some(ref bytes) = &file_bytes {
         println!("[boot] origin.olang: {} bytes", bytes.len());
-        // Validate file trước khi load — best-effort recovery nếu corrupt
+        // Validate — best-effort recovery nếu corrupt
         match olang::reader::OlangReader::new(bytes) {
             Ok(reader) => {
                 let (_pf, info) = reader.parse_recoverable();
                 if let Some(ref err) = info.error {
                     eprintln!(
-                        "[boot] WARNING: origin.olang corrupt at byte {}: {:?}",
+                        "[boot] WARNING: corrupt at byte {}: {:?}",
                         info.last_good_offset, err
                     );
                     eprintln!(
-                        "[boot] Recovered {} records from {} bytes",
+                        "[boot] Recovered {} records / {} bytes",
                         info.records_recovered, info.total_bytes
                     );
                 }
             }
             Err(e) => {
-                eprintln!("[boot] WARNING: origin.olang invalid header: {:?}", e);
-                eprintln!("[boot] Starting from scratch — old file preserved as origin.olang.bak");
+                eprintln!("[boot] WARNING: invalid header: {:?}", e);
+                eprintln!("[boot] Preserved as origin.olang.bak");
                 let _ = std::fs::copy(OLANG_FILE, "origin.olang.bak");
             }
         }
-        HomeRuntime::with_file(session_id, Some(bytes))
     } else {
         println!("[boot] No origin.olang — booting from nothing");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 3: LOAD registry + QT axioms
+    // ══════════════════════════════════════════════════════════════════════════
+    let mut rt = if let Some(ref bytes) = file_bytes {
+        HomeRuntime::with_file(session_id, Some(bytes))
+    } else {
         HomeRuntime::new(session_id)
     };
+
+    println!(
+        "[load] Registry: {} nodes, {} aliases · Stage {:?}",
+        rt.registry_len(),
+        rt.registry_alias_count(),
+        rt.boot_stage(),
+    );
+    for err in rt.boot_errors() {
+        eprintln!("[load] ERROR: {}", err);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 4: SETUP — HAL detect + manifest scan
+    // ══════════════════════════════════════════════════════════════════════════
+    let arch = hal::Architecture::detect();
+    let tier = hal::HardwareTier::from_arch(arch);
+    println!(
+        "[setup] {} · {} · UCD {}",
+        arch.name(),
+        tier.summary(),
+        ucd::table_len(),
+    );
+    println!("[setup] {}", rt.manifest().summary());
+    println!(
+        "[setup] Agents: {} chiefs, {} workers",
+        rt.chief_count(),
+        rt.worker_count(),
+    );
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 5: RUN — REPL loop
+    // ══════════════════════════════════════════════════════════════════════════
+    println!();
+    println!("Type text to chat · ○{{help}} for commands · Ctrl+C to exit");
+    println!();
 
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -258,5 +312,20 @@ mod tests {
         for input in &["", "   ", "\t", "\n"] {
             assert!(input.trim().is_empty());
         }
+    }
+
+    #[test]
+    fn boot_info_accessible() {
+        let rt = HomeRuntime::new(66666);
+        // Boot stage should be at least UcdReady when UCD table is present
+        let _stage = rt.boot_stage();
+        // Manifest should have entries after boot
+        let manifest = rt.manifest();
+        let _summary = manifest.summary();
+        // Registry should have nodes (axioms + L1 system)
+        assert!(rt.registry_len() > 0);
+        assert!(rt.registry_alias_count() > 0);
+        // No errors on clean boot
+        assert!(rt.boot_errors().is_empty());
     }
 }

@@ -15,3 +15,4 @@ context = { workspace = true, features = ["std"] }
 agents  = { workspace = true, features = ["std"] }
 memory  = { workspace = true, features = ["std"] }
 runtime = { workspace = true, features = ["std"] }
+hal     = { workspace = true, features = ["std"] }

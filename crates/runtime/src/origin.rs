@@ -27,7 +27,7 @@ use olang::registry::Registry;
 use vsdf::body::{body_from_molecule, BodyStore};
 use olang::self_model::SelfModel;
 use olang::separator::parse_to_chains;
-use olang::startup::{boot, chain_to_emoji, resolve_with_cp};
+use olang::startup::{boot, chain_to_emoji, resolve_with_cp, BootStage, SystemManifest};
 use olang::vm::{OlangVM, VmEvent};
 use agents::leo::{LeoAI, ProgOutput};
 use agents::chief::{Chief, ChiefKind};
@@ -138,6 +138,12 @@ pub struct HomeRuntime {
     chiefs: alloc::vec::Vec<Chief>,
     /// Workers — tier 2 agents (sensors, actuators)
     workers: alloc::vec::Vec<Worker>,
+    /// Boot stage reached during startup
+    boot_stage: BootStage,
+    /// SystemManifest — hệ thống biết mình có gì sau boot
+    manifest: SystemManifest,
+    /// Boot errors (nếu có)
+    boot_errors: alloc::vec::Vec<String>,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -198,6 +204,9 @@ impl HomeRuntime {
             router: MessageRouter::new(),
             chiefs: Self::boot_chiefs(),
             workers: alloc::vec::Vec::new(),
+            boot_stage: boot_result.stage,
+            manifest: boot_result.manifest,
+            boot_errors: boot_result.errors,
         }
     }
 
@@ -2090,6 +2099,31 @@ impl HomeRuntime {
     /// Number of active workers.
     pub fn worker_count(&self) -> usize {
         self.workers.len()
+    }
+
+    /// Boot stage reached during startup.
+    pub fn boot_stage(&self) -> BootStage {
+        self.boot_stage
+    }
+
+    /// SystemManifest — node inventory after boot.
+    pub fn manifest(&self) -> &SystemManifest {
+        &self.manifest
+    }
+
+    /// Boot errors (empty if clean boot).
+    pub fn boot_errors(&self) -> &[String] {
+        &self.boot_errors
+    }
+
+    /// Registry node count.
+    pub fn registry_len(&self) -> usize {
+        self.registry.len()
+    }
+
+    /// Registry alias count.
+    pub fn registry_alias_count(&self) -> usize {
+        self.registry.alias_count()
     }
 }
 
