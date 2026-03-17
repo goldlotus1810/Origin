@@ -979,12 +979,12 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                     ctx.emit(Op::Load(object.clone()));
                 }
                 // Navigate down, storing intermediate dicts
-                for i in 0..depth - 1 {
+                for (i, field) in fields.iter().enumerate().take(depth - 1) {
                     ctx.emit(Op::Dup); // keep copy for later reassembly
                     let local_name: String = alloc::format!("__nested_{}", i);
                     ctx.emit(Op::Store(local_name.clone()));
                     ctx.locals.push(local_name);
-                    ctx.emit(Op::Push(string_to_key_chain(&fields[i])));
+                    ctx.emit(Op::Push(string_to_key_chain(field)));
                     ctx.emit(Op::Call("__dict_get".into()));
                 }
                 // Set the last field on the innermost dict
