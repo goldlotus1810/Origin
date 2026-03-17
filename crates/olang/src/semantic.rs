@@ -280,6 +280,16 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // Module imports are valid at any point
         }
 
+        Stmt::FieldAssign { object, field: _, value } => {
+            validate_expr(value, scope, errors);
+            if !scope.is_defined(object) {
+                errors.push(SemError::new(&alloc::format!(
+                    "Field assignment on undeclared variable '{}' (use 'let' to declare first)",
+                    object
+                )));
+            }
+        }
+
         Stmt::TryCatch { try_block, catch_block } => {
             scope.enter();
             for s in try_block {
@@ -413,6 +423,16 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             validate_expr(index, scope, errors);
         }
 
+        Expr::Dict(fields) => {
+            for (_key, value) in fields {
+                validate_expr(value, scope, errors);
+            }
+        }
+
+        Expr::FieldAccess { object, .. } => {
+            validate_expr(object, scope, errors);
+        }
+
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
             // Validate dimension values are in valid byte range (0-255)
             for (name, val) in [("S", shape), ("R", relation), ("V", valence), ("A", arousal), ("T", time)] {
@@ -477,6 +497,8 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::Group(inner) => infer_expr_kind(inner),
         Expr::Array(_) => ChainKind::Unknown,
         Expr::Index { .. } => ChainKind::Unknown,
+        Expr::Dict(_) => ChainKind::Unknown,
+        Expr::FieldAccess { .. } => ChainKind::Unknown,
         Expr::MolLiteral { shape, valence, .. } => {
             // Heuristic: check shape and valence to classify
             match shape {
@@ -503,6 +525,7 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         | Stmt::While { .. }
         | Stmt::Break | Stmt::Continue
         | Stmt::Assign { .. }
+        | Stmt::FieldAssign { .. }
         | Stmt::Use(_) => ChainKind::Void,
         Stmt::Return(Some(expr)) => infer_expr_kind(expr),
         Stmt::Return(None) => ChainKind::Void,
@@ -512,6 +535,21 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
 // ─────────────────────────────────────────────────────────────────────────────
 // Lowering — AST → OlangProgram
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Encode a string as a MolecularChain key (each byte → 1 molecule).
+/// Used for dict field names — deterministic and comparable.
+fn string_to_key_chain(s: &str) -> crate::molecular::MolecularChain {
+    let mut mols = Vec::new();
+    for b in s.bytes() {
+        mols.push(crate::molecular::Molecule {
+            shape: 0x02,       // marker: string key
+            relation: 0x01,    // Member
+            emotion: crate::molecular::EmotionDim { valence: b, arousal: 0 },
+            time: 0x01,        // Static
+        });
+    }
+    crate::molecular::MolecularChain(mols)
+}
 
 /// Lower (hạ) AST → OlangProgram (IR opcodes).
 ///
@@ -774,6 +812,19 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::StoreUpdate(name.clone()));
         }
 
+        Stmt::FieldAssign { object, field, value } => {
+            // obj.field = value → load obj, push field key chain, lower value, __dict_set, store back
+            if ctx.is_local(object) {
+                ctx.emit(Op::LoadLocal(object.clone()));
+            } else {
+                ctx.emit(Op::Load(object.clone()));
+            }
+            ctx.emit(Op::Push(string_to_key_chain(field)));
+            lower_expr(value, ctx);
+            ctx.emit(Op::Call("__dict_set".into()));
+            ctx.emit(Op::StoreUpdate(object.clone()));
+        }
+
         Stmt::Use(module) => {
             // Emit a Load for the module name — runtime can intercept and load the module
             ctx.emit(Op::Load(module.clone()));
@@ -1023,11 +1074,27 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "concat" => Some("__concat"),
                 "head" => Some("__head"),
                 "tail" => Some("__tail"),
+                "get" => Some("__dict_get"),
+                "set" => Some("__dict_set"),
+                "keys" => Some("__dict_keys"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
-                for arg in args {
-                    lower_expr(arg, ctx);
+                // For dict builtins, string args need key encoding
+                if builtin_name == "__dict_get" || builtin_name == "__dict_set" {
+                    // get(dict, "key") / set(dict, "key", value)
+                    for arg in args {
+                        // If arg is a string literal, encode as key chain
+                        if let Expr::Str(s) = arg {
+                            ctx.emit(Op::Push(string_to_key_chain(s)));
+                        } else {
+                            lower_expr(arg, ctx);
+                        }
+                    }
+                } else {
+                    for arg in args {
+                        lower_expr(arg, ctx);
+                    }
                 }
                 ctx.emit(Op::Call(builtin_name.into()));
             } else
@@ -1190,6 +1257,25 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             lower_expr(array, ctx);
             lower_expr(index, ctx);
             ctx.emit(Op::Call("__array_get".into()));
+        }
+
+        Expr::Dict(fields) => {
+            // Push key/value pairs alternating, then count, then call __dict_new
+            // Stack: [key0, val0, key1, val1, ..., count]
+            // Keys encoded as MolecularChain (each byte → 1 molecule)
+            for (key, value) in fields {
+                ctx.emit(Op::Push(string_to_key_chain(key)));
+                lower_expr(value, ctx);
+            }
+            ctx.emit(Op::PushNum(fields.len() as f64)); // number of pairs
+            ctx.emit(Op::Call("__dict_new".into()));
+        }
+
+        Expr::FieldAccess { object, field } => {
+            // obj.field → load obj, push field key chain, __dict_get
+            lower_expr(object, ctx);
+            ctx.emit(Op::Push(string_to_key_chain(field)));
+            ctx.emit(Op::Call("__dict_get".into()));
         }
 
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
@@ -2008,5 +2094,194 @@ mod tests {
         assert!(outputs.len() >= 1, "Should have output");
         let v = outputs[0].to_number().unwrap();
         assert!((v - 3.0).abs() < f64::EPSILON, "len([10,20,30])=3, got {}", v);
+    }
+
+    // ── Dict / .field tests ───────────────────────────────────────────────
+
+    #[test]
+    fn parse_dict_literal() {
+        let stmts = parse("let d = { name: 42, age: 10 };").unwrap();
+        match &stmts[0] {
+            Stmt::Let { name, value } => {
+                assert_eq!(name, "d");
+                match value {
+                    Expr::Dict(fields) => {
+                        assert_eq!(fields.len(), 2);
+                        assert_eq!(fields[0].0, "name");
+                        assert_eq!(fields[1].0, "age");
+                    }
+                    other => panic!("Expected Dict, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Let, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_empty_dict() {
+        // Empty {} is MolLiteral (backwards compat), not Dict
+        let stmts = parse("let d = {};").unwrap();
+        match &stmts[0] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(value, Expr::MolLiteral { .. }));
+            }
+            other => panic!("Expected Let, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_field_access() {
+        let stmts = parse("emit d.name;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::FieldAccess { object, field }) => {
+                assert!(matches!(object.as_ref(), Expr::Ident(n) if n == "d"));
+                assert_eq!(field, "name");
+            }
+            other => panic!("Expected Emit(FieldAccess), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_chained_field_access() {
+        let stmts = parse("emit a.b.c;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::FieldAccess { object, field }) => {
+                assert_eq!(field, "c");
+                match object.as_ref() {
+                    Expr::FieldAccess { object: inner, field: f2 } => {
+                        assert_eq!(f2, "b");
+                        assert!(matches!(inner.as_ref(), Expr::Ident(n) if n == "a"));
+                    }
+                    other => panic!("Expected nested FieldAccess, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Emit(FieldAccess), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_field_assign() {
+        let stmts = parse("let d = { x: 1 }; d.x = 42;").unwrap();
+        assert_eq!(stmts.len(), 2);
+        match &stmts[1] {
+            Stmt::FieldAssign { object, field, value } => {
+                assert_eq!(object, "d");
+                assert_eq!(field, "x");
+                assert!(matches!(value, Expr::Int(42)));
+            }
+            other => panic!("Expected FieldAssign, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn validate_field_assign_undeclared() {
+        let stmts = parse("x.name = 42;").unwrap();
+        let errors = validate(&stmts);
+        assert!(
+            errors.iter().any(|e| e.message.contains("undeclared")),
+            "Should warn on undeclared field assign: {:?}", errors
+        );
+    }
+
+    #[test]
+    fn lower_dict_produces_dict_new() {
+        let stmts = parse("let d = { x: 1, y: 2 };").unwrap();
+        let prog = lower(&stmts);
+        assert!(
+            prog.ops.iter().any(|op| matches!(op, Op::Call(n) if n == "__dict_new")),
+            "Should emit __dict_new call: {:?}", prog.ops
+        );
+        // Should push 2 as count (2 pairs)
+        assert!(
+            prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if (*n - 2.0).abs() < f64::EPSILON)),
+            "Should push pair count 2: {:?}", prog.ops
+        );
+    }
+
+    #[test]
+    fn lower_field_access_produces_dict_get() {
+        let stmts = parse("let d = { x: 1 }; emit d.x;").unwrap();
+        let prog = lower(&stmts);
+        assert!(
+            prog.ops.iter().any(|op| matches!(op, Op::Call(n) if n == "__dict_get")),
+            "Should emit __dict_get call: {:?}", prog.ops
+        );
+    }
+
+    #[test]
+    fn lower_field_assign_produces_dict_set() {
+        let stmts = parse("let d = { x: 1 }; d.x = 42;").unwrap();
+        let prog = lower(&stmts);
+        assert!(
+            prog.ops.iter().any(|op| matches!(op, Op::Call(n) if n == "__dict_set")),
+            "Should emit __dict_set call: {:?}", prog.ops
+        );
+        assert!(
+            prog.ops.iter().any(|op| matches!(op, Op::StoreUpdate(n) if n == "d")),
+            "Should emit StoreUpdate to save dict back: {:?}", prog.ops
+        );
+    }
+
+    #[test]
+    fn e2e_dict_field_access() {
+        // Create dict, access field, emit value
+        let stmts = parse("let d = { x: 42, y: 10 }; emit d.x;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON, "d.x should be 42, got {}", v);
+    }
+
+    #[test]
+    fn e2e_dict_field_assign() {
+        // Create dict, assign field, emit new value
+        let stmts = parse("let d = { x: 1 }; d.x = 99; emit d.x;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 99.0).abs() < f64::EPSILON, "d.x should be 99 after assign, got {}", v);
+    }
+
+    #[test]
+    fn e2e_dict_multiple_fields() {
+        let stmts = parse("let d = { a: 10, b: 20, c: 30 }; emit d.b;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 20.0).abs() < f64::EPSILON, "d.b should be 20, got {}", v);
+    }
+
+    #[test]
+    fn e2e_dict_add_new_field() {
+        // Add field that didn't exist initially
+        let stmts = parse("let d = { x: 1 }; d.y = 77; emit d.y;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 77.0).abs() < f64::EPSILON, "d.y should be 77, got {}", v);
     }
 }

@@ -131,6 +131,9 @@ pub enum Stmt {
 
     /// `use "module";` or `use module;` — import module
     Use(String),
+
+    /// `obj.field = expr;` — assign to field of dict/record
+    FieldAssign { object: String, field: String, value: Expr },
 }
 
 /// Match arm — pattern + body.
@@ -268,6 +271,12 @@ pub enum Expr {
 
     /// Array indexing: `arr[idx]`
     Index { array: Box<Expr>, index: Box<Expr> },
+
+    /// Dict literal: `{ key: value, key2: value2 }`
+    Dict(Vec<(String, Expr)>),
+
+    /// Field access: `obj.field`
+    FieldAccess { object: Box<Expr>, field: String },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -643,14 +652,31 @@ impl<'a> Parser<'a> {
         }
 
         // ident = expr → reassignment (not `let`, not `==`)
+        // obj.field = expr → field assignment
         if self.check(&Token::Eq) {
-            if let Expr::Ident(name) = expr {
-                self.advance(); // consume =
-                let value = self.parse_expr()?;
-                self.expect(&Token::Semi)?;
-                return Ok(Stmt::Assign { name, value });
+            let is_field_assign = matches!(&expr, Expr::FieldAccess { object, .. } if matches!(object.as_ref(), Expr::Ident(_)));
+            let is_assign = matches!(&expr, Expr::Ident(_));
+
+            if is_field_assign {
+                if let Expr::FieldAccess { object, field } = expr {
+                    if let Expr::Ident(obj_name) = *object {
+                        self.advance(); // consume =
+                        let value = self.parse_expr()?;
+                        self.expect(&Token::Semi)?;
+                        return Ok(Stmt::FieldAssign { object: obj_name, field, value });
+                    }
+                }
+                unreachable!();
+            } else if is_assign {
+                if let Expr::Ident(name) = expr {
+                    self.advance(); // consume =
+                    let value = self.parse_expr()?;
+                    self.expect(&Token::Semi)?;
+                    return Ok(Stmt::Assign { name, value });
+                }
+                unreachable!();
             }
-            // If left side is not an ident, fall through to expression stmt
+            // Not assignable, fall through to expression stmt
         }
 
         // Regular expression statement
@@ -941,7 +967,7 @@ impl<'a> Parser<'a> {
 
     /// primary = IDENT | IDENT '(' args ')' | INT | STR | '(' expr ')' | '?'
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
-        match self.peek() {
+        let mut expr = match self.peek() {
             Token::Ident(name) => {
                 let name = name.clone();
                 self.advance();
@@ -951,49 +977,52 @@ impl<'a> Parser<'a> {
                     self.advance();
                     let args = self.parse_args()?;
                     self.expect(&Token::RParen)?;
-                    return Ok(Expr::Call { name, args });
+                    Expr::Call { name, args }
                 }
-
                 // Check for array indexing: name[idx]
-                if self.check(&Token::LBracket) {
+                else if self.check(&Token::LBracket) {
                     self.advance();
                     let index = self.parse_expr()?;
                     self.expect(&Token::RBracket)?;
-                    return Ok(Expr::Index {
+                    Expr::Index {
                         array: Box::new(Expr::Ident(name)),
                         index: Box::new(index),
-                    });
+                    }
+                } else {
+                    Expr::Ident(name)
                 }
-
-                Ok(Expr::Ident(name))
             }
 
             Token::Int(val) => {
                 self.advance();
-                Ok(Expr::Int(val))
+                Expr::Int(val)
             }
 
             Token::Str(s) => {
                 let s = s.clone();
                 self.advance();
-                Ok(Expr::Str(s))
+                Expr::Str(s)
             }
 
             Token::LParen => {
                 self.advance();
-                let expr = self.parse_expr()?;
+                let inner = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
-                Ok(Expr::Group(Box::new(expr)))
+                Expr::Group(Box::new(inner))
             }
 
             Token::Wild => {
                 self.advance();
-                Ok(Expr::Ident("?".to_string()))
+                Expr::Ident("?".to_string())
             }
 
-            // Molecular literal: { S=1 R=2 V=128 A=128 T=3 }
+            // { ... } — Dict literal or Molecular literal
             Token::LBrace => {
-                self.try_parse_mol_literal()
+                if self.is_dict_literal() {
+                    self.parse_dict_literal()?
+                } else {
+                    self.try_parse_mol_literal()?
+                }
             }
 
             // Array literal: [a, b, c]
@@ -1009,21 +1038,67 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(&Token::RBracket)?;
-                Ok(Expr::Array(elements))
+                Expr::Array(elements)
             }
 
             // Logical not: !expr
             Token::Not => {
                 self.advance();
                 let inner = self.parse_primary()?;
-                Ok(Expr::LogicNot(Box::new(inner)))
+                Expr::LogicNot(Box::new(inner))
             }
 
-            other => Err(ParseError::new(&alloc::format!(
+            other => return Err(ParseError::new(&alloc::format!(
                 "Unexpected token: {:?}",
                 other
             ))),
+        };
+
+        // Postfix: .field access (can chain: a.b.c)
+        while self.check(&Token::Dot) {
+            self.advance(); // consume .
+            let field = self.expect_ident()?;
+            expr = Expr::FieldAccess {
+                object: Box::new(expr),
+                field,
+            };
         }
+
+        Ok(expr)
+    }
+
+    /// Look ahead to determine if `{` starts a Dict literal (`{ key: value }`)
+    /// vs a MolLiteral (`{ S=1 R=2 }`).
+    fn is_dict_literal(&self) -> bool {
+        // pos is at LBrace. Check tokens[pos+1] = Ident, tokens[pos+2] = Colon
+        if self.pos + 2 < self.tokens.len() {
+            matches!(&self.tokens[self.pos + 1], Token::Ident(_))
+                && matches!(&self.tokens[self.pos + 2], Token::Colon)
+        } else {
+            false
+        }
+    }
+
+    /// Parse dict literal: `{ key: value, key2: value2 }`
+    fn parse_dict_literal(&mut self) -> Result<Expr, ParseError> {
+        self.advance(); // consume {
+        let mut fields = Vec::new();
+        if !self.check(&Token::RBrace) {
+            loop {
+                let key = self.expect_ident()?;
+                self.expect(&Token::Colon)?;
+                let value = self.parse_expr()?;
+                fields.push((key, value));
+                if self.check(&Token::Comma) {
+                    self.advance();
+                    if self.check(&Token::RBrace) { break; } // trailing comma
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(Expr::Dict(fields))
     }
 
     /// Parse molecular literal: `{ S=1 R=2 V=128 A=128 T=3 }`

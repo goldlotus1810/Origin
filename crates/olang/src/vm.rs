@@ -639,6 +639,113 @@ impl OlangVM {
                             arr.0.extend(elem.0.iter().cloned());
                             let _ = stack.push(arr);
                         }
+                        "__dict_new" => {
+                            // Stack: [key0, val0, key1, val1, ..., count]
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut pairs = Vec::new();
+                            for _ in 0..count {
+                                let val = vm_pop!(stack, events);
+                                let key = vm_pop!(stack, events);
+                                pairs.push((key, val));
+                            }
+                            pairs.reverse();
+                            // Encode as flat chain: key0|sep|val0|sep|key1|sep|val1...
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (i, (key, val)) in pairs.into_iter().enumerate() {
+                                if i > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(key.0.iter().cloned());
+                                result.0.push(sep);
+                                result.0.extend(val.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__dict_get" => {
+                            // Stack: [dict, key]
+                            let key = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            let elements = split_array_chain(&dict);
+                            // Keys at even indices, values at odd indices
+                            let mut found = false;
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == key.0 {
+                                    let _ = stack.push(elements[i + 1].clone());
+                                    found = true;
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            if !found {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__dict_keys" => {
+                            // Stack: [dict]
+                            // Returns array of keys (even-indexed elements)
+                            let dict = vm_pop!(stack, events);
+                            let elements = split_array_chain(&dict);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            let mut key_idx = 0;
+                            let mut i = 0;
+                            while i < elements.len() {
+                                if key_idx > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(elements[i].0.iter().cloned());
+                                key_idx += 1;
+                                i += 2; // skip values
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__dict_set" => {
+                            // Stack: [dict, key, value]
+                            let value = vm_pop!(stack, events);
+                            let key = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            let mut elements = split_array_chain(&dict);
+                            // Find and update existing key, or append
+                            let mut found = false;
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == key.0 {
+                                    elements[i + 1] = value.clone();
+                                    found = true;
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            if !found {
+                                elements.push(key);
+                                elements.push(value);
+                            }
+                            // Rebuild chain from elements
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in elements.into_iter().enumerate() {
+                                if j > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
@@ -2172,5 +2279,69 @@ mod tests {
         assert!(!result.has_error(), "errors: {:?}", result.errors());
         let v = result.outputs()[0].to_number().unwrap();
         assert!((v - 3.0).abs() < f64::EPSILON, "len=3, got {}", v);
+    }
+
+    // ── Dict builtins ────────────────────────────────────────────────────────
+
+    fn key_chain(s: &str) -> MolecularChain {
+        let mut mols = alloc::vec::Vec::new();
+        for b in s.bytes() {
+            mols.push(Molecule {
+                shape: 0x02, relation: 0x01,
+                emotion: EmotionDim { valence: b, arousal: 0 },
+                time: 0x01,
+            });
+        }
+        MolecularChain(mols)
+    }
+
+    #[test]
+    fn dict_new_and_get() {
+        // Create dict {key1: 10, key2: 20}, get key2 → 20
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::PushNum(10.0))
+            .push_op(Op::Push(key_chain("key2")))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::PushNum(2.0))
+            .push_op(Op::Call("__dict_new".into()))
+            .push_op(Op::Store("d".into()))
+            // Get key2
+            .push_op(Op::LoadLocal("d".into()))
+            .push_op(Op::Push(key_chain("key2")))
+            .push_op(Op::Call("__dict_get".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 20.0).abs() < f64::EPSILON, "dict.key2 should be 20, got {}", v);
+    }
+
+    #[test]
+    fn dict_set_updates_value() {
+        // Create dict {key1: 10}, set key1 = 99, get key1 → 99
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(1.0))
+            .push_op(Op::Call("__dict_new".into()))
+            // Set key1 = 99
+            .push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::PushNum(99.0))
+            .push_op(Op::Call("__dict_set".into()))
+            .push_op(Op::Store("d".into()))
+            // Get key1
+            .push_op(Op::LoadLocal("d".into()))
+            .push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::Call("__dict_get".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 99.0).abs() < f64::EPSILON, "dict.key1 should be 99, got {}", v);
     }
 }
