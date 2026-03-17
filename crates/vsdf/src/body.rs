@@ -21,6 +21,7 @@
 
 extern crate alloc;
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use crate::scene::{Material, Transform};
 use crate::sdf::{SdfKind, SdfParams};
 use crate::spline::VectorSpline;
@@ -255,31 +256,84 @@ impl NodeBody {
 pub struct BodyStore {
     /// chain_hash → NodeBody
     bodies: BTreeMap<u64, NodeBody>,
+    /// Access counter per hash — LFU eviction khi RAM pressure
+    access_count: BTreeMap<u64, u32>,
+    /// Maximum number of bodies to keep in RAM (0 = unlimited)
+    max_bodies: usize,
 }
 
 impl BodyStore {
-    /// Tạo empty store.
+    /// Tạo empty store — unlimited bodies.
     pub fn new() -> Self {
         Self {
             bodies: BTreeMap::new(),
+            access_count: BTreeMap::new(),
+            max_bodies: 0, // unlimited
+        }
+    }
+
+    /// Tạo store với RAM limit.
+    ///
+    /// Khi vượt `max_bodies`, evict body ít dùng nhất (LFU).
+    /// Công thức giảm tải RAM: chỉ giữ active bodies trong memory.
+    pub fn with_capacity(max_bodies: usize) -> Self {
+        Self {
+            bodies: BTreeMap::new(),
+            access_count: BTreeMap::new(),
+            max_bodies,
         }
     }
 
     /// Get or create NodeBody for a chain_hash.
     pub fn get_or_create(&mut self, chain_hash: u64) -> &mut NodeBody {
+        *self.access_count.entry(chain_hash).or_insert(0) += 1;
         self.bodies
             .entry(chain_hash)
             .or_insert_with(|| NodeBody::new(chain_hash))
     }
 
-    /// Lookup (read-only).
+    /// Lookup (read-only) — tăng access counter.
     pub fn get(&self, chain_hash: u64) -> Option<&NodeBody> {
+        // Note: không tăng counter ở get() immutable — chỉ get_mut/get_or_create tăng
         self.bodies.get(&chain_hash)
     }
 
-    /// Lookup (mutable).
+    /// Lookup (mutable) — tăng access counter.
     pub fn get_mut(&mut self, chain_hash: u64) -> Option<&mut NodeBody> {
+        if self.bodies.contains_key(&chain_hash) {
+            *self.access_count.entry(chain_hash).or_insert(0) += 1;
+        }
         self.bodies.get_mut(&chain_hash)
+    }
+
+    /// Evict least-frequently-used bodies khi vượt capacity.
+    ///
+    /// Giảm tải RAM: chỉ giữ `max_bodies` active nhất.
+    /// Bodies bị evict có thể tái tạo từ Molecule bytes (body_from_molecule).
+    /// Trả về số bodies đã evict.
+    pub fn evict_lfu(&mut self) -> usize {
+        if self.max_bodies == 0 || self.bodies.len() <= self.max_bodies {
+            return 0;
+        }
+
+        let to_evict = self.bodies.len() - self.max_bodies;
+
+        // Collect (hash, access_count) → sort → remove least used
+        let mut candidates: Vec<(u64, u32)> = self
+            .bodies
+            .keys()
+            .map(|&h| (h, self.access_count.get(&h).copied().unwrap_or(0)))
+            .collect();
+        candidates.sort_by_key(|&(_, count)| count);
+
+        let mut evicted = 0;
+        for (hash, _) in candidates.into_iter().take(to_evict) {
+            self.bodies.remove(&hash);
+            self.access_count.remove(&hash);
+            evicted += 1;
+        }
+
+        evicted
     }
 
     /// Learn shape cho 1 node.
@@ -333,9 +387,11 @@ impl BodyStore {
         self.bodies.keys()
     }
 
-    /// RAM estimate.
+    /// RAM estimate in bytes.
     pub fn ram_usage(&self) -> usize {
         // Rough: per body = ~200 bytes (struct) + spline segments
+        // Per access_count entry = ~12 bytes (u64 + u32)
+        let access_overhead = self.access_count.len() * 12;
         self.bodies.len() * 200
             + self
                 .bodies
@@ -350,6 +406,18 @@ impl BodyStore {
                         * 16 // 4 f32 per segment
                 })
                 .sum::<usize>()
+            + access_overhead
+    }
+
+    /// Current capacity limit (0 = unlimited).
+    pub fn max_bodies(&self) -> usize {
+        self.max_bodies
+    }
+
+    /// Set capacity limit. Immediately evicts if over limit.
+    pub fn set_max_bodies(&mut self, max: usize) -> usize {
+        self.max_bodies = max;
+        self.evict_lfu()
     }
 }
 
@@ -635,5 +703,60 @@ mod tests {
         assert!(snap.intensity > 0.5, "Fire is bright");
         assert!(snap.emotion_v > 0.5, "Fire is positive");
         assert!(snap.emotion_a > 0.8, "Fire is exciting");
+    }
+
+    // ── BodyStore eviction tests ────────────────────────────────────────────
+
+    #[test]
+    fn body_store_with_capacity_evicts_lfu() {
+        let mut store = BodyStore::with_capacity(3);
+
+        // Create 5 bodies — will exceed capacity
+        for i in 0..5u64 {
+            let body = store.get_or_create(i);
+            body.learn_shape(SdfKind::Sphere, SdfParams::default());
+        }
+
+        // Access body 0 and 4 multiple times → high frequency
+        for _ in 0..5 {
+            store.get_or_create(0);
+            store.get_or_create(4);
+        }
+
+        assert_eq!(store.len(), 5);
+
+        // Evict → keep top 3 most accessed
+        let evicted = store.evict_lfu();
+        assert_eq!(evicted, 2, "Should evict 2 bodies");
+        assert_eq!(store.len(), 3);
+
+        // Body 0 and 4 (high access) should survive
+        assert!(store.get(0).is_some(), "High-access body 0 should survive");
+        assert!(store.get(4).is_some(), "High-access body 4 should survive");
+    }
+
+    #[test]
+    fn body_store_set_max_bodies() {
+        let mut store = BodyStore::new(); // unlimited
+
+        for i in 0..10u64 {
+            store.get_or_create(i);
+        }
+        assert_eq!(store.len(), 10);
+
+        // Set limit → immediate eviction
+        let evicted = store.set_max_bodies(5);
+        assert_eq!(evicted, 5);
+        assert_eq!(store.len(), 5);
+    }
+
+    #[test]
+    fn body_store_no_evict_under_capacity() {
+        let mut store = BodyStore::with_capacity(10);
+        for i in 0..5u64 {
+            store.get_or_create(i);
+        }
+        let evicted = store.evict_lfu();
+        assert_eq!(evicted, 0, "Under capacity → no eviction");
     }
 }

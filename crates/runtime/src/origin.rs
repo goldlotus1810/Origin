@@ -217,7 +217,7 @@ impl HomeRuntime {
             dream_cycles: 0,
             dream_approved_total: 0,
             dream_l3_created: 0,
-            body_store: BodyStore::new(),
+            body_store: BodyStore::with_capacity(4096), // Max 4K bodies in RAM — evict LFU
             leo: LeoAI::new(
                 isl::address::ISLAddress::new(1, 0, 0, 1), // tier 1, LeoAI
                 isl::address::ISLAddress::new(0, 0, 0, 0), // tier 0, AAM
@@ -1676,18 +1676,75 @@ impl HomeRuntime {
             // Silk connections exist but no STM match yet — first time seeing related topic
             None
         } else {
-            // Build human-readable recall
+            // Build human-readable recall — enriched by BodyStore splines
             dominant_valence /= total_matches as f32;
-            if max_fire > 2 {
-                Some(format!("Bạn đã nhắc đến chủ đề này {} lần rồi", max_fire))
+
+            // BodyStore enrichment: kiểm tra xem related nodes có learned body data không
+            let body_insight = self.body_insight_for_recall(&related);
+
+            let base = if max_fire > 2 {
+                format!("Bạn đã nhắc đến chủ đề này {} lần rồi", max_fire)
             } else if dominant_valence < -0.3 {
-                "Mình nhớ bạn đã nói về điều tương tự trước đó".to_string().into()
+                "Mình nhớ bạn đã nói về điều tương tự trước đó".to_string()
             } else if dominant_valence > 0.3 {
-                "Mình nhớ lần trước bạn cũng nhắc đến điều này".to_string().into()
+                "Mình nhớ lần trước bạn cũng nhắc đến điều này".to_string()
             } else {
-                "Mình đã ghi nhận điều này từ trước".to_string().into()
+                "Mình đã ghi nhận điều này từ trước".to_string()
+            };
+
+            if let Some(insight) = body_insight {
+                Some(format!("{} — {}", base, insight))
+            } else {
+                Some(base)
             }
         }
+    }
+
+    /// BodyStore insight cho recall — đọc spline data từ related nodes.
+    ///
+    /// Nếu related nodes có learned emotion/temperature splines → trả về text mô tả.
+    /// Đây là "BodyStore phục vụ inference" — công thức → ngữ nghĩa.
+    fn body_insight_for_recall(
+        &self,
+        related: &[(u64, f32, silk::edge::EmotionTag)],
+    ) -> Option<String> {
+        let mut total_v = 0.0f32;
+        let mut total_a = 0.0f32;
+        let mut body_count = 0u32;
+
+        for &(hash, _weight, _emo) in related.iter().take(5) {
+            if let Some(body) = self.body_store.get(hash) {
+                // Đọc emotion splines tại t=0.5 (trung điểm)
+                let snap = body.splines.evaluate(0.5);
+                total_v += snap.emotion_v;
+                total_a += snap.emotion_a;
+                body_count += 1;
+            }
+        }
+
+        if body_count == 0 {
+            return None;
+        }
+
+        let avg_v = total_v / body_count as f32;
+        let avg_a = total_a / body_count as f32;
+
+        // Chỉ trả insight khi emotion đáng kể (không neutral)
+        if avg_v.abs() < 0.15 && avg_a < 0.3 {
+            return None;
+        }
+
+        let feeling = if avg_v < -0.3 {
+            "chủ đề này mang cảm xúc nặng"
+        } else if avg_v > 0.3 {
+            "chủ đề này mang năng lượng tích cực"
+        } else if avg_a > 0.6 {
+            "đây là chủ đề khiến bạn rất chú ý"
+        } else {
+            return None;
+        };
+
+        Some(feeling.into())
     }
 
     // ── Phase 10: KnowTree L3 recall — topic-aware knowledge ────────────────
@@ -2183,6 +2240,32 @@ impl HomeRuntime {
                         // invalid → discard silently (QT: sai → hủy)
                     }
                 }
+            }
+        }
+
+        // ── T6b4: BodyStore ← Learning — cập nhật Spline từ thực tế ────────
+        // Learning tích lũy emotion data → cập nhật BodyStore splines
+        // Đây là bridge "Molecule = Công thức" → Spline thay đổi theo thực tế
+        {
+            let body_updates = self.learning.pending_body_updates();
+            for update in &body_updates {
+                if let Some(body) = self.body_store.get_mut(update.chain_hash) {
+                    // Cập nhật emotion_v spline từ accumulated valence
+                    let v = update.emotion.valence;
+                    if v.abs() > 0.1 {
+                        body.learn_emotion_v(vsdf::spline::VectorSpline::flat(v));
+                    }
+                    // Cập nhật emotion_a spline từ accumulated arousal
+                    let a = update.emotion.arousal;
+                    if a > 0.15 {
+                        body.learn_emotion_a(vsdf::spline::VectorSpline::flat(a));
+                    }
+                }
+            }
+
+            // RAM pressure — evict least-used bodies mỗi 21 turns (Fib[8])
+            if self.turn_count > 0 && self.turn_count.is_multiple_of(21) {
+                self.body_store.evict_lfu();
             }
         }
 

@@ -588,12 +588,14 @@ mod tests {
             emotion: EmotionTag::new(0.8, 0.9, 0.7, 0.8),
             timestamp: 1000,
             fire_count: 1,
+            mol_summary: None,
         };
         let obs2 = Observation {
             chain: chain.clone(),
             emotion: EmotionTag::new(-0.2, 0.5, 0.3, 0.4),
             timestamp: 2000,
             fire_count: 1,
+            mol_summary: None,
         };
         let result = aggregate_emotion(&[&obs1, &obs2]);
         assert!(

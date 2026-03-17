@@ -19,6 +19,73 @@ use crate::hebbian::{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MolSummary — Lightweight 5D coordinates cho Silk
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tóm tắt 5D của một Molecule — chỉ giữ bytes cần thiết cho similarity.
+///
+/// Silk crate là no_std, không import olang::molecular::Molecule.
+/// Caller (learning.rs, runtime) truyền MolSummary khi co-activate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MolSummary {
+    pub shape: u8,
+    pub relation: u8,
+    pub valence: u8,
+    pub arousal: u8,
+    pub time: u8,
+}
+
+impl MolSummary {
+    /// So sánh 5D — trả về similarity ∈ [0.0, 1.0].
+    ///
+    /// Mỗi chiều chia sẻ cùng base → +0.2 (toàn phần).
+    /// Mỗi chiều gần nhau (delta < 32) → +0.1 (bán phần).
+    /// 5 chiều × 0.2 = 1.0 max (identical).
+    pub fn similarity(&self, other: &Self) -> f32 {
+        let mut score = 0.0f32;
+
+        // Shape: cùng base (8 categories)
+        let s_base_a = if self.shape == 0 { 1 } else { ((self.shape - 1) % 8) + 1 };
+        let s_base_b = if other.shape == 0 { 1 } else { ((other.shape - 1) % 8) + 1 };
+        if s_base_a == s_base_b {
+            score += 0.20;
+        }
+
+        // Relation: cùng base (8 categories)
+        let r_base_a = if self.relation == 0 { 1 } else { ((self.relation - 1) % 8) + 1 };
+        let r_base_b = if other.relation == 0 { 1 } else { ((other.relation - 1) % 8) + 1 };
+        if r_base_a == r_base_b {
+            score += 0.20;
+        }
+
+        // Valence: gần nhau → similar (delta-based)
+        let v_delta = (self.valence as i16 - other.valence as i16).unsigned_abs();
+        if v_delta < 16 {
+            score += 0.20;
+        } else if v_delta < 48 {
+            score += 0.10;
+        }
+
+        // Arousal: gần nhau → similar
+        let a_delta = (self.arousal as i16 - other.arousal as i16).unsigned_abs();
+        if a_delta < 16 {
+            score += 0.20;
+        } else if a_delta < 48 {
+            score += 0.10;
+        }
+
+        // Time: cùng base (5 categories)
+        let t_base_a = if self.time == 0 { 3 } else { ((self.time - 1) % 5) + 1 };
+        let t_base_b = if other.time == 0 { 3 } else { ((other.time - 1) % 5) + 1 };
+        if t_base_a == t_base_b {
+            score += 0.20;
+        }
+
+        score
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SilkGraph
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -68,6 +135,57 @@ impl SilkGraph {
             // Edge chưa có → tạo mới
             let _ = key;
             let edge = SilkEdge::associative(from, to, emotion, ts);
+            self.insert_sorted(edge);
+        }
+    }
+
+    /// Co-activate dùng 5D molecular similarity — **đây là cách đúng**.
+    ///
+    /// Similarity giữa 2 molecules boost cả reward lẫn initial weight:
+    ///   - similarity >= 0.4 → reward *= (1 + similarity * 0.5)
+    ///   - Nodes chia sẻ nhiều chiều → kết nối mạnh hơn tự nhiên
+    ///
+    /// Đây là "Silk = công thức quan hệ" — kết nối xuất phát từ 5D,
+    /// không chỉ từ temporal proximity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn co_activate_mol(
+        &mut self,
+        from: u64,
+        to: u64,
+        from_mol: Option<MolSummary>,
+        to_mol: Option<MolSummary>,
+        emotion: EmotionTag,
+        reward: f32,
+        ts: i64,
+    ) {
+        // Tính 5D similarity bonus
+        let sim_bonus = match (from_mol, to_mol) {
+            (Some(a), Some(b)) => a.similarity(&b),
+            _ => 0.0,
+        };
+
+        // Boost reward dựa trên similarity: nodes cùng chiều → kết nối mạnh hơn
+        let boosted_reward = if sim_bonus >= 0.4 {
+            reward * (1.0 + sim_bonus * 0.5)
+        } else {
+            reward
+        };
+
+        let key = (from, to, EdgeKind::Assoc.as_byte());
+
+        if let Some(idx) = self.find_edge_idx(from, to, EdgeKind::Assoc) {
+            let e = &mut self.edges[idx];
+            e.weight = hebbian_strengthen(e.weight, boosted_reward);
+            e.emotion = blend_emotion(e.emotion, emotion, emotion.intensity);
+            e.fire_count = e.fire_count.saturating_add(1);
+            e.updated_at = ts;
+        } else {
+            let _ = key;
+            let mut edge = SilkEdge::associative(from, to, emotion, ts);
+            // Nodes chia sẻ >=3 chiều → start stronger (implicit Silk)
+            if sim_bonus >= 0.6 {
+                edge.weight = (edge.weight + sim_bonus * 0.3).min(0.8);
+            }
             self.insert_sorted(edge);
         }
     }
@@ -288,11 +406,20 @@ impl SilkGraph {
 
     // ── Dream cluster detection ──────────────────────────────────────────────
 
-    /// Tính cluster_score(A, B) cho Dream.
+    /// Tính cluster_score(A, B) cho Dream — đầy đủ 3 thành phần.
     ///
-    /// score = 0.4 × hebbian_weight + 0.3 × co_activation_ratio
-    /// (chain_similarity được tính bên ngoài bởi LCA engine)
-    pub fn cluster_score_partial(&self, hash_a: u64, hash_b: u64, max_fire_count: u32) -> f32 {
+    /// score = 0.3 × chain_similarity + 0.4 × hebbian_weight + 0.3 × fire_ratio
+    ///
+    /// `mol_a`, `mol_b`: 5D coordinates của 2 nodes.
+    /// Nếu không có mol → chain_similarity = 0 (fallback cũ).
+    pub fn cluster_score(
+        &self,
+        hash_a: u64,
+        hash_b: u64,
+        mol_a: Option<MolSummary>,
+        mol_b: Option<MolSummary>,
+        max_fire_count: u32,
+    ) -> f32 {
         let weight = self
             .assoc_weight(hash_a, hash_b)
             .max(self.assoc_weight(hash_b, hash_a));
@@ -309,7 +436,19 @@ impl SilkGraph {
             0.0
         };
 
-        0.4 * weight + 0.3 * fire_ratio
+        let chain_sim = match (mol_a, mol_b) {
+            (Some(a), Some(b)) => a.similarity(&b),
+            _ => 0.0,
+        };
+
+        0.3 * chain_sim + 0.4 * weight + 0.3 * fire_ratio
+    }
+
+    /// Tính cluster_score(A, B) cho Dream — partial (không có 5D data).
+    ///
+    /// Backwards-compatible: score = 0.4 × hebbian_weight + 0.3 × fire_ratio
+    pub fn cluster_score_partial(&self, hash_a: u64, hash_b: u64, max_fire_count: u32) -> f32 {
+        self.cluster_score(hash_a, hash_b, None, None, max_fire_count)
     }
 
     /// Tìm candidates cần promote tại một tầng (Dream input).
@@ -719,5 +858,71 @@ mod tests {
         g.maintain(0, 0);
         let w_after = g.assoc_weight(0xA, 0xB);
         assert_eq!(w_before, w_after, "0 elapsed → không decay");
+    }
+
+    // ── MolSummary 5D similarity tests ──────────────────────────────────────
+
+    #[test]
+    fn mol_similarity_identical() {
+        let a = MolSummary { shape: 0x01, relation: 0x01, valence: 0xC0, arousal: 0xC0, time: 0x04 };
+        assert!((a.similarity(&a) - 1.0).abs() < 0.01, "Identical → 1.0");
+    }
+
+    #[test]
+    fn mol_similarity_same_base_different_sub() {
+        // Sphere sub 0 vs Sphere sub 1 — cùng base
+        let a = MolSummary { shape: 0x01, relation: 0x01, valence: 0x80, arousal: 0x80, time: 0x03 };
+        let b = MolSummary { shape: 0x09, relation: 0x01, valence: 0x80, arousal: 0x80, time: 0x03 };
+        let sim = a.similarity(&b);
+        assert!(sim >= 0.8, "Same base on all dims → high sim: {}", sim);
+    }
+
+    #[test]
+    fn mol_similarity_different_shape() {
+        // Sphere vs Capsule — only shape differs
+        let a = MolSummary { shape: 0x01, relation: 0x01, valence: 0x80, arousal: 0x80, time: 0x03 };
+        let b = MolSummary { shape: 0x02, relation: 0x01, valence: 0x80, arousal: 0x80, time: 0x03 };
+        let sim = a.similarity(&b);
+        assert!(sim >= 0.6 && sim < 1.0, "4/5 dims match → 0.8: {}", sim);
+    }
+
+    #[test]
+    fn mol_similarity_very_different() {
+        let a = MolSummary { shape: 0x01, relation: 0x01, valence: 0x00, arousal: 0x00, time: 0x01 };
+        let b = MolSummary { shape: 0x04, relation: 0x06, valence: 0xFF, arousal: 0xFF, time: 0x05 };
+        let sim = a.similarity(&b);
+        assert!(sim < 0.2, "Completely different → low sim: {}", sim);
+    }
+
+    #[test]
+    fn co_activate_mol_boosts_similar_nodes() {
+        let mut g = SilkGraph::new();
+        let fire = MolSummary { shape: 0x01, relation: 0x01, valence: 0xC0, arousal: 0xC0, time: 0x04 };
+        let sun = MolSummary { shape: 0x01, relation: 0x01, valence: 0xC0, arousal: 0x90, time: 0x04 };
+
+        // With mol similarity (fire ≈ sun: 4/5 dims match)
+        g.co_activate_mol(0xA, 0xB, Some(fire), Some(sun), emo(0.5, 0.7), 0.5, 1000);
+        let w_mol = g.assoc_weight(0xA, 0xB);
+
+        // Without mol similarity
+        let mut g2 = SilkGraph::new();
+        g2.co_activate(0xA, 0xB, emo(0.5, 0.7), 0.5, 1000);
+        let w_plain = g2.assoc_weight(0xA, 0xB);
+
+        assert!(w_mol >= w_plain, "5D similarity should boost edge: mol={} plain={}", w_mol, w_plain);
+    }
+
+    #[test]
+    fn cluster_score_with_5d() {
+        let mut g = SilkGraph::new();
+        g.co_activate(0xA, 0xB, emo(0.5, 0.7), 0.8, 1000);
+
+        let fire = MolSummary { shape: 0x01, relation: 0x01, valence: 0xC0, arousal: 0xC0, time: 0x04 };
+        let sun = MolSummary { shape: 0x01, relation: 0x01, valence: 0xC0, arousal: 0x90, time: 0x04 };
+
+        let score_5d = g.cluster_score(0xA, 0xB, Some(fire), Some(sun), 1);
+        let score_partial = g.cluster_score_partial(0xA, 0xB, 1);
+
+        assert!(score_5d > score_partial, "5D similarity adds chain_sim component: {} > {}", score_5d, score_partial);
     }
 }
