@@ -1118,7 +1118,7 @@ impl OlangVM {
                             let mut mols = Vec::new();
                             for m in &s.0 {
                                 let b = m.emotion.valence;
-                                let upper = if (b'a'..=b'z').contains(&b) { b - 32 } else { b };
+                                let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
                                 mols.push(Molecule {
                                     shape: 0x02, relation: 0x01,
                                     emotion: EmotionDim { valence: upper, arousal: 0 },
@@ -1132,7 +1132,7 @@ impl OlangVM {
                             let mut mols = Vec::new();
                             for m in &s.0 {
                                 let b = m.emotion.valence;
-                                let lower = if (b'A'..=b'Z').contains(&b) { b + 32 } else { b };
+                                let lower = if b.is_ascii_uppercase() { b + 32 } else { b };
                                 mols.push(Molecule {
                                     shape: 0x02, relation: 0x01,
                                     emotion: EmotionDim { valence: lower, arousal: 0 },
