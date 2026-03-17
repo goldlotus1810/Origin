@@ -17,6 +17,8 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
+use isl::address::ISLAddress;
+use isl::message::{ISLFrame, ISLMessage, MsgType};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bridge message types
@@ -168,6 +170,77 @@ impl BridgeFrame {
     /// Frame size in bytes.
     pub fn size(&self) -> usize {
         5 + self.payload.len()
+    }
+
+    // ── Typed payload accessors ──────────────────────────────────────────────
+
+    /// Read emotion payload: (valence, arousal, fx).
+    pub fn payload_emotion(&self) -> Option<(f32, f32, f32)> {
+        if self.msg_type != BridgeMsg::EmotionUpdate || self.payload.len() < 12 {
+            return None;
+        }
+        let v = f32::from_be_bytes([self.payload[0], self.payload[1], self.payload[2], self.payload[3]]);
+        let a = f32::from_be_bytes([self.payload[4], self.payload[5], self.payload[6], self.payload[7]]);
+        let f = f32::from_be_bytes([self.payload[8], self.payload[9], self.payload[10], self.payload[11]]);
+        Some((v, a, f))
+    }
+
+    /// Read audio payload: raw bytes (Web Audio API features).
+    pub fn payload_audio(&self) -> Option<&[u8]> {
+        if self.msg_type != BridgeMsg::AudioInput {
+            return None;
+        }
+        Some(&self.payload)
+    }
+
+    /// Read silk update payload: edge_count.
+    pub fn payload_silk_edges(&self) -> Option<u32> {
+        if self.msg_type != BridgeMsg::SilkUpdate || self.payload.len() < 4 {
+            return None;
+        }
+        Some(u32::from_be_bytes([
+            self.payload[0], self.payload[1], self.payload[2], self.payload[3],
+        ]))
+    }
+
+    // ── BridgeFrame ↔ ISLFrame conversion ────────────────────────────────────
+
+    /// WASM bridge ISL address: layer=0xFF (system), group=0x01 (bridge).
+    const BRIDGE_ADDR: ISLAddress = ISLAddress::new(0xFF, 0x01, 0x00, 0x00);
+
+    /// Convert BridgeFrame → ISLFrame for internal processing.
+    ///
+    /// Maps BridgeMsg types to ISL MsgType equivalents.
+    /// `target` = destination ISL address (usually AAM or a Chief).
+    pub fn to_isl_frame(&self, target: ISLAddress) -> ISLFrame {
+        let msg_type = match self.msg_type {
+            BridgeMsg::TextInput => MsgType::Text,
+            BridgeMsg::OlangInput => MsgType::Program,
+            BridgeMsg::AudioInput => MsgType::ChainPayload,
+            BridgeMsg::Ping => MsgType::Tick,
+            BridgeMsg::Pong => MsgType::Ack,
+            BridgeMsg::Stats => MsgType::Query,
+            BridgeMsg::Health => MsgType::Query,
+            // Push events (HomeOS → browser) don't normally convert to ISL
+            _ => MsgType::Text,
+        };
+        let header = ISLMessage::new(Self::BRIDGE_ADDR, target, msg_type);
+        ISLFrame::with_body(header, self.payload.clone())
+    }
+
+    /// Convert ISLFrame → BridgeFrame for sending to browser.
+    ///
+    /// Maps ISL MsgType to BridgeMsg push event types.
+    pub fn from_isl_frame(frame: &ISLFrame) -> Self {
+        let (msg_type, payload) = match frame.header.msg_type {
+            MsgType::Text => (BridgeMsg::Response, frame.body.clone()),
+            MsgType::Dream => (BridgeMsg::DreamResult, frame.body.clone()),
+            MsgType::Emergency => (BridgeMsg::Response, frame.body.clone()),
+            MsgType::Ack => (BridgeMsg::Pong, Vec::new()),
+            MsgType::Tick => (BridgeMsg::Ping, Vec::new()),
+            _ => (BridgeMsg::Response, frame.body.clone()),
+        };
+        Self { msg_type, payload }
     }
 }
 
@@ -355,6 +428,81 @@ mod tests {
         let events = stream.drain();
         assert_eq!(events[0].msg_type, BridgeMsg::SceneUpdate);
         assert_eq!(events[0].payload_str().unwrap(), json);
+    }
+
+    #[test]
+    fn payload_emotion_accessor() {
+        let frame = BridgeFrame::emotion_update(-0.5, 0.7, -0.15);
+        let (v, a, f) = frame.payload_emotion().unwrap();
+        assert!((v - (-0.5)).abs() < 1e-6);
+        assert!((a - 0.7).abs() < 1e-6);
+        assert!((f - (-0.15)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn payload_emotion_wrong_type() {
+        let frame = BridgeFrame::ping();
+        assert!(frame.payload_emotion().is_none());
+    }
+
+    #[test]
+    fn payload_audio_accessor() {
+        let frame = BridgeFrame::new(BridgeMsg::AudioInput, vec![1, 2, 3, 4]);
+        assert_eq!(frame.payload_audio().unwrap(), &[1, 2, 3, 4]);
+        // Wrong type → None
+        let frame2 = BridgeFrame::ping();
+        assert!(frame2.payload_audio().is_none());
+    }
+
+    #[test]
+    fn payload_silk_edges_accessor() {
+        let mut stream = EventStream::new(64);
+        stream.push_silk_update(42);
+        let events = stream.drain();
+        assert_eq!(events[0].payload_silk_edges().unwrap(), 42);
+    }
+
+    #[test]
+    fn bridge_to_isl_text() {
+        let frame = BridgeFrame::text_input("hello");
+        let target = ISLAddress::new(0, 0, 0, 1);
+        let isl = frame.to_isl_frame(target);
+        assert_eq!(isl.header.msg_type, MsgType::Text);
+        assert_eq!(isl.header.to, target);
+        assert_eq!(isl.body, b"hello");
+    }
+
+    #[test]
+    fn bridge_to_isl_olang() {
+        let frame = BridgeFrame::new(BridgeMsg::OlangInput, b"stats".to_vec());
+        let target = ISLAddress::new(0, 0, 0, 1);
+        let isl = frame.to_isl_frame(target);
+        assert_eq!(isl.header.msg_type, MsgType::Program);
+    }
+
+    #[test]
+    fn isl_to_bridge_roundtrip() {
+        let msg = ISLMessage::new(
+            ISLAddress::new(1, 0, 0, 1),
+            ISLAddress::new(0xFF, 0x01, 0, 0),
+            MsgType::Text,
+        );
+        let isl = ISLFrame::with_body(msg, b"response text".to_vec());
+        let bridge = BridgeFrame::from_isl_frame(&isl);
+        assert_eq!(bridge.msg_type, BridgeMsg::Response);
+        assert_eq!(bridge.payload_str().unwrap(), "response text");
+    }
+
+    #[test]
+    fn isl_dream_to_bridge() {
+        let msg = ISLMessage::new(
+            ISLAddress::new(1, 0, 0, 1),
+            ISLAddress::new(0xFF, 0x01, 0, 0),
+            MsgType::Dream,
+        );
+        let isl = ISLFrame::with_body(msg, b"dream result".to_vec());
+        let bridge = BridgeFrame::from_isl_frame(&isl);
+        assert_eq!(bridge.msg_type, BridgeMsg::DreamResult);
     }
 
     #[test]

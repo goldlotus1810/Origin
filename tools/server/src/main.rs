@@ -28,10 +28,6 @@ fn main() {
     println!("HomeOS ○");
     println!();
 
-    if ucd::table_len() == 0 {
-        eprintln!("[start] WARNING: UCD table empty — rebuild with UnicodeData.txt");
-    }
-
     let session_id = now_ns() as u64;
 
     // ══════════════════════════════════════════════════════════════════════════

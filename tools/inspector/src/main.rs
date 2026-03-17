@@ -142,7 +142,7 @@ mod tests {
         // The default path when no CLI arg is given should be "origin.olang".
         // We verify the constant behavior by checking env::args logic inline:
         // unwrap_or_else returns the default.
-        let default: String = None::<String>.unwrap_or_else(|| "origin.olang".to_string());
+        let default: String = "origin.olang".to_string();
         assert_eq!(default, "origin.olang");
     }
 

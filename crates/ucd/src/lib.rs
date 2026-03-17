@@ -160,9 +160,6 @@ mod tests {
 
     #[test]
     fn lookup_fire() {
-        if table_len() == 0 {
-            return;
-        }
         let e = lookup(0x1F525).expect("🔥 FIRE phải có trong UCD");
         assert_eq!(e.cp, 0x1F525);
         assert_eq!(e.group, 0x03, "FIRE thuộc EMOTICON group");
@@ -183,9 +180,6 @@ mod tests {
 
     #[test]
     fn lookup_sphere_sdf() {
-        if table_len() == 0 {
-            return;
-        }
         let e = lookup(0x25CF).expect("● BLACK CIRCLE phải có");
         assert_eq!((e.shape - 1) % 8 + 1, 0x01, "● = Sphere base");
         assert_eq!(e.group, 0x01, "Geometric Shapes = SDF group");
@@ -194,18 +188,12 @@ mod tests {
 
     #[test]
     fn lookup_torus_sdf() {
-        if table_len() == 0 {
-            return;
-        }
         let e = lookup(0x25CB).expect("○ WHITE CIRCLE phải có");
         assert_eq!((e.shape - 1) % 8 + 1, 0x05, "○ = Torus base");
     }
 
     #[test]
     fn lookup_member_relation() {
-        if table_len() == 0 {
-            return;
-        }
         let e = lookup(0x2208).expect("∈ ELEMENT OF phải có");
         assert_eq!((e.relation - 1) % 8 + 1, 0x01, "∈ = Member base");
         assert_eq!((e.time - 1) % 5 + 1, 0x01, "Math relation = Static base");
@@ -213,9 +201,6 @@ mod tests {
 
     #[test]
     fn lookup_arrow_causes() {
-        if table_len() == 0 {
-            return;
-        }
         let e = lookup(0x2192).expect("→ RIGHTWARDS ARROW phải có");
         assert_eq!((e.relation - 1) % 8 + 1, 0x06, "→ = Causes base");
         assert_eq!((e.time - 1) % 5 + 1, 0x05, "Arrow = Instant base");
@@ -223,9 +208,6 @@ mod tests {
 
     #[test]
     fn lookup_pi_math() {
-        if table_len() == 0 {
-            return;
-        }
         // π = U+03C0 — không thuộc 5 nhóm → None
         // Nhưng ∂ = U+2202 thuộc Math Operators
         let e = lookup(0x2202).expect("∂ PARTIAL DIFFERENTIAL phải có");
@@ -235,9 +217,6 @@ mod tests {
 
     #[test]
     fn lookup_musical_note() {
-        if table_len() == 0 {
-            return;
-        }
         // Musical Symbols thật sự ở 1D100..1D1FF
         // 𝄞 MUSICAL SYMBOL G CLEF = U+1D11E
         if let Some(e) = lookup(0x1D11E) {
@@ -250,9 +229,6 @@ mod tests {
 
     #[test]
     fn lookup_droplet() {
-        if table_len() == 0 {
-            return;
-        }
         let e = lookup(0x1F4A7).expect("💧 DROPLET phải có");
         assert_eq!(e.group, 0x03, "DROPLET = EMOTICON");
         assert!(e.valence >= 0x80, "DROPLET valence moderate+");
@@ -268,9 +244,6 @@ mod tests {
 
     #[test]
     fn table_not_empty() {
-        if table_len() == 0 {
-            return;
-        }
         assert!(
             table_len() > 1000,
             "UCD table phải có >1000 entries, got {}",
@@ -297,9 +270,6 @@ mod tests {
     #[test]
     #[cfg(feature = "reverse-index")]
     fn decode_hash_fire() {
-        if table_len() == 0 {
-            return;
-        }
         let e = lookup(0x1F525).unwrap();
         let decoded = decode_hash(e.hash);
         // Có thể decode ra cp khác nếu hash collision
@@ -330,9 +300,6 @@ mod tests {
     #[test]
     #[cfg(feature = "reverse-index")]
     fn bucket_sphere_member() {
-        if table_len() == 0 {
-            return;
-        }
         let cps = bucket_cps(0x01, 0x01); // Sphere + Member
                                           // EMOTICON group nhiều nodes Sphere+Member
         assert!(!cps.is_empty(), "bucket (Sphere, Member) phải có entries");
@@ -398,9 +365,6 @@ mod tests {
 
     #[test]
     fn convenience_fns_fire() {
-        if table_len() == 0 {
-            return;
-        }
         let s = shape_of(0x1F525);
         assert_eq!((s - 1) % 8 + 1, 0x01, "FIRE shape base = Sphere");
         let r = relation_of(0x1F525);
@@ -425,9 +389,6 @@ mod tests {
 
     #[test]
     fn count_unique_molecules() {
-        if table_len() == 0 {
-            return;
-        }
         // Count unique 5-tuples using a sorted vec + dedup
         let mut tuples: Vec<(u8, u8, u8, u8, u8)> = UCD_TABLE
             .iter()
@@ -447,9 +408,6 @@ mod tests {
 
     #[test]
     fn count_unique_hashes() {
-        if table_len() == 0 {
-            return;
-        }
         let mut hashes: Vec<u64> = UCD_TABLE.iter().map(|e| e.hash).collect();
         let total = hashes.len();
         hashes.sort();

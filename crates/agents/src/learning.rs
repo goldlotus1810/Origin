@@ -451,6 +451,9 @@ impl LearningLoop {
     pub fn context(&self) -> &ContextEngine {
         &self.context
     }
+    pub fn gate(&self) -> &SecurityGate {
+        &self.gate
+    }
     pub fn turn_count(&self) -> usize {
         self.context.turn_count()
     }
@@ -556,9 +559,6 @@ mod tests {
         LearningLoop::new(0x1234)
     }
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     fn text(s: &str) -> ContentInput {
         ContentInput::Text {
@@ -571,9 +571,6 @@ mod tests {
 
     #[test]
     fn stm_push_increases_len() {
-        if skip() {
-            return;
-        }
         let mut stm = ShortTermMemory::new(10);
         let chain = olang::encoder::encode_codepoint(0x1F525);
         stm.push(chain, EmotionTag::NEUTRAL, 1000);
@@ -582,9 +579,6 @@ mod tests {
 
     #[test]
     fn stm_same_chain_increments_fire() {
-        if skip() {
-            return;
-        }
         let mut stm = ShortTermMemory::new(10);
         let chain = olang::encoder::encode_codepoint(0x1F525);
         stm.push(chain.clone(), EmotionTag::NEUTRAL, 1000);
@@ -596,9 +590,6 @@ mod tests {
 
     #[test]
     fn stm_top_n_sorted() {
-        if skip() {
-            return;
-        }
         let mut stm = ShortTermMemory::new(10);
         let c1 = olang::encoder::encode_codepoint(0x1F525); // fire
         let c2 = olang::encoder::encode_codepoint(0x1F4A7); // water
@@ -623,9 +614,6 @@ mod tests {
 
     #[test]
     fn stm_eviction_lfu() {
-        if skip() {
-            return;
-        }
         let mut stm = ShortTermMemory::new(3); // max 3
                                                // Đổ 4 chains khác nhau
         let chains: Vec<_> = [0x1F525u32, 0x1F4A7, 0x2744, 0x1F9E0]
@@ -654,9 +642,6 @@ mod tests {
 
     #[test]
     fn process_text_ok() {
-        if skip() {
-            return;
-        }
         let mut l = loop_();
         let r = l.process_one(text("hôm nay trời đẹp"));
         assert!(matches!(r, ProcessResult::Ok { .. }), "Normal text → Ok");
@@ -685,9 +670,6 @@ mod tests {
 
     #[test]
     fn process_multiple_builds_silk() {
-        if skip() {
-            return;
-        }
         let mut l = loop_();
         // Dùng emoji — mỗi cái có codepoint khác nhau → chain hash khác nhau
         l.process_one(ContentInput::Text {
@@ -704,15 +686,12 @@ mod tests {
         });
         // Silk: 🔥 → 💧 (different hashes → edge)
         // STM phải có entries
-        assert!(l.stm().len() > 0, "STM phải có entries");
+        assert!(!l.stm().is_empty(), "STM phải có entries");
         // Graph có thể có hoặc không tùy chain hash — check STM thay thế
     }
 
     #[test]
     fn process_sensor_ok() {
-        if skip() {
-            return;
-        }
         let mut l = loop_();
         let r = l.process_one(ContentInput::Sensor {
             kind: SensorKind::Temperature,
@@ -724,9 +703,6 @@ mod tests {
 
     #[test]
     fn process_system_boot_ok() {
-        if skip() {
-            return;
-        }
         let mut l = loop_();
         let r = l.process_one(ContentInput::System {
             event: SystemEvent::Boot,
@@ -737,9 +713,6 @@ mod tests {
 
     #[test]
     fn dream_candidates_top_fired() {
-        if skip() {
-            return;
-        }
         let mut l = loop_();
         // Gửi "tôi buồn" nhiều lần
         for i in 0..5 {
@@ -761,9 +734,6 @@ mod tests {
 
     #[test]
     fn audio_frequency_co_activates_silk() {
-        if skip() {
-            return;
-        }
         let mut l = loop_();
         // Feed two audio inputs at same frequency → should co-activate in Silk
         let r1 = l.process_one(ContentInput::Audio {
@@ -781,14 +751,11 @@ mod tests {
         });
         assert!(matches!(r2, ProcessResult::Ok { .. }));
         // Graph should have at least one edge from audio co-activation
-        assert!(l.graph().len() > 0, "Audio freq should create Silk edges");
+        assert!(!l.graph().is_empty(), "Audio freq should create Silk edges");
     }
 
     #[test]
     fn audio_different_freq_bands_distinct() {
-        if skip() {
-            return;
-        }
         let mut l = loop_();
         // Sub-bass (40 Hz) and treble (8000 Hz) should produce different freq hashes
         l.process_one(ContentInput::Audio {

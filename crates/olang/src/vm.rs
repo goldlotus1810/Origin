@@ -1159,9 +1159,6 @@ mod tests {
     use crate::encoder::encode_codepoint;
     use crate::ir::{compile_expr, OlangIrExpr};
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
     fn vm() -> OlangVM {
         OlangVM::new()
     }
@@ -1187,9 +1184,6 @@ mod tests {
 
     #[test]
     fn execute_push_emit() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525); // 🔥
         let mut prog = OlangProgram::new("test");
         prog.push_op(Op::Push(chain.clone()))
@@ -1204,9 +1198,6 @@ mod tests {
 
     #[test]
     fn execute_lca() {
-        if skip() {
-            return;
-        }
         let fire = encode_codepoint(0x1F525);
         let water = encode_codepoint(0x1F4A7);
         let mut prog = OlangProgram::new("test");
@@ -1224,9 +1215,6 @@ mod tests {
 
     #[test]
     fn execute_dup() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         let mut prog = OlangProgram::new("test");
         prog.push_op(Op::Push(chain))
@@ -1240,9 +1228,6 @@ mod tests {
 
     #[test]
     fn execute_swap() {
-        if skip() {
-            return;
-        }
         let fire = encode_codepoint(0x1F525);
         let water = encode_codepoint(0x1F4A7);
         let mut prog = OlangProgram::new("test");
@@ -1274,9 +1259,6 @@ mod tests {
 
     #[test]
     fn execute_edge_emits_event() {
-        if skip() {
-            return;
-        }
         let fire = encode_codepoint(0x1F525);
         let water = encode_codepoint(0x1F4A7);
         let mut prog = OlangProgram::new("test");
@@ -1318,9 +1300,6 @@ mod tests {
 
     #[test]
     fn execute_jmp() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         // JMP 2 → skip PUSH → chỉ HALT
         let mut prog = OlangProgram::new("test");
@@ -1424,9 +1403,6 @@ mod tests {
 
     #[test]
     fn execute_inspect() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525); // 🔥
         let mut prog = OlangProgram::new("test");
         prog.push_op(Op::Push(chain))
@@ -1450,9 +1426,6 @@ mod tests {
 
     #[test]
     fn execute_assert_pass() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         let mut prog = OlangProgram::new("test");
         prog.push_op(Op::Push(chain))
@@ -1482,9 +1455,6 @@ mod tests {
 
     #[test]
     fn execute_typeof() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         let mut prog = OlangProgram::new("test");
         prog.push_op(Op::Push(chain))
@@ -1500,9 +1470,6 @@ mod tests {
 
     #[test]
     fn execute_explain() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         let mut prog = OlangProgram::new("test");
         prog.push_op(Op::Push(chain))
@@ -1520,9 +1487,6 @@ mod tests {
 
     #[test]
     fn execute_why() {
-        if skip() {
-            return;
-        }
         let fire = encode_codepoint(0x1F525);
         let water = encode_codepoint(0x1F4A7);
         let mut prog = OlangProgram::new("test");

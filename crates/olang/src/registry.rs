@@ -656,9 +656,6 @@ mod tests {
     use super::*;
     use crate::encoder::encode_codepoint;
 
-    fn skip_if_empty() -> bool {
-        ucd::table_len() == 0
-    }
 
     #[test]
     fn registry_new_empty() {
@@ -670,24 +667,18 @@ mod tests {
 
     #[test]
     fn insert_and_lookup() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525); // 🔥
         let hash = r.insert(&chain, 0, 0, 1000, false);
 
         let entry = r.lookup_hash(hash).expect("phải tìm được sau insert");
         assert_eq!(entry.layer, 0);
-        assert_eq!(entry.is_qr, false);
+        assert!(!entry.is_qr);
         assert_eq!(entry.chain_hash, hash);
     }
 
     #[test]
     fn insert_idempotent() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525);
 
@@ -699,9 +690,6 @@ mod tests {
 
     #[test]
     fn lookup_chain() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F4A7); // 💧
         r.insert(&chain, 2, 100, 1000, true);
@@ -713,9 +701,6 @@ mod tests {
 
     #[test]
     fn register_alias() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525); // 🔥
         let hash = r.insert(&chain, 0, 0, 1000, false);
@@ -733,9 +718,6 @@ mod tests {
 
     #[test]
     fn alias_idempotent() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525);
         let hash = r.insert(&chain, 0, 0, 1000, false);
@@ -747,9 +729,6 @@ mod tests {
 
     #[test]
     fn layer_rep_single() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525); // 🔥
         let _hash = r.insert(&chain, 0, 0, 1000, false);
@@ -761,9 +740,6 @@ mod tests {
 
     #[test]
     fn layer_rep_multiple() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
 
         // Insert 3 nodes vào L2
@@ -778,9 +754,6 @@ mod tests {
 
     #[test]
     fn qr_supersession() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
 
         let old_chain = encode_codepoint(0x25CB); // ○ (giả sử QR cũ sai)
@@ -807,9 +780,6 @@ mod tests {
 
     #[test]
     fn branch_watermark() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let branch_hash = 0xDEADBEEF_u64;
 
@@ -827,9 +797,6 @@ mod tests {
 
     #[test]
     fn entries_in_layer() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
 
         r.insert(&encode_codepoint(0x1F525), 0, 0, 1000, false);
@@ -843,9 +810,6 @@ mod tests {
 
     #[test]
     fn qr_and_dn_separation() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
 
         r.insert(&encode_codepoint(0x1F525), 0, 0, 1000, true); // QR
@@ -865,9 +829,6 @@ mod tests {
 
     #[test]
     fn multiple_aliases_same_node() {
-        if skip_if_empty() {
-            return;
-        }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525);
         let hash = r.insert(&chain, 0, 0, 1000, false);
@@ -902,7 +863,6 @@ mod tests {
 
     #[test]
     fn insert_with_kind() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525); // 🔥
         let h = r.insert_with_kind(&chain, 1, 0, 0, true, NodeKind::Skill);
@@ -913,7 +873,6 @@ mod tests {
 
     #[test]
     fn insert_default_kind() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         // L0 insert → Alphabet
         let c0 = encode_codepoint(0x25CB);
@@ -927,7 +886,6 @@ mod tests {
 
     #[test]
     fn entries_by_kind() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         // Use codepoints from UCD groups: Box Drawing (SDF) + Misc Symbols (EMOTICON)
         let c1 = encode_codepoint(0x2500); // ─ Box Drawing
@@ -943,7 +901,6 @@ mod tests {
 
     #[test]
     fn kind_summary() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         let c1 = encode_codepoint(0x2500); // ─ Box Drawing
         let c2 = encode_codepoint(0x2654); // ♔ Chess King
@@ -956,7 +913,6 @@ mod tests {
 
     #[test]
     fn evict_cold_removes_l2_plus() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         let c0 = encode_codepoint(0x1F525); // L0
         let c1 = encode_codepoint(0x2654);  // L1
@@ -986,7 +942,6 @@ mod tests {
 
     #[test]
     fn memory_usage_returns_nonzero() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525);
         r.insert(&chain, 0, 0, 0, false);
@@ -1001,7 +956,6 @@ mod tests {
 
     #[test]
     fn reverse_index_after_bulk() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         r.begin_bulk();
         let chain = encode_codepoint(0x1F525);
@@ -1016,7 +970,6 @@ mod tests {
 
     #[test]
     fn reverse_index_normal_mode() {
-        if skip_if_empty() { return; }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525);
         let hash = r.insert(&chain, 0, 0, 0, false);

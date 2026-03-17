@@ -658,17 +658,11 @@ mod tests {
         ContentEncoder::new()
     }
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     // ── Text ─────────────────────────────────────────────────────────────────
 
     #[test]
     fn encode_text_not_empty() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Text {
             content: "tôi buồn quá hôm nay".to_string(),
             timestamp: 1000,
@@ -679,9 +673,6 @@ mod tests {
 
     #[test]
     fn encode_text_emotion_negative() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Text {
             content: "tôi buồn và mệt".to_string(),
             timestamp: 1000,
@@ -695,9 +686,6 @@ mod tests {
 
     #[test]
     fn encode_text_emoji() {
-        if skip() {
-            return;
-        }
         // Text chứa emoji → chain từ UCD của emoji đó
         let r = enc().encode(ContentInput::Text {
             content: "🔥".to_string(),
@@ -710,9 +698,6 @@ mod tests {
 
     #[test]
     fn encode_audio_low_pitch_negative() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Audio {
             freq_hz: 120.0,
             amplitude: 0.3,
@@ -729,9 +714,6 @@ mod tests {
 
     #[test]
     fn encode_audio_chain_not_empty() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Audio {
             freq_hz: 440.0,
             amplitude: 0.6,
@@ -745,9 +727,6 @@ mod tests {
 
     #[test]
     fn encode_sensor_fire_temperature() {
-        if skip() {
-            return;
-        }
         // 40°C → 🔥 chain
         let r = enc().encode(ContentInput::Sensor {
             kind: SensorKind::Temperature,
@@ -766,9 +745,6 @@ mod tests {
 
     #[test]
     fn encode_sensor_cold_temperature() {
-        if skip() {
-            return;
-        }
         // 5°C → ❄ chain
         let r = enc().encode(ContentInput::Sensor {
             kind: SensorKind::Temperature,
@@ -780,9 +756,6 @@ mod tests {
 
     #[test]
     fn encode_sensor_motion() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Sensor {
             kind: SensorKind::Motion,
             value: 1.0,
@@ -796,9 +769,6 @@ mod tests {
 
     #[test]
     fn encode_code_rust() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Code {
             content: "fn main() {\n    println!(\"hello\");\n}".to_string(),
             language: CodeLang::Rust,
@@ -812,9 +782,6 @@ mod tests {
 
     #[test]
     fn encode_math_integral() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Math {
             expression: "∫ f(x) dx".to_string(),
             timestamp: 1000,
@@ -827,9 +794,6 @@ mod tests {
 
     #[test]
     fn encode_system_boot() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::System {
             event: SystemEvent::Boot,
             timestamp: 0,
@@ -840,9 +804,6 @@ mod tests {
 
     #[test]
     fn encode_system_error_negative() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::System {
             event: SystemEvent::Error,
             timestamp: 1000,
@@ -854,9 +815,6 @@ mod tests {
 
     #[test]
     fn encode_image_sphere() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Image {
             sdf_type: 0, // Sphere
             brightness: 0.7,
@@ -872,9 +830,6 @@ mod tests {
 
     #[test]
     fn encode_image_dark_negative() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Image {
             sdf_type: 1, // Box
             brightness: 0.1,
@@ -888,9 +843,6 @@ mod tests {
 
     #[test]
     fn encode_image_motion_high_arousal() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Image {
             sdf_type: 4, // Mixed
             brightness: 0.5,
@@ -905,9 +857,6 @@ mod tests {
 
     #[test]
     fn all_sources_produce_chains() {
-        if skip() {
-            return;
-        }
         let inputs = alloc::vec![
             ContentInput::Text {
                 content: "test".to_string(),
@@ -988,9 +937,6 @@ mod tests {
 
     #[test]
     fn encode_image_multi_region() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Image {
             sdf_type: 4,  // Mixed
             brightness: 0.6,
@@ -1000,16 +946,13 @@ mod tests {
         });
         assert!(!r.chain.is_empty());
         // Multiple regions → LCA chain should have multiple molecules
-        assert!(r.chain.0.len() >= 1, "Multi-region image encodes");
+        assert!(!r.chain.0.is_empty(), "Multi-region image encodes");
     }
 
     // ── Audio spectral features ─────────────────────────────────────────────
 
     #[test]
     fn encode_audio_loud_high_freq() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Audio {
             freq_hz: 8000.0, // treble
             amplitude: 0.9,  // loud
@@ -1022,9 +965,6 @@ mod tests {
 
     #[test]
     fn encode_audio_quiet_low_freq() {
-        if skip() {
-            return;
-        }
         let r = enc().encode(ContentInput::Audio {
             freq_hz: 40.0,   // sub-bass
             amplitude: 0.1,  // quiet

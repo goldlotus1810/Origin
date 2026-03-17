@@ -332,9 +332,6 @@ mod tests {
     use olang::encoder::encode_codepoint;
     use silk::edge::EmotionTag;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     fn make_stm_with_fire(entries: &[(u32, u32)]) -> ShortTermMemory {
         // entries = (codepoint, fire_count)
@@ -394,9 +391,6 @@ mod tests {
 
     #[test]
     fn dream_too_few_nodes_no_cluster() {
-        if skip() {
-            return;
-        }
         // Chỉ 2 observations < min_cluster_size=3
         let stm = make_stm_with_fire(&[(0x1F525, 3), (0x1F4A7, 2)]);
         let graph = SilkGraph::new();
@@ -414,9 +408,6 @@ mod tests {
 
     #[test]
     fn dream_similar_nodes_cluster() {
-        if skip() {
-            return;
-        }
         // Nodes với chain similarity cao (same shape/relation, khác emotion nhẹ)
         let stm = make_stm_unique(&[
             (0.8, 0.9, 5),   // positive high
@@ -435,7 +426,7 @@ mod tests {
         let result = dream.run(&stm, &graph, 1000);
         assert!(result.scanned >= 4, "scanned={}", result.scanned);
         assert!(
-            result.proposals.len() > 0,
+            !result.proposals.is_empty(),
             "Similar nodes phải cluster: clusters={}",
             result.clusters_found
         );
@@ -443,9 +434,6 @@ mod tests {
 
     #[test]
     fn dream_proposals_have_lca_chain() {
-        if skip() {
-            return;
-        }
         let stm = make_stm_with_fire(&[
             (0x1F600, 8), // 😀
             (0x1F601, 7), // 😁
@@ -472,9 +460,6 @@ mod tests {
 
     #[test]
     fn dream_aam_approval_flow() {
-        if skip() {
-            return;
-        }
         // Nodes fire nhiều → confidence cao → AAM approve
         let stm = make_stm_unique(&[
             (0.8, 0.9, 15),
@@ -494,7 +479,7 @@ mod tests {
         assert!(result.scanned >= 4, "scanned={}", result.scanned);
         // Fire cao → proposals với confidence cao → AAM approve nhiều
         assert!(
-            result.proposals.len() > 0,
+            !result.proposals.is_empty(),
             "Fire cao → phải có proposals: {}",
             result.proposals.len()
         );
@@ -502,9 +487,6 @@ mod tests {
 
     #[test]
     fn dream_hebbian_boosts_clustering() {
-        if skip() {
-            return;
-        }
         // Tạo Silk co-activation giữa 2 nodes trước
         let mut graph = SilkGraph::new();
         let chain_a = encode_codepoint(0x2744); // ❄
@@ -546,9 +528,6 @@ mod tests {
 
     #[test]
     fn dream_does_not_cluster_dissimilar() {
-        if skip() {
-            return;
-        }
         // 🔥 và ❄ — opposite emotions → chain similarity thấp
         // Không có Hebbian weight
         let stm = make_stm_with_fire(&[
@@ -579,9 +558,6 @@ mod tests {
 
     #[test]
     fn aggregate_emotion_avg() {
-        if skip() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         let obs1 = Observation {
             chain: chain.clone(),

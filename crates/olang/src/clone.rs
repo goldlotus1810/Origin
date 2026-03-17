@@ -358,9 +358,6 @@ mod tests {
     use crate::writer::OlangWriter;
     use alloc::format;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     fn make_origin(ts: i64) -> Vec<u8> {
         let mut w = OlangWriter::new(ts);
@@ -376,9 +373,6 @@ mod tests {
 
     #[test]
     fn clone_speaker_smaller_than_origin() {
-        if skip() {
-            return;
-        }
         let origin = make_origin(1000);
         let profile = DeviceProfile::speaker("living_room");
         let result = clone_for_device(&origin, &profile, 2000);
@@ -395,9 +389,6 @@ mod tests {
 
     #[test]
     fn clone_preserves_relevant_nodes() {
-        if skip() {
-            return;
-        }
         let origin = make_origin(1000);
         let profile = DeviceProfile::hub("hub_01"); // Hub giữ tất cả
         let result = clone_for_device(&origin, &profile, 2000).unwrap();
@@ -406,9 +397,6 @@ mod tests {
 
     #[test]
     fn clone_hub_more_than_sensor() {
-        if skip() {
-            return;
-        }
         let origin = make_origin(1000);
         let hub_r = clone_for_device(&origin, &DeviceProfile::hub("hub"), 2000).unwrap();
         let sensor_r = clone_for_device(&origin, &DeviceProfile::sensor("s01"), 2000).unwrap();
@@ -422,9 +410,6 @@ mod tests {
 
     #[test]
     fn clone_has_device_marker() {
-        if skip() {
-            return;
-        }
         let origin = make_origin(1000);
         let profile = DeviceProfile::speaker("test_speaker");
         let result = clone_for_device(&origin, &profile, 2000).unwrap();
@@ -448,9 +433,6 @@ mod tests {
 
     #[test]
     fn delta_no_new_nodes() {
-        if skip() {
-            return;
-        }
         let origin = make_origin(1000);
         let profile = DeviceProfile::hub("hub");
         let device = clone_for_device(&origin, &profile, 2000).unwrap();
@@ -478,9 +460,6 @@ mod tests {
 
     #[test]
     fn clone_within_size_limit() {
-        if skip() {
-            return;
-        }
         let origin = make_origin(1000);
         let profile = DeviceProfile::sensor("tiny_sensor");
         let result = clone_for_device(&origin, &profile, 2000).unwrap();
@@ -494,9 +473,6 @@ mod tests {
 
     #[test]
     fn clone_result_roundtrip() {
-        if skip() {
-            return;
-        }
         let origin = make_origin(1000);
         let profile = DeviceProfile::mobile("phone_01");
         let result = clone_for_device(&origin, &profile, 2000).unwrap();

@@ -396,9 +396,6 @@ mod tests {
     use super::*;
     use crate::startup::boot_empty;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     // ── SelfSnapshot ─────────────────────────────────────────────────────────
 
@@ -414,9 +411,6 @@ mod tests {
 
     #[test]
     fn snapshot_after_boot() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         let snap = SelfSnapshot::capture(&result.registry, 1000);
         // Boot seeds axioms → phải có ít nhất 1 node
@@ -444,9 +438,6 @@ mod tests {
 
     #[test]
     fn snapshot_qr_ratio() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         let snap = SelfSnapshot::capture(&result.registry, 1000);
         let ratio = snap.qr_ratio();
@@ -509,9 +500,6 @@ mod tests {
 
     #[test]
     fn spontaneous_fibonacci_reason() {
-        if skip() {
-            return;
-        }
         let registry = crate::registry::Registry::new();
         let snap = SelfSnapshot::capture(&registry, 1000);
         let gaps = detect_gaps(&snap);
@@ -533,9 +521,6 @@ mod tests {
 
     #[test]
     fn self_model_update() {
-        if skip() {
-            return;
-        }
         let mut model = SelfModel::new();
         let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
@@ -545,9 +530,6 @@ mod tests {
 
     #[test]
     fn self_model_accumulates() {
-        if skip() {
-            return;
-        }
         let mut model = SelfModel::new();
         let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
@@ -562,9 +544,6 @@ mod tests {
 
     #[test]
     fn self_model_summary() {
-        if skip() {
-            return;
-        }
         let mut model = SelfModel::new();
         let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
@@ -576,9 +555,6 @@ mod tests {
 
     #[test]
     fn self_model_proposals_grow() {
-        if skip() {
-            return;
-        }
         let mut model = SelfModel::new();
         let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
@@ -595,9 +571,6 @@ mod tests {
 
     #[test]
     fn self_reflection_creates_self_chain() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         let snap = SelfSnapshot::capture(&result.registry, 1000);
         // self_chain phải là chain hợp lệ

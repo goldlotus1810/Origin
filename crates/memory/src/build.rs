@@ -395,16 +395,9 @@ impl Default for ConsolidationScheduler {
 mod tests {
     use super::*;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     fn make_chain() -> MolecularChain {
-        if skip() {
-            MolecularChain::empty()
-        } else {
-            olang::encoder::encode_codepoint(0x1F525) // 🔥
-        }
+        olang::encoder::encode_codepoint(0x1F525) // 🔥
     }
 
     // ── DraftEntry ──────────────────────────────────────────────────────────

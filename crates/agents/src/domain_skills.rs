@@ -1116,6 +1116,101 @@ impl Skill for NetworkSkill {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ImmunitySkill — threat response + countermeasures (complement to NetworkSkill)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Respond to detected threats — quarantine, block, escalate.
+///
+/// NetworkSkill detects anomalies → ImmunitySkill responds to them.
+/// Biological analogy: immune system response after pathogen detection.
+///
+/// state["alert_level"] = "normal" | "elevated" | "critical" (from NetworkSkill)
+/// state["threat_type"] = "port_scan" | "brute_force" | "data_exfil" | "malware" | "unknown"
+/// state["repeat_count"] = how many times this threat has been seen
+///
+/// Output: state["immunity_action"] = "monitor" | "block" | "quarantine" | "escalate"
+pub struct ImmunitySkill;
+
+impl Skill for ImmunitySkill {
+    fn name(&self) -> &str {
+        "Immunity"
+    }
+
+    fn execute(&self, ctx: &mut ExecContext) -> SkillResult {
+        // Require alert_level from NetworkSkill
+        let alert_level = match ctx.get("alert_level") {
+            Some(level) => String::from(level),
+            None => return SkillResult::Insufficient,
+        };
+
+        let threat_type = String::from(ctx.get("threat_type").unwrap_or("unknown"));
+
+        let repeat_count: u32 = ctx
+            .get("repeat_count")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+
+        // Determine response action based on severity + repetition
+        let action = match (alert_level.as_str(), repeat_count) {
+            ("critical", _) => "quarantine",
+            ("elevated", n) if n >= 3 => "quarantine",
+            ("elevated", _) => "block",
+            (_, n) if n >= 5 => "block",
+            _ => "monitor",
+        };
+
+        // Escalate to Chief if quarantine needed
+        let escalate = action == "quarantine";
+        if escalate {
+            ctx.set(String::from("immunity_escalate"), String::from("true"));
+        }
+
+        ctx.set(String::from("immunity_action"), String::from(action));
+        ctx.set(
+            String::from("immunity_summary"),
+            alloc::format!("{} → {} (×{})", threat_type, action, repeat_count),
+        );
+
+        // Encode response as molecular chain
+        let cp = match action {
+            "quarantine" => 0x1F6AB, // 🚫
+            "block" => 0x26D4,       // ⛔
+            "monitor" => 0x1F50D,    // 🔍
+            _ => 0x2714,             // ✔
+        };
+        let chain = encode_codepoint(cp);
+        ctx.push_output(chain.clone());
+
+        let emotion = match action {
+            "quarantine" => EmotionTag {
+                valence: -0.80,
+                arousal: 0.90,
+                dominance: 0.85,
+                intensity: 0.95,
+            },
+            "block" => EmotionTag {
+                valence: -0.50,
+                arousal: 0.75,
+                dominance: 0.70,
+                intensity: 0.70,
+            },
+            _ => EmotionTag {
+                valence: -0.10,
+                arousal: 0.40,
+                dominance: 0.50,
+                intensity: 0.30,
+            },
+        };
+
+        SkillResult::Ok {
+            chain,
+            emotion,
+            note: alloc::format!("immunity {} {}", action, threat_type),
+        }
+    }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Tests
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1407,6 +1502,61 @@ mod tests {
         let r = skill.execute(&mut ctx);
         assert!(r.is_ok());
         assert_eq!(ctx.get("alert_level"), Some("normal"));
+    }
+
+    // ── ImmunitySkill ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn immunity_quarantine_on_critical() {
+        let skill = ImmunitySkill;
+        let mut ctx = ctx();
+        ctx.set(String::from("alert_level"), String::from("critical"));
+        ctx.set(String::from("threat_type"), String::from("malware"));
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert_eq!(ctx.get("immunity_action"), Some("quarantine"));
+        assert_eq!(ctx.get("immunity_escalate"), Some("true"));
+    }
+
+    #[test]
+    fn immunity_block_on_elevated() {
+        let skill = ImmunitySkill;
+        let mut ctx = ctx();
+        ctx.set(String::from("alert_level"), String::from("elevated"));
+        ctx.set(String::from("threat_type"), String::from("port_scan"));
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert_eq!(ctx.get("immunity_action"), Some("block"));
+    }
+
+    #[test]
+    fn immunity_monitor_on_normal() {
+        let skill = ImmunitySkill;
+        let mut ctx = ctx();
+        ctx.set(String::from("alert_level"), String::from("normal"));
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert_eq!(ctx.get("immunity_action"), Some("monitor"));
+    }
+
+    #[test]
+    fn immunity_escalate_on_repeated_elevated() {
+        let skill = ImmunitySkill;
+        let mut ctx = ctx();
+        ctx.set(String::from("alert_level"), String::from("elevated"));
+        ctx.set(String::from("repeat_count"), String::from("5"));
+        let r = skill.execute(&mut ctx);
+        assert!(r.is_ok());
+        assert_eq!(ctx.get("immunity_action"), Some("quarantine"));
+        assert_eq!(ctx.get("immunity_escalate"), Some("true"));
+    }
+
+    #[test]
+    fn immunity_insufficient_without_alert() {
+        let skill = ImmunitySkill;
+        let mut ctx = ctx();
+        let r = skill.execute(&mut ctx);
+        assert!(matches!(r, SkillResult::Insufficient));
     }
 
     // ── QT4 compliance ───────────────────────────────────────────────────────

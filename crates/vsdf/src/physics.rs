@@ -478,7 +478,7 @@ mod tests {
         let p = Vec3::new(0.0, 2.0, 0.0);
         let light = Vec3::new(0.0, 1.0, 0.0);
         let shade = diffuse_shade(SdfKind::Sphere, p, &sphere_params(), light, 0.5, 1.0);
-        assert!(shade >= 0.0 && shade <= 1.0, "Shade trong [0,1]: {}", shade);
+        assert!((0.0..=1.0).contains(&shade), "Shade trong [0,1]: {}", shade);
     }
 
     // ── Physics pipeline ──────────────────────────────────────────────────────

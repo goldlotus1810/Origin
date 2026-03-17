@@ -303,17 +303,11 @@ mod tests {
     use super::*;
     use alloc::format;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     // ── ZWJ sequence ─────────────────────────────────────────────────────────
 
     #[test]
     fn zwj_family_is_one_chain() {
-        if skip() {
-            return;
-        }
         // 👨‍👩‍👦 = U+1F468 ZWJ U+1F469 ZWJ U+1F466
         let s = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F466}";
         let tokens = parse_tokens(s);
@@ -334,9 +328,6 @@ mod tests {
 
     #[test]
     fn zwj_couple_two_molecules() {
-        if skip() {
-            return;
-        }
         // 👨‍👨 = U+1F468 ZWJ U+1F468
         let s = "\u{1F468}\u{200D}\u{1F468}";
         let tokens = parse_tokens(s);
@@ -352,9 +343,6 @@ mod tests {
 
     #[test]
     fn space_two_separate_nodes() {
-        if skip() {
-            return;
-        }
         // 👨 👨 → 2 chains riêng
         let chains = parse_to_chains("\u{1F468} \u{1F468}");
         assert_eq!(chains.len(), 2, "space → 2 nodes riêng");
@@ -362,9 +350,6 @@ mod tests {
 
     #[test]
     fn fire_space_water_two_chains() {
-        if skip() {
-            return;
-        }
         let chains = parse_to_chains("\u{1F525} \u{1F4A7}"); // 🔥 💧
         assert_eq!(chains.len(), 2, "🔥 💧 → 2 chains riêng");
         // Hai chains phải khác nhau
@@ -379,9 +364,6 @@ mod tests {
 
     #[test]
     fn plus_gives_lca() {
-        if skip() {
-            return;
-        }
         // 🔥+💧 → LCA → 1 chain
         let tokens = parse_tokens("\u{1F525}+\u{1F4A7}");
         let has_op = tokens
@@ -394,9 +376,6 @@ mod tests {
 
     #[test]
     fn juxtapose_two_emojis_separate() {
-        if skip() {
-            return;
-        }
         // 👨👨 (viết liền không có ZWJ) → 2 nodes riêng
         let chains = parse_to_chains("\u{1F468}\u{1F468}");
         // Juxtapose: mỗi emoji → chain riêng
@@ -446,9 +425,6 @@ mod tests {
 
     #[test]
     fn word_to_chain_known() {
-        if skip() {
-            return;
-        }
         let token = SepToken::Word("fire".into());
         let chain = token_to_chain(&token);
         assert!(!chain.is_empty(), "'fire' → non-empty chain");
@@ -465,9 +441,6 @@ mod tests {
 
     #[test]
     fn zwj_vs_space_different_lengths() {
-        if skip() {
-            return;
-        }
         // ZWJ → 1 chain, 2 mols
         let zwj_chains = parse_to_chains("\u{1F468}\u{200D}\u{1F469}");
         // Space → 2 chains, 1 mol each
@@ -481,9 +454,6 @@ mod tests {
 
     #[test]
     fn separator_table_correctness() {
-        if skip() {
-            return;
-        }
         // Theo spec:
         // 👨‍👨 (ZWJ) = 1 cluster: couple → chain 2 mol ✓
         // 👨 👨 (space) = 2 nodes riêng → 2 chains ✓

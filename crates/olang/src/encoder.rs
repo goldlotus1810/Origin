@@ -81,9 +81,6 @@ mod tests {
 
     #[test]
     fn encode_fire() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let chain = encode_codepoint(0x1F525); // 🔥
         assert_eq!(chain.len(), 1);
         let m = &chain.0[0];
@@ -100,9 +97,6 @@ mod tests {
 
     #[test]
     fn encode_droplet() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let chain = encode_codepoint(0x1F4A7); // 💧
         assert_eq!(chain.len(), 1);
         let m = &chain.0[0];
@@ -113,9 +107,6 @@ mod tests {
 
     #[test]
     fn encode_sphere_sdf() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let chain = encode_codepoint(0x25CF); // ●
         assert_eq!(chain.0[0].shape_base(), ShapeBase::Sphere);
         assert_eq!(chain.0[0].time_base(), TimeDim::Static, "SDF shapes = Static");
@@ -123,9 +114,6 @@ mod tests {
 
     #[test]
     fn encode_arrow_causes() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let chain = encode_codepoint(0x2192); // →
         assert_eq!(chain.0[0].relation_base(), RelationBase::Causes);
         assert_eq!(chain.0[0].time_base(), TimeDim::Instant, "Arrow = Instant");
@@ -133,9 +121,6 @@ mod tests {
 
     #[test]
     fn encode_member_relation() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let chain = encode_codepoint(0x2208); // ∈
         assert_eq!(chain.0[0].relation_base(), RelationBase::Member);
         assert_eq!(chain.0[0].time_base(), TimeDim::Static, "Math = Static");
@@ -143,9 +128,6 @@ mod tests {
 
     #[test]
     fn encode_zwj_family() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         // 👨‍👩‍👦 = U+1F468 ZWJ U+1F469 ZWJ U+1F466
         let chain = encode_zwj_sequence(&[0x1F468, 0x1F469, 0x1F466]);
         assert_eq!(chain.len(), 3);
@@ -168,9 +150,6 @@ mod tests {
 
     #[test]
     fn encode_zwj_single() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let chain = encode_zwj_sequence(&[0x1F525]);
         assert_eq!(chain.len(), 1);
         // Single = Member (kết thúc ngay)
@@ -179,9 +158,6 @@ mod tests {
 
     #[test]
     fn encode_flag_vietnam() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         // 🇻🇳 = U+1F1FB (V) + U+1F1F3 (N)
         // QT4: encode_flag delegates to encode_zwj_sequence — no hardcoded Molecule
         let chain = encode_flag(0x1F1FB, 0x1F1F3);
@@ -193,9 +169,6 @@ mod tests {
 
     #[test]
     fn encode_different_cps_different_chains() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let fire = encode_codepoint(0x1F525);
         let water = encode_codepoint(0x1F4A7);
         // Phải khác nhau ít nhất ở emotion
@@ -207,9 +180,6 @@ mod tests {
 
     #[test]
     fn encode_no_hardcode_verify() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         // Verify chain đến từ UCD — so sánh với UCD trực tiếp
         let cp = 0x1F525u32;
         let chain = encode_codepoint(cp);

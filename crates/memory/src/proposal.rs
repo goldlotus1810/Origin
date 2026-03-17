@@ -838,15 +838,9 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     #[test]
     fn proposal_is_confident() {
-        if skip() {
-            return;
-        }
         let chain = olang::encoder::encode_codepoint(0x1F525);
         let p = DreamProposal::new_node(
             chain,
@@ -860,9 +854,6 @@ mod tests {
 
     #[test]
     fn proposal_not_confident() {
-        if skip() {
-            return;
-        }
         let chain = olang::encoder::encode_codepoint(0x1F525);
         let p = DreamProposal::new_node(
             chain,
@@ -876,9 +867,6 @@ mod tests {
 
     #[test]
     fn aam_approve_new_node() {
-        if skip() {
-            return;
-        }
         let chain = olang::encoder::encode_codepoint(0x1F525);
         let p = DreamProposal::new_node(
             chain,
@@ -892,9 +880,6 @@ mod tests {
 
     #[test]
     fn aam_pending_insufficient_sources() {
-        if skip() {
-            return;
-        }
         let chain = olang::encoder::encode_codepoint(0x1F525);
         let p = DreamProposal::new_node(
             chain,
@@ -1024,9 +1009,6 @@ mod tests {
 
     #[test]
     fn skill_proposal_abstraction_needs_sources() {
-        if skip() {
-            return;
-        }
         let chain = olang::encoder::encode_codepoint(0x1F525);
         let p = SkillProposal::new(
             "Abstraction",

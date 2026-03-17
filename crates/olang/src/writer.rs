@@ -298,9 +298,6 @@ mod tests {
     use crate::encoder::encode_codepoint;
     use alloc::string::String;
 
-    fn skip_if_empty() -> bool {
-        ucd::table_len() == 0
-    }
 
     #[test]
     fn writer_header() {
@@ -320,9 +317,6 @@ mod tests {
 
     #[test]
     fn write_node() {
-        if skip_if_empty() {
-            return;
-        }
         let mut w = OlangWriter::new(0);
         let chain = encode_codepoint(0x1F525); // 🔥
         let before = w.size();
@@ -343,9 +337,6 @@ mod tests {
 
     #[test]
     fn write_node_qr() {
-        if skip_if_empty() {
-            return;
-        }
         let mut w = OlangWriter::new(0);
         let chain = encode_codepoint(0x1F525);
         w.append_node(&chain, 0, true, 1000).unwrap();
@@ -393,9 +384,6 @@ mod tests {
 
     #[test]
     fn write_sequence_offsets() {
-        if skip_if_empty() {
-            return;
-        }
         let mut w = OlangWriter::new(0);
 
         let c1 = encode_codepoint(0x1F525);
@@ -410,9 +398,6 @@ mod tests {
 
     #[test]
     fn write_mixed_records() {
-        if skip_if_empty() {
-            return;
-        }
         let mut w = OlangWriter::new(0);
 
         let chain = encode_codepoint(0x1F525);
