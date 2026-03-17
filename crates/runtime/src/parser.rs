@@ -252,7 +252,17 @@ impl OlangParser {
 
         // Empty
         if trimmed.is_empty() {
-            return Err("Empty expression".to_string());
+            return Err("Empty expression — use ○{help} for syntax guide".to_string());
+        }
+
+        // Unmatched braces
+        let open_count = trimmed.chars().filter(|&c| c == '{').count();
+        let close_count = trimmed.chars().filter(|&c| c == '}').count();
+        if open_count != close_count {
+            return Err(format!(
+                "Unmatched braces: {} open, {} close",
+                open_count, close_count
+            ));
         }
 
         // System commands: dream, stats, seed, ...

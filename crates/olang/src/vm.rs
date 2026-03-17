@@ -79,6 +79,20 @@ pub enum VmError {
     DivisionByZero,
 }
 
+impl core::fmt::Display for VmError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::StackUnderflow => write!(f, "Stack underflow — pop from empty stack"),
+            Self::StackOverflow => write!(f, "Stack overflow — exceeded {} entries", STACK_MAX),
+            Self::InfiniteLoop => write!(f, "Infinite loop detected (QT2: ∞ is wrong)"),
+            Self::InvalidJump(target) => write!(f, "Invalid jump to position {}", target),
+            Self::MaxStepsExceeded => write!(f, "Max steps exceeded ({}) — program too long", STEPS_MAX),
+            Self::MaxCallDepthExceeded => write!(f, "Max call depth exceeded — too many nested scopes"),
+            Self::DivisionByZero => write!(f, "Division by zero"),
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // VmStack
 // ─────────────────────────────────────────────────────────────────────────────
