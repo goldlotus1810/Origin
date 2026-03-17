@@ -28,7 +28,7 @@ use olang::semantic;
 use olang::syntax;
 use olang::knowtree::KnowTree;
 use olang::registry::Registry;
-use vsdf::body::{body_from_molecule, BodyStore};
+use vsdf::body::{body_from_molecule_full, BodyStore};
 use olang::self_model::SelfModel;
 use olang::separator::parse_to_chains;
 use olang::startup::{boot, chain_to_emoji, resolve_with_cp, BootStage, SystemManifest};
@@ -2165,9 +2165,10 @@ impl HomeRuntime {
             if let Some(mol) = chain.first() {
                 let hash = chain.chain_hash();
                 if self.body_store.get(hash).is_none() {
-                    let body = body_from_molecule(
+                    let body = body_from_molecule_full(
                         hash,
                         mol.shape,
+                        mol.relation,
                         mol.emotion.valence,
                         mol.emotion.arousal,
                         mol.time,
@@ -2215,9 +2216,10 @@ impl HomeRuntime {
                             // Tạo body cho evolved node (RAM cache — sau file)
                             if let Some(evolved_mol) = evolved_chain.first() {
                                 if self.body_store.get(evolved_hash).is_none() {
-                                    let body = body_from_molecule(
+                                    let body = body_from_molecule_full(
                                         evolved_hash,
                                         evolved_mol.shape,
+                                        evolved_mol.relation,
                                         evolved_mol.emotion.valence,
                                         evolved_mol.emotion.arousal,
                                         evolved_mol.time,

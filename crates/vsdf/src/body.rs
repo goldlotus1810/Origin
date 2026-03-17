@@ -456,56 +456,197 @@ pub fn shape_base_to_sdf(shape_base: u8) -> SdfKind {
     }
 }
 
-/// Tạo default NodeBody từ Molecule bytes.
+/// Tạo NodeBody hoàn chỉnh từ Molecule 5 bytes — CÔNG THỨC, không phải dữ liệu.
 ///
-/// Molecule [shape][relation][valence][arousal][time] → NodeBody:
-///   shape → sdf_kind + default params
-///   valence → emotion_v spline (flat)
-///   arousal → emotion_a spline (flat)
-///   time → intensity spline envelope
-pub fn body_from_molecule(chain_hash: u64, shape: u8, valence: u8, arousal: u8, time: u8) -> NodeBody {
-    let shape_base = if shape == 0 { 1 } else { ((shape - 1) % 8) + 1 };
-    let sdf_kind = shape_base_to_sdf(shape_base);
+/// Mọi thuộc tính được TÍNH từ 5 bytes, không lưu trữ:
+///
+/// ```text
+/// [Shape]    → SdfKind + SdfParams (r, h, r2 từ sub_index)
+/// [Relation] → alpha, roughness (relation type ảnh hưởng vật chất)
+/// [Valence]  → color temperature (warm/cool), emotion_v spline
+/// [Arousal]  → emission, scale, force, emotion_a spline
+/// [Time]     → intensity envelope, temperature curve, frequency
+/// ```
+///
+/// Deterministic: cùng 5 bytes → cùng NodeBody. Có thể evict khỏi RAM
+/// rồi tái tạo bất kỳ lúc nào.
+pub fn body_from_molecule(
+    chain_hash: u64,
+    shape: u8,
+    valence: u8,
+    arousal: u8,
+    time: u8,
+) -> NodeBody {
+    body_from_molecule_full(chain_hash, shape, 0x01, valence, arousal, time)
+}
 
-    // Valence/arousal → normalized f32
+/// Full 5D → Body computation. Dùng tất cả 5 chiều.
+///
+/// Đây là "công thức chính" — mỗi chiều đóng góp vào thuộc tính vật lý:
+///   Shape    → hình dạng + kích thước
+///   Relation → tính chất bề mặt (alpha, roughness)
+///   Valence  → màu sắc + cảm xúc
+///   Arousal  → năng lượng (emission, scale, force)
+///   Time     → dynamics (intensity, temperature, frequency envelopes)
+pub fn body_from_molecule_full(
+    chain_hash: u64,
+    shape: u8,
+    relation: u8,
+    valence: u8,
+    arousal: u8,
+    time: u8,
+) -> NodeBody {
+    // ── Extract base + sub_index from hierarchical encoding ──────────
+    let shape_base = if shape == 0 { 1 } else { ((shape - 1) % 8) + 1 };
+    let shape_sub = if shape == 0 { 0 } else { (shape - 1) / 8 };
+    let relation_base = if relation == 0 { 1 } else { ((relation - 1) % 8) + 1 };
+    let time_base = if time == 0 { 3 } else { ((time - 1) % 5) + 1 };
+    let time_sub = if time == 0 { 0 } else { (time - 1) / 5 };
+
+    // ── Normalized values ────────────────────────────────────────────
     let v_norm = (valence as f32 - 128.0) / 128.0; // -1.0 .. +1.0
     let a_norm = arousal as f32 / 255.0; // 0.0 .. 1.0
 
-    // Time base → intensity envelope
-    let time_base = if time == 0 { 3 } else { ((time - 1) % 5) + 1 };
+    // ── 1. Shape → SdfKind + SdfParams ──────────────────────────────
+    // sub_index scales the default size: more variation = smaller details
+    let size_factor = 0.3 + 0.7 / (1.0 + shape_sub as f32 * 0.3); // 0.3..1.0
+    let sdf_kind = shape_base_to_sdf(shape_base);
+    let sdf_params = match sdf_kind {
+        SdfKind::Sphere | SdfKind::Ellipsoid | SdfKind::Octahedron => {
+            SdfParams::sphere(size_factor * 0.5)
+        }
+        SdfKind::Box | SdfKind::RoundBox => {
+            let s = size_factor * 0.4;
+            SdfParams::sdf_box(s, s * 0.8, s) // slightly flattened
+        }
+        SdfKind::Cone | SdfKind::Pyramid => {
+            SdfParams::cone(size_factor * 0.3, size_factor * 0.6)
+        }
+        SdfKind::Torus | SdfKind::Link => {
+            SdfParams::torus(size_factor * 0.4, size_factor * 0.15)
+        }
+        SdfKind::Capsule | SdfKind::Cylinder | SdfKind::HexPrism | SdfKind::TriPrism => {
+            SdfParams::capsule(size_factor * 0.2, size_factor * 0.5)
+        }
+        SdfKind::CutSphere | SdfKind::CutHollow | SdfKind::DeathStar => {
+            SdfParams::sphere(size_factor * 0.45)
+        }
+        SdfKind::Plane | SdfKind::SolidAngle => SdfParams::default(),
+    };
 
+    // ── 2. Relation → surface properties ────────────────────────────
+    // Relation type influences how the node "connects" to the world visually
+    let (rel_alpha, rel_roughness) = match relation_base {
+        1 => (1.0, 0.5),  // Member — solid, medium rough
+        2 => (0.9, 0.3),  // Subset — slightly transparent, smoother
+        3 => (1.0, 0.1),  // Equivalent — solid, very smooth (mirror-like)
+        4 => (0.7, 0.8),  // Orthogonal — semi-transparent, rough
+        5 => (1.0, 0.4),  // Compose — solid, moderate
+        6 => (0.95, 0.2), // Causes — near-solid, smooth (directional energy)
+        7 => (0.85, 0.6), // Approximate — slightly hazy
+        8 => (0.8, 0.5),  // Inverse — semi-transparent
+        _ => (1.0, 0.5),
+    };
+
+    // ── 3. Valence → color temperature ──────────────────────────────
+    // Positive = warm (red/orange/yellow), Negative = cool (blue/purple)
+    // Neutral = natural gray
+    let (mat_r, mat_g, mat_b) = if v_norm > 0.3 {
+        // Warm: orange → yellow as v increases
+        let t = (v_norm - 0.3) / 0.7; // 0..1
+        (0.9 + t * 0.1, 0.4 + t * 0.5, 0.1 + t * 0.1)
+    } else if v_norm < -0.3 {
+        // Cool: blue → purple as v decreases
+        let t = (-v_norm - 0.3) / 0.7; // 0..1
+        (0.15 + t * 0.2, 0.3 - t * 0.1, 0.6 + t * 0.35)
+    } else {
+        // Neutral zone: warm gray with subtle tint
+        let t = (v_norm + 0.3) / 0.6; // 0..1 within [-0.3, 0.3]
+        (0.5 + t * 0.2, 0.5 + t * 0.1, 0.6 - t * 0.15)
+    };
+
+    // ── 4. Arousal → energy properties ──────────────────────────────
+    // High arousal = glowing, larger, more forceful
+    let emission = a_norm * a_norm * 0.8; // quadratic: low arousal barely glows
+    let scale = 0.7 + a_norm * 0.6; // 0.7..1.3
+
+    // ── 5. Time → all 4 temporal splines ────────────────────────────
+    // Time base determines the envelope shape for intensity, temperature,
+    // force, and frequency. time_sub adds phase variation.
+    let phase = time_sub as f32 * 0.15; // 0.0..~0.6 phase shift
+
+    let intensity_spline = match time_base {
+        1 => VectorSpline::flat(0.4 + a_norm * 0.3), // Static: level depends on arousal
+        2 => VectorSpline::linear(0.2 + phase, 0.6 + a_norm * 0.2), // Slow rise
+        3 => VectorSpline::flat(0.5 + a_norm * 0.2),                // Medium steady
+        4 => VectorSpline::linear(0.1 + phase, 0.8 + a_norm * 0.2), // Fast rise
+        5 => VectorSpline::linear(phase, 1.0),                      // Instant
+        _ => VectorSpline::flat(0.5),
+    };
+
+    // Temperature: arousal heats things up, time modulates
+    let temp_base = a_norm * 0.6; // hot things have high arousal
+    let temperature_spline = match time_base {
+        1 => VectorSpline::flat(temp_base),
+        2 => VectorSpline::linear(temp_base * 0.5, temp_base),
+        3 => VectorSpline::flat(temp_base * 0.8),
+        4 => VectorSpline::linear(temp_base * 0.3, temp_base * 1.2),
+        5 => VectorSpline::linear(0.0, temp_base * 1.5),
+        _ => VectorSpline::flat(temp_base),
+    };
+
+    // Force: arousal = energy, time = how it's released
+    let force_base = a_norm * 0.5;
+    let force_spline = match time_base {
+        1 => VectorSpline::flat(force_base * 0.3), // Static = minimal force
+        2 => VectorSpline::linear(0.0, force_base), // Slow build
+        3 => VectorSpline::flat(force_base * 0.6),  // Steady
+        4 => VectorSpline::linear(force_base * 0.2, force_base), // Fast build
+        5 => VectorSpline::linear(0.0, force_base * 1.5), // Burst
+        _ => VectorSpline::flat(0.0),
+    };
+
+    // Frequency: time determines rhythm, arousal determines pitch
+    let freq_base = 0.2 + a_norm * 0.5;
+    let frequency_spline = match time_base {
+        1 => VectorSpline::flat(0.0),              // Static = no rhythm
+        2 => VectorSpline::flat(freq_base * 0.3),  // Slow = low freq
+        3 => VectorSpline::flat(freq_base * 0.5),  // Medium
+        4 => VectorSpline::flat(freq_base * 0.8),  // Fast
+        5 => VectorSpline::flat(freq_base),         // Instant = highest
+        _ => VectorSpline::flat(0.0),
+    };
+
+    // ── Assemble NodeBody ────────────────────────────────────────────
     let mut body = NodeBody::new(chain_hash);
     body.sdf_kind = Some(sdf_kind);
+    body.sdf_params = sdf_params;
 
-    // Emotion splines (flat at molecule value)
+    // Material: combine all dimensions
+    body.material = Material {
+        r: mat_r,
+        g: mat_g,
+        b: mat_b,
+        alpha: rel_alpha,
+        roughness: rel_roughness,
+        emission,
+    };
+
+    // Transform: arousal → scale
+    body.transform.scale = scale;
+
+    // Splines: computed from time × arousal
+    body.splines.intensity = intensity_spline;
+    body.splines.temperature = temperature_spline;
+    body.splines.force = force_spline;
+    body.splines.frequency = frequency_spline;
+
+    // Emotion splines from valence/arousal (only when non-default)
     if valence != 0x80 {
         body.splines.emotion_v = VectorSpline::flat(v_norm);
     }
     if arousal != 0x80 {
         body.splines.emotion_a = VectorSpline::flat(a_norm);
-    }
-
-    // Time → intensity behavior
-    body.splines.intensity = match time_base {
-        1 => VectorSpline::flat(0.5),      // Static
-        2 => VectorSpline::linear(0.3, 0.7), // Slow rise
-        3 => VectorSpline::flat(0.6),      // Medium (steady)
-        4 => VectorSpline::linear(0.2, 1.0), // Fast rise
-        5 => VectorSpline::linear(0.0, 1.0), // Instant
-        _ => VectorSpline::flat(0.5),
-    };
-
-    // Emission from arousal
-    body.material.emission = a_norm * 0.5;
-    // Color hint from valence (warm=positive, cool=negative)
-    if v_norm > 0.2 {
-        body.material.r = 0.9;
-        body.material.g = 0.5 + v_norm * 0.3;
-        body.material.b = 0.2;
-    } else if v_norm < -0.2 {
-        body.material.r = 0.2;
-        body.material.g = 0.4;
-        body.material.b = 0.7 + (-v_norm) * 0.3;
     }
 
     body
@@ -603,12 +744,18 @@ mod tests {
         assert_eq!(body.sdf_kind, Some(SdfKind::Sphere));
         // Valence positive → warm color
         assert!(body.material.r > 0.7, "Fire = warm red");
-        // Arousal high → emission
-        assert!(body.material.emission > 0.2, "Fire = glowing");
+        // Arousal high → emission (quadratic)
+        assert!(body.material.emission > 0.3, "Fire = glowing");
+        // Arousal high → larger scale
+        assert!(body.transform.scale > 1.0, "Fire = energetic, larger");
         // Time=Fast → rising intensity
         let snap0 = body.evaluate(0.0);
         let snap1 = body.evaluate(1.0);
         assert!(snap1.intensity > snap0.intensity, "Fast = rising intensity");
+        // Temperature should be significant (high arousal)
+        assert!(snap1.temperature > 0.3, "Fire = hot");
+        // Force should build (fast time)
+        assert!(snap1.force > snap0.force, "Fast = building force");
     }
 
     #[test]
@@ -616,9 +763,14 @@ mod tests {
         // 💧 WATER: shape=Sphere, valence=0x80 (neutral), arousal=0x40 (low), time=Slow
         let body = body_from_molecule(0x0A7E, 0x01, 0x80, 0x40, 0x02);
         assert_eq!(body.sdf_kind, Some(SdfKind::Sphere));
-        // Neutral valence → default colors
-        // Arousal low → low emission
-        assert!(body.material.emission < 0.2, "Water = calm, low emission");
+        // Arousal low → low emission (quadratic → very low)
+        assert!(body.material.emission < 0.1, "Water = calm, low emission");
+        // Arousal low → smaller scale
+        assert!(body.transform.scale < 1.0, "Water = calm, smaller");
+        // Slow time → slow build temperature
+        let snap0 = body.evaluate(0.0);
+        let snap1 = body.evaluate(1.0);
+        assert!(snap1.temperature > snap0.temperature, "Slow = warming up");
     }
 
     #[test]
@@ -626,7 +778,54 @@ mod tests {
         // sad concept: valence=0x30 (negative), arousal=0x60
         let body = body_from_molecule(0xBBBB, 0x01, 0x30, 0x60, 0x03);
         // Negative valence → cool blue
-        assert!(body.material.b > 0.7, "Negative = cool blue");
+        assert!(body.material.b > 0.6, "Negative = cool blue");
+        assert!(body.material.r < body.material.b, "Blue dominates red");
+    }
+
+    #[test]
+    fn body_from_molecule_full_5d() {
+        // Test full 5D computation with relation
+        // Orthogonal relation → semi-transparent, rough
+        let body = body_from_molecule_full(0xABCD, 0x03, 0x04, 0xA0, 0xB0, 0x03);
+        assert_eq!(body.sdf_kind, Some(SdfKind::Box));
+        assert!(body.material.alpha < 0.8, "Orthogonal = semi-transparent");
+        assert!(body.material.roughness > 0.7, "Orthogonal = rough");
+    }
+
+    #[test]
+    fn body_from_molecule_deterministic() {
+        // Same 5 bytes → identical body (core formula guarantee)
+        let a = body_from_molecule_full(0x1234, 0x09, 0x03, 0xC0, 0x90, 0x04);
+        let b = body_from_molecule_full(0x1234, 0x09, 0x03, 0xC0, 0x90, 0x04);
+        assert_eq!(a.sdf_kind, b.sdf_kind);
+        assert!((a.material.r - b.material.r).abs() < 1e-6);
+        assert!((a.material.emission - b.material.emission).abs() < 1e-6);
+        assert!((a.transform.scale - b.transform.scale).abs() < 1e-6);
+        let sa = a.evaluate(0.5);
+        let sb = b.evaluate(0.5);
+        assert!((sa.intensity - sb.intensity).abs() < 1e-6);
+        assert!((sa.temperature - sb.temperature).abs() < 1e-6);
+    }
+
+    #[test]
+    fn body_from_molecule_static_no_frequency() {
+        // time_base=1 (Static) → frequency should be 0 (no rhythm)
+        let body = body_from_molecule(0x5555, 0x01, 0x80, 0x80, 0x01);
+        let snap = body.evaluate(0.5);
+        assert!((snap.frequency).abs() < 1e-5, "Static = no frequency");
+    }
+
+    #[test]
+    fn body_from_molecule_shape_sub_scales_size() {
+        // shape=0x01 (Sphere, sub=0) vs shape=0x09 (Sphere, sub=1)
+        let big = body_from_molecule(0x1111, 0x01, 0x80, 0x80, 0x03);
+        let small = body_from_molecule(0x2222, 0x09, 0x80, 0x80, 0x03);
+        assert!(
+            big.sdf_params.r > small.sdf_params.r,
+            "Higher sub_index = smaller size: {} vs {}",
+            big.sdf_params.r,
+            small.sdf_params.r
+        );
     }
 
     #[test]
