@@ -1736,4 +1736,35 @@ mod tests {
         let n = outputs[0].to_number().unwrap();
         assert!((n - 99.0).abs() < f64::EPSILON, "Catch should output 99, got {}", n);
     }
+
+    #[test]
+    fn for_in_emits_counter_values() {
+        // for i in 0..3 { emit i }
+        // Counter on stack, DUP into scoped var each iteration.
+        // Should output: 0.0, 1.0, 2.0
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(0.0));          // counter = 0 on stack
+        prog.push_op(Op::Loop(3));               // 3 iterations
+        prog.push_op(Op::ScopeBegin);
+        prog.push_op(Op::Dup);                   // dup counter for body
+        prog.push_op(Op::Store("i".into()));     // body can use i
+        prog.push_op(Op::LoadLocal("i".into())); // load counter var
+        prog.push_op(Op::Emit);                  // emit it
+        // Increment counter on stack
+        prog.push_op(Op::PushNum(1.0));
+        prog.push_op(Op::Call("__hyp_add".into()));
+        prog.push_op(Op::ScopeEnd);              // destroys scope, triggers loop
+        prog.push_op(Op::Pop);                   // discard counter after loop
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "for-in error: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 3, "Should emit 3 values, got {}", outputs.len());
+        let v0 = outputs[0].to_number().unwrap();
+        let v1 = outputs[1].to_number().unwrap();
+        let v2 = outputs[2].to_number().unwrap();
+        assert!((v0 - 0.0).abs() < f64::EPSILON, "First should be 0, got {}", v0);
+        assert!((v1 - 1.0).abs() < f64::EPSILON, "Second should be 1, got {}", v1);
+        assert!((v2 - 2.0).abs() < f64::EPSILON, "Third should be 2, got {}", v2);
+    }
 }

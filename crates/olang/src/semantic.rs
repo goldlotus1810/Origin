@@ -233,6 +233,20 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // Commands with args are always valid
         }
 
+        Stmt::ForIn { var, start, end, body } => {
+            if end <= start {
+                errors.push(SemError::new(&alloc::format!(
+                    "for-in range {}..{} is empty", start, end
+                )));
+            }
+            scope.enter();
+            scope.locals.push(var.clone());
+            for s in body {
+                validate_stmt(s, scope, errors);
+            }
+            scope.exit();
+        }
+
         Stmt::TryCatch { try_block, catch_block } => {
             scope.enter();
             for s in try_block {
@@ -423,7 +437,7 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         }
         Stmt::Expr(expr) => infer_expr_kind(expr),
         Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. }
-        | Stmt::Match { .. } | Stmt::TryCatch { .. } => ChainKind::Void,
+        | Stmt::Match { .. } | Stmt::TryCatch { .. } | Stmt::ForIn { .. } => ChainKind::Void,
     }
 }
 
@@ -585,6 +599,38 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 }
                 ctx.locals.truncate(saved);
             }
+        }
+
+        Stmt::ForIn { var, start, end, body } => {
+            // for var in start..end { body }
+            // Counter lives on stack; each iteration DUP into scoped var.
+            // PushNum(start)          // counter on stack
+            // Loop(N)
+            //   ScopeBegin
+            //   Dup, Store(var)       // body sees var in scope
+            //   [body]
+            //   PushNum(1), Call(__hyp_add) // increment counter on stack
+            //   ScopeEnd              // pop scope, loop jump-back
+            // Pop                     // discard counter after loop
+            let count = end.saturating_sub(*start);
+            ctx.emit(Op::PushNum(*start as f64));
+            if count > 0 {
+                ctx.emit(Op::Loop(count));
+                ctx.emit(Op::ScopeBegin);
+                ctx.emit(Op::Dup);
+                ctx.emit(Op::Store(var.clone()));
+                ctx.locals.push(var.clone());
+                let saved = ctx.locals.len();
+                for s in body {
+                    lower_stmt(s, ctx);
+                }
+                ctx.locals.truncate(saved);
+                // Increment counter on stack
+                ctx.emit(Op::PushNum(1.0));
+                ctx.emit(Op::Call("__hyp_add".into()));
+                ctx.emit(Op::ScopeEnd);
+            }
+            ctx.emit(Op::Pop);
         }
 
         Stmt::FnDef { .. } => {

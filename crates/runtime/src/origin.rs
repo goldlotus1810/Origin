@@ -1297,7 +1297,7 @@ impl HomeRuntime {
                         // Semantic validation
                         let errors = semantic::validate(&stmts);
                         if !errors.is_empty() {
-                            let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
+                            let msgs: alloc::vec::Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
                             return Response {
                                 text: format!("Semantic error:\n{}", msgs.join("\n")),
                                 tone: ResponseTone::Engaged,
@@ -3663,6 +3663,13 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
                     (pat, body.into_iter().map(olang_expr_to_ir).collect())
                 })
                 .collect(),
+        },
+
+        OlangExpr::ForIn { var, start, end, body } => OlangIrExpr::ForIn {
+            var,
+            start,
+            end,
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
         },
     }
 }

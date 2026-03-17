@@ -323,6 +323,10 @@ pub enum Keyword {
     Try,
     /// `catch` — error handler block
     Catch,
+    /// `for` — for-in loop
+    For,
+    /// `in` — range iteration
+    In,
 }
 
 /// Check xem string có phải keyword không.
@@ -337,6 +341,8 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "match" => Some(Keyword::Match),
         "try" => Some(Keyword::Try),
         "catch" => Some(Keyword::Catch),
+        "for" => Some(Keyword::For),
+        "in" => Some(Keyword::In),
         _ => None,
     }
 }
@@ -445,6 +451,12 @@ pub enum Token {
     Catch,
     /// `=>`
     FatArrow,
+    /// `for`
+    For,
+    /// `in`
+    In,
+    /// `..` — range operator
+    DotDot,
 
     // ── End ──
     /// End of input
@@ -569,6 +581,16 @@ impl<'a> Lexer<'a> {
             '"' => {
                 return self.lex_string();
             }
+            '.' => {
+                self.chars.next();
+                // .. → DotDot (range)
+                if let Some(&(_, '.')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::DotDot;
+                }
+                // Single dot: treat as identifier character (shouldn't normally occur)
+                return Token::Ident(".".into());
+            }
             _ => {}
         }
 
@@ -658,6 +680,8 @@ impl<'a> Lexer<'a> {
                 Keyword::Match => Token::Match,
                 Keyword::Try => Token::Try,
                 Keyword::Catch => Token::Catch,
+                Keyword::For => Token::For,
+                Keyword::In => Token::In,
             };
         }
 

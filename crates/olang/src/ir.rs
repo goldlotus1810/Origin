@@ -381,6 +381,13 @@ pub enum OlangIrExpr {
         try_body: Vec<OlangIrExpr>,
         catch_body: Vec<OlangIrExpr>,
     },
+    /// for var in start..end { body } — range iteration
+    ForIn {
+        var: String,
+        start: u32,
+        end: u32,
+        body: Vec<OlangIrExpr>,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -644,6 +651,26 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
 
             let end = prog.ops.len();
             prog.ops[jmp_idx] = Op::Jmp(end);
+        }
+
+        OlangIrExpr::ForIn { var, start, end, body } => {
+            // Counter lives on stack; each iteration DUP into scoped var.
+            let count = end.saturating_sub(*start);
+            prog.push_op(Op::PushNum(*start as f64));
+            if count > 0 {
+                prog.push_op(Op::Loop(count));
+                prog.push_op(Op::ScopeBegin);
+                prog.push_op(Op::Dup);
+                prog.push_op(Op::Store(var.clone()));
+                for e in body {
+                    emit_expr(e, prog);
+                }
+                // Increment counter on stack
+                prog.push_op(Op::PushNum(1.0));
+                prog.push_op(Op::Call("__hyp_add".into()));
+                prog.push_op(Op::ScopeEnd);
+            }
+            prog.push_op(Op::Pop);
         }
     }
 }

@@ -19,6 +19,7 @@
 //!   ○{stats}           → System command
 
 extern crate alloc;
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -209,6 +210,13 @@ pub enum OlangExpr {
         try_body: Vec<OlangExpr>,
         catch_body: Vec<OlangExpr>,
     },
+    /// ○{for i in 0..10 { emit i }} — range iteration
+    ForIn {
+        var: String,
+        start: u32,
+        end: u32,
+        body: Vec<OlangExpr>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -331,6 +339,11 @@ impl OlangParser {
         // Try/catch (error handling): try { body } catch { handler }
         if let Some(try_expr) = self.try_parse_try_catch(trimmed) {
             return Ok(try_expr);
+        }
+
+        // For-in (range iteration): for var in start..end { body }
+        if let Some(for_expr) = self.try_parse_for_in(trimmed) {
+            return Ok(for_expr);
         }
 
         // Use (Python-style import): use <skill>
@@ -644,6 +657,45 @@ impl OlangParser {
         Some(OlangExpr::TryCatch {
             try_body,
             catch_body,
+        })
+    }
+
+    /// Try to parse for-in: "for i in 0..10 { body }"
+    fn try_parse_for_in(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("for ") {
+            return None;
+        }
+        let rest = trimmed.strip_prefix("for ")?.trim();
+        // Parse: VAR in START..END { body }
+        let in_pos = rest.find(" in ")?;
+        let var = rest[..in_pos].trim().to_string();
+        if var.is_empty() {
+            return None;
+        }
+        let after_in = rest[in_pos + 4..].trim();
+        // Parse range: START..END
+        let dotdot = after_in.find("..")?;
+        let start_str = after_in[..dotdot].trim();
+        let after_dots = after_in[dotdot + 2..].trim();
+        // END is before the first space or {
+        let end_end = after_dots
+            .find([' ', '{'])
+            .unwrap_or(after_dots.len());
+        let end_str = after_dots[..end_end].trim();
+        let start: u32 = start_str.parse().ok()?;
+        let end: u32 = end_str.parse().ok()?;
+        // Find body
+        let body_rest = after_dots[end_end..].trim();
+        let open = body_rest.find('{')?;
+        let close = find_matching_brace(body_rest, open)?;
+        let body_str = body_rest[open + 1..close].trim();
+        let body = self.parse_block(body_str);
+        Some(OlangExpr::ForIn {
+            var,
+            start,
+            end,
+            body,
         })
     }
 

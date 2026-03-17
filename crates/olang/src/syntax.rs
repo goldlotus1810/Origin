@@ -102,6 +102,14 @@ pub enum Stmt {
         try_block: Vec<Stmt>,
         catch_block: Vec<Stmt>,
     },
+
+    /// `for var in start..end { body }`
+    ForIn {
+        var: String,
+        start: u32,
+        end: u32,
+        body: Vec<Stmt>,
+    },
 }
 
 /// Match arm — pattern + body.
@@ -278,6 +286,7 @@ impl<'a> Parser<'a> {
             Token::Fn => self.parse_fn(),
             Token::Match => self.parse_match(),
             Token::Try => self.parse_try_catch(),
+            Token::For => self.parse_for_in(),
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -439,6 +448,26 @@ impl<'a> Parser<'a> {
         Ok(Stmt::TryCatch {
             try_block,
             catch_block,
+        })
+    }
+
+    /// `for` IDENT `in` INT `..` INT `{` stmts `}`
+    fn parse_for_in(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'for'
+        let var = self.expect_ident()?;
+        self.expect(&Token::In)?;
+        let start = self.expect_int()?;
+        self.expect(&Token::DotDot)?;
+        let end = self.expect_int()?;
+        let body = self.parse_block()?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::ForIn {
+            var,
+            start,
+            end,
+            body,
         })
     }
 
@@ -1568,5 +1597,48 @@ mod tests {
             }
             _ => panic!("Expected TryCatch"),
         }
+    }
+
+    // ── For-In ────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_for_in_basic() {
+        let stmts = parse("for i in 0..5 { emit fire; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ForIn { var, start, end, body } => {
+                assert_eq!(var, "i");
+                assert_eq!(*start, 0);
+                assert_eq!(*end, 5);
+                assert_eq!(body.len(), 1);
+            }
+            _ => panic!("Expected ForIn"),
+        }
+    }
+
+    #[test]
+    fn parse_for_in_with_nested_body() {
+        let stmts = parse("for x in 1..10 { if fire { emit water; } }").unwrap();
+        match &stmts[0] {
+            Stmt::ForIn { var, start, end, body } => {
+                assert_eq!(var, "x");
+                assert_eq!(*start, 1);
+                assert_eq!(*end, 10);
+                assert!(matches!(&body[0], Stmt::If { .. }));
+            }
+            _ => panic!("Expected ForIn"),
+        }
+    }
+
+    #[test]
+    fn lex_for_in_tokens() {
+        use crate::alphabet::{Lexer, Token};
+        let tokens = Lexer::tokenize_all("for i in 0..5 { }");
+        assert_eq!(tokens[0], Token::For);
+        assert_eq!(tokens[1], Token::Ident("i".into()));
+        assert_eq!(tokens[2], Token::In);
+        assert_eq!(tokens[3], Token::Int(0));
+        assert_eq!(tokens[4], Token::DotDot);
+        assert_eq!(tokens[5], Token::Int(5));
     }
 }
