@@ -41,6 +41,7 @@ origin:   313 nodes (35 L0 + 278 domain) · 236 edges · 2246 aliases · 72KB
 ✅ Phase 4: Math → Silk — solve/derive/integrate kết quả vào STM + Silk
 ✅ Phase 3: Domain Knowledge — 313 nodes seeded (6 domains)
 ✅ SkillProposal — ComposedSkill + SkillPattern + SkillPatternStore + wired vào LeoAI
+✅ Unwrap reduction: 50 → 27 production unwraps (partial_cmp→total_cmp, try_into→array)
 ```
 
 ---
@@ -137,9 +138,8 @@ docs/ chỉ giữ: olang_guide.md
 
 ```
 1. [TRUNG BÌNH] Multilingual Seeding — multilang.olang integrate
-2. [TRUNG BÌNH] Giảm unwrap() (291 → <100)
-3. [THẤP]       WASM Browser Demo
-4. [THẤP]       API documentation cho core crates
+2. [THẤP]       WASM Browser Demo
+3. [THẤP]       API documentation cho core crates
 ```
 
 ---
@@ -165,7 +165,7 @@ E: Đồng bộ docs, reseed origin.olang
 F: P1 RelOps 18/18, Dream STM cleanup
 G: Verify Phase 2-5 thực trạng, cập nhật NEXT_PLAN
 H: Dọn docs → old/, Phase 5+4+3 HOÀN THÀNH, 1759 tests
-I: SkillProposal HOÀN THÀNH (ComposedSkill + SkillPattern + wire LeoAI), 1774 tests
+I: SkillProposal + unwrap reduction (50→27), 1774 tests
 ```
 
 ---
