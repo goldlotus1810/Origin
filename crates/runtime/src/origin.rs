@@ -21,6 +21,7 @@ use memory::dream::{DreamConfig, DreamCycle};
 use silk::walk::ResponseTone;
 
 use crate::parser::{OlangExpr, OlangParser, ParseResult, RelationOp};
+use olang::compiler::{Compiler, Target};
 use olang::ir::{compile_expr, OlangIrExpr};
 use olang::knowtree::KnowTree;
 use olang::registry::Registry;
@@ -777,6 +778,14 @@ impl HomeRuntime {
                      ○{why fire water}      — find connection\n\
                      ○{trace}              — toggle execution tracing\n\
                      ○{fuse 🔥}             — QT2 finiteness check\n\
+                     ○{compile c 🔥 ∘ 💧}  — compile to C\n\
+                     ○{compile rust stats} — compile to Rust\n\
+                     ○{compile wasm 1 + 2} — compile to WASM\n\
+                     ○{if fire { stats }}  — conditional\n\
+                     ○{loop 3 { stats }}   — loop N times\n\
+                     ○{fn test { stats }}  — function definition\n\
+                     ○{let x = fire}       — variable binding\n\
+                     ○{{ S=1 R=6 V=200 }}  — molecular literal\n\
                      ○{help}               — this message",
                 ),
                 tone: ResponseTone::Engaged,
@@ -1042,6 +1051,86 @@ impl HomeRuntime {
                     tone: ResponseTone::Engaged,
                     fx: self.learning.context().fx(),
                     kind: ResponseKind::OlangResult,
+                }
+            }
+
+            // ── compile <target> <source> ──────────────────────────────────────
+            // ○{compile c fire ∘ water}   → C source
+            // ○{compile rust stats}       → Rust source
+            // ○{compile wasm 1 + 2}       → WASM (WAT) source
+            _ if cmd.starts_with("compile ") => {
+                let rest = cmd["compile ".len()..].trim();
+                // First word = target, rest = Olang source
+                let (target_str, source) = match rest.find(' ') {
+                    Some(pos) => (rest[..pos].trim(), rest[pos + 1..].trim()),
+                    None => {
+                        return Response {
+                            text: String::from("compile <target> <source>\ntargets: c, rust, wasm"),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        };
+                    }
+                };
+                let target = match target_str {
+                    "c" | "C" => Target::C,
+                    "rust" | "Rust" | "rs" => Target::Rust,
+                    "wasm" | "WASM" | "wat" | "WAT" => Target::Wasm,
+                    other => {
+                        return Response {
+                            text: format!("Unknown target '{}' — use: c, rust, wasm", other),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        };
+                    }
+                };
+
+                // Parse source as Olang expression
+                let parse_result = self.parser.parse(&format!("○{{{}}}", source));
+                let expr = match parse_result {
+                    ParseResult::OlangExpr(e) => e,
+                    ParseResult::Error(e) => {
+                        return Response {
+                            text: format!("Parse error: {}", e),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        };
+                    }
+                    _ => {
+                        return Response {
+                            text: String::from("compile: source must be an Olang expression"),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        };
+                    }
+                };
+
+                // Compile: Expr → IR → Program → Target source
+                let ir_expr = olang_expr_to_ir(expr);
+                let prog = compile_expr(&ir_expr);
+                let compiler = Compiler::new(target);
+                match compiler.emit(&prog) {
+                    Ok(output) => Response {
+                        text: format!(
+                            "Compiled to {} ({} bytes, {} ops):\n{}",
+                            target.name(),
+                            output.len(),
+                            prog.ops.len(),
+                            output
+                        ),
+                        tone: ResponseTone::Engaged,
+                        fx: self.learning.context().fx(),
+                        kind: ResponseKind::OlangResult,
+                    },
+                    Err(e) => Response {
+                        text: format!("Compile error: {:?}", e),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
                 }
             }
 

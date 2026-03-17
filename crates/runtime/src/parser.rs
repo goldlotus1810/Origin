@@ -756,7 +756,8 @@ fn is_command(s: &str) -> bool {
             | "reboot"
             | "status"
             | "help"
-    ) || is_math_command(s)
+    ) || s.starts_with("compile ")
+        || is_math_command(s)
         || is_constant_command(s)
         || is_leo_command(s)
 }
