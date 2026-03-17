@@ -42,6 +42,7 @@ pub enum OlangToken {
 }
 
 /// Relation operator trong ○{}.
+/// 18 RelOps: 10 gốc + 8 mở rộng (Phase 11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelationOp {
     Member,      // ∈ U+2208
@@ -54,6 +55,15 @@ pub enum RelationOp {
     Context,     // ∂ U+2202 (dùng cho "bank ∂ finance")
     Contains,    // ∪ U+222A
     Intersects,  // ∩ U+2229
+    // Phase 11: 8 RelOps mở rộng
+    Orthogonal,  // ⊥ U+22A5 — vuông góc / độc lập
+    SetMinus,    // ∖ U+2216 — loại trừ tập hợp
+    Bidir,       // ↔ U+2194 — quan hệ hai chiều
+    Flows,       // ⟶ U+27F6 — dòng chảy / pipeline
+    Repeats,     // ⟳ U+27F3 — lặp lại / chu kỳ
+    Resolves,    // ↑ U+2191 — giải quyết / nâng cấp
+    Trigger,     // ⚡ U+26A1 — kích hoạt
+    Parallel,    // ∥ U+2225 — song song / đồng thời
 }
 
 impl RelationOp {
@@ -69,6 +79,14 @@ impl RelationOp {
             '∂' => Some(Self::Context),
             '∪' => Some(Self::Contains),
             '∩' => Some(Self::Intersects),
+            '⊥' => Some(Self::Orthogonal),
+            '∖' => Some(Self::SetMinus),
+            '↔' => Some(Self::Bidir),
+            '⟶' => Some(Self::Flows),
+            '⟳' => Some(Self::Repeats),
+            '↑' => Some(Self::Resolves),
+            '⚡' => Some(Self::Trigger),
+            '∥' => Some(Self::Parallel),
             _ => None,
         }
     }
@@ -85,6 +103,14 @@ impl RelationOp {
             Self::Context => "∂",
             Self::Contains => "∪",
             Self::Intersects => "∩",
+            Self::Orthogonal => "⊥",
+            Self::SetMinus => "∖",
+            Self::Bidir => "↔",
+            Self::Flows => "⟶",
+            Self::Repeats => "⟳",
+            Self::Resolves => "↑",
+            Self::Trigger => "⚡",
+            Self::Parallel => "∥",
         }
     }
 }
@@ -885,5 +911,124 @@ mod tests {
 
         let r = parser().parse("○{tich-phan \"3x^2\"}");
         assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+    }
+
+    // ── Phase 11: New RelOps ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_orthogonal() {
+        let r = parser().parse("○{🔥 ⊥ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Orthogonal,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_setminus() {
+        let r = parser().parse("○{🔥 ∖ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::SetMinus,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_bidir() {
+        let r = parser().parse("○{🔥 ↔ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Bidir,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_flows() {
+        let r = parser().parse("○{🔥 ⟶ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Flows,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_repeats() {
+        let r = parser().parse("○{🔥 ⟳ ?}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Repeats,
+                object: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_resolves() {
+        let r = parser().parse("○{🔥 ↑ ?}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Resolves,
+                object: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_trigger() {
+        let r = parser().parse("○{🔥 ⚡ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Trigger,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_parallel() {
+        let r = parser().parse("○{🔥 ∥ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Parallel,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn relop_roundtrip_all_18() {
+        let chars = [
+            '∈', '⊂', '≡', '∘', '→', '≈', '←', '∂', '∪', '∩',
+            '⊥', '∖', '↔', '⟶', '⟳', '↑', '⚡', '∥',
+        ];
+        for c in chars {
+            let op = RelationOp::from_char(c).unwrap_or_else(|| panic!("from_char failed for {c}"));
+            let s = op.as_str();
+            assert_eq!(s.chars().next().unwrap(), c, "roundtrip failed for {c}");
+        }
     }
 }

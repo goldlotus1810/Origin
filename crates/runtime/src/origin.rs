@@ -2619,6 +2619,15 @@ fn relation_op_to_byte(op: RelationOp) -> u8 {
         RelationOp::Context => 0x09,
         RelationOp::Contains => 0x0A,
         RelationOp::Intersects => 0x0B,
+        // Phase 11: 8 RelOps mở rộng
+        RelationOp::Orthogonal => 0x04,  // trùng RelationBase::Orthogonal
+        RelationOp::SetMinus => 0x0C,
+        RelationOp::Bidir => 0x0D,
+        RelationOp::Flows => 0x0E,
+        RelationOp::Repeats => 0x0F,
+        RelationOp::Resolves => 0x10,
+        RelationOp::Trigger => 0x11,
+        RelationOp::Parallel => 0x12,
     }
 }
 
@@ -2877,6 +2886,7 @@ impl HomeRuntime {
 
         let mut approved_this_cycle: u64 = 0;
         let mut l3_this_cycle: u64 = 0;
+        let mut promoted_hashes: alloc::vec::Vec<u64> = alloc::vec::Vec::new();
 
         // Feed approved proposals
         // QT9: serialize TRƯỚC → pending_writes → RỒI mới cập nhật Registry
@@ -2954,13 +2964,20 @@ impl HomeRuntime {
                                 // L2: promote to KnowTree
                                 self.knowtree
                                     .promote_from_stm(&obs.chain, None, *fire_count, ts);
+                                // Track for STM cleanup
+                                promoted_hashes.push(*chain_hash);
                             }
-                            let _ = chain_hash;
                         }
                         _ => {}
                     }
                 }
             }
+        }
+
+        // STM cleanup: xóa observations đã promote lên QR
+        // Tránh re-clustering cùng data trong Dream lần sau
+        if !promoted_hashes.is_empty() {
+            self.learning.stm_mut().remove_promoted(&promoted_hashes);
         }
 
         // Update dream stats
