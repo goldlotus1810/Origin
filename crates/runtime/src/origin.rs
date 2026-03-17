@@ -708,7 +708,7 @@ impl HomeRuntime {
                 }
                 VmEvent::LookupAlias(alias) => {
                     let cp_from_cache = self.alias_to_cp.get(alias.as_str()).copied();
-                    let (chain, cp_opt) = if let Some(cp) = cp_from_cache {
+                    let (chain, _cp_opt) = if let Some(cp) = cp_from_cache {
                         (olang::encoder::encode_codepoint(cp), Some(cp))
                     } else {
                         resolve_with_cp(alias, &self.registry)
