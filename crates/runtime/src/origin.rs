@@ -2231,15 +2231,6 @@ impl HomeRuntime {
         }
     }
 
-    // ── Response generation ───────────────────────────────────────────────────
-
-    /// Sinh fallback text khi không có original từ pipeline.
-    /// Dùng response_template::tone_fallback — không hardcode string ở đây.
-    #[allow(dead_code)]
-    fn generate_response(&self, tone: ResponseTone, current_v: f32, _fx: f32) -> String {
-        crate::response_template::tone_fallback(tone, current_v)
-    }
-
     // ── SilkWalk — tìm context liên quan ─────────────────────────────────────
 
     /// Walk Silk từ các từ khóa trong câu hỏi.
