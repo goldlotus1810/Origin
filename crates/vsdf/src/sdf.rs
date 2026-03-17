@@ -6,7 +6,7 @@
 //! SDF byte trong Molecule = primitive index (0x01..0x12).
 //! Confidence score: 0.0..1.0 — độ tự tin của fit.
 
-use libm::{cosf, fabsf, fmaxf, fminf, sinf, sqrtf};
+use homemath::{cosf, fabsf, fmaxf, fminf, sinf, sqrtf};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Vec3 — điểm trong không gian 3D

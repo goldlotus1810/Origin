@@ -16,4 +16,4 @@ olang   = { workspace = true }
 silk    = { workspace = true }
 context = { workspace = true }
 agents  = { workspace = true }
-libm    = { workspace = true }
+homemath = { workspace = true }

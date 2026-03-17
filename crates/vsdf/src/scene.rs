@@ -63,8 +63,8 @@ impl Transform {
         let dy = p.y - self.position.y;
         let dz = p.z - self.position.z;
         // Inverse Y rotation
-        let cos = libm::cosf(-self.rotation_y);
-        let sin = libm::sinf(-self.rotation_y);
+        let cos = homemath::cosf(-self.rotation_y);
+        let sin = homemath::sinf(-self.rotation_y);
         let lx = (dx * cos - dz * sin) / self.scale;
         let ly = dy / self.scale;
         let lz = (dx * sin + dz * cos) / self.scale;
@@ -76,8 +76,8 @@ impl Transform {
         let sx = p.x * self.scale;
         let sy = p.y * self.scale;
         let sz = p.z * self.scale;
-        let cos = libm::cosf(self.rotation_y);
-        let sin = libm::sinf(self.rotation_y);
+        let cos = homemath::cosf(self.rotation_y);
+        let sin = homemath::sinf(self.rotation_y);
         Vec3::new(
             sx * cos - sz * sin + self.position.x,
             sy + self.position.y,
@@ -213,8 +213,8 @@ impl SceneNode {
         let local = self.transform.world_to_local(world_p);
         let local_n = gradient(self.kind, local, &self.params);
         // Rotate normal back to world space (scale doesn't affect normal direction)
-        let cos = libm::cosf(self.transform.rotation_y);
-        let sin = libm::sinf(self.transform.rotation_y);
+        let cos = homemath::cosf(self.transform.rotation_y);
+        let sin = homemath::sinf(self.transform.rotation_y);
         Vec3::new(
             local_n.x * cos - local_n.z * sin,
             local_n.y,

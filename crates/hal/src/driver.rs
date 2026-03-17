@@ -184,7 +184,7 @@ pub struct AccelReading {
 impl AccelReading {
     /// Magnitude = √(x² + y² + z²)
     pub fn magnitude(&self) -> f32 {
-        libm::sqrtf(self.x * self.x + self.y * self.y + self.z * self.z)
+        homemath::sqrtf(self.x * self.x + self.y * self.y + self.z * self.z)
     }
 }
 

@@ -134,7 +134,7 @@ fn molecule_similarity(a: &Molecule, b: &Molecule) -> f32 {
 
     let dv = (a.emotion.valence as f32 - b.emotion.valence as f32) / 255.0;
     let da = (a.emotion.arousal as f32 - b.emotion.arousal as f32) / 255.0;
-    let emo_sim = 1.0 - libm::sqrtf(dv * dv + da * da) * 0.5;
+    let emo_sim = 1.0 - homemath::sqrtf(dv * dv + da * da) * 0.5;
 
     let time_match = if a.time == b.time { 1.0f32 } else { 0.5 };
 

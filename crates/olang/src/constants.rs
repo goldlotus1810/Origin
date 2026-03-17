@@ -320,7 +320,7 @@ fn compute_e_taylor(iterations: usize) -> f64 {
 
 /// φ = (1 + √5) / 2 — algebraic, exact to f64.
 fn compute_phi() -> f64 {
-    (1.0 + libm::sqrt(5.0)) / 2.0
+    (1.0 + homemath::sqrt(5.0)) / 2.0
 }
 
 /// √2 via Newton's method: x_{n+1} = (x_n + 2/x_n) / 2
@@ -353,7 +353,7 @@ fn compute_euler_gamma(iterations: usize) -> f64 {
     for k in 1..=n {
         harmonic += 1.0 / k as f64;
     }
-    harmonic - libm::log(n as f64)
+    harmonic - homemath::log(n as f64)
 }
 
 /// Catalan's constant G = Σ(n=0..N) (-1)^n / (2n+1)^2
@@ -407,8 +407,8 @@ pub fn fibonacci(n: u64) -> f64 {
     } else {
         // Binet's formula: F(n) = φ^n / √5
         let phi = compute_phi();
-        let sqrt5 = libm::sqrt(5.0);
-        libm::round(libm::pow(phi, n as f64) / sqrt5)
+        let sqrt5 = homemath::sqrt(5.0);
+        homemath::round(homemath::pow(phi, n as f64) / sqrt5)
     }
 }
 
@@ -499,7 +499,7 @@ pub fn process_constant_command(input: &str, precision: Precision) -> String {
                     n,
                     r,
                     compute_phi(),
-                    libm::fabs(r - compute_phi()),
+                    homemath::fabs(r - compute_phi()),
                 )
             } else {
                 let n: u64 = match parts[1].parse() {
@@ -599,7 +599,7 @@ mod tests {
     #[test]
     fn phi_exact() {
         let phi = MathConstant::Phi.compute(Precision::Low);
-        let expected = (1.0 + libm::sqrt(5.0)) / 2.0;
+        let expected = (1.0 + homemath::sqrt(5.0)) / 2.0;
         assert!((phi - expected).abs() < 1e-15, "φ = {}", phi);
     }
 

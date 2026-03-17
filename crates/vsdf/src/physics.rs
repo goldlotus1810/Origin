@@ -15,7 +15,7 @@
 
 use crate::sdf::{sdf, SdfKind, SdfParams, Vec3};
 use crate::vector::VectorField;
-use libm::sqrtf;
+use homemath::sqrtf;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gradient analytical — ∇f per primitive

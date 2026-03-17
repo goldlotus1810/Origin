@@ -39,7 +39,7 @@ pub const PROMOTE_WEIGHT: f32 = compute_promote_f32();
 /// Compute φ = (1+√5)/2 at compile time (const fn).
 const fn compute_phi_f32() -> f32 {
     // √5 ≈ 2.2360679774997896 (computed via Newton's method at f64, cast to f32)
-    // We use a high-precision literal since const fn can't call libm
+    // We use a high-precision literal since const fn can't call homemath
     const SQRT5: f32 = 2.236_068; // √5 to f32 precision
     (1.0 + SQRT5) / 2.0
 }
@@ -63,14 +63,14 @@ const fn compute_promote_f32() -> f32 {
     phi_inv + phi_inv3
 }
 
-/// Runtime φ with full f64 precision (uses libm::sqrt).
+/// Runtime φ with full f64 precision (uses homemath::sqrt).
 pub fn phi_f64() -> f64 {
-    (1.0 + libm::sqrt(5.0)) / 2.0
+    (1.0 + homemath::sqrt(5.0)) / 2.0
 }
 
 /// Runtime φ⁻¹ with full f64 precision.
 pub fn phi_inv_f64() -> f64 {
-    (libm::sqrt(5.0) - 1.0) / 2.0
+    (homemath::sqrt(5.0) - 1.0) / 2.0
 }
 
 /// Nanoseconds trong 24 giờ.
@@ -141,7 +141,7 @@ pub fn hebbian_decay(weight: f32, elapsed_ns: i64) -> f32 {
     let days = elapsed_ns as f64 / NS_PER_DAY as f64;
     // weight × φ⁻¹^days — f64 precision
     let phi_inv = phi_inv_f64();
-    let factor = libm::pow(phi_inv, days);
+    let factor = homemath::pow(phi_inv, days);
     ((weight as f64 * factor).max(0.0)) as f32
 }
 
@@ -281,7 +281,7 @@ mod tests {
     fn decay_multiple_days() {
         let w0 = 1.0f32;
         let w7 = hebbian_decay(w0, NS_PER_DAY * 7); // 1 tuần
-        let expected = libm::powf(PHI_INV, 7.0);
+        let expected = homemath::powf(PHI_INV, 7.0);
         assert!(
             (w7 - expected).abs() < 0.001,
             "7 ngày: w7={} ≈ φ⁻⁷={}",
@@ -294,7 +294,7 @@ mod tests {
     fn decay_partial_day() {
         let w0 = 1.0f32;
         let w_half = hebbian_decay(w0, NS_PER_DAY / 2); // 12h
-        let expected = libm::powf(PHI_INV, 0.5);
+        let expected = homemath::powf(PHI_INV, 0.5);
         assert!((w_half - expected).abs() < 0.001);
     }
 

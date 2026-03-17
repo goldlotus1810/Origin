@@ -58,7 +58,7 @@ impl EmotionTag {
     pub fn distance_va(&self, other: &Self) -> f32 {
         let dv = self.valence - other.valence;
         let da = self.arousal - other.arousal;
-        libm::sqrtf(dv * dv + da * da)
+        homemath::sqrtf(dv * dv + da * da)
     }
 
     /// Từ bytes UCD (valence_byte, arousal_byte).

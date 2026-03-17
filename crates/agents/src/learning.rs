@@ -761,7 +761,7 @@ fn frequency_hash(freq_hz: f32) -> u64 {
     let octave = if freq_hz <= 0.0 {
         0u8
     } else {
-        ((libm::log2f(freq_hz / 20.0).max(0.0)) as u8).min(10)
+        ((homemath::log2f(freq_hz / 20.0).max(0.0)) as u8).min(10)
     };
     olang::hash::fnv1a_namespaced(0xAA, &[octave])
 }

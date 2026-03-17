@@ -257,8 +257,8 @@ impl HomeRuntime {
                         // Check if numeric result
                         if let Some(num) = chain.to_number() {
                             // Display number cleanly
-                            if (num - libm::round(num)).abs() < 1e-10 && num.abs() < 1e15 {
-                                output_text.push_str(&format!("= {} ", libm::round(num) as i64));
+                            if (num - homemath::round(num)).abs() < 1e-10 && num.abs() < 1e15 {
+                                output_text.push_str(&format!("= {} ", homemath::round(num) as i64));
                             } else {
                                 output_text.push_str(&format!("= {:.6} ", num));
                             }
@@ -652,8 +652,8 @@ impl HomeRuntime {
                     for (i, out) in prog_result.outputs.iter().enumerate() {
                         match out {
                             ProgOutput::Number(n) => {
-                                if (*n - libm::round(*n)).abs() < 1e-10 && n.abs() < 1e15 {
-                                    text.push_str(&format!("  [{}] = {}\n", i, libm::round(*n) as i64));
+                                if (*n - homemath::round(*n)).abs() < 1e-10 && n.abs() < 1e15 {
+                                    text.push_str(&format!("  [{}] = {}\n", i, homemath::round(*n) as i64));
                                 } else {
                                     text.push_str(&format!("  [{}] = {:.6}\n", i, n));
                                 }

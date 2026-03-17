@@ -75,8 +75,8 @@ impl MathExpr {
     pub fn display(&self) -> String {
         match self {
             MathExpr::Num(n) => {
-                if (*n - libm::round(*n)).abs() < 1e-10 && n.abs() < 1e15 {
-                    format!("{}", libm::round(*n) as i64)
+                if (*n - homemath::round(*n)).abs() < 1e-10 && n.abs() < 1e15 {
+                    format!("{}", homemath::round(*n) as i64)
                 } else {
                     format!("{:.6}", n)
                 }
@@ -166,16 +166,16 @@ impl MathExpr {
                     Some(a.eval(var, val)? / bv)
                 }
             }
-            MathExpr::Pow(a, b) => Some(libm::pow(a.eval(var, val)?, b.eval(var, val)?)),
+            MathExpr::Pow(a, b) => Some(homemath::pow(a.eval(var, val)?, b.eval(var, val)?)),
             MathExpr::Neg(a) => Some(-a.eval(var, val)?),
-            MathExpr::Sin(a) => Some(libm::sin(a.eval(var, val)?)),
-            MathExpr::Cos(a) => Some(libm::cos(a.eval(var, val)?)),
+            MathExpr::Sin(a) => Some(homemath::sin(a.eval(var, val)?)),
+            MathExpr::Cos(a) => Some(homemath::cos(a.eval(var, val)?)),
             MathExpr::Ln(a) => {
                 let av = a.eval(var, val)?;
                 if av <= 0.0 {
                     None
                 } else {
-                    Some(libm::log(av))
+                    Some(homemath::log(av))
                 }
             }
         }
@@ -499,7 +499,7 @@ pub fn simplify(expr: &MathExpr) -> MathExpr {
             let a = simplify(a);
             let b = simplify(b);
             match (&a, &b) {
-                (MathExpr::Num(x), MathExpr::Num(y)) => MathExpr::Num(libm::pow(*x, *y)),
+                (MathExpr::Num(x), MathExpr::Num(y)) => MathExpr::Num(homemath::pow(*x, *y)),
                 _ if b.is_zero() => MathExpr::Num(1.0),
                 _ if b.is_one() => a,
                 _ => MathExpr::Pow(Box::new(a), Box::new(b)),
@@ -855,7 +855,7 @@ pub fn solve(eq: &Equation, var: &str) -> MathResult {
                 steps,
             }
         } else {
-            let sqrt_d = libm::sqrt(discriminant);
+            let sqrt_d = homemath::sqrt(discriminant);
             let x1 = (-b + sqrt_d) / (2.0 * a);
             let x2 = (-b - sqrt_d) / (2.0 * a);
             steps.push(format!(
@@ -896,8 +896,8 @@ fn extract_coefficients(expr: &MathExpr, var: &str) -> (f64, f64, f64) {
 }
 
 fn format_number(n: f64) -> String {
-    if (n - libm::round(n)).abs() < 1e-10 && n.abs() < 1e15 {
-        format!("{}", libm::round(n) as i64)
+    if (n - homemath::round(n)).abs() < 1e-10 && n.abs() < 1e15 {
+        format!("{}", homemath::round(n) as i64)
     } else {
         format!("{:.6}", n)
     }

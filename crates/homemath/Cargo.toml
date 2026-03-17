@@ -1,0 +1,7 @@
+[package]
+name = "homemath"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []

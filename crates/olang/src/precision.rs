@@ -263,7 +263,7 @@ mod tests {
         let low = PrecisionConfig::new(Precision::Low);
         let ultra = PrecisionConfig::new(Precision::Ultra);
         // Both should be close to true φ
-        let true_phi = (1.0 + libm::sqrt(5.0)) / 2.0;
+        let true_phi = (1.0 + homemath::sqrt(5.0)) / 2.0;
         assert!((ultra.phi - true_phi).abs() <= (low.phi - true_phi).abs());
     }
 

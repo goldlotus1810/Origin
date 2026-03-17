@@ -244,12 +244,12 @@ mod tests {
         let phi = 2.39996; // golden angle ≈ 2π/φ²
         (0..n)
             .map(|i| {
-                let theta = libm::acosf(1.0 - 2.0 * (i as f32 + 0.5) / n as f32);
+                let theta = homemath::acosf(1.0 - 2.0 * (i as f32 + 0.5) / n as f32);
                 let psi = phi * i as f32;
                 Vec3::new(
-                    r * libm::sinf(theta) * libm::cosf(psi),
-                    r * libm::cosf(theta),
-                    r * libm::sinf(theta) * libm::sinf(psi),
+                    r * homemath::sinf(theta) * homemath::cosf(psi),
+                    r * homemath::cosf(theta),
+                    r * homemath::sinf(theta) * homemath::sinf(psi),
                 )
             })
             .collect()
