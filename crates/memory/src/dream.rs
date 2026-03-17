@@ -426,7 +426,7 @@ mod tests {
         let result = dream.run(&stm, &graph, 1000);
         assert!(result.scanned >= 4, "scanned={}", result.scanned);
         assert!(
-            result.proposals.len() > 0,
+            !result.proposals.is_empty(),
             "Similar nodes phải cluster: clusters={}",
             result.clusters_found
         );
@@ -479,7 +479,7 @@ mod tests {
         assert!(result.scanned >= 4, "scanned={}", result.scanned);
         // Fire cao → proposals với confidence cao → AAM approve nhiều
         assert!(
-            result.proposals.len() > 0,
+            !result.proposals.is_empty(),
             "Fire cao → phải có proposals: {}",
             result.proposals.len()
         );

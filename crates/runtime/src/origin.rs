@@ -4455,7 +4455,7 @@ mod stm_verification_tests {
 
         rt.process_text("hôm nay trời đẹp", 1000);
         assert!(
-            rt.learning.stm().len() > 0,
+            !rt.learning.stm().is_empty(),
             "STM phải có observations sau khi chat: len={}",
             rt.learning.stm().len()
         );
@@ -4527,7 +4527,7 @@ mod stm_verification_tests {
         let r = rt.process_audio(440.0, 0.7, 120.0, 0.0, 1000);
         assert_eq!(r.kind, ResponseKind::Natural);
         assert!(
-            rt.learning.stm().len() > 0,
+            !rt.learning.stm().is_empty(),
             "Audio input phải tạo STM observation"
         );
     }
@@ -4546,7 +4546,7 @@ mod stm_verification_tests {
         let r = rt.process_input(input, 1000);
         assert_eq!(r.kind, ResponseKind::Natural);
         assert!(
-            rt.learning.stm().len() > 0,
+            !rt.learning.stm().is_empty(),
             "Sensor input phải tạo STM observation"
         );
     }
@@ -4565,7 +4565,7 @@ mod stm_verification_tests {
         let r = rt.process_input(input, 1000);
         assert_eq!(r.kind, ResponseKind::Natural);
         assert!(
-            rt.learning.stm().len() > 0,
+            !rt.learning.stm().is_empty(),
             "Code input phải tạo STM observation"
         );
     }
@@ -4579,7 +4579,7 @@ mod stm_verification_tests {
         let r = rt.process_image(0.5, 0.7, 0.8, 0.1, None, 1000);
         assert_eq!(r.kind, ResponseKind::Natural);
         assert!(
-            rt.learning.stm().len() > 0,
+            !rt.learning.stm().is_empty(),
             "Image input phải tạo STM observation"
         );
     }
@@ -4597,7 +4597,7 @@ mod stm_verification_tests {
         let r = rt.process_input(input, 1000);
         assert_eq!(r.kind, ResponseKind::Natural);
         assert!(
-            rt.learning.stm().len() > 0,
+            !rt.learning.stm().is_empty(),
             "System event phải tạo STM observation"
         );
     }
@@ -5087,11 +5087,11 @@ mod integration_tests {
 
         // Verify learning occurred
         assert!(
-            rt.learning.stm().len() > 0,
+            !rt.learning.stm().is_empty(),
             "STM phải có entries sau khi học war content"
         );
         assert!(
-            rt.learning.graph().len() > 0,
+            !rt.learning.graph().is_empty(),
             "Silk phải có edges từ war content"
         );
     }
@@ -5130,7 +5130,7 @@ mod integration_tests {
 
         // Verify STM has learned content (some may deduplicate by chain_hash)
         assert!(
-            rt.learning.stm().len() >= 1,
+            !rt.learning.stm().is_empty(),
             "STM phải có observations: {}",
             rt.learning.stm().len()
         );

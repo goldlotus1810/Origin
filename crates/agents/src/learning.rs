@@ -686,7 +686,7 @@ mod tests {
         });
         // Silk: 🔥 → 💧 (different hashes → edge)
         // STM phải có entries
-        assert!(l.stm().len() > 0, "STM phải có entries");
+        assert!(!l.stm().is_empty(), "STM phải có entries");
         // Graph có thể có hoặc không tùy chain hash — check STM thay thế
     }
 
@@ -751,7 +751,7 @@ mod tests {
         });
         assert!(matches!(r2, ProcessResult::Ok { .. }));
         // Graph should have at least one edge from audio co-activation
-        assert!(l.graph().len() > 0, "Audio freq should create Silk edges");
+        assert!(!l.graph().is_empty(), "Audio freq should create Silk edges");
     }
 
     #[test]

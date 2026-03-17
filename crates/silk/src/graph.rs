@@ -883,7 +883,7 @@ mod tests {
         let a = MolSummary { shape: 0x01, relation: 0x01, valence: 0x80, arousal: 0x80, time: 0x03 };
         let b = MolSummary { shape: 0x02, relation: 0x01, valence: 0x80, arousal: 0x80, time: 0x03 };
         let sim = a.similarity(&b);
-        assert!(sim >= 0.6 && sim < 1.0, "4/5 dims match → 0.8: {}", sim);
+        assert!((0.6..1.0).contains(&sim), "4/5 dims match → 0.8: {}", sim);
     }
 
     #[test]

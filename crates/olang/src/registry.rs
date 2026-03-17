@@ -673,7 +673,7 @@ mod tests {
 
         let entry = r.lookup_hash(hash).expect("phải tìm được sau insert");
         assert_eq!(entry.layer, 0);
-        assert_eq!(entry.is_qr, false);
+        assert!(!entry.is_qr);
         assert_eq!(entry.chain_hash, hash);
     }
 

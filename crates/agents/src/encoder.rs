@@ -946,7 +946,7 @@ mod tests {
         });
         assert!(!r.chain.is_empty());
         // Multiple regions → LCA chain should have multiple molecules
-        assert!(r.chain.0.len() >= 1, "Multi-region image encodes");
+        assert!(!r.chain.0.is_empty(), "Multi-region image encodes");
     }
 
     // ── Audio spectral features ─────────────────────────────────────────────

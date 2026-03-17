@@ -1453,7 +1453,7 @@ mod tests {
         let probe = w.probe_with_hal(&platform, 1000);
         // RPi không có actuator device trong mock → Unreachable
         // Nhưng có GPIO capability
-        assert!(probe.capabilities.len() > 0 || probe.status == HardwareStatus::Unreachable);
+        assert!(!probe.capabilities.is_empty() || probe.status == HardwareStatus::Unreachable);
     }
 
     #[test]

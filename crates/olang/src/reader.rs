@@ -652,7 +652,7 @@ mod tests {
         let n = &pf.nodes[0];
         assert_eq!(n.chain, chain, "Chain roundtrip đúng");
         assert_eq!(n.layer, 0);
-        assert_eq!(n.is_qr, false);
+        assert!(!n.is_qr);
         assert_eq!(n.timestamp, 1000);
     }
 
@@ -664,7 +664,7 @@ mod tests {
         });
 
         let n = &pf.nodes[0];
-        assert_eq!(n.is_qr, true, "QR flag preserve");
+        assert!(n.is_qr, "QR flag preserve");
         assert_eq!(n.layer, 2);
     }
 
