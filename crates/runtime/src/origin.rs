@@ -33,6 +33,8 @@ use olang::vm::{OlangVM, VmEvent};
 use agents::leo::{LeoAI, ProgOutput};
 use agents::chief::{Chief, ChiefKind};
 use agents::worker::Worker;
+use agents::skill::{ExecContext, Skill};
+use agents::domain_skills::{ClusterSkill, SimilaritySkill, GeneralizationSkill};
 use crate::router::MessageRouter;
 use memory::proposal::{AlertLevel, RegistryGate};
 
@@ -681,31 +683,57 @@ impl HomeRuntime {
                 let result = self
                     .dream
                     .run(self.learning.stm(), self.learning.graph(), ts);
-                let text = format!(
-                    "Dream cycle ○\n\
-                     Scanned    : {}\n\
-                     Clusters   : {}\n\
-                     Proposals  : {}\n\
-                     Approved   : {}\n\
-                     ─── Lifetime ───\n\
-                     Total cycles: {}\n\
-                     Total approved: {}\n\
-                     L3 concepts : {}\n\
-                     Fib interval: {} turns\n\
-                     KnowTree    : {} nodes, {} L3",
-                    result.scanned,
-                    result.clusters_found,
-                    result.proposals.len(),
-                    result.approved,
-                    self.dream_cycles,
-                    self.dream_approved_total,
-                    self.dream_l3_created,
-                    silk::hebbian::fib(self.dream_fib_index),
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(String::from("Dream cycle ○"));
+                lines.push(format!("Scanned    : {}", result.scanned));
+                lines.push(format!("Clusters   : {}", result.clusters_found));
+                lines.push(format!("Proposals  : {}", result.proposals.len()));
+                lines.push(format!("Approved   : {}", result.approved));
+
+                // Show what was discovered
+                if !result.proposals.is_empty() {
+                    lines.push(String::from("─── Discovered ───"));
+                    for p in &result.proposals {
+                        match &p.kind {
+                            memory::proposal::ProposalKind::NewNode { chain, sources, .. } => {
+                                let hash = chain.chain_hash();
+                                let label = self.registry.alias_for_hash(hash)
+                                    .unwrap_or("(new concept)");
+                                lines.push(format!(
+                                    "  L3 concept: {} (from {} sources, confidence {:.2})",
+                                    label, sources.len(), p.confidence
+                                ));
+                            }
+                            memory::proposal::ProposalKind::PromoteQR { chain_hash, fire_count } => {
+                                let label = self.registry.alias_for_hash(*chain_hash)
+                                    .unwrap_or("(memory)");
+                                lines.push(format!(
+                                    "  Promote QR: {} (fire={})",
+                                    label, fire_count
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                lines.push(String::from("─── Lifetime ───"));
+                lines.push(format!("Total cycles: {}", self.dream_cycles));
+                lines.push(format!("Total approved: {}", self.dream_approved_total));
+                lines.push(format!("L3 concepts : {}", self.dream_l3_created));
+                lines.push(format!(
+                    "Fib interval: {} turns",
+                    silk::hebbian::fib(self.dream_fib_index)
+                ));
+                lines.push(format!(
+                    "KnowTree    : {} nodes, {} L3",
                     self.knowtree.total_nodes(),
-                    self.knowtree.concepts(),
-                );
+                    self.knowtree.concepts()
+                ));
+
                 Response {
-                    text,
+                    text: lines.join("\n"),
                     tone: ResponseTone::Engaged,
                     fx: 0.0,
                     kind: ResponseKind::System,
@@ -747,6 +775,176 @@ impl HomeRuntime {
                 }
             }
 
+            "memory" | "nho" => {
+                // ○{memory} — show what the system remembers
+                let stm = self.learning.stm();
+                if stm.is_empty() {
+                    return Response {
+                        text: String::from("Trí nhớ ngắn hạn trống — chưa học gì."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(format!("Trí nhớ ngắn hạn ○ ({} observations)", stm.len()));
+                lines.push(String::from("────────────────────────────────"));
+
+                // Top observations by fire_count
+                let top = stm.top_n(10);
+                for (i, obs) in top.iter().enumerate() {
+                    let hash = obs.chain.chain_hash();
+                    let v = obs.emotion.valence;
+                    let a = obs.emotion.arousal;
+                    let fire = obs.fire_count;
+
+                    // Try to find alias in registry
+                    let label = self.registry.alias_for_hash(hash)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("{:016X}", hash));
+
+                    let mood = if v > 0.3 { "+" } else if v < -0.3 { "-" } else { "~" };
+                    lines.push(format!(
+                        "  {}. {} [{}] fire={} V={:.2} A={:.2}",
+                        i + 1, label, mood, fire, v, a
+                    ));
+                }
+
+                // Silk connections summary
+                let silk_edges = self.learning.graph().len();
+                let silk_nodes = self.learning.graph().node_count();
+                if silk_edges > 0 {
+                    lines.push(String::new());
+                    lines.push(format!("Silk: {} liên kết giữa {} concepts", silk_edges, silk_nodes));
+                }
+
+                // LeoAI knowledge expression
+                let expressed = self.leo.express_all();
+                if !expressed.is_empty() {
+                    lines.push(String::new());
+                    lines.push(format!("LeoAI biểu đạt: {} patterns", expressed.len()));
+                    for (i, expr) in expressed.iter().take(5).enumerate() {
+                        lines.push(format!("  {}. {}", i + 1, expr));
+                    }
+                    if expressed.len() > 5 {
+                        lines.push(format!("  ... và {} nữa", expressed.len() - 5));
+                    }
+                }
+
+                Response {
+                    text: lines.join("\n"),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            "cluster" => {
+                // ○{cluster} — cluster STM observations using ClusterSkill
+                let stm = self.learning.stm();
+                if stm.len() < 2 {
+                    return Response {
+                        text: String::from("Cần ít nhất 2 observations để cluster."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+
+                // Feed all STM chains into skill
+                for obs in stm.all().iter().take(32) {
+                    ctx.push_input(obs.chain.clone());
+                }
+
+                let skill = ClusterSkill;
+                let result = skill.execute(&mut ctx);
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(String::from("Cluster ○"));
+                match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let count = ctx.get("cluster_count").unwrap_or("?");
+                        lines.push(format!("Input    : {} observations", stm.len().min(32)));
+                        lines.push(format!("Clusters : {}", count));
+                        lines.push(format!("Note     : {}", note));
+
+                        // Show cluster representatives
+                        for (i, chain) in ctx.output_chains.iter().enumerate().take(8) {
+                            let hash = chain.chain_hash();
+                            let label = self.registry.alias_for_hash(hash)
+                                .unwrap_or("(cluster)");
+                            lines.push(format!(
+                                "  {}. {} (hash {:016X}, {} molecules)",
+                                i + 1, label, hash, chain.0.len()
+                            ));
+                        }
+                    }
+                    _ => lines.push(String::from("Không đủ data để cluster.")),
+                }
+
+                Response {
+                    text: lines.join("\n"),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            "generalize" | "rules" => {
+                // ○{generalize} — extract IF-THEN rules from STM
+                let stm = self.learning.stm();
+                if stm.len() < 3 {
+                    return Response {
+                        text: String::from("Cần ít nhất 3 observations để generalize."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+
+                for obs in stm.all().iter().take(32) {
+                    ctx.push_input(obs.chain.clone());
+                }
+
+                let skill = GeneralizationSkill;
+                let result = skill.execute(&mut ctx);
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(String::from("Generalization ○"));
+                match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let rule_count: usize = ctx.get("rule_count")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        lines.push(format!("Input : {} observations", stm.len().min(32)));
+                        lines.push(format!("Rules : {}", rule_count));
+                        lines.push(format!("Note  : {}", note));
+                        lines.push(String::from("────────────────────────────────"));
+                        for i in 0..rule_count {
+                            let key = alloc::format!("rule_{}", i);
+                            if let Some(rule) = ctx.get(&key) {
+                                lines.push(format!("  {}", rule));
+                            }
+                        }
+                    }
+                    _ => lines.push(String::from("Không đủ data để generalize.")),
+                }
+
+                Response {
+                    text: lines.join("\n"),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
             "help" => Response {
                 text: String::from(
                     "HomeOS ○{} Commands:\n\
@@ -758,6 +956,9 @@ impl HomeRuntime {
                      ○{dream}              — run Dream cycle\n\
                      ○{stats}              — system statistics\n\
                      ○{health}             — system health check\n\
+                     ○{memory}             — show learned knowledge\n\
+                     ○{cluster}            — cluster STM observations\n\
+                     ○{generalize}         — extract IF-THEN rules\n\
                      ○{solve \"2x+3=7\"}     — solve equation\n\
                      ○{derive \"x^2+3x\"}   — symbolic derivative\n\
                      ○{integrate \"2x\"}     — symbolic integral\n\
@@ -781,6 +982,7 @@ impl HomeRuntime {
                      ○{compile c 🔥 ∘ 💧}  — compile to C\n\
                      ○{compile rust stats} — compile to Rust\n\
                      ○{compile wasm 1 + 2} — compile to WASM\n\
+                     ○{similar term1 term2} — compare 2 concepts\n\
                      ○{if fire { stats }}  — conditional\n\
                      ○{loop 3 { stats }}   — loop N times\n\
                      ○{fn test { stats }}  — function definition\n\
@@ -1131,6 +1333,77 @@ impl HomeRuntime {
                         fx: 0.0,
                         kind: ResponseKind::System,
                     },
+                }
+            }
+
+            _ if cmd.starts_with("similar ") => {
+                // ○{similar fire water} — compare 2 concepts using SimilaritySkill
+                let args: alloc::vec::Vec<&str> = cmd[8..].split_whitespace().collect();
+                if args.len() < 2 {
+                    return Response {
+                        text: String::from("Cần 2 terms: ○{similar term1 term2}"),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let chain_a = self.registry.lookup_name(args[0])
+                    .and_then(|h| {
+                        let entry = self.registry.lookup_hash(h)?;
+                        Some(olang::encoder::encode_codepoint(entry.chain_hash as u32))
+                    })
+                    .unwrap_or_else(|| {
+                        // Fallback: encode as text
+                        let chains: alloc::vec::Vec<_> = args[0].chars()
+                            .map(|c| olang::encoder::encode_codepoint(c as u32))
+                            .filter(|ch| !ch.is_empty())
+                            .collect();
+                        if chains.is_empty() { olang::encoder::encode_codepoint('?' as u32) }
+                        else { olang::lca::lca_many(&chains) }
+                    });
+
+                let chain_b = self.registry.lookup_name(args[1])
+                    .and_then(|h| {
+                        let entry = self.registry.lookup_hash(h)?;
+                        Some(olang::encoder::encode_codepoint(entry.chain_hash as u32))
+                    })
+                    .unwrap_or_else(|| {
+                        let chains: alloc::vec::Vec<_> = args[1].chars()
+                            .map(|c| olang::encoder::encode_codepoint(c as u32))
+                            .filter(|ch| !ch.is_empty())
+                            .collect();
+                        if chains.is_empty() { olang::encoder::encode_codepoint('?' as u32) }
+                        else { olang::lca::lca_many(&chains) }
+                    });
+
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                ctx.push_input(chain_a);
+                ctx.push_input(chain_b);
+
+                let skill = SimilaritySkill;
+                let result = skill.execute(&mut ctx);
+
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, chain, .. } => {
+                        let sim = ctx.get("similarity").unwrap_or("?");
+                        let lca_hash = chain.chain_hash();
+                        let lca_label = self.registry.alias_for_hash(lca_hash)
+                            .unwrap_or("(LCA)");
+                        format!(
+                            "Similarity ○\n  {} ↔ {} = {}\n  LCA: {} ({:016X})\n  {}",
+                            args[0], args[1], sim, lca_label, lca_hash, note
+                        )
+                    }
+                    _ => format!("Không thể so sánh {} và {}.", args[0], args[1]),
+                };
+
+                Response {
+                    text,
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
                 }
             }
 
@@ -2088,6 +2361,29 @@ impl HomeRuntime {
                             "{}\n⊥ Mình nhận thấy có điều mâu thuẫn — bạn có muốn nói rõ hơn không?",
                             text
                         );
+                    }
+
+                    // Curiosity: high novelty → express interest
+                    if !text.is_empty() {
+                        match insight.curiosity_level.as_deref() {
+                            Some("extreme") => {
+                                text = format!("{}\nĐây là điều rất mới — mình muốn hiểu thêm.", text);
+                            }
+                            Some("high") => {
+                                text = format!("{}\nMình chưa gặp điều này trước đây.", text);
+                            }
+                            _ => {} // moderate/low → no comment
+                        }
+                    }
+
+                    // Reflection: knowledge quality warning
+                    if !text.is_empty() {
+                        if let Some("fragile") = insight.reflection_verdict.as_deref() {
+                            text = format!(
+                                "{}\n[Kiến thức còn mỏng — cần thêm dữ liệu]",
+                                text
+                            );
+                        }
                     }
                 }
 
@@ -3762,6 +4058,36 @@ impl HomeRuntime {
             }
             if writer.write_count() > 0 {
                 self.pending_writes.extend_from_slice(writer.as_bytes());
+            }
+        }
+
+        // Auto-Generalize: extract IF-THEN rules when STM is rich enough
+        // Fibonacci threshold: run only when STM >= Fib[6]=13 observations
+        if self.learning.stm().len() >= 13 {
+            let emotion = self.learning.context().last_emotion();
+            let mut gen_ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+            for obs in self.learning.stm().all().iter().take(32) {
+                gen_ctx.push_input(obs.chain.clone());
+            }
+            let gen_skill = GeneralizationSkill;
+            if let agents::skill::SkillResult::Ok { chain, .. } = gen_skill.execute(&mut gen_ctx) {
+                let rule_count: usize = gen_ctx.get("rule_count")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                if rule_count > 0 {
+                    // Feed generalized chain back into Silk as a high-level concept
+                    let gen_hash = chain.chain_hash();
+                    let anchor_hash = self.learning.stm().all().first()
+                        .map(|o| o.chain.chain_hash())
+                        .unwrap_or(0);
+                    self.learning.graph_mut().co_activate(
+                        gen_hash,
+                        anchor_hash,
+                        emotion,
+                        0.5,
+                        ts,
+                    );
+                }
             }
         }
 
