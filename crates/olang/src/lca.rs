@@ -221,11 +221,15 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
     }
 }
 
-/// Extremity of a single molecule (valence + arousal distance from midpoint).
+/// Extremity of a single molecule (Euclidean distance from midpoint in V/A space).
+///
+/// Trước: (ext_v + ext_a) / 2.0 — trung bình đơn giản (vi phạm QT emotion).
+/// Giờ: Euclidean distance / √2 — normalized [0.0, 1.0], không trung bình.
 fn extremity_single(valence: u8, arousal: u8) -> f32 {
     let ext_v = (valence as f32 - 128.0).abs() / 128.0;
     let ext_a = (arousal as f32 - 128.0).abs() / 128.0;
-    (ext_v + ext_a) / 2.0
+    // Euclidean distance in 2D, normalized by max possible distance (√2)
+    homemath::sqrtf(ext_v * ext_v + ext_a * ext_a) * core::f32::consts::FRAC_1_SQRT_2
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

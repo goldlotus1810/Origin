@@ -99,8 +99,18 @@ impl BookReader {
             return BookStats::default();
         }
         let sig = records.iter().filter(|r| r.significant).count();
-        let avg_v = records.iter().map(|r| r.emotion.valence).sum::<f32>() / records.len() as f32;
-        let avg_a = records.iter().map(|r| r.emotion.arousal).sum::<f32>() / records.len() as f32;
+        // Weighted aggregate: emotional intensity (|V|×A) as weight — NOT simple average (QT)
+        let weights: Vec<f32> = records
+            .iter()
+            .map(|r| (r.emotion.valence.abs() * r.emotion.arousal).max(0.01))
+            .collect();
+        let tw: f32 = weights.iter().sum();
+        let avg_v = records.iter().zip(weights.iter())
+            .map(|(r, &w)| r.emotion.valence * w)
+            .sum::<f32>() / tw;
+        let avg_a = records.iter().zip(weights.iter())
+            .map(|(r, &w)| r.emotion.arousal * w)
+            .sum::<f32>() / tw;
         BookStats {
             total_sentences: records.len(),
             significant_sentences: sig,
@@ -482,8 +492,11 @@ mod tests {
         let stats = r2.stats(&records);
         assert_eq!(stats.total_sentences, 3);
         assert_eq!(stats.significant_sentences, 2, "2 significant (|V|>0.3)");
-        // avg_valence ≈ (0.8 + -0.6 + 0.0) / 3 = 0.067
-        assert!((stats.avg_valence - 0.067).abs() < 0.05);
+        // Weighted aggregate: weight = |V| × A (emotionally intense sentences count more)
+        // Vui: |0.8|×0.7=0.56, Buồn: |-0.6|×0.4=0.24, Ổn: |0.0|×0.2=0.01(min)
+        // avg_valence ≈ (0.8×0.56 + -0.6×0.24 + 0.0×0.01) / (0.56+0.24+0.01) ≈ 0.376
+        // "Vui lắm!" trọng số lớn hơn → kéo valence lên (amplify thay vì trung bình)
+        assert!(stats.avg_valence > 0.2, "Weighted: emotionally strong 'Vui' dominates, got {}", stats.avg_valence);
     }
 
     #[test]
