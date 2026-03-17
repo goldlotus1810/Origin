@@ -62,6 +62,9 @@ pub enum Stmt {
     /// `let name = expr;` hoặc `name ≔ expr;`
     Let { name: String, value: Expr },
 
+    /// `let { a, b } = expr;` — destructure dict/record into variables
+    LetDestructure { names: Vec<String>, value: Expr },
+
     /// `emit expr;` hoặc `○ expr;`
     Emit(Expr),
 
@@ -139,8 +142,8 @@ pub enum Stmt {
     /// `use "module";` or `use module;` — import module
     Use(String),
 
-    /// `obj.field = expr;` — assign to field of dict/record
-    FieldAssign { object: String, field: String, value: Expr },
+    /// `obj.field = expr;` or `obj.a.b.c = expr;` — assign to field of dict/record
+    FieldAssign { object: String, fields: Vec<String>, value: Expr },
 }
 
 /// Match arm — pattern + body.
@@ -290,6 +293,9 @@ pub enum Expr {
 
     /// Lambda: `|x, y| expr`
     Lambda { params: Vec<String>, body: Box<Expr> },
+
+    /// Conditional expression: `if cond { a } else { b }`
+    IfExpr { cond: Box<Expr>, then_expr: Box<Expr>, else_expr: Box<Expr> },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -332,6 +338,24 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             _src: src,
+        }
+    }
+
+    /// Extract root ident and field path from a nested FieldAccess expression.
+    /// `a.b.c` → Some(("a", ["b", "c"]))
+    fn extract_field_path(expr: &Expr) -> Option<(String, Vec<String>)> {
+        match expr {
+            Expr::FieldAccess { object, field } => {
+                match object.as_ref() {
+                    Expr::Ident(root) => Some((root.clone(), alloc::vec![field.clone()])),
+                    _ => {
+                        let (root, mut path) = Self::extract_field_path(object)?;
+                        path.push(field.clone());
+                        Some((root, path))
+                    }
+                }
+            }
+            _ => None,
         }
     }
 
@@ -423,6 +447,24 @@ impl<'a> Parser<'a> {
     /// `let name = expr;`
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'let'
+        // Check for destructuring: let { a, b } = expr;
+        if self.check(&Token::LBrace) {
+            self.advance(); // consume {
+            let mut names = Vec::new();
+            if !self.check(&Token::RBrace) {
+                names.push(self.expect_ident()?);
+                while self.check(&Token::Comma) {
+                    self.advance();
+                    if self.check(&Token::RBrace) { break; } // trailing comma
+                    names.push(self.expect_ident()?);
+                }
+            }
+            self.expect(&Token::RBrace)?;
+            self.expect(&Token::Eq)?;
+            let value = self.parse_expr()?;
+            self.expect(&Token::Semi)?;
+            return Ok(Stmt::LetDestructure { names, value });
+        }
         let name = self.expect_ident()?;
         self.expect(&Token::Eq)?;
         let value = self.parse_expr()?;
@@ -673,22 +715,17 @@ impl<'a> Parser<'a> {
         }
 
         // ident = expr → reassignment (not `let`, not `==`)
-        // obj.field = expr → field assignment
+        // obj.field = expr → field assignment (supports a.b.c = value)
         if self.check(&Token::Eq) {
-            let is_field_assign = matches!(&expr, Expr::FieldAccess { object, .. } if matches!(object.as_ref(), Expr::Ident(_)));
+            // Check if it's a (nested) field assign: extract root + path
+            if let Some((root, fields)) = Self::extract_field_path(&expr) {
+                self.advance(); // consume =
+                let value = self.parse_expr()?;
+                self.expect(&Token::Semi)?;
+                return Ok(Stmt::FieldAssign { object: root, fields, value });
+            }
             let is_assign = matches!(&expr, Expr::Ident(_));
-
-            if is_field_assign {
-                if let Expr::FieldAccess { object, field } = expr {
-                    if let Expr::Ident(obj_name) = *object {
-                        self.advance(); // consume =
-                        let value = self.parse_expr()?;
-                        self.expect(&Token::Semi)?;
-                        return Ok(Stmt::FieldAssign { object: obj_name, field, value });
-                    }
-                }
-                unreachable!();
-            } else if is_assign {
+            if is_assign {
                 if let Expr::Ident(name) = expr {
                     self.advance(); // consume =
                     let value = self.parse_expr()?;
@@ -1088,6 +1125,24 @@ impl<'a> Parser<'a> {
                 self.expect(&Token::Pipe)?;
                 let body = self.parse_expr()?;
                 Expr::Lambda { params, body: Box::new(body) }
+            }
+
+            // If-expression: if cond { then } else { else }
+            Token::If => {
+                self.advance(); // consume if
+                let cond = self.parse_expr()?;
+                self.expect(&Token::LBrace)?;
+                let then_expr = self.parse_expr()?;
+                self.expect(&Token::RBrace)?;
+                self.expect(&Token::Else)?;
+                self.expect(&Token::LBrace)?;
+                let else_expr = self.parse_expr()?;
+                self.expect(&Token::RBrace)?;
+                Expr::IfExpr {
+                    cond: Box::new(cond),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
+                }
             }
 
             // Logical not: !expr

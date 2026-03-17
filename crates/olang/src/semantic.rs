@@ -164,6 +164,13 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.define_local(name);
         }
 
+        Stmt::LetDestructure { names, value } => {
+            validate_expr(value, scope, errors);
+            for name in names {
+                scope.define_local(name);
+            }
+        }
+
         Stmt::Emit(expr) => {
             validate_expr(expr, scope, errors);
         }
@@ -290,7 +297,7 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // Module imports are valid at any point
         }
 
-        Stmt::FieldAssign { object, field: _, value } => {
+        Stmt::FieldAssign { object, fields: _, value } => {
             validate_expr(value, scope, errors);
             if !scope.is_defined(object) {
                 errors.push(SemError::new(&alloc::format!(
@@ -457,6 +464,12 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.exit();
         }
 
+        Expr::IfExpr { cond, then_expr, else_expr } => {
+            validate_expr(cond, scope, errors);
+            validate_expr(then_expr, scope, errors);
+            validate_expr(else_expr, scope, errors);
+        }
+
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
             // Validate dimension values are in valid byte range (0-255)
             for (name, val) in [("S", shape), ("R", relation), ("V", valence), ("A", arousal), ("T", time)] {
@@ -525,6 +538,7 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::FieldAccess { .. } => ChainKind::Unknown,
         Expr::Pipe(_, right) => infer_expr_kind(right),
         Expr::Lambda { .. } => ChainKind::Unknown,
+        Expr::IfExpr { then_expr, .. } => infer_expr_kind(then_expr),
         Expr::MolLiteral { shape, valence, .. } => {
             // Heuristic: check shape and valence to classify
             match shape {
@@ -542,7 +556,8 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
 /// Infer kind cho statement (most statements → Void).
 pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
     match stmt {
-        Stmt::Let { .. } | Stmt::Emit(_) | Stmt::Command(_) | Stmt::CommandArg { .. } => {
+        Stmt::Let { .. } | Stmt::LetDestructure { .. }
+        | Stmt::Emit(_) | Stmt::Command(_) | Stmt::CommandArg { .. } => {
             ChainKind::Void
         }
         Stmt::Expr(expr) => infer_expr_kind(expr),
@@ -676,6 +691,21 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             lower_expr(value, ctx);
             ctx.emit(Op::Store(name.clone()));
             ctx.locals.push(name.clone());
+        }
+
+        Stmt::LetDestructure { names, value } => {
+            // let { a, b } = dict → lower dict, then extract each field
+            lower_expr(value, ctx);
+            // Store dict as temporary
+            ctx.emit(Op::Store("__destructure_tmp".into()));
+            ctx.locals.push("__destructure_tmp".into());
+            for name in names {
+                ctx.emit(Op::LoadLocal("__destructure_tmp".into()));
+                ctx.emit(Op::Push(string_to_key_chain(name)));
+                ctx.emit(Op::Call("__dict_get".into()));
+                ctx.emit(Op::Store(name.clone()));
+                ctx.locals.push(name.clone());
+            }
         }
 
         Stmt::Emit(expr) => {
@@ -909,17 +939,55 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::StoreUpdate(name.clone()));
         }
 
-        Stmt::FieldAssign { object, field, value } => {
+        Stmt::FieldAssign { object, fields, value } => {
             // obj.field = value → load obj, push field key chain, lower value, __dict_set, store back
-            if ctx.is_local(object) {
-                ctx.emit(Op::LoadLocal(object.clone()));
+            // For nested: obj.a.b = value → load obj, get a, set b=value, set a=modified, store obj
+            if fields.len() == 1 {
+                // Simple: obj.field = value
+                if ctx.is_local(object) {
+                    ctx.emit(Op::LoadLocal(object.clone()));
+                } else {
+                    ctx.emit(Op::Load(object.clone()));
+                }
+                ctx.emit(Op::Push(string_to_key_chain(&fields[0])));
+                lower_expr(value, ctx);
+                ctx.emit(Op::Call("__dict_set".into()));
+                ctx.emit(Op::StoreUpdate(object.clone()));
             } else {
-                ctx.emit(Op::Load(object.clone()));
+                // Nested: obj.a.b.c = value
+                // Strategy: load obj, navigate to parent dict, set last field, rebuild path
+                // Store intermediate dicts as locals for reassembly
+                let depth = fields.len();
+                // Load root
+                if ctx.is_local(object) {
+                    ctx.emit(Op::LoadLocal(object.clone()));
+                } else {
+                    ctx.emit(Op::Load(object.clone()));
+                }
+                // Navigate down, storing intermediate dicts
+                for i in 0..depth - 1 {
+                    ctx.emit(Op::Dup); // keep copy for later reassembly
+                    let local_name: String = alloc::format!("__nested_{}", i);
+                    ctx.emit(Op::Store(local_name.clone()));
+                    ctx.locals.push(local_name);
+                    ctx.emit(Op::Push(string_to_key_chain(&fields[i])));
+                    ctx.emit(Op::Call("__dict_get".into()));
+                }
+                // Set the last field on the innermost dict
+                ctx.emit(Op::Push(string_to_key_chain(&fields[depth - 1])));
+                lower_expr(value, ctx);
+                ctx.emit(Op::Call("__dict_set".into()));
+                // Rebuild path from inside out
+                for i in (0..depth - 1).rev() {
+                    let local_name: String = alloc::format!("__nested_{}", i);
+                    ctx.emit(Op::LoadLocal(local_name));
+                    ctx.emit(Op::Swap); // [parent, modified_child]
+                    ctx.emit(Op::Push(string_to_key_chain(&fields[i])));
+                    ctx.emit(Op::Swap); // [parent, key, modified_child]
+                    ctx.emit(Op::Call("__dict_set".into()));
+                }
+                ctx.emit(Op::StoreUpdate(object.clone()));
             }
-            ctx.emit(Op::Push(string_to_key_chain(field)));
-            lower_expr(value, ctx);
-            ctx.emit(Op::Call("__dict_set".into()));
-            ctx.emit(Op::StoreUpdate(object.clone()));
         }
 
         Stmt::Use(module) => {
@@ -1456,6 +1524,23 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             }
             lower_expr(body, ctx);
             ctx.locals.truncate(saved);
+        }
+
+        Expr::IfExpr { cond, then_expr, else_expr } => {
+            // if cond { then } else { else } as expression
+            lower_expr(cond, ctx);
+            let jz_pos = ctx.current_pos();
+            ctx.emit(Op::Jz(0)); // if falsy → else branch
+            ctx.emit(Op::Pop); // pop cond (truthy)
+            lower_expr(then_expr, ctx);
+            let jmp_pos = ctx.current_pos();
+            ctx.emit(Op::Jmp(0)); // skip else
+            let else_target = ctx.current_pos();
+            ctx.patch_jump(jz_pos, else_target);
+            ctx.emit(Op::Pop); // pop cond (falsy)
+            lower_expr(else_expr, ctx);
+            let end = ctx.current_pos();
+            ctx.patch_jump(jmp_pos, end);
         }
 
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
@@ -2344,9 +2429,9 @@ mod tests {
         let stmts = parse("let d = { x: 1 }; d.x = 42;").unwrap();
         assert_eq!(stmts.len(), 2);
         match &stmts[1] {
-            Stmt::FieldAssign { object, field, value } => {
+            Stmt::FieldAssign { object, fields, value } => {
                 assert_eq!(object, "d");
-                assert_eq!(field, "x");
+                assert_eq!(fields, &["x"]);
                 assert!(matches!(value, Expr::Int(42)));
             }
             other => panic!("Expected FieldAssign, got {:?}", other),
@@ -2463,5 +2548,147 @@ mod tests {
         assert!(!outputs.is_empty(), "Should have output");
         let v = outputs[0].to_number().unwrap();
         assert!((v - 77.0).abs() < f64::EPSILON, "d.y should be 77, got {}", v);
+    }
+
+    // ── Phase 2 Tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_comments() {
+        // Line comment
+        let stmts = parse("let x = 1; // this is a comment\nemit x;").unwrap();
+        assert_eq!(stmts.len(), 2);
+        // Block comment
+        let stmts2 = parse("let x = /* hidden */ 1; emit x;").unwrap();
+        assert_eq!(stmts2.len(), 2);
+    }
+
+    #[test]
+    fn parse_pipe_operator() {
+        let stmts = parse("emit 5 |> to_string;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Emit(Expr::Pipe(_, _)) => {}
+            other => panic!("Expected Emit(Pipe), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_lambda() {
+        let stmts = parse("let f = |x| x + 1;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value: Expr::Lambda { params, .. }, .. } => {
+                assert_eq!(params, &["x"]);
+            }
+            other => panic!("Expected Let with Lambda, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_if_expr() {
+        let stmts = parse("let x = if 1 { 10 } else { 20 };").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value: Expr::IfExpr { .. }, .. } => {}
+            other => panic!("Expected Let with IfExpr, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e2e_if_expr() {
+        let stmts = parse("let x = if 1 { 10 } else { 20 }; emit x;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 10.0).abs() < f64::EPSILON, "truthy condition → 10, got {}", v);
+    }
+
+    #[test]
+    fn parse_let_destructure() {
+        let stmts = parse("let { a, b } = { a: 1, b: 2 };").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::LetDestructure { names, .. } => {
+                assert_eq!(names, &["a", "b"]);
+            }
+            other => panic!("Expected LetDestructure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e2e_destructure() {
+        let stmts = parse("let { x, y } = { x: 10, y: 20 }; emit x; emit y;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2, "Should have 2 outputs, got {:?}", outputs);
+        let vx = outputs[0].to_number().unwrap();
+        let vy = outputs[1].to_number().unwrap();
+        assert!((vx - 10.0).abs() < f64::EPSILON, "x=10, got {}", vx);
+        assert!((vy - 20.0).abs() < f64::EPSILON, "y=20, got {}", vy);
+    }
+
+    #[test]
+    fn e2e_for_each() {
+        let stmts = parse("let arr = [10, 20, 30]; let sum = 0; for x in arr { sum = sum + x; } emit sum;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 60.0).abs() < f64::EPSILON, "sum=60, got {}", v);
+    }
+
+    #[test]
+    fn parse_method_call() {
+        // obj.method(args) desugars to Call { name: "method", args: [obj, ...] }
+        let stmts = parse("emit arr.len();").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::Call { name, args }) => {
+                assert_eq!(name, "len");
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!("Expected Emit(Call), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e2e_method_call_len() {
+        let stmts = parse("let arr = [1, 2, 3]; emit arr.len();").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "arr.len()=3, got {}", v);
+    }
+
+    #[test]
+    fn parse_nested_field_assign() {
+        let stmts = parse("let d = { a: { b: 1 } }; d.a.b = 42;").unwrap();
+        match &stmts[1] {
+            Stmt::FieldAssign { object, fields, .. } => {
+                assert_eq!(object, "d");
+                assert_eq!(fields, &["a", "b"]);
+            }
+            other => panic!("Expected FieldAssign, got {:?}", other),
+        }
     }
 }
