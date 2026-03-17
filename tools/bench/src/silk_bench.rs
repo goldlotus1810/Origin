@@ -575,7 +575,7 @@ fn bench_projection() {
     // ══════════════════════════════════════════════════════════════════════
     let b_node_bytes = total_nodes * 19; // tagged sparse avg
     let b_hebbian = total_nodes * avg_edges * 4 / 100; // 4% learned
-    let b_structural = total_nodes * avg_edges * 1 / 100; // 1% parent ptrs
+    let b_structural = total_nodes * avg_edges / 100; // 1% parent ptrs
     let b_hebb_bytes = b_hebbian * 19;
     let b_struct_bytes = b_structural * 17;
     let b_total = b_node_bytes + b_hebb_bytes + b_struct_bytes;
@@ -687,7 +687,53 @@ fn bench_projection() {
     println!();
 
     // ══════════════════════════════════════════════════════════════════════
-    // Visual comparison 4 models
+    // Model E: COMPACT-QR — QR nodes compressed to 2 bytes
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // From CompactQR (molecular.rs):
+    //   16 bits = [shape:3][relation:3][time:3][valence:4][arousal:3]
+    //   Full 5D position in 2 bytes. Hash computed from 2B on demand.
+    //   Mature QR nodes → CompactQR → L2→Ln-1 cold storage.
+    //   L0 + L1 stay full resolution for active processing.
+    //
+    // Lifecycle: Formula → Evaluating → Mature → QR → CompactQR
+    //   L0: 5400 full formulas (10B) — always hot
+    //   L1: ~50K LCA results (5B tagged) — Memory working set
+    //   L2→Ln: 2B CompactQR nodes (2B each!) — cold archive
+    //   HebbianLink: only top 0.5% strongest connections stored
+
+    let e_l0 = l0_nodes * 10; // full formulas
+    let e_l1 = l1_nodes * 5;  // LCA tagged
+    // L2→Ln: CompactQR = 2 bytes per node!
+    let e_compact = l2_ln_nodes * 2;
+    // HebbianLink: only 0.5% strongest (rest implicit from CompactQR silk_compare)
+    let e_hebbian_count = l2_ln_nodes * avg_edges * 5 / 1000; // 0.5%
+    let e_hebb = e_hebbian_count * 7; // compact on-disk format
+    // Optional: bloom filter for fast hash→offset lookup = 1 bit/node
+    let e_bloom = total_nodes / 8; // 1 bit per node
+
+    let e_total = e_l0 + e_l1 + e_compact + e_hebb + e_bloom;
+
+    println!("    ╔═══════════════════════════════════════════════════╗");
+    println!("    ║  MODEL E: COMPACT-QR (QR → 2 bytes, L2→Ln)      ║");
+    println!("    ╚═══════════════════════════════════════════════════╝");
+    println!("    L0 formulas    : {:>5} × 10B  = {}", format_count(l0_nodes), format_bytes(e_l0));
+    println!("    L1 LCA (Memory): {:>5} × 5B   = {}", format_count(l1_nodes), format_bytes(e_l1));
+    println!("    L2→Ln CompactQR: {} × 2B   = {} ← DNA tri thức", format_count(l2_ln_nodes), format_bytes(e_compact));
+    println!("    Silk implicit  : {} × 0B   = 0 B (silk_compare O(1))", format_count(l2_ln_nodes * avg_edges * 995 / 1000));
+    println!("    HebbianLink    : {} × 7B   = {} (top 0.5%)", format_count(e_hebbian_count), format_bytes(e_hebb));
+    println!("    Bloom filter   : {} (1 bit/node)", format_bytes(e_bloom));
+    println!("    chain_hash     : 0 B (compute_hash() từ 2B — deterministic)");
+    println!("    ────────────────────────────────────────────────────");
+    println!("    DISK TOTAL     : {}  {}", format_bytes(e_total),
+        if e_total < 16_000_000_000 { "✓ FITS 16GB" } else { "✗ VƯỢT 16GB" });
+    println!("    Dư còn         : {} (cho aliases, runtime, evolution, logs)",
+        format_bytes(16_000_000_000u64.saturating_sub(e_total)));
+    println!("    Nén so với Old : {:.0}× nhỏ hơn", old_total as f64 / e_total as f64);
+    println!();
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Visual comparison 5 models
     // ══════════════════════════════════════════════════════════════════════
     let bar_width = 50;
     let max_val = old_total as f64;
@@ -697,6 +743,7 @@ fn bench_projection() {
     print_bar("  3-Layer (19B)", b_total, max_val, bar_width);
     print_bar("  Formula+Delta", c_total, max_val, bar_width);
     print_bar("  Zero-Hash(4.5B)", d_total, max_val, bar_width);
+    print_bar("  CompactQR (2B)", e_total, max_val, bar_width);
     // 16GB line
     print!("      16GB limit ");
     let limit_pos = ((16_000_000_000.0 / max_val) * bar_width as f64).min(bar_width as f64) as usize;
@@ -746,6 +793,80 @@ fn bench_projection() {
         format_bytes(c_total), if c_total < 16_000_000_000 { "✓" } else { "✗" });
     println!("    {:30} {:>12} {:>10}", "D: Zero-Hash (hash tính lại)",
         format_bytes(d_total), if d_total < 16_000_000_000 { "✓" } else { "✗" });
+    println!("    {:30} {:>12} {:>10}", "E: CompactQR (2B/node) ★",
+        format_bytes(e_total), if e_total < 16_000_000_000 { "✓" } else { "✗" });
+    println!();
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CompactQR live benchmark
+    // ══════════════════════════════════════════════════════════════════════
+    println!("    ── CompactQR Live Benchmark ──");
+    {
+        use olang::molecular::CompactQR;
+
+        // Encode fire codepoint → Molecule → CompactQR
+        let fire_chain = olang::encoder::encode_codepoint(0x1F525);
+        let fire_mol = fire_chain.0[0];
+        let fire_cqr = CompactQR::from_molecule(&fire_mol);
+        println!("    🔥 Fire: {:?} → CompactQR {}", fire_mol, fire_cqr);
+
+        // Roundtrip fidelity
+        let back = fire_cqr.to_molecule();
+        println!("    Roundtrip: {:?} (shape={}, rel={}, V={}, A={}, T={})",
+            back, back.shape, back.relation, back.emotion.valence, back.emotion.arousal, back.time);
+
+        // Silk compare: fire vs water
+        let water_chain = olang::encoder::encode_codepoint(0x1F4A7);
+        let water_mol = water_chain.0[0];
+        let water_cqr = CompactQR::from_molecule(&water_mol);
+        let (matching, sim) = fire_cqr.silk_compare(water_cqr);
+        println!("    🔥↔💧 silk_compare: {}/5 dims match, similarity={:.2}", matching, sim);
+
+        // Evolve: fire → gentle fire (lower valence)
+        let gentle = fire_cqr.evolve(3, 4); // dim 3 = valence, zone 4
+        println!("    🔥→🕯️ evolve(V, 4): {}", gentle);
+
+        // Speed: from_molecule
+        let t = std::time::Instant::now();
+        let iters = 1_000_000u64;
+        for _ in 0..iters {
+            let _ = CompactQR::from_molecule(&fire_mol);
+        }
+        let elapsed = t.elapsed();
+        println!("    from_molecule : {:.0} ops/s ({:.1}ns/call)",
+            iters as f64 / elapsed.as_secs_f64(),
+            elapsed.as_nanos() as f64 / iters as f64);
+
+        // Speed: silk_compare
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            let _ = fire_cqr.silk_compare(water_cqr);
+        }
+        let elapsed = t.elapsed();
+        println!("    silk_compare  : {:.0} ops/s ({:.1}ns/call)",
+            iters as f64 / elapsed.as_secs_f64(),
+            elapsed.as_nanos() as f64 / iters as f64);
+
+        // Speed: compute_hash
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            let _ = fire_cqr.compute_hash();
+        }
+        let elapsed = t.elapsed();
+        println!("    compute_hash  : {:.0} ops/s ({:.1}ns/call)",
+            iters as f64 / elapsed.as_secs_f64(),
+            elapsed.as_nanos() as f64 / iters as f64);
+
+        // Speed: evolve
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            let _ = fire_cqr.evolve(3, 4);
+        }
+        let elapsed = t.elapsed();
+        println!("    evolve        : {:.0} ops/s ({:.1}ns/call)",
+            iters as f64 / elapsed.as_secs_f64(),
+            elapsed.as_nanos() as f64 / iters as f64);
+    }
     println!();
 }
 

@@ -281,10 +281,11 @@ pub const TAGGED_DEFAULT_TIME: u8 = 0x03; // Medium
 ///   Candidate cho QR promotion (bất tử, ED25519 signed).
 ///
 /// Ln-1 dynamic — không hardcode max layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Maturity {
     /// Công thức — tiềm năng, chưa evaluate
+    #[default]
     Formula = 0x00,
     /// Đang đánh giá — có evidence, tích lũy
     Evaluating = 0x01,
@@ -338,12 +339,6 @@ impl Maturity {
     pub fn is_evaluating(self) -> bool { self == Self::Evaluating }
     /// Check if in Mature state (chín, sẵn sàng QR).
     pub fn is_mature(self) -> bool { self == Self::Mature }
-}
-
-impl Default for Maturity {
-    fn default() -> Self {
-        Self::Formula
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1038,6 +1033,196 @@ impl MolecularChain {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CompactQR — 2-byte QR node cho L2→Ln-1
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 2-byte compressed QR node — DNA của tri thức.
+///
+/// Khi node đạt `Maturity::Mature` → Dream promote → QR signed →
+/// **nén thành 2 bytes** lưu vào L2→Ln-1.
+///
+/// ## Encoding (16 bits = 2 bytes)
+///
+/// ```text
+/// Byte 0:  [shape:3][relation:3][time:2(hi)]
+/// Byte 1:  [time:1(lo)][valence:4][arousal:3]
+///
+/// shape    = 3 bits (0-7) → 8 ShapeBase categories
+/// relation = 3 bits (0-7) → 8 RelationBase categories
+/// time     = 3 bits (0-4) → 5 TimeDim categories (split: 2 hi + 1 lo)
+/// valence  = 4 bits (0-15) → 16 zones of 16 (V/16 = zone)
+/// arousal  = 3 bits (0-7) → 8 zones of 32 (A/32 = zone)
+/// ```
+///
+/// ## Tại sao 2 bytes?
+///
+/// "Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức."
+///
+/// 2 bytes = 5D tọa độ trong không gian Silk.
+/// Từ 2 bytes → reconstruct full Molecule (fill zone centers).
+/// Từ 2 bytes → Silk bucket address (implicit, 0 bytes edges).
+/// Từ 2 bytes → similarity O(1) (so sánh 2 bytes = so sánh 5D).
+///
+/// ## Dùng ở đâu?
+///
+/// - **L2→Ln-1**: QR nodes nén lại lưu trên disk (origin.olang)
+/// - **L1 Memory**: STM/LTM dùng CompactQR làm data cho L0
+/// - **Silk**: 2 bytes IS the Silk address — node = coordinate
+///
+/// ## Storage impact
+///
+/// ```text
+/// 2B nodes × 2 bytes = 4 GB    (vs 33B old = 66 GB)
+/// Silk edges          = 0 B     (implicit from 2-byte comparison)
+/// HebbianLink 2%      ≈ 0.84 GB
+/// Total              ≈ 4.84 GB → FITS 16GB (11 GB dư)
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CompactQR {
+    /// 2-byte packed 5D coordinate.
+    bytes: [u8; 2],
+}
+
+impl CompactQR {
+    /// Số bytes trên disk.
+    pub const SIZE: usize = 2;
+
+    /// Nén Molecule → 2 bytes.
+    ///
+    /// Lấy base category + zone cho mỗi chiều.
+    /// Thông tin sub-variant bị mất — chỉ giữ BASE.
+    /// Đây là nén LOSSY nhưng giữ đúng vị trí 5D (bucket address).
+    pub fn from_molecule(mol: &Molecule) -> Self {
+        // Shape: 3 bits (base 0-7)
+        let s = if mol.shape == 0 { 0 } else { ((mol.shape - 1) % 8) as u16 };
+        // Relation: 3 bits (base 0-7)
+        let r = if mol.relation == 0 { 0 } else { ((mol.relation - 1) % 8) as u16 };
+        // Time: 3 bits (base 0-4)
+        let t = if mol.time == 0 { 2 } else { (((mol.time - 1) % 5) as u16).min(4) };
+        // Valence: 4 bits (zone 0-15, each zone = 16 wide)
+        let v = (mol.emotion.valence / 16) as u16; // 0-15
+        // Arousal: 3 bits (zone 0-7, each zone = 32 wide)
+        let a = (mol.emotion.arousal / 32) as u16; // 0-7
+
+        // Pack: [shape:3][relation:3][time_hi:2] [time_lo:1][valence:4][arousal:3]
+        let bits = (s << 13) | (r << 10) | (t << 7) | (v << 3) | a;
+
+        Self {
+            bytes: [(bits >> 8) as u8, (bits & 0xFF) as u8],
+        }
+    }
+
+    /// Tạo từ 2 raw bytes.
+    pub fn from_bytes(b: [u8; 2]) -> Self {
+        Self { bytes: b }
+    }
+
+    /// Raw 2 bytes.
+    pub fn to_bytes(self) -> [u8; 2] {
+        self.bytes
+    }
+
+    /// Unpack → 5D components (base indices).
+    fn unpack(self) -> (u8, u8, u8, u8, u8) {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        let s = ((bits >> 13) & 0x07) as u8; // 0-7
+        let r = ((bits >> 10) & 0x07) as u8; // 0-7
+        let t = ((bits >> 7) & 0x07) as u8;  // 0-4
+        let v = ((bits >> 3) & 0x0F) as u8;  // 0-15
+        let a = (bits & 0x07) as u8;          // 0-7
+        (s, r, t, v, a)
+    }
+
+    /// Reconstruct full Molecule từ 2 bytes.
+    ///
+    /// Lossy: sub-variant = 0, V/A = zone center.
+    /// Đủ cho Silk implicit comparison và L0 formula evaluation.
+    pub fn to_molecule(self) -> Molecule {
+        let (s, r, t, v, a) = self.unpack();
+        Molecule {
+            shape: s + 1,               // base 1-8
+            relation: r + 1,            // base 1-8
+            emotion: EmotionDim {
+                valence: v * 16 + 8,    // zone center (zone * 16 + 8)
+                arousal: a * 32 + 16,   // zone center (zone * 32 + 16)
+            },
+            time: t + 1,                // base 1-5
+        }
+    }
+
+    /// Shape base index (0-7).
+    pub fn shape_idx(self) -> u8 { self.unpack().0 }
+    /// Relation base index (0-7).
+    pub fn relation_idx(self) -> u8 { self.unpack().1 }
+    /// Time base index (0-4).
+    pub fn time_idx(self) -> u8 { self.unpack().2 }
+    /// Valence zone (0-15).
+    pub fn valence_zone(self) -> u8 { self.unpack().3 }
+    /// Arousal zone (0-7).
+    pub fn arousal_zone(self) -> u8 { self.unpack().4 }
+
+    /// Implicit Silk: số chiều chung giữa 2 CompactQR.
+    ///
+    /// O(1) — chỉ so sánh 2 bytes, trích 5 fields.
+    /// Trả về (shared_count, strength).
+    /// strength = shared_count / 5.0 (base).
+    pub fn silk_compare(self, other: Self) -> (u8, f32) {
+        let (s1, r1, t1, v1, a1) = self.unpack();
+        let (s2, r2, t2, v2, a2) = other.unpack();
+
+        let mut shared = 0u8;
+        if s1 == s2 { shared += 1; }
+        if r1 == r2 { shared += 1; }
+        if t1 == t2 { shared += 1; }
+        if v1 == v2 { shared += 1; }
+        if a1 == a2 { shared += 1; }
+
+        let strength = shared as f32 / 5.0;
+        (shared, strength)
+    }
+
+    /// Tính chain_hash từ 2 bytes — deterministic, KHÔNG cần lưu hash.
+    ///
+    /// "hash = f(formula)" — tính lại bất cứ lúc nào từ 2 bytes.
+    /// Dùng FNV-1a 64-bit (same as MolecularChain::chain_hash).
+    pub fn compute_hash(self) -> u64 {
+        // FNV-1a 64-bit — consistent with chain_hash
+        let mut h: u64 = 0xcbf29ce484222325;
+        h ^= self.bytes[0] as u64;
+        h = h.wrapping_mul(0x100000001b3);
+        h ^= self.bytes[1] as u64;
+        h = h.wrapping_mul(0x100000001b3);
+        h
+    }
+
+    /// Evolve: thay 1 chiều → CompactQR mới (loài mới).
+    ///
+    /// dim: 0=shape, 1=relation, 2=time, 3=valence, 4=arousal
+    pub fn evolve(self, dim: u8, new_val: u8) -> Self {
+        let (mut s, mut r, mut t, mut v, mut a) = self.unpack();
+        match dim {
+            0 => s = new_val.min(7),
+            1 => r = new_val.min(7),
+            2 => t = new_val.min(4),
+            3 => v = new_val.min(15),
+            4 => a = new_val.min(7),
+            _ => {}
+        }
+        let bits = ((s as u16) << 13) | ((r as u16) << 10) | ((t as u16) << 7) | ((v as u16) << 3) | (a as u16);
+        Self {
+            bytes: [(bits >> 8) as u8, (bits & 0xFF) as u8],
+        }
+    }
+}
+
+impl core::fmt::Display for CompactQR {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let (s, r, t, v, a) = self.unpack();
+        write!(f, "QR[S{} R{} T{} V{} A{}]", s, r, t, v, a)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1553,6 +1738,168 @@ mod tests {
         let b = test_mol(0x05, 0x06, 0x20, 0xC0, 0x01);
         let deltas = a.dimension_delta(&b);
         assert_eq!(deltas.len(), 5, "All 5 dimensions differ");
+    }
+
+    // ── CompactQR tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn compact_qr_size() {
+        assert_eq!(CompactQR::SIZE, 2, "CompactQR = 2 bytes");
+        assert_eq!(core::mem::size_of::<CompactQR>(), 2);
+    }
+
+    #[test]
+    fn compact_qr_roundtrip_defaults() {
+        // Default Molecule: Sphere, Member, V=0x80, A=0x80, Medium
+        let mol = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let qr = CompactQR::from_molecule(&mol);
+        let restored = qr.to_molecule();
+        // Base categories must match exactly
+        assert_eq!(restored.shape_base(), mol.shape_base());
+        assert_eq!(restored.relation_base(), mol.relation_base());
+        assert_eq!(restored.time_base(), mol.time_base());
+        // V/A within zone (lossy but same bucket)
+        assert_eq!(restored.emotion.valence / 16, mol.emotion.valence / 16, "Same V zone");
+        assert_eq!(restored.emotion.arousal / 32, mol.emotion.arousal / 32, "Same A zone");
+    }
+
+    #[test]
+    fn compact_qr_fire_molecule() {
+        // 🔥 = Sphere, Causes, V=0xC0, A=0xC0, Fast
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule(&fire);
+        assert_eq!(qr.shape_idx(), 0, "Sphere = base 0");
+        assert_eq!(qr.relation_idx(), 5, "Causes = base 5");
+        assert_eq!(qr.time_idx(), 3, "Fast = base 3");
+        assert_eq!(qr.valence_zone(), 12, "0xC0/16 = 12");
+        assert_eq!(qr.arousal_zone(), 6, "0xC0/32 = 6");
+    }
+
+    #[test]
+    fn compact_qr_silk_compare_identical() {
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule(&fire);
+        let (shared, strength) = qr.silk_compare(qr);
+        assert_eq!(shared, 5, "Identical → 5/5 dims");
+        assert!((strength - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn compact_qr_silk_compare_partial() {
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04); // Sphere, Causes, V=12, A=6, Fast
+        let ice = test_mol(0x01, 0x06, 0x30, 0x30, 0x02);   // Sphere, Causes, V=3, A=1, Slow
+        let qr_f = CompactQR::from_molecule(&fire);
+        let qr_i = CompactQR::from_molecule(&ice);
+        let (shared, _) = qr_f.silk_compare(qr_i);
+        assert_eq!(shared, 2, "Fire/Ice share Shape + Relation = 2");
+    }
+
+    #[test]
+    fn compact_qr_silk_compare_zero() {
+        let a = test_mol(0x01, 0x01, 0x10, 0x10, 0x01); // Sphere, Member, V=1, A=0, Static
+        let b = test_mol(0x04, 0x06, 0xF0, 0xE0, 0x05); // Cone, Causes, V=15, A=7, Instant
+        let qr_a = CompactQR::from_molecule(&a);
+        let qr_b = CompactQR::from_molecule(&b);
+        let (shared, _) = qr_a.silk_compare(qr_b);
+        assert_eq!(shared, 0, "Completely different → 0 shared");
+    }
+
+    #[test]
+    fn compact_qr_evolve() {
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule(&fire);
+        // Evolve Valence zone: 12 → 2 (like "lửa nhẹ")
+        let evolved = qr.evolve(3, 2);
+        assert_eq!(evolved.valence_zone(), 2);
+        // Other dims unchanged
+        assert_eq!(evolved.shape_idx(), qr.shape_idx());
+        assert_eq!(evolved.relation_idx(), qr.relation_idx());
+        assert_eq!(evolved.time_idx(), qr.time_idx());
+        assert_eq!(evolved.arousal_zone(), qr.arousal_zone());
+        // Different node
+        assert_ne!(qr.compute_hash(), evolved.compute_hash());
+    }
+
+    #[test]
+    fn compact_qr_hash_deterministic() {
+        let mol = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule(&mol);
+        let h1 = qr.compute_hash();
+        let h2 = qr.compute_hash();
+        assert_eq!(h1, h2, "Hash must be deterministic");
+        // Different QR → different hash
+        let qr2 = qr.evolve(0, 3);
+        assert_ne!(qr.compute_hash(), qr2.compute_hash());
+    }
+
+    #[test]
+    fn compact_qr_byte_roundtrip() {
+        let mol = test_mol(0x03, 0x07, 0xA0, 0x60, 0x02);
+        let qr = CompactQR::from_molecule(&mol);
+        let bytes = qr.to_bytes();
+        let restored = CompactQR::from_bytes(bytes);
+        assert_eq!(qr, restored, "Byte roundtrip must be lossless");
+    }
+
+    #[test]
+    fn compact_qr_display() {
+        let mol = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule(&mol);
+        let s = alloc::format!("{}", qr);
+        assert!(s.starts_with("QR["), "Display format: {}", s);
+    }
+
+    #[test]
+    fn compact_qr_all_bases_representable() {
+        // All 8 shape bases
+        for s in 1u8..=8 {
+            let mol = test_mol(s, 0x01, 0x80, 0x80, 0x03);
+            let qr = CompactQR::from_molecule(&mol);
+            assert_eq!(qr.shape_idx(), s - 1, "Shape base {} → idx {}", s, s - 1);
+        }
+        // All 8 relation bases
+        for r in 1u8..=8 {
+            let mol = test_mol(0x01, r, 0x80, 0x80, 0x03);
+            let qr = CompactQR::from_molecule(&mol);
+            assert_eq!(qr.relation_idx(), r - 1);
+        }
+        // All 5 time bases
+        for t in 1u8..=5 {
+            let mol = test_mol(0x01, 0x01, 0x80, 0x80, t);
+            let qr = CompactQR::from_molecule(&mol);
+            assert_eq!(qr.time_idx(), t - 1);
+        }
+    }
+
+    #[test]
+    fn compact_qr_valence_zones() {
+        // 16 zones (0-15)
+        for zone in 0u8..16 {
+            let v = zone * 16 + 8; // zone center
+            let mol = test_mol(0x01, 0x01, v, 0x80, 0x03);
+            let qr = CompactQR::from_molecule(&mol);
+            assert_eq!(qr.valence_zone(), zone, "V={:#X} → zone {}", v, zone);
+        }
+    }
+
+    #[test]
+    fn compact_qr_arousal_zones() {
+        // 8 zones (0-7)
+        for zone in 0u8..8 {
+            let a = zone * 32 + 16; // zone center
+            let mol = test_mol(0x01, 0x01, 0x80, a, 0x03);
+            let qr = CompactQR::from_molecule(&mol);
+            assert_eq!(qr.arousal_zone(), zone, "A={:#X} → zone {}", a, zone);
+        }
+    }
+
+    #[test]
+    fn compact_qr_storage_at_2b() {
+        // 2 billion nodes × 2 bytes = 4 GB
+        let nodes: u64 = 2_000_000_000;
+        let storage = nodes * CompactQR::SIZE as u64;
+        assert!(storage < 16_000_000_000, "2B × 2B = {} < 16GB", storage);
+        assert_eq!(storage, 4_000_000_000, "Exactly 4 GB");
     }
 }
 
