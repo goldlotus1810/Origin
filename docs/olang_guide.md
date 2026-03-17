@@ -56,7 +56,11 @@ String lit -> registry alias lookup.
 
 ---
 
-## 2. Relations — 18 RelOps
+## 2. Relations — 18 Edge Types (10 parser-supported)
+
+> **Ghi chu:** 18 edge types ton tai trong Silk layer. Parser hien ho tro 10
+> (∈ ⊂ ≡ ∘ → ≈ ← ∂ ∪ ∩). Cac RelOps 0x0B-0x11 (∖ ↔ ⟶ ⟳ ↑ ⚡ ∥) la
+> Silk edges, chua co trong parser syntax.
 
 ### Tao edge (relation giua 2 nodes)
 ```olang
@@ -375,6 +379,41 @@ learn "vui la cam xuc tot";
 dream;                          -- STM -> cluster -> QR
 ```
 
+### Molecular Literals (moi — PushMol opcode)
+```olang
+-- Tao molecule truc tiep tu 5 chieu:
+emit { S=1 R=6 V=200 A=180 T=4 };
+-- S=Shape, R=Relation, V=Valence, A=Arousal, T=Time
+
+-- Kiem tra truth:
+"fire" == { S=1 R=6 V=200 A=180 T=4 };
+```
+
+### LeoAI tu lap trinh (leo.rs)
+```olang
+-- LeoAI co the sinh va chay Olang:
+-- program("emit fire ∘ water;")     -> chay VM, hoc ket qua
+-- program_compose("fire", "water")  -> sinh + chay "emit fire ∘ water;"
+-- program_verify("fire", 0xABCD)    -> sinh truth assertion
+-- program_experiment(0xABCD, "V", 100) -> thay 1 chieu, hoc ket qua
+
+-- LeoAI bieu dat tri thuc:
+-- express_observation(hash) -> "{ S=1 R=6 V=200 A=180 T=4 }"
+-- express_all()             -> tat ca STM thanh Vec<String>
+-- express_evolution(s, e)   -> "{ ... } <- { ... } (* DeltaV *)"
+```
+
+### Molecule Evolution
+```olang
+-- Molecule.evolve(dim, new_value) -> loai moi
+-- Chi thay doi 1/5 chieu -> chain_hash moi
+-- Consistency >= 3/4 semantic rules -> valid
+
+-- Vi du: lua -> lua nhe (giam Valence)
+-- fire.evolve(Valence, 0x40) -> "lua_nhe" (loai moi)
+-- Learning pipeline detect evolution tu dong
+```
+
 ---
 
 ## 9. Creative Writing — Van & Tho
@@ -478,16 +517,19 @@ learn "Nuoc mat kho, nu cuoi no tren moi.";
 | `status`  | Khong   | Status report                       |
 | `help`    | Khong   | Help                                |
 
-### IR Opcodes (26 total)
+### IR Opcodes (31 total)
 
-**Stack:** PUSH, LOAD, LCA, DUP, POP, SWAP
-**Relation:** EDGE(rel), QUERY(rel)
-**Control:** CALL, RET, JMP, JZ, LOOP
-**Output:** EMIT, HALT
+**Stack:** PUSH, LOAD, DUP, POP, SWAP, PUSH_NUM, PUSH_MOL
+**Chain:** LCA, EDGE(rel), QUERY(rel), EMIT, FUSE
+**Control:** CALL, RET, JMP, JZ, LOOP, SCOPE_BEGIN, SCOPE_END
+**Output:** HALT
 **System:** DREAM, STATS, NOP
 **State:** STORE, LOAD_LOCAL
-**QT2:** FUSE
 **Debug:** TRACE, INSPECT, ASSERT, TYPEOF, WHY, EXPLAIN
+
+> PUSH_MOL: molecular literal `{ S=1 R=6 V=200 A=180 T=4 }`
+> PUSH_NUM: numeric literal (f64) cho arithmetic
+> SCOPE_BEGIN/END: lexical scoping cho local variables
 
 ### QT Axioms
 

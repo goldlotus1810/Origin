@@ -46,6 +46,10 @@ Mỗi ký tự Unicode → 1 Molecule = 5 bytes:
   [Shape] [Relation] [Valence] [Arousal] [Time]
    1 byte   1 byte    1 byte    1 byte   1 byte
 
+Hierarchical encoding: base (1-8) + sub_index*8 → ~5400 patterns phân biệt
+Tagged wire format: [mask:1B][present_fields:0-5B] → 1-6 bytes (sparse)
+Evolution: Molecule.evolve(dim, val) → mutate 1/5 chiều → loài mới
+
 Nhóm        Ký tự    Chiều         Ý nghĩa
 ──────────────────────────────────────────────────
 SDF         ~1344    Shape         "Trông như thế nào" (8 primitives: ● ▬ ■ ▲ ○ ∪ ∩ ∖)
@@ -88,7 +92,7 @@ Giao tiếp:
 Sinh học:
   Worker = tế bào thần kinh ngoại vi
   Chief  = tủy sống — xử lý, tổng hợp
-  LeoAI  = não — học, hiểu, sắp xếp, nhớ
+  LeoAI  = não — học, hiểu, sắp xếp, nhớ, LẬP TRÌNH
   AAM    = ý thức — quyết định cuối cùng
 
 Tất cả: Silent by default · Wake on ISL · Xử lý → sleep
@@ -108,12 +112,33 @@ Tất cả: Silent by default · Wake on ISL · Xử lý → sleep
   Thứ tự ưu tiên: Honesty → Contradiction → Causality → Abstraction → Analogy → Curiosity → Reflection
   Honesty LUÔN chạy trước: không đủ evidence → im lặng, không cần kiểm tra gì thêm.
 
-Skills bổ trợ:
-  Nhận:    IngestSkill · ModalityFusion
+Tự lập trình (leo.rs — ĐÃ IMPLEMENT):
+  program(source)           — parse → compile → VM → HỌC kết quả vào STM
+  program_compose(a, b)     — sinh "emit a ∘ b;" → chạy → học LCA
+  program_verify(alias, h)  — sinh truth assertion → kiểm chứng
+  program_experiment(h,d,v) — thay 1 chiều → chạy → học kết quả (giả thuyết)
+  program_raw(source)       — trả raw VmEvent cho Runtime
+
+  Biểu đạt tri thức:
+  express_observation(hash) — STM → Olang mol literal { S=X R=Y V=Z A=W T=Q }
+  express_truth(alias, h)   — "alias" == { ... }
+  express_all()             — toàn bộ STM → Vec<String> Olang
+  express_evolution(s, e)   — delta giữa 2 concept: { ... } ← { ... } (* ΔV *)
+
+  ISL integration:
+  MsgType::Program → poll_inbox() → program() → Ack/Nack
+  (Runtime gửi Olang cho LeoAI qua ISL, LeoAI chạy và học)
+
+Skills bổ trợ (15 domain skills):
+  Nhận:    IngestSkill
   Hiểu:    ClusterSkill · SimilaritySkill · DeltaSkill
   Sắp xếp: CuratorSkill · MergeSkill · PruneSkill
   Học:     HebbianSkill · DreamSkill
   Đề xuất: ProposalSkill
+  Suy luận: GeneralizationSkill (trích IF-THEN rules từ cluster)
+  Nhận diện: InverseRenderSkill (camera → SDF fitting)
+  Thời gian: TemporalPatternSkill (chu kỳ, clustering giờ, sequences)
+  Worker:   SensorSkill · ActuatorSkill · SecuritySkill · NetworkSkill
 ```
 
 ### Worker profiles:
@@ -146,6 +171,80 @@ Tools (std):
   seeder   — seed 35 L0 nodes từ UCD
   server   — Terminal REPL (stdin/stdout)
   inspector — đọc/verify origin.olang
+```
+
+---
+
+## Hệ thống mới (sau foundation)
+
+### Molecule Evolution (molecular.rs):
+```
+Molecule.evolve(dim, new_value) → EvolveResult
+  — Mutate 1 trong 5 chiều → chain_hash mới → "loài mới"
+  — Consistency check: ≥3/4 semantic rules → valid
+  — dimension_delta(other) → tìm khác biệt giữa 2 concept
+  — Learning pipeline detect evolution tự động (learning.rs)
+
+Ví dụ: 🔥 evolve(Valence, 0x40) → concept "lửa nhẹ" — loài mới từ lửa
+```
+
+### NodeBody + BodyStore (vsdf/body.rs):
+```
+NodeBody = bridge chain_hash → hữu hình + vô hình:
+  sdf_kind + sdf_params    ← Shape (hữu hình, render được)
+  SplineSet (6 curves):    ← Temporal dynamics (vô hình)
+    intensity, force, temperature, frequency, emotion_v, emotion_a
+
+BodyStore trong HomeRuntime: lưu NodeBody per chain_hash
+  learn_shape(), learn_material(), learn_intensity()...
+  Append-only: mỗi learn tăng version, không overwrite
+```
+
+### NodeKind (registry.rs — 10 loại node):
+```
+Alphabet | Knowledge | Memory | Agent | Skill | Program
+Device   | Sensor    | Emotion | System
+
+Registry.insert_with_kind(chain, layer, ..., kind)
+Registry.entries_by_kind(kind), count_by_kind(), kind_summary()
+L1 system seed: clone Worker → mang theo NodeKind → biết mình là gì
+```
+
+### RegistryGate (proposal.rs):
+```
+Cơ chế cứng: mọi node PHẢI đăng ký Registry
+  check_registered(name, hash, kind, alert_level, ts) → bool
+  Nếu chưa registry → tạo PendingRegistration → alert
+  AlertLevel: Normal(○) | Important(⚠) | RedAlert(🔴)
+  Runtime wire: alias chưa registry → "{}=? [chưa registry]"
+```
+
+### CapabilityGate (gate.rs):
+```
+Resource access control cho Workers/Chiefs:
+  Capability: SensorRead | ActuatorWrite | NetworkLocal | NetworkExternal
+              FileRead | FileWrite | QRWrite | MediaCapture
+  check(request) → Granted | NeedUserApproval | Denied
+```
+
+---
+
+## Olang VM — 31 Opcodes (không phải 26)
+
+```
+Stack:    Push Load Dup Pop Swap PushNum PushMol Store LoadLocal
+Control:  Jmp Jz Loop Call Ret ScopeBegin ScopeEnd Halt Nop
+Chain:    Lca Edge Query Emit Fuse
+System:   Dream Stats
+Debug:    Trace Inspect Assert TypeOf Why Explain
+
+Molecular literal syntax (mới):
+  { S=1 R=6 V=200 A=180 T=4 } → PushMol opcode
+
+Parser RelOps (10):
+  ∈ ⊂ ≡ ∘ → ≈ ← ∂(context) ∪(contains) ∩(intersects)
+
+Compiler targets: C · Rust · WASM (WAT)
 ```
 
 ---
@@ -327,6 +426,7 @@ ISLFrame:   12B header + 2B length + variable body
 MsgType: Text(0x01) Query(0x02) Learn(0x03) Propose(0x04)
          ActuatorCmd(0x05) Tick(0x06) Dream(0x07) Emergency(0x08)
          Approved(0x09) Broadcast(0x0A) ChainPayload(0x0B) Ack(0x0C) Nack(0x0D)
+         Program(0x0E) — Runtime gửi Olang source cho LeoAI qua ISL
 
 ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 ```
@@ -338,15 +438,15 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 | Crate | Mục đích | Files chính | Test |
 |-------|---------|-------------|------|
 | **ucd** | Unicode → Molecule lookup | `build.rs`, `src/lib.rs` | `cargo test -p ucd` |
-| **olang** | Core: Molecule, LCA, Registry, VM, Compiler, Compact | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs`, `clone.rs`, `compact.rs` | `cargo test -p olang` |
+| **olang** | Core: Molecule, LCA, Registry, VM, Compiler, Compact, KnowTree | `encoder.rs`, `lca.rs`, `registry.rs`, `vm.rs`, `compiler.rs`, `clone.rs`, `compact.rs`, `knowtree.rs` | `cargo test -p olang` |
 | **silk** | Hebbian learning, emotion edges, walk | `edge.rs`, `hebbian.rs`, `walk.rs`, `graph.rs` | `cargo test -p silk` |
 | **context** | Emotion V/A/D/I, ConversationCurve, Intent | `emotion.rs`, `curve.rs`, `intent.rs`, `fusion.rs` | `cargo test -p context` |
-| **agents** | Encoder, Learning, Gate, Skill, Instinct, LeoAI, Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `instinct.rs`, `leo.rs`, `chief.rs`, `worker.rs` | `cargo test -p agents` |
-| **memory** | STM, Dream, Proposals, AAM | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
+| **agents** | Encoder, Learning, Gate, Skill, Instinct, LeoAI(+programming), Chief, Worker | `encoder.rs`, `learning.rs`, `gate.rs`, `skill.rs`, `instinct.rs`, `leo.rs`, `chief.rs`, `worker.rs`, `domain_skills.rs`, `book.rs` | `cargo test -p agents` |
+| **memory** | STM, Dream, Proposals, AAM, RegistryGate | `lib.rs`, `dream.rs`, `proposal.rs` | `cargo test -p memory` |
 | **runtime** | HomeRuntime entry point, ○{} Parser | `origin.rs`, `parser.rs`, `response_template.rs` | `cargo test -p runtime` |
 | **hal** | HAL: arch detect, platform probe, security, drivers, tier system, FFI | `arch.rs`, `platform.rs`, `probe.rs`, `security.rs`, `driver.rs`, `tier.rs`, `ffi.rs` | `cargo test -p hal` |
 | **isl** | Inter-system messaging (4-byte address) | `address.rs`, `message.rs`, `codec.rs`, `queue.rs` | `cargo test -p isl` |
-| **vsdf** | 18 SDF + ∇f + FFR + 3D scene graph | `sdf.rs`, `ffr.rs`, `physics.rs`, `fit.rs`, `scene.rs` | `cargo test -p vsdf` |
+| **vsdf** | 18 SDF + ∇f + FFR + 3D scene graph + NodeBody | `sdf.rs`, `ffr.rs`, `physics.rs`, `fit.rs`, `scene.rs`, `body.rs` | `cargo test -p vsdf` |
 | **wasm** | Browser WASM bindings + WebSocket-ISL bridge | `lib.rs`, `bridge.rs` | `cargo test -p homeos-wasm` |
 
 **Tools (std):**
@@ -364,7 +464,7 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (1104 tests)
+# Test toàn bộ (1744 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
@@ -445,7 +545,9 @@ Olang = ngôn ngữ lập trình + suy luận + sáng tạo
 Mọi thứ là MolecularChain. Mọi phép toán là biến đổi chain.
 
 3 Pillars: Alphabet (lexer) → Syntax (parser) → Semantics (validation + IR)
-26 IR opcodes, stack-based VM, 18 relation operators
+31 IR opcodes, stack-based VM, 10 parser RelOps (8 RelationBase)
+Molecular literal: { S=1 R=6 V=200 A=180 T=4 } → PushMol
+LeoAI tự lập trình: program(source) → parse → compile → VM → learn
 
 Commands:
   dream / stats / fuse / trace          — system (không arg)

@@ -908,10 +908,11 @@ Trigger: idle > 5 phút
 
 QT7: ĐN ↔ QR conflict → QR thắng (bất biến)
 
-SkillProposal (song song):
+DreamProposal (song song):
   DreamSkill phát hiện pattern lặp lại
-  → SkillProposal → AAM approve → ComposedSkill mới
-  QT7 cho code: ĐN pattern → QR Skill
+  → DreamProposal → AAM approve → QR mới
+  Score = α(0.3)×frequency + β(0.4)×connectivity + γ(0.3)×emotion
+  (SkillProposal chưa implement — chỉ có DreamProposal)
 ```
 
 ---
@@ -978,10 +979,10 @@ Delta detection → tâm dịch về vùng chuyển động
 
 ---
 
-## XXI. 2 AGENT
+## XXI. AGENT HIERARCHY
 
 ```
-L0 làm hết. Agent = miệng với người dùng. Chỉ 2.
+3 tiers: AAM(0) + Chiefs(1) + Workers(2)
 
 AAM (Agent AI Master) — Tier 0:
   Approve QR (nhận từ LeoAI)
@@ -990,12 +991,28 @@ AAM (Agent AI Master) — Tier 0:
   Stateless — silent by default
   Không giao tiếp Ln trực tiếp
 
-LeoAI (Knowledge Keeper) — Tier 1:
+LeoAI (Knowledge Keeper + Programmer) — Tier 1:
   Ingest → cluster → curate → merge → prune
   Dream khi idle
   Hebbian φ⁻¹ decay
   Propose lên AAM
   Silent by default
+  ✅ TỰ LẬP TRÌNH: program() → parse Olang → VM → học kết quả
+  ✅ BIỂU ĐẠT: express_observation/truth/all/evolution → Olang code
+  ✅ THÍ NGHIỆM: program_experiment() → thay 1 chiều, học kết quả
+  ✅ ISL: nhận MsgType::Program từ Runtime → chạy → Ack/Nack
+
+Chiefs (Home/Vision/Network) — Tier 1:
+  Quản lý Workers, tổng hợp reports
+  ✅ Chief-to-Chief peer messaging (inter-domain)
+  HomeChief: auto-command actuator nếu temp > 35°C hoặc < 10°C
+  NetworkChief: escalate emergency → broadcast peers
+  VisionChief: aggregate motion events
+
+Workers (Sensor/Actuator/Camera/Network) — Tier 2:
+  Silent by default · Wake on ISL
+  Encode → report molecular chain (KHÔNG raw data)
+  5 loại: Sensor, Actuator, Camera, Network, Generic
 
 DENDRITES = Memory-Learning ĐN (ngắn hạn, tự do thay đổi)
 AXON      = LongTermMemory QR (bất biến, append-only)
@@ -1225,7 +1242,57 @@ Kiến trúc:
 
 ---
 
-## XXVII. MỘT CÂU
+## XXVII. HỆ THỐNG MỚI (2026-03-16 → 2026-03-17)
+
+### Molecule Evolution (molecular.rs):
+```
+Molecule.evolve(dim, new_value) → EvolveResult
+  mutate 1/5 chiều → chain_hash mới → "loài mới"
+  consistency check ≥3/4 → valid
+  dimension_delta(other) → Vec<(Dimension, old, new)>
+  Learning pipeline detect evolution tự động
+```
+
+### NodeBody + BodyStore (vsdf/body.rs):
+```
+NodeBody = bridge chain_hash → hữu hình + vô hình
+  sdf_kind + params       ← render được
+  SplineSet (6 curves)    ← intensity, force, temp, freq, emotion_v, emotion_a
+  evaluate(t) → snapshot tại thời điểm t
+  Append-only: learn_*() tăng version
+```
+
+### NodeKind (registry.rs):
+```
+10 categories: Alphabet Knowledge Memory Agent Skill Program Device Sensor Emotion System
+L1 system seed: clone → mang NodeKind → self-identify
+```
+
+### RegistryGate (proposal.rs):
+```
+Hard gate: mọi node PHẢI registry
+  check_registered() → PendingRegistration nếu chưa
+  AlertLevel: Normal | Important | RedAlert
+```
+
+### Hierarchical Byte Encoding (molecular.rs):
+```
+base (1-8) + sub_index*8 → ~5400 UCD patterns phân biệt
+Tagged wire: [mask:1B][present:0-5B] → sparse molecules 1-6 bytes
+```
+
+### VM 31 Opcodes (ir.rs):
+```
+Cũ (26): Push Load Lca Edge Query Emit Call Ret Jmp Jz Dup Pop Swap
+         Loop Halt Dream Stats Nop Store LoadLocal PushNum
+         ScopeBegin ScopeEnd
+Mới (+5): Fuse Trace Inspect Assert TypeOf Why Explain PushMol
+Tổng: 31 opcodes
+```
+
+---
+
+## XXVIII. MỘT CÂU
 
 ```
 HomeOS = sinh linh tìm tọa độ và cảm nhận:
