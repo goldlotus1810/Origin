@@ -128,7 +128,11 @@ fn emit_c(prog: &OlangProgram) -> Result<String, CompileError> {
     out.push_str("extern Chain olang_load(const char *name);\n");
     out.push_str("extern void  olang_emit(Chain c);\n");
     out.push_str("extern void  olang_edge(Chain a, Chain b, uint8_t rel);\n");
-    out.push_str("extern void  olang_query(Chain a, uint8_t rel);\n\n");
+    out.push_str("extern void  olang_query(Chain a, uint8_t rel);\n");
+    out.push_str("/* Device I/O: Olang → HAL → hardware */\n");
+    out.push_str("extern int   olang_device_write(const char *id, uint8_t value);\n");
+    out.push_str("extern Chain olang_device_read(const char *id);\n");
+    out.push_str("extern void  olang_device_list(void);\n\n");
 
     // Function body
     out.push_str(&format!("void {}(void) {{\n", prog.name.replace(' ', "_")));
@@ -202,6 +206,15 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         ),
         Op::TryBegin(target) => format!("_err = 0; /* try: on error goto label_{} */", target),
         Op::CatchEnd => "_err = 0; /* catch end */".into(),
+        Op::DeviceWrite(id) => format!(
+            "{{ Chain v = pop(&s); olang_device_write(\"{}\", (uint8_t)(v & 0xFF)); }}",
+            escape(id)
+        ),
+        Op::DeviceRead(id) => format!(
+            "push(&s, olang_device_read(\"{}\"));",
+            escape(id)
+        ),
+        Op::DeviceList => "olang_device_list();".into(),
     })
 }
 
@@ -222,6 +235,10 @@ fn emit_rust(prog: &OlangProgram) -> Result<String, CompileError> {
     out.push_str("    fn olang_load(name: *const u8) -> u64;\n");
     out.push_str("    fn olang_emit(chain: u64);\n");
     out.push_str("    fn olang_edge(a: u64, b: u64, rel: u8);\n");
+    out.push_str("    // Device I/O: Olang → HAL → hardware\n");
+    out.push_str("    fn olang_device_write(id: *const u8, value: u8) -> i32;\n");
+    out.push_str("    fn olang_device_read(id: *const u8) -> u64;\n");
+    out.push_str("    fn olang_device_list();\n");
     out.push_str("}\n\n");
 
     let fn_name = prog.name.replace([' ', '-'], "_");
@@ -304,6 +321,15 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         ),
         Op::TryBegin(_) => "// try block begin".into(),
         Op::CatchEnd => "// catch block end".into(),
+        Op::DeviceWrite(id) => format!(
+            "{{ let v = stack.pop().unwrap_or(0); unsafe {{ olang_device_write(b\"{}\\0\".as_ptr(), (v & 0xFF) as u8); }} }}",
+            escape(id)
+        ),
+        Op::DeviceRead(id) => format!(
+            "stack.push(unsafe {{ olang_device_read(b\"{}\\0\".as_ptr()) }});",
+            escape(id)
+        ),
+        Op::DeviceList => "unsafe { olang_device_list(); }".into(),
     })
 }
 
@@ -364,6 +390,15 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
                 format!("_pc = {};", next)
             }
         }
+        Op::DeviceWrite(id) => format!(
+            "{{ let v = stack.pop().unwrap_or(0); unsafe {{ olang_device_write(b\"{}\\0\".as_ptr(), (v & 0xFF) as u8); }} }} _pc = {};",
+            escape(id), next
+        ),
+        Op::DeviceRead(id) => format!(
+            "stack.push(unsafe {{ olang_device_read(b\"{}\\0\".as_ptr()) }}); _pc = {};",
+            escape(id), next
+        ),
+        Op::DeviceList => format!("unsafe {{ olang_device_list(); }} _pc = {};", next),
     })
 }
 
@@ -385,7 +420,11 @@ fn emit_wat(prog: &OlangProgram) -> Result<String, CompileError> {
     out.push_str("  (import \"olang\" \"load\"  (func $load  (param i32) (result i64)))\n");
     out.push_str("  (import \"olang\" \"emit\"  (func $emit  (param i64)))\n");
     out.push_str("  (import \"olang\" \"edge\"  (func $edge  (param i64 i64 i32)))\n");
-    out.push_str("  (import \"olang\" \"query\" (func $query (param i64 i32)))\n\n");
+    out.push_str("  (import \"olang\" \"query\" (func $query (param i64 i32)))\n");
+    out.push_str("  ;; Device I/O: Olang → HAL → hardware\n");
+    out.push_str("  (import \"olang\" \"device_write\" (func $device_write (param i32 i32) (result i32)))\n");
+    out.push_str("  (import \"olang\" \"device_read\"  (func $device_read  (param i32) (result i64)))\n");
+    out.push_str("  (import \"olang\" \"device_list\"  (func $device_list))\n\n");
 
     // Memory for string literals
     out.push_str("  (memory 1)\n\n");
@@ -499,6 +538,15 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         ),
         Op::TryBegin(_) => ";; try block begin".into(),
         Op::CatchEnd => ";; catch block end".into(),
+        Op::DeviceWrite(id) => format!(
+            "local.set $a  i32.const 256  i64.wrap_i32  i32.const 0  call $device_write  drop  ;; device_write \"{}\"",
+            escape(id)
+        ),
+        Op::DeviceRead(id) => format!(
+            "i32.const 256  call $device_read  ;; device_read \"{}\"",
+            escape(id)
+        ),
+        Op::DeviceList => "call $device_list  ;; list devices".into(),
     })
 }
 
@@ -562,6 +610,12 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; try begin", next),
         Op::CatchEnd =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; catch end", next),
+        Op::DeviceWrite(id) =>
+            format!("(i32.const 256) (i32.const 0) (call $device_write) (drop) (local.set $pc (i32.const {})) (br $dispatch) ;; device_write \"{}\"", next, escape(id)),
+        Op::DeviceRead(id) =>
+            format!("(i32.const 256) (call $device_read) (local.set $pc (i32.const {})) (br $dispatch) ;; device_read \"{}\"", next, escape(id)),
+        Op::DeviceList =>
+            format!("(call $device_list) (local.set $pc (i32.const {})) (br $dispatch) ;; device_list", next),
     })
 }
 
@@ -839,6 +893,78 @@ mod tests {
         for target in [Target::C, Target::Rust, Target::Wasm] {
             let result = Compiler::new(target).emit(&prog);
             assert!(result.is_ok(), "{} try/catch failed: {:?}", target.name(), result.err());
+        }
+    }
+
+    // ── Device I/O compiler tests ──────────────────────────────────────────
+
+    #[test]
+    fn c_device_write_emits_call() {
+        let mut prog = OlangProgram::new("dev_test");
+        prog.push_op(Op::PushNum(255.0))
+            .push_op(Op::DeviceWrite("relay_0".into()))
+            .push_op(Op::Halt);
+        let src = Compiler::new(Target::C).emit(&prog).unwrap();
+        assert!(src.contains("olang_device_write"), "C: device_write call");
+        assert!(src.contains("relay_0"), "C: device_id preserved");
+    }
+
+    #[test]
+    fn c_device_read_emits_call() {
+        let mut prog = OlangProgram::new("dev_test");
+        prog.push_op(Op::DeviceRead("dht22".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let src = Compiler::new(Target::C).emit(&prog).unwrap();
+        assert!(src.contains("olang_device_read"), "C: device_read call");
+        assert!(src.contains("dht22"), "C: device_id preserved");
+    }
+
+    #[test]
+    fn c_device_list_emits_call() {
+        let mut prog = OlangProgram::new("dev_test");
+        prog.push_op(Op::DeviceList)
+            .push_op(Op::Halt);
+        let src = Compiler::new(Target::C).emit(&prog).unwrap();
+        assert!(src.contains("olang_device_list"), "C: device_list call");
+    }
+
+    #[test]
+    fn rust_device_ops_emit() {
+        let mut prog = OlangProgram::new("dev_test");
+        prog.push_op(Op::PushNum(128.0))
+            .push_op(Op::DeviceWrite("light_0".into()))
+            .push_op(Op::DeviceRead("sensor_temp".into()))
+            .push_op(Op::DeviceList)
+            .push_op(Op::Halt);
+        let src = Compiler::new(Target::Rust).emit(&prog).unwrap();
+        assert!(src.contains("olang_device_write"), "Rust: device_write");
+        assert!(src.contains("olang_device_read"), "Rust: device_read");
+        assert!(src.contains("olang_device_list"), "Rust: device_list");
+    }
+
+    #[test]
+    fn wat_device_imports() {
+        let mut prog = OlangProgram::new("dev_test");
+        prog.push_op(Op::DeviceList)
+            .push_op(Op::Halt);
+        let src = Compiler::new(Target::Wasm).emit(&prog).unwrap();
+        assert!(src.contains("\"device_write\""), "WAT: device_write import");
+        assert!(src.contains("\"device_read\""), "WAT: device_read import");
+        assert!(src.contains("\"device_list\""), "WAT: device_list import");
+    }
+
+    #[test]
+    fn all_targets_device_ops() {
+        let mut prog = OlangProgram::new("dev_test");
+        prog.push_op(Op::PushNum(1.0))
+            .push_op(Op::DeviceWrite("relay".into()))
+            .push_op(Op::DeviceRead("sensor".into()))
+            .push_op(Op::DeviceList)
+            .push_op(Op::Halt);
+        for target in [Target::C, Target::Rust, Target::Wasm] {
+            let result = Compiler::new(target).emit(&prog);
+            assert!(result.is_ok(), "{} device ops failed: {:?}", target.name(), result.err());
         }
     }
 

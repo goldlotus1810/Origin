@@ -708,6 +708,27 @@ impl HomeRuntime {
                         ));
                     }
                 }
+
+                // ── Device I/O events ────────────────────────────────────
+                // VM emit → Runtime xử lý → HAL → phần cứng thật.
+                // Khi chạy từ REPL (không có HAL), chỉ log event.
+                // Khi chạy trên thiết bị, Runtime inject HAL và thực thi.
+
+                VmEvent::DeviceWrite { device_id, value } => {
+                    output_text.push_str(&format!(
+                        "[device_write \"{}\" = 0x{:02X}] ",
+                        device_id, value
+                    ));
+                }
+                VmEvent::DeviceRead { device_id } => {
+                    output_text.push_str(&format!(
+                        "[device_read \"{}\"] ",
+                        device_id
+                    ));
+                }
+                VmEvent::DeviceListRequest => {
+                    output_text.push_str("[device_list] ");
+                }
             }
         }
 

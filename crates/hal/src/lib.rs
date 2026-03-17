@@ -32,7 +32,8 @@ pub use arch::{Architecture, ChipsetLayout, CpuInfo, MemoryInfo, PlatformProfile
 pub use driver::{AudioInfo, DisplayInfo, DisplayKind, InputEvent};
 pub use ffi::{FfiConfig, FfiResponse, PlatformBridge};
 pub use platform::{
-    DeviceDescriptor, DeviceStatus, DeviceType, HalPlatform, MockPlatform, PlatformCapability,
+    DeviceDescriptor, DeviceResult, DeviceStatus, DeviceType, HalPlatform, MockPlatform,
+    PlatformCapability,
 };
 pub use probe::{
     ProbeResult, ProbeStatus, SystemProbe, VulnerabilityReport, VulnerabilitySeverity,

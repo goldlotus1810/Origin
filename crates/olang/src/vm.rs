@@ -114,6 +114,24 @@ pub enum VmEvent {
     WhyConnection { from: u64, to: u64 },
     /// Explain: trace origin of a chain
     ExplainOrigin { hash: u64 },
+
+    // ── Device I/O events ────────────────────────────────────────────────────
+    // VM emit — Runtime xử lý → gọi HAL → phần cứng thật.
+
+    /// Ghi giá trị ra thiết bị. Runtime gọi HAL.device_write().
+    DeviceWrite {
+        /// Device ID (VD: "gpio_relay", "light_0")
+        device_id: String,
+        /// Giá trị ghi (molecular dimension: 0x00=off, 0xFF=max)
+        value: u8,
+    },
+    /// Đọc giá trị từ thiết bị. Runtime gọi HAL.device_read().
+    DeviceRead {
+        /// Device ID
+        device_id: String,
+    },
+    /// Liệt kê thiết bị. Runtime gọi HAL.scan_devices().
+    DeviceListRequest,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1609,6 +1627,40 @@ impl OlangVM {
                         hash: chain.chain_hash(),
                     });
                     let _ = stack.push(chain);
+                }
+
+                // ── Device I/O opcodes ─────────────────────────────────────────
+                // VM = side-effect free. Emit events → Runtime xử lý → HAL.
+                // Đây là bridge: Olang → VmEvent → Runtime → HAL → phần cứng.
+
+                Op::DeviceWrite(device_id) => {
+                    let val_chain = vm_pop!(stack, events);
+                    // Extract value: nếu là number chain → u8, nếu là mol → valence
+                    let value = if let Some(n) = val_chain.to_number() {
+                        n as u8
+                    } else if let Some(mol) = val_chain.0.first() {
+                        mol.emotion.valence
+                    } else {
+                        0
+                    };
+                    events.push(VmEvent::DeviceWrite {
+                        device_id: device_id.clone(),
+                        value,
+                    });
+                }
+
+                Op::DeviceRead(device_id) => {
+                    // Emit event — Runtime sẽ gọi HAL.device_read() và inject kết quả.
+                    // Tạm push empty chain → Runtime sẽ replace.
+                    events.push(VmEvent::DeviceRead {
+                        device_id: device_id.clone(),
+                    });
+                    // Push placeholder — caller (Runtime) có thể inject actual value
+                    let _ = stack.push(MolecularChain::empty());
+                }
+
+                Op::DeviceList => {
+                    events.push(VmEvent::DeviceListRequest);
                 }
 
                 Op::TryBegin(catch_target) => {
