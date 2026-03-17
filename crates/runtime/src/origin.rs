@@ -153,6 +153,10 @@ pub struct HomeRuntime {
     boot_errors: alloc::vec::Vec<String>,
     /// Execution tracing toggle (○{trace} bật/tắt)
     trace_enabled: bool,
+    /// Platform bridge — HAL → phần cứng thật.
+    /// None = REPL/test mode (chỉ log events).
+    /// Some = wired to real hardware via PlatformBridge.
+    platform: Option<alloc::boxed::Box<dyn hal::ffi::PlatformBridge>>,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -208,6 +212,17 @@ impl HomeRuntime {
     /// Boot từ hư không — ○(∅)==○.
     pub fn new(session_id: u64) -> Self {
         Self::with_file(session_id, None)
+    }
+
+    /// Boot với platform bridge — Olang ○{} điều khiển phần cứng thật.
+    pub fn with_platform(
+        session_id: u64,
+        file_bytes: Option<&[u8]>,
+        platform: alloc::boxed::Box<dyn hal::ffi::PlatformBridge>,
+    ) -> Self {
+        let mut rt = Self::with_file(session_id, file_bytes);
+        rt.platform = Some(platform);
+        rt
     }
 
     /// Boot với file bytes — load registry + Silk edges từ origin.olang.
@@ -269,6 +284,7 @@ impl HomeRuntime {
             manifest: boot_result.manifest,
             boot_errors: boot_result.errors,
             trace_enabled: false,
+            platform: None,
         };
 
         // ── Run bootstrap programs — firmware trên VM ─────────────────────
@@ -715,16 +731,38 @@ impl HomeRuntime {
                 // Khi chạy trên thiết bị, Runtime inject HAL và thực thi.
 
                 VmEvent::DeviceWrite { device_id, value } => {
-                    output_text.push_str(&format!(
-                        "[device_write \"{}\" = 0x{:02X}] ",
-                        device_id, value
-                    ));
+                    if let Some(ref platform) = self.platform {
+                        let ok = platform.write_actuator(device_id, *value);
+                        output_text.push_str(&format!(
+                            "[device_write \"{}\" = 0x{:02X} → {}] ",
+                            device_id, value, if ok { "ok" } else { "fail" }
+                        ));
+                    } else {
+                        output_text.push_str(&format!(
+                            "[device_write \"{}\" = 0x{:02X}] ",
+                            device_id, value
+                        ));
+                    }
                 }
                 VmEvent::DeviceRead { device_id } => {
-                    output_text.push_str(&format!(
-                        "[device_read \"{}\"] ",
-                        device_id
-                    ));
+                    if let Some(ref platform) = self.platform {
+                        if let Some(val) = platform.read_sensor(device_id) {
+                            output_text.push_str(&format!(
+                                "[device_read \"{}\" = {:.2}] ",
+                                device_id, val
+                            ));
+                        } else {
+                            output_text.push_str(&format!(
+                                "[device_read \"{}\" = none] ",
+                                device_id
+                            ));
+                        }
+                    } else {
+                        output_text.push_str(&format!(
+                            "[device_read \"{}\"] ",
+                            device_id
+                        ));
+                    }
                 }
                 VmEvent::DeviceListRequest => {
                     output_text.push_str("[device_list] ");
@@ -739,25 +777,63 @@ impl HomeRuntime {
                     ));
                 }
                 VmEvent::FileReadRequest { path } => {
-                    // Try reading via HAL if available, otherwise log
-                    output_text.push_str(&format!(
-                        "[file_read \"{}\"] ",
-                        path
-                    ));
+                    if let Some(ref platform) = self.platform {
+                        if let Some(data) = platform.read_file(path) {
+                            // Push file contents as string if valid UTF-8
+                            if let Ok(text) = core::str::from_utf8(&data) {
+                                output_text.push_str(&format!(
+                                    "[file_read \"{}\" → {} bytes] {}",
+                                    path, data.len(), text
+                                ));
+                            } else {
+                                output_text.push_str(&format!(
+                                    "[file_read \"{}\" → {} bytes (binary)] ",
+                                    path, data.len()
+                                ));
+                            }
+                        } else {
+                            output_text.push_str(&format!(
+                                "[file_read \"{}\" → not found] ",
+                                path
+                            ));
+                        }
+                    } else {
+                        output_text.push_str(&format!(
+                            "[file_read \"{}\"] ",
+                            path
+                        ));
+                    }
                 }
                 VmEvent::FileWriteRequest { path, data } => {
-                    output_text.push_str(&format!(
-                        "[file_write \"{}\" ({} bytes)] ",
-                        path,
-                        data.len()
-                    ));
+                    if let Some(ref platform) = self.platform {
+                        let ok = platform.write_file(path, data);
+                        output_text.push_str(&format!(
+                            "[file_write \"{}\" ({} bytes) → {}] ",
+                            path, data.len(), if ok { "ok" } else { "fail" }
+                        ));
+                    } else {
+                        output_text.push_str(&format!(
+                            "[file_write \"{}\" ({} bytes)] ",
+                            path, data.len()
+                        ));
+                    }
                 }
                 VmEvent::FileAppendRequest { path, data } => {
-                    output_text.push_str(&format!(
-                        "[file_append \"{}\" ({} bytes)] ",
-                        path,
-                        data.len()
-                    ));
+                    if let Some(ref platform) = self.platform {
+                        // QT9: Append-only — read + append + write
+                        let mut existing = platform.read_file(path).unwrap_or_default();
+                        existing.extend_from_slice(data);
+                        let ok = platform.write_file(path, &existing);
+                        output_text.push_str(&format!(
+                            "[file_append \"{}\" (+{} bytes) → {}] ",
+                            path, data.len(), if ok { "ok" } else { "fail" }
+                        ));
+                    } else {
+                        output_text.push_str(&format!(
+                            "[file_append \"{}\" ({} bytes)] ",
+                            path, data.len()
+                        ));
+                    }
                 }
                 VmEvent::SpawnRequest { body_ops_count } => {
                     output_text.push_str(&format!(
