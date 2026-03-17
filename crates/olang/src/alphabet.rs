@@ -333,6 +333,8 @@ pub enum Keyword {
     Break,
     /// `continue` — skip to next iteration
     Continue,
+    /// `return` — return value from function
+    Return,
 }
 
 /// Check xem string có phải keyword không.
@@ -352,6 +354,7 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "while" => Some(Keyword::While),
         "break" => Some(Keyword::Break),
         "continue" => Some(Keyword::Continue),
+        "return" => Some(Keyword::Return),
         _ => None,
     }
 }
@@ -488,6 +491,8 @@ pub enum Token {
     Break,
     /// `continue`
     Continue,
+    /// `return`
+    Return,
 
     // ── End ──
     /// End of input
@@ -751,6 +756,7 @@ impl<'a> Lexer<'a> {
                 Keyword::While => Token::While,
                 Keyword::Break => Token::Break,
                 Keyword::Continue => Token::Continue,
+                Keyword::Return => Token::Return,
             };
         }
 

@@ -115,7 +115,7 @@ impl Scope {
         self.locals.push(name.to_string());
     }
 
-    fn _is_local(&self, name: &str) -> bool {
+    fn is_defined(&self, name: &str) -> bool {
         self.locals.iter().any(|n| n == name)
     }
 
@@ -257,6 +257,23 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
 
         Stmt::Break | Stmt::Continue => {
             // Valid only inside loops — structural check, no scope impact
+        }
+
+        Stmt::Assign { name, value } => {
+            validate_expr(value, scope, errors);
+            // Warn if variable not previously defined (typo risk)
+            if !scope.is_defined(name) {
+                errors.push(SemError::new(&alloc::format!(
+                    "Assignment to undeclared variable '{}' (use 'let' to declare first)",
+                    name
+                )));
+            }
+        }
+
+        Stmt::Return(expr) => {
+            if let Some(e) = expr {
+                validate_expr(e, scope, errors);
+            }
         }
 
         Stmt::TryCatch { try_block, catch_block } => {
@@ -467,7 +484,10 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. }
         | Stmt::Match { .. } | Stmt::TryCatch { .. } | Stmt::ForIn { .. }
         | Stmt::While { .. }
-        | Stmt::Break | Stmt::Continue => ChainKind::Void,
+        | Stmt::Break | Stmt::Continue
+        | Stmt::Assign { .. } => ChainKind::Void,
+        Stmt::Return(Some(expr)) => infer_expr_kind(expr),
+        Stmt::Return(None) => ChainKind::Void,
     }
 }
 
@@ -729,6 +749,19 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             if let Some(breaks) = ctx.break_jumps.last_mut() {
                 breaks.push(pos);
             }
+        }
+
+        Stmt::Assign { name, value } => {
+            lower_expr(value, ctx);
+            ctx.emit(Op::StoreUpdate(name.clone()));
+        }
+
+        Stmt::Return(expr) => {
+            if let Some(e) = expr {
+                lower_expr(e, ctx);
+                ctx.emit(Op::Emit); // return value = emit it
+            }
+            ctx.emit(Op::Ret);
         }
 
         Stmt::Continue => {
@@ -1759,5 +1792,89 @@ mod tests {
         let prog = lower(&stmts);
         let jmp_count = prog.ops.iter().filter(|op| matches!(op, Op::Jmp(_))).count();
         assert!(jmp_count >= 1, "continue should produce Jmp");
+    }
+
+    // ── Variable Reassignment ────────────────────────────────────────────────
+
+    #[test]
+    fn validate_assign_undeclared() {
+        let stmts = parse("x = 5;").unwrap();
+        let errors = validate(&stmts);
+        assert!(
+            errors.iter().any(|e| e.message.contains("undeclared")),
+            "Should warn about undeclared variable: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn validate_assign_declared_ok() {
+        let stmts = parse("let x = 1; x = 2;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Assign to declared var should be valid: {:?}", errors);
+    }
+
+    #[test]
+    fn lower_assign_produces_store_update() {
+        let stmts = parse("let x = 1; x = 2;").unwrap();
+        let prog = lower(&stmts);
+        let has_store_update = prog.ops.iter().any(|op| matches!(op, Op::StoreUpdate(_)));
+        assert!(has_store_update, "Assign should produce StoreUpdate opcode");
+    }
+
+    // ── Return ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn lower_return_value() {
+        let stmts = parse("fn foo() { return 42; } emit foo();").unwrap();
+        let prog = lower(&stmts);
+        let has_ret = prog.ops.iter().any(|op| matches!(op, Op::Ret));
+        assert!(has_ret, "return should produce Ret opcode");
+    }
+
+    #[test]
+    fn lower_return_bare() {
+        // Functions are inlined at call site, so we need a call to produce Ret
+        let stmts = parse("fn foo() { return; } emit foo();").unwrap();
+        let prog = lower(&stmts);
+        let has_ret = prog.ops.iter().any(|op| matches!(op, Op::Ret));
+        assert!(has_ret, "bare return should produce Ret opcode");
+    }
+
+    // ── End-to-End (parse → lower → VM execute) ─────────────────────────────
+
+    #[test]
+    fn e2e_assign_in_while_loop() {
+        // let x = 0; while x < 3 { emit x; x = x + 1; }
+        let stmts = parse("let x = 0; while x < 3 { emit x; x = x + 1; }").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 3, "Should emit 3 values, got {}", outputs.len());
+        let v0 = outputs[0].to_number().unwrap();
+        let v1 = outputs[1].to_number().unwrap();
+        let v2 = outputs[2].to_number().unwrap();
+        assert!((v0 - 0.0).abs() < f64::EPSILON, "x=0");
+        assert!((v1 - 1.0).abs() < f64::EPSILON, "x=1");
+        assert!((v2 - 2.0).abs() < f64::EPSILON, "x=2");
+    }
+
+    #[test]
+    fn e2e_return_from_function() {
+        let stmts = parse("fn double(n) { return n + n; } emit double(21);").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "Should have output, got {}", outputs.len());
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON, "double(21)=42, got {}", v);
     }
 }

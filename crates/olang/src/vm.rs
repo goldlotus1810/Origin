@@ -559,6 +559,25 @@ impl OlangVM {
                     }
                 }
 
+                Op::StoreUpdate(name) => {
+                    let val = vm_pop!(stack, events);
+                    // Search ALL scopes from innermost outward; update first match.
+                    // If not found anywhere, store in current scope (fallback).
+                    let mut found = false;
+                    for scope in scopes.iter_mut().rev() {
+                        if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
+                            entry.1 = val.clone();
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        if let Some(scope) = scopes.last_mut() {
+                            scope.push((name.clone(), val));
+                        }
+                    }
+                }
+
                 Op::LoadLocal(name) => {
                     // Search from innermost scope outward (lexical scoping)
                     let val = scopes
@@ -771,6 +790,23 @@ impl OlangVM {
                                     if let Some((_, c)) = scope.iter().find(|(n, _)| n == name) {
                                         let _ = stack.push(c.clone());
                                         break;
+                                    }
+                                }
+                            }
+                            Op::StoreUpdate(name) => {
+                                if let Ok(c) = stack.pop() {
+                                    let mut found = false;
+                                    for scope in scopes.iter_mut().rev() {
+                                        if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
+                                            entry.1 = c.clone();
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    if !found {
+                                        if let Some(scope) = scopes.last_mut() {
+                                            scope.push((name.clone(), c));
+                                        }
                                     }
                                 }
                             }
@@ -1930,5 +1966,56 @@ mod tests {
         let result = vm().execute(&prog);
         assert!(!result.has_error());
         assert!(result.outputs()[0].is_empty(), "!42 should be empty (falsy)");
+    }
+
+    // ── StoreUpdate ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn store_update_modifies_outer_scope() {
+        // Root: x = 10
+        // Inner scope: StoreUpdate x = 20, emit x (should be 20)
+        // After scope end: emit x (should be 20 — updated in outer scope)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::Store("x".into()))
+            .push_op(Op::ScopeBegin)
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::StoreUpdate("x".into()))
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 20
+            .push_op(Op::ScopeEnd)
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 20 (outer scope was updated)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "StoreUpdate errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+        let inner = outputs[0].to_number().unwrap();
+        let outer = outputs[1].to_number().unwrap();
+        assert!((inner - 20.0).abs() < f64::EPSILON, "Inner scope sees 20: {}", inner);
+        assert!((outer - 20.0).abs() < f64::EPSILON, "Outer scope updated to 20: {}", outer);
+    }
+
+    #[test]
+    fn store_update_vs_store_shadowing() {
+        // Store shadows (creates new in inner scope), StoreUpdate modifies outer.
+        // Root: x = 10
+        // Inner scope: Store(x)=99 → shadows outer
+        // After scope end: emit x (should be 10, shadow discarded)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::Store("x".into()))
+            .push_op(Op::ScopeBegin)
+            .push_op(Op::PushNum(99.0))
+            .push_op(Op::Store("x".into())) // shadows, not updates outer
+            .push_op(Op::ScopeEnd)
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 10
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let outer = result.outputs()[0].to_number().unwrap();
+        assert!((outer - 10.0).abs() < f64::EPSILON, "Store shadows, outer still 10: {}", outer);
     }
 }

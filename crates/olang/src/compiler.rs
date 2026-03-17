@@ -184,6 +184,7 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Stats => "/* stats */".into(),
         Op::Nop => "".into(),
         Op::Store(name) => format!("olang_store(\"{}\", pop(&s));", escape(name)),
+        Op::StoreUpdate(name) => format!("olang_store_update(\"{}\", pop(&s));", escape(name)),
         Op::LoadLocal(name) => format!("push(&s, olang_load_local(\"{}\"));", escape(name)),
         Op::PushNum(n) => format!("push(&s, (Chain){:.17e});", n),
         Op::Fuse => "/* QT2: FUSE — verify chain finite */ { Chain c = peek(&s); if (c == 0) pop(&s); }".into(),
@@ -285,6 +286,7 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Call(name) => format!("{}();", name.replace(' ', "_")),
         Op::Jmp(_) | Op::Jz(_) => "// unreachable in linear mode".into(),
         Op::Store(name) => format!("// store local: {}", name),
+        Op::StoreUpdate(name) => format!("// store update: {}", name),
         Op::LoadLocal(name) => format!("// load local: {}", name),
         Op::PushNum(n) => format!("stack.push(({:.17e}_f64).to_bits());", n),
         Op::Fuse => "// QT2: FUSE — verify chain finite (∞-1)".into(),
@@ -332,6 +334,7 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
         Op::Jmp(t)  => format!("_pc = {};", t),
         Op::Jz(t)   => format!("if stack.pop().unwrap_or(0) == 0 {{ _pc = {}; }} else {{ _pc = {}; }}", t, next),
         Op::Store(name) => format!("/* store {} */ _pc = {};", escape(name), next),
+        Op::StoreUpdate(name) => format!("/* store_update {} */ _pc = {};", escape(name), next),
         Op::LoadLocal(name) => format!("/* load {} */ _pc = {};", escape(name), next),
         Op::PushNum(n) => format!("stack.push(({:.17e}_f64).to_bits()); _pc = {};", n, next),
         Op::Fuse => format!("/* QT2: FUSE */ _pc = {};", next),
@@ -478,6 +481,7 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         Op::Call(name) => format!("call ${}", name.replace(' ', "_")),
         Op::Jmp(_) | Op::Jz(_) => ";; unreachable in linear mode".into(),
         Op::Store(_) => "local.set $local ;; store".into(),
+        Op::StoreUpdate(_) => "local.set $local ;; store_update".into(),
         Op::LoadLocal(_) => "local.get $local ;; load_local".into(),
         Op::PushNum(n) => format!("f64.const {:.17e}", n),
         Op::Fuse => ";; QT2: FUSE — verify chain finite".into(),
@@ -534,6 +538,8 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!("(i64.eqz) (if (then (local.set $pc (i32.const {})) (br $dispatch)) (else (local.set $pc (i32.const {})) (br $dispatch)))", t, next),
         Op::Store(_) =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; store", next),
+        Op::StoreUpdate(_) =>
+            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; store_update", next),
         Op::LoadLocal(_) =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; load_local", next),
         Op::PushNum(n) =>

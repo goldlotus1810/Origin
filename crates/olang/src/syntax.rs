@@ -122,6 +122,12 @@ pub enum Stmt {
 
     /// `continue;` — skip to next iteration
     Continue,
+
+    /// `name = expr;` — reassign existing variable
+    Assign { name: String, value: Expr },
+
+    /// `return expr;` — return value from function
+    Return(Option<Expr>),
 }
 
 /// Match arm — pattern + body.
@@ -340,6 +346,18 @@ impl<'a> Parser<'a> {
                 self.advance();
                 if self.check(&Token::Semi) { self.advance(); }
                 Ok(Stmt::Continue)
+            }
+            Token::Return => {
+                self.advance();
+                // return; or return expr;
+                if self.check(&Token::Semi) || self.check(&Token::RBrace) || self.at_eof() {
+                    if self.check(&Token::Semi) { self.advance(); }
+                    Ok(Stmt::Return(None))
+                } else {
+                    let expr = self.parse_expr()?;
+                    if self.check(&Token::Semi) { self.advance(); }
+                    Ok(Stmt::Return(Some(expr)))
+                }
             }
             Token::Command(_) => self.parse_command(),
 
@@ -576,7 +594,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse expression, then check for ≔ or ⇒ suffix
+    /// Parse expression, then check for ≔ or ⇒ or = suffix
     fn parse_expr_or_symbol_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expr()?;
 
@@ -588,6 +606,17 @@ impl<'a> Parser<'a> {
         // ⇒ → implies (if/else)
         if self.check(&Token::Implies) {
             return self.finish_implies(expr);
+        }
+
+        // ident = expr → reassignment (not `let`, not `==`)
+        if self.check(&Token::Eq) {
+            if let Expr::Ident(name) = expr {
+                self.advance(); // consume =
+                let value = self.parse_expr()?;
+                self.expect(&Token::Semi)?;
+                return Ok(Stmt::Assign { name, value });
+            }
+            // If left side is not an ident, fall through to expression stmt
         }
 
         // Regular expression statement
