@@ -573,6 +573,13 @@ impl HomeRuntime {
                         1.0, // intentional → full reward
                         ts,
                     );
+                    // QT8: Ghi edge vào pending_writes
+                    {
+                        use olang::writer::OlangWriter;
+                        let mut ew = OlangWriter::new_append();
+                        ew.append_edge(*from, *to, *rel, ts);
+                        self.pending_writes.extend_from_slice(ew.as_bytes());
+                    }
                     output_text.push_str(&format!(
                         "edge(0x{:04X}→0x{:04X} rel=0x{:02X}) ",
                         from & 0xFFFF,
@@ -716,6 +723,37 @@ impl HomeRuntime {
                     0.7, // intentional but indirect
                     ts,
                 );
+            }
+        }
+
+        // ── QT8+QT9: Ghi L1 nodes + Silk edges cho VM learned chains ────
+        // Mọi chain từ VM (Output, LookupAlias) → phải persist vào origin.olang
+        if !learned.is_empty() {
+            use olang::writer::OlangWriter;
+            let mut vm_writer = OlangWriter::new_append();
+            let mut wrote_any = false;
+            for chain in &learned {
+                let hash = chain.chain_hash();
+                if self.registry.lookup_hash(hash).is_none() {
+                    let _ = vm_writer.append_node(chain, 1, false, ts);
+                    wrote_any = true;
+                    // QT9: Registry SAU
+                    self.gated_insert(chain, 1, ts, false, olang::registry::NodeKind::Knowledge, "vm:L1");
+                }
+                // Silk edges từ chain này
+                let edges: alloc::vec::Vec<_> = self.learning.graph()
+                    .edges_from(hash)
+                    .iter()
+                    .filter(|e| e.weight >= 0.10)
+                    .map(|e| (e.from_hash, e.to_hash, e.kind.as_byte(), e.updated_at))
+                    .collect();
+                for (from, to, kind, edge_ts) in &edges {
+                    vm_writer.append_edge(*from, *to, *kind, *edge_ts);
+                    wrote_any = true;
+                }
+            }
+            if wrote_any {
+                self.pending_writes.extend_from_slice(vm_writer.as_bytes());
             }
         }
 
