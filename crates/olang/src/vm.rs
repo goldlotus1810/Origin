@@ -442,6 +442,54 @@ impl OlangVM {
                                 let _ = stack.push(MolecularChain::empty()); // falsy
                             }
                         }
+                        "__match_type" => {
+                            // Pop expected type name (from Load) and actual type chain
+                            // The actual chain was DUPed then TypeOf → events emitted
+                            // Stack has: [... type_info_chain, expected_name_chain]
+                            let _expected = vm_pop!(stack, events);
+                            let actual = vm_pop!(stack, events);
+                            // classify_chain returns "SDF", "MATH", "EMOTICON", "Mixed(...)", "Empty"
+                            let type_name = classify_chain(&actual);
+                            // The expected pattern comes from Load("SDF") which triggers
+                            // LookupAlias. For matching, we check if the type_name
+                            // starts with common known types. The pattern name is stored
+                            // in the Load op preceding this Call.
+                            // Since the VM is stack-based and we already consumed the
+                            // expected chain, we look at the previous Load op's name
+                            // from the events (LookupAlias).
+                            let expected_name = events.iter().rev().find_map(|e| {
+                                if let VmEvent::LookupAlias(n) = e { Some(n.clone()) } else { None }
+                            }).unwrap_or_default();
+                            let matches = type_name.starts_with(&expected_name)
+                                || (expected_name == "Mixed" && type_name.starts_with("Mixed"));
+                            if matches {
+                                let _ = stack.push(actual); // truthy
+                            } else {
+                                let _ = stack.push(MolecularChain::empty()); // falsy
+                            }
+                        }
+                        "__match_mol" => {
+                            // Pop expected mol pattern and subject
+                            let expected = vm_pop!(stack, events);
+                            let actual = vm_pop!(stack, events);
+                            // Compare molecule dimensions
+                            let matches = if !actual.is_empty() && !expected.is_empty() {
+                                let a = &actual.0[0];
+                                let e = &expected.0[0];
+                                a.shape == e.shape
+                                    && a.relation == e.relation
+                                    && a.emotion.valence == e.emotion.valence
+                                    && a.emotion.arousal == e.emotion.arousal
+                                    && a.time == e.time
+                            } else {
+                                actual.is_empty() && expected.is_empty()
+                            };
+                            if matches {
+                                let _ = stack.push(actual); // truthy
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
@@ -1521,5 +1569,33 @@ mod tests {
         // Truth of identical chains → non-empty output
         assert_eq!(result.outputs().len(), 1);
         assert!(!result.outputs()[0].is_empty(), "Same chain == same chain should be truthy");
+    }
+
+    #[test]
+    fn match_mol_same() {
+        // __match_mol: compare two identical PushMol chains → truthy
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushMol(1, 6, 200, 180, 4))
+            .push_op(Op::PushMol(1, 6, 200, 180, 4))
+            .push_op(Op::Call("__match_mol".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(!result.outputs()[0].is_empty(), "Same mol should match");
+    }
+
+    #[test]
+    fn match_mol_different() {
+        // __match_mol: different mols → falsy (empty)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushMol(1, 6, 200, 180, 4))
+            .push_op(Op::PushMol(2, 3, 100, 50, 1))
+            .push_op(Op::Call("__match_mol".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result.outputs()[0].is_empty(), "Different mol should not match");
     }
 }
