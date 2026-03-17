@@ -183,9 +183,32 @@ fn main() {
             break;
         }
 
-        // Process
+        // ── Olang file execution: `olang <filename>` ─────────────────────
+        let response;
         let ts = now_ns();
-        let response = rt.process_text(input, ts);
+        if let Some(filename) = input.strip_prefix("olang ") {
+            let filename = filename.trim();
+            match std::fs::read_to_string(filename) {
+                Ok(source) => {
+                    response = rt.run_program(&source, ts);
+                }
+                Err(e) => {
+                    println!("[error] Cannot read '{}': {}", filename, e);
+                    continue;
+                }
+            }
+        }
+        // ── Inline Olang program: lines starting with `>` ───────────────
+        else if input.starts_with("> ") || input.starts_with(">") {
+            let source = input.strip_prefix("> ").unwrap_or(
+                input.strip_prefix(">").unwrap_or(input)
+            );
+            response = rt.run_program(source, ts);
+        }
+        // ── Normal text processing ──────────────────────────────────────
+        else {
+            response = rt.process_text(input, ts);
+        }
 
         // Output — silent responses (SilentAck, Observe) → không in gì
         if !response.text.is_empty() {

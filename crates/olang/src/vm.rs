@@ -18,6 +18,59 @@ use crate::molecular::{EmotionDim, Molecule, MolecularChain};
 // VmEvent — side effects VM muốn thực hiện
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Extract readable text from a string-encoded MolecularChain.
+/// String chains use shape=0x02, relation=0x01, with each byte stored in valence.
+/// Returns None if the chain doesn't look like a string encoding.
+pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
+    if chain.is_empty() {
+        return Some(String::new());
+    }
+    // Check if it looks like a string chain (all shape=0x02, relation=0x01)
+    let is_string = chain.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01);
+    if is_string {
+        let s: String = chain.0.iter()
+            .map(|m| m.emotion.valence as char)
+            .collect();
+        Some(s)
+    } else {
+        None
+    }
+}
+
+/// Encode a string as a MolecularChain (each byte → 1 molecule).
+/// Inverse of chain_to_string.
+pub fn string_to_chain(s: &str) -> MolecularChain {
+    let mols: Vec<Molecule> = s.bytes().map(|b| Molecule {
+        shape: 0x02,
+        relation: 0x01,
+        emotion: EmotionDim { valence: b, arousal: 0 },
+        time: 0x01,
+    }).collect();
+    MolecularChain(mols)
+}
+
+/// Format a chain for human-readable display.
+/// Tries string decoding first, then number, then raw molecule info.
+pub fn format_chain_display(chain: &MolecularChain) -> String {
+    if chain.is_empty() {
+        return "(empty)".into();
+    }
+    // Try string
+    if let Some(s) = chain_to_string(chain) {
+        return s;
+    }
+    // Try number
+    if let Some(n) = chain.to_number() {
+        return if n == (n as i64 as f64) {
+            alloc::format!("{}", n as i64)
+        } else {
+            alloc::format!("{}", n)
+        };
+    }
+    // Fallback: molecule count + hash
+    alloc::format!("[chain: {} molecules, hash={:#x}]", chain.len(), chain.chain_hash())
+}
+
 /// Event từ VM → caller xử lý.
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
@@ -800,6 +853,582 @@ impl OlangVM {
                             // Print: emit top of stack as output (same as Emit but via call)
                             let val = vm_pop!(stack, events);
                             events.push(VmEvent::Output(val));
+                        }
+                        "__println" => {
+                            // Print with newline: emit value + newline as string chain
+                            let val = vm_pop!(stack, events);
+                            let text = format_chain_display(&val);
+                            let with_nl = alloc::format!("{}\n", text);
+                            events.push(VmEvent::Output(string_to_chain(&with_nl)));
+                        }
+                        "__hyp_mod" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(1.0);
+                            let _ = stack.push(MolecularChain::from_number(na % nb));
+                        }
+                        "__hyp_neg" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(-na));
+                        }
+                        "__hyp_abs" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(na.abs()));
+                        }
+                        "__hyp_min" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(na.min(nb)));
+                        }
+                        "__hyp_max" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(na.max(nb)));
+                        }
+                        "__array_set" => {
+                            // Stack: [array, index, value]
+                            let value = vm_pop!(stack, events);
+                            let idx_chain = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let idx = idx_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut elements = split_array_chain(&arr);
+                            if idx < elements.len() {
+                                elements[idx] = value;
+                            }
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in elements.into_iter().enumerate() {
+                                if j > 0 { result.0.push(sep); }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_slice" => {
+                            // Stack: [array, start, end]
+                            let end_chain = vm_pop!(stack, events);
+                            let start_chain = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let start = start_chain.to_number().unwrap_or(0.0) as usize;
+                            let end = end_chain.to_number().unwrap_or(0.0) as usize;
+                            let elements = split_array_chain(&arr);
+                            let sliced: Vec<_> = elements.into_iter()
+                                .skip(start)
+                                .take(end.saturating_sub(start))
+                                .collect();
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in sliced.into_iter().enumerate() {
+                                if j > 0 { result.0.push(sep); }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__is_empty" => {
+                            let val = vm_pop!(stack, events);
+                            let result = if val.is_empty() { 1.0 } else { 0.0 };
+                            let _ = stack.push(MolecularChain::from_number(result));
+                        }
+                        "__eq" => {
+                            // Deep equality: compare two chains molecule by molecule
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let result = if a.0 == b.0 { 1.0 } else { 0.0 };
+                            let _ = stack.push(MolecularChain::from_number(result));
+                        }
+                        // ── String builtins ────────────────────────────────
+                        "__str_split" => {
+                            // Stack: [string_chain, delimiter_chain]
+                            // Split string by delimiter, return array of sub-strings
+                            let delim = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            // Decode both to byte strings via valence
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
+                            let d_bytes: Vec<u8> = delim.0.iter().map(|m| m.emotion.valence).collect();
+                            if d_bytes.is_empty() {
+                                let _ = stack.push(s); // no split on empty delim
+                            } else {
+                                // Split
+                                let sep = Molecule {
+                                    shape: 0, relation: 0,
+                                    emotion: EmotionDim { valence: 0, arousal: 0 },
+                                    time: 0,
+                                };
+                                let mut result = MolecularChain(Vec::new());
+                                let mut start = 0;
+                                let mut elem_idx = 0;
+                                while start <= s_bytes.len() {
+                                    // Find next occurrence of delimiter
+                                    let found = if start + d_bytes.len() <= s_bytes.len() {
+                                        s_bytes[start..].windows(d_bytes.len())
+                                            .position(|w| w == d_bytes.as_slice())
+                                    } else {
+                                        None
+                                    };
+                                    let end = match found {
+                                        Some(pos) => start + pos,
+                                        None => s_bytes.len(),
+                                    };
+                                    if elem_idx > 0 { result.0.push(sep); }
+                                    for &b in &s_bytes[start..end] {
+                                        result.0.push(Molecule {
+                                            shape: 0x02, relation: 0x01,
+                                            emotion: EmotionDim { valence: b, arousal: 0 },
+                                            time: 0x01,
+                                        });
+                                    }
+                                    elem_idx += 1;
+                                    if found.is_some() {
+                                        start = end + d_bytes.len();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                let _ = stack.push(result);
+                            }
+                        }
+                        "__str_contains" => {
+                            // Stack: [haystack, needle] → 1.0 if contains, empty if not
+                            let needle = vm_pop!(stack, events);
+                            let haystack = vm_pop!(stack, events);
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.emotion.valence).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.emotion.valence).collect();
+                            let found = if n_bytes.is_empty() {
+                                true
+                            } else {
+                                h_bytes.windows(n_bytes.len()).any(|w| w == n_bytes.as_slice())
+                            };
+                            if found {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__str_replace" => {
+                            // Stack: [string, old_pattern, new_pattern] → replaced string
+                            let new_pat = vm_pop!(stack, events);
+                            let old_pat = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
+                            let old_bytes: Vec<u8> = old_pat.0.iter().map(|m| m.emotion.valence).collect();
+                            let new_bytes: Vec<u8> = new_pat.0.iter().map(|m| m.emotion.valence).collect();
+                            let mut result_bytes = Vec::new();
+                            let mut i = 0;
+                            if old_bytes.is_empty() {
+                                result_bytes = s_bytes;
+                            } else {
+                                while i < s_bytes.len() {
+                                    if i + old_bytes.len() <= s_bytes.len()
+                                        && s_bytes[i..i + old_bytes.len()] == *old_bytes.as_slice()
+                                    {
+                                        result_bytes.extend_from_slice(&new_bytes);
+                                        i += old_bytes.len();
+                                    } else {
+                                        result_bytes.push(s_bytes[i]);
+                                        i += 1;
+                                    }
+                                }
+                            }
+                            let mut mols = Vec::new();
+                            for b in result_bytes {
+                                mols.push(Molecule {
+                                    shape: 0x02, relation: 0x01,
+                                    emotion: EmotionDim { valence: b, arousal: 0 },
+                                    time: 0x01,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__str_starts_with" => {
+                            // Stack: [string, prefix] → 1.0 if starts with, empty if not
+                            let prefix = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
+                            let p_bytes: Vec<u8> = prefix.0.iter().map(|m| m.emotion.valence).collect();
+                            let starts = s_bytes.starts_with(&p_bytes);
+                            if starts {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__str_ends_with" => {
+                            let suffix = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
+                            let x_bytes: Vec<u8> = suffix.0.iter().map(|m| m.emotion.valence).collect();
+                            let ends = s_bytes.ends_with(&x_bytes);
+                            if ends {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__str_index_of" => {
+                            // Stack: [haystack, needle] → index (number) or -1
+                            let needle = vm_pop!(stack, events);
+                            let haystack = vm_pop!(stack, events);
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.emotion.valence).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.emotion.valence).collect();
+                            let idx = if n_bytes.is_empty() {
+                                0i64
+                            } else {
+                                h_bytes.windows(n_bytes.len())
+                                    .position(|w| w == n_bytes.as_slice())
+                                    .map(|i| i as i64)
+                                    .unwrap_or(-1)
+                            };
+                            let _ = stack.push(MolecularChain::from_number(idx as f64));
+                        }
+                        "__str_trim" => {
+                            let s = vm_pop!(stack, events);
+                            // Trim leading/trailing whitespace (space=0x20, tab=0x09, etc)
+                            let bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
+                            let trimmed: &[u8] = {
+                                let start = bytes.iter().position(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').unwrap_or(bytes.len());
+                                let end = bytes.iter().rposition(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').map(|i| i + 1).unwrap_or(start);
+                                &bytes[start..end]
+                            };
+                            let mut mols = Vec::new();
+                            for &b in trimmed {
+                                mols.push(Molecule {
+                                    shape: 0x02, relation: 0x01,
+                                    emotion: EmotionDim { valence: b, arousal: 0 },
+                                    time: 0x01,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__str_upper" => {
+                            let s = vm_pop!(stack, events);
+                            let mut mols = Vec::new();
+                            for m in &s.0 {
+                                let b = m.emotion.valence;
+                                let upper = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+                                mols.push(Molecule {
+                                    shape: 0x02, relation: 0x01,
+                                    emotion: EmotionDim { valence: upper, arousal: 0 },
+                                    time: 0x01,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__str_lower" => {
+                            let s = vm_pop!(stack, events);
+                            let mut mols = Vec::new();
+                            for m in &s.0 {
+                                let b = m.emotion.valence;
+                                let lower = if b >= b'A' && b <= b'Z' { b + 32 } else { b };
+                                mols.push(Molecule {
+                                    shape: 0x02, relation: 0x01,
+                                    emotion: EmotionDim { valence: lower, arousal: 0 },
+                                    time: 0x01,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__str_substr" => {
+                            // Stack: [string, start, length]
+                            let len_chain = vm_pop!(stack, events);
+                            let start_chain = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let start = start_chain.to_number().unwrap_or(0.0) as usize;
+                            let len = len_chain.to_number().unwrap_or(0.0) as usize;
+                            let mols: Vec<Molecule> = s.0.iter()
+                                .skip(start)
+                                .take(len)
+                                .copied()
+                                .collect();
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        // ── Math builtins ──────────────────────────────────
+                        "__hyp_floor" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::floor(na)));
+                        }
+                        "__hyp_ceil" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::ceil(na)));
+                        }
+                        "__hyp_round" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::round(na)));
+                        }
+                        "__hyp_sqrt" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::sqrt(na)));
+                        }
+                        "__hyp_pow" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(1.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::pow(na, nb)));
+                        }
+                        "__hyp_log" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(1.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::log(na)));
+                        }
+                        "__hyp_sin" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::sin(na)));
+                        }
+                        "__hyp_cos" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::cos(na)));
+                        }
+                        // ── Dict builtins ──────────────────────────────────
+                        "__dict_has_key" => {
+                            // Stack: [dict, key] → 1.0 if key exists, empty if not
+                            let key = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            let elements = split_array_chain(&dict);
+                            let mut found = false;
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == key.0 {
+                                    found = true;
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            if found {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__dict_values" => {
+                            // Stack: [dict] → array of values (odd-indexed elements)
+                            let dict = vm_pop!(stack, events);
+                            let elements = split_array_chain(&dict);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            let mut val_idx = 0;
+                            let mut i = 1; // start at first value
+                            while i < elements.len() {
+                                if val_idx > 0 { result.0.push(sep); }
+                                result.0.extend(elements[i].0.iter().cloned());
+                                val_idx += 1;
+                                i += 2;
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__dict_merge" => {
+                            // Stack: [dict_a, dict_b] → merged dict (b overrides a)
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let mut a_elems = split_array_chain(&a);
+                            let b_elems = split_array_chain(&b);
+                            // Merge: for each key in b, update or append to a
+                            let mut j = 0;
+                            while j + 1 < b_elems.len() {
+                                let bkey = &b_elems[j];
+                                let bval = &b_elems[j + 1];
+                                let mut found = false;
+                                let mut k = 0;
+                                while k + 1 < a_elems.len() {
+                                    if a_elems[k].0 == bkey.0 {
+                                        a_elems[k + 1] = bval.clone();
+                                        found = true;
+                                        break;
+                                    }
+                                    k += 2;
+                                }
+                                if !found {
+                                    a_elems.push(bkey.clone());
+                                    a_elems.push(bval.clone());
+                                }
+                                j += 2;
+                            }
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (idx, elem) in a_elems.into_iter().enumerate() {
+                                if idx > 0 { result.0.push(sep); }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__dict_remove" => {
+                            // Stack: [dict, key] → dict without that key
+                            let key = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            let elements = split_array_chain(&dict);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            let mut out_idx = 0;
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 != key.0 {
+                                    if out_idx > 0 { result.0.push(sep); }
+                                    result.0.extend(elements[i].0.iter().cloned());
+                                    result.0.push(sep);
+                                    result.0.extend(elements[i + 1].0.iter().cloned());
+                                    out_idx += 1;
+                                }
+                                i += 2;
+                            }
+                            let _ = stack.push(result);
+                        }
+                        // ── Array builtins ─────────────────────────────────
+                        "__array_pop" => {
+                            // Stack: [array] → [array_without_last, last_element]
+                            let arr = vm_pop!(stack, events);
+                            let mut elements = split_array_chain(&arr);
+                            if let Some(last) = elements.pop() {
+                                let sep = Molecule {
+                                    shape: 0, relation: 0,
+                                    emotion: EmotionDim { valence: 0, arousal: 0 },
+                                    time: 0,
+                                };
+                                let mut rest = MolecularChain(Vec::new());
+                                for (j, elem) in elements.into_iter().enumerate() {
+                                    if j > 0 { rest.0.push(sep); }
+                                    rest.0.extend(elem.0.iter().cloned());
+                                }
+                                let _ = stack.push(rest);
+                                let _ = stack.push(last);
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__array_reverse" => {
+                            let arr = vm_pop!(stack, events);
+                            let mut elements = split_array_chain(&arr);
+                            elements.reverse();
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in elements.into_iter().enumerate() {
+                                if j > 0 { result.0.push(sep); }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_contains" => {
+                            // Stack: [array, element] → 1.0 if found, empty if not
+                            let elem = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let found = elements.iter().any(|e| e.0 == elem.0);
+                            if found {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__array_join" => {
+                            // Stack: [array, separator_string] → joined string
+                            let sep_chain = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in elements.into_iter().enumerate() {
+                                if j > 0 {
+                                    result.0.extend(sep_chain.0.iter().cloned());
+                                }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_map" => {
+                            // Simple map: applies a number transform from stack
+                            // Stack: [array, function_chain]
+                            // For now: just return the array (closures needed for full impl)
+                            let _fn = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let _ = stack.push(arr);
+                        }
+                        "__array_filter" => {
+                            // Simple filter: for now just return the array
+                            let _fn = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let _ = stack.push(arr);
+                        }
+                        // ── ISL builtins ───────────────────────────────────
+                        "__isl_send" => {
+                            // Stack: [address_chain, payload_chain]
+                            let payload = vm_pop!(stack, events);
+                            let addr = vm_pop!(stack, events);
+                            events.push(VmEvent::Output(MolecularChain(alloc::vec![
+                                Molecule { shape: 0x0A, relation: 0x06,
+                                    emotion: EmotionDim { valence: 0x01, arousal: 0 },
+                                    time: 0x03 }
+                            ])));
+                            // Emit ISL send event for runtime to handle
+                            events.push(VmEvent::CreateEdge {
+                                from: addr.chain_hash(),
+                                to: payload.chain_hash(),
+                                rel: 0x06, // Causes (send triggers receive)
+                            });
+                            let _ = stack.push(MolecularChain::from_number(1.0)); // success
+                        }
+                        "__isl_broadcast" => {
+                            // Stack: [payload_chain]
+                            let payload = vm_pop!(stack, events);
+                            events.push(VmEvent::Output(payload));
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        // ── Type conversion ────────────────────────────────
+                        "__type_of" => {
+                            let val = vm_pop!(stack, events);
+                            let type_name = classify_chain(&val);
+                            // Encode type name as string chain
+                            let mut mols = Vec::new();
+                            for b in type_name.bytes() {
+                                mols.push(Molecule {
+                                    shape: 0x02, relation: 0x01,
+                                    emotion: EmotionDim { valence: b, arousal: 0 },
+                                    time: 0x01,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__chain_hash" => {
+                            let val = vm_pop!(stack, events);
+                            let hash = val.chain_hash();
+                            let _ = stack.push(MolecularChain::from_number(hash as f64));
+                        }
+                        "__chain_len" => {
+                            let val = vm_pop!(stack, events);
+                            let _ = stack.push(MolecularChain::from_number(val.0.len() as f64));
                         }
                         _ => {
                             // Unknown function → emit lookup event
@@ -2362,5 +2991,268 @@ mod tests {
         assert!(!result.has_error(), "errors: {:?}", result.errors());
         let v = result.outputs()[0].to_number().unwrap();
         assert!((v - 99.0).abs() < f64::EPSILON, "dict.key1 should be 99, got {}", v);
+    }
+
+    // ── Phase 5: String Builtins ────────────────────────────────────────────
+
+    fn str_chain(s: &str) -> MolecularChain {
+        let mut mols = Vec::new();
+        for b in s.bytes() {
+            mols.push(Molecule {
+                shape: 0x02, relation: 0x01,
+                emotion: EmotionDim { valence: b, arousal: 0 },
+                time: 0x01,
+            });
+        }
+        MolecularChain(mols)
+    }
+
+    #[test]
+    fn str_contains_found() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("hello world")))
+            .push_op(Op::Push(str_chain("world")))
+            .push_op(Op::Call("__str_contains".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(!result.outputs()[0].is_empty(), "Should find 'world'");
+    }
+
+    #[test]
+    fn str_contains_not_found() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("hello")))
+            .push_op(Op::Push(str_chain("xyz")))
+            .push_op(Op::Call("__str_contains".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result.outputs()[0].is_empty(), "Should not find 'xyz'");
+    }
+
+    #[test]
+    fn str_starts_with_true() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("hello world")))
+            .push_op(Op::Push(str_chain("hello")))
+            .push_op(Op::Call("__str_starts_with".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.outputs()[0].is_empty());
+    }
+
+    #[test]
+    fn str_index_of_found() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("abcdef")))
+            .push_op(Op::Push(str_chain("cd")))
+            .push_op(Op::Call("__str_index_of".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 2.0).abs() < f64::EPSILON, "index of 'cd' = 2, got {}", v);
+    }
+
+    #[test]
+    fn str_replace_basic() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("hello world")))
+            .push_op(Op::Push(str_chain("world")))
+            .push_op(Op::Push(str_chain("olang")))
+            .push_op(Op::Call("__str_replace".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let out = &result.outputs()[0];
+        // Result should be "hello olang" encoded as molecules
+        let decoded: Vec<u8> = out.0.iter().map(|m| m.emotion.valence).collect();
+        assert_eq!(&decoded, b"hello olang");
+    }
+
+    #[test]
+    fn str_split_basic() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("a,b,c")))
+            .push_op(Op::Push(str_chain(",")))
+            .push_op(Op::Call("__str_split".into()))
+            .push_op(Op::Call("__array_len".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "split 'a,b,c' by ',' = 3 parts, got {}", v);
+    }
+
+    #[test]
+    fn str_trim_whitespace() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("  hello  ")))
+            .push_op(Op::Call("__str_trim".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.emotion.valence).collect();
+        assert_eq!(&decoded, b"hello");
+    }
+
+    #[test]
+    fn str_upper_lower() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(str_chain("Hello")))
+            .push_op(Op::Call("__str_upper".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.emotion.valence).collect();
+        assert_eq!(&decoded, b"HELLO");
+    }
+
+    // ── Phase 5: Math Builtins ──────────────────────────────────────────────
+
+    #[test]
+    fn math_floor() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(3.7))
+            .push_op(Op::Call("__hyp_floor".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "floor(3.7)=3, got {}", v);
+    }
+
+    #[test]
+    fn math_ceil() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(3.2))
+            .push_op(Op::Call("__hyp_ceil".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 4.0).abs() < f64::EPSILON, "ceil(3.2)=4, got {}", v);
+    }
+
+    #[test]
+    fn math_sqrt() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(16.0))
+            .push_op(Op::Call("__hyp_sqrt".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 4.0).abs() < 0.01, "sqrt(16)=4, got {}", v);
+    }
+
+    #[test]
+    fn math_pow() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(2.0))
+            .push_op(Op::PushNum(8.0))
+            .push_op(Op::Call("__hyp_pow".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 256.0).abs() < f64::EPSILON, "pow(2,8)=256, got {}", v);
+    }
+
+    // ── Phase 5: Dict Builtins ──────────────────────────────────────────────
+
+    #[test]
+    fn dict_has_key_exists() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(key_chain("x")))
+            .push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(1.0))
+            .push_op(Op::Call("__dict_new".into()))
+            .push_op(Op::Push(key_chain("x")))
+            .push_op(Op::Call("__dict_has_key".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.outputs()[0].is_empty(), "has_key should be truthy");
+    }
+
+    #[test]
+    fn dict_has_key_missing() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(key_chain("x")))
+            .push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(1.0))
+            .push_op(Op::Call("__dict_new".into()))
+            .push_op(Op::Push(key_chain("z")))
+            .push_op(Op::Call("__dict_has_key".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(result.outputs()[0].is_empty(), "has_key for missing key should be falsy");
+    }
+
+    #[test]
+    fn array_reverse() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(1.0))
+            .push_op(Op::PushNum(2.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__array_new".into()))
+            .push_op(Op::Call("__array_reverse".into()))
+            // Get first element (should be 3 after reverse)
+            .push_op(Op::PushNum(0.0))
+            .push_op(Op::Call("__array_get".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "first after reverse should be 3, got {}", v);
+    }
+
+    #[test]
+    fn array_contains_found() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::PushNum(30.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__array_new".into()))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::Call("__array_contains".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.outputs()[0].is_empty(), "should contain 20");
+    }
+
+    #[test]
+    fn type_of_builtin() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(42.0))
+            .push_op(Op::Call("__type_of".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(!result.outputs()[0].is_empty());
+    }
+
+    #[test]
+    fn chain_len_builtin() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(42.0))
+            .push_op(Op::Call("__chain_len".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        let v = result.outputs()[0].to_number().unwrap();
+        // Number chain has 4 molecules
+        assert!(v > 0.0, "chain_len should be > 0, got {}", v);
     }
 }

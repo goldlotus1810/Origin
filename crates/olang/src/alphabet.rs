@@ -75,7 +75,7 @@ pub fn classify(c: char) -> CharClass {
         // Symbol operators (control flow)
         '≔' | '⇒' | '↻' | '○' => CharClass::Symbol,
         // Arithmetic (QT3: hypothesis — chưa chứng minh)
-        '+' | '-' | '×' | '÷' => CharClass::Arithmetic,
+        '+' | '-' | '×' | '÷' | '%' | '*' | '/' => CharClass::Arithmetic,
         // Physical (QT3: proven — đã chứng minh)
         '⧺' | '⊖' => CharClass::Physical,
         // Delimiters
@@ -247,6 +247,8 @@ pub enum ArithOp {
     Mul,
     /// `÷` (U+00F7) — chia (giả thuyết)
     Div,
+    /// `%` — modulo (giả thuyết)
+    Mod,
 }
 
 impl ArithOp {
@@ -255,8 +257,9 @@ impl ArithOp {
         match c {
             '+' => Some(Self::Add),
             '-' => Some(Self::Sub),
-            '×' => Some(Self::Mul),
-            '÷' => Some(Self::Div),
+            '×' | '*' => Some(Self::Mul),
+            '÷' | '/' => Some(Self::Div),
+            '%' => Some(Self::Mod),
             _ => None,
         }
     }
@@ -398,6 +401,8 @@ pub enum Token {
     Ident(String),
     /// Số nguyên
     Int(u32),
+    /// Số thực (float)
+    Float(f64),
     /// Chuỗi ký tự trong ngoặc kép: "text"
     Str(String),
 
@@ -767,6 +772,29 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
+        // Check for float: integer part followed by '.' and digit
+        if let Some(&(_, '.')) = self.chars.peek() {
+            // Peek ahead to see if next after '.' is a digit (not a field access)
+            let mut clone = self.chars.clone();
+            clone.next(); // skip '.'
+            if let Some(&(_, c)) = clone.peek() {
+                if c.is_ascii_digit() {
+                    self.chars.next(); // consume '.'
+                    let mut frac = 0.0_f64;
+                    let mut divisor = 10.0_f64;
+                    while let Some(&(_, c)) = self.chars.peek() {
+                        if let Some(d) = c.to_digit(10) {
+                            frac += d as f64 / divisor;
+                            divisor *= 10.0;
+                            self.chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    return Token::Float(n as f64 + frac);
+                }
+            }
+        }
         Token::Int(n)
     }
 
@@ -778,7 +806,28 @@ impl<'a> Lexer<'a> {
             if c == '"' {
                 break;
             }
-            s.push(c);
+            if c == '\\' {
+                // Escape sequences
+                if let Some(&(_, esc)) = self.chars.peek() {
+                    self.chars.next();
+                    match esc {
+                        'n' => s.push('\n'),
+                        't' => s.push('\t'),
+                        'r' => s.push('\r'),
+                        '\\' => s.push('\\'),
+                        '"' => s.push('"'),
+                        '0' => s.push('\0'),
+                        _ => {
+                            s.push('\\');
+                            s.push(esc);
+                        }
+                    }
+                } else {
+                    s.push('\\');
+                }
+            } else {
+                s.push(c);
+            }
         }
         Token::Str(s)
     }
