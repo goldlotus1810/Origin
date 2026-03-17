@@ -16,3 +16,6 @@ pub mod edge;
 pub mod graph;
 pub mod hebbian;
 pub mod walk;
+
+// Re-export MolSummary cho learning pipeline dùng
+pub use graph::MolSummary;

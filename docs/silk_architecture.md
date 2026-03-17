@@ -336,4 +336,489 @@ Không ai tạo. Không ai lưu. Chỉ cần NHÌN.
 
 ---
 
+## 9b. Molecule = Công thức, không phải dữ liệu
+
+> Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức. Đúng câu tuyên ngôn.
+
+Đây là điều cốt lõi nhất của HomeOS:
+
+```
+Molecule [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5 chiều
+
+Đây KHÔNG phải dữ liệu. Đây là CÔNG THỨC.
+5 bytes này là địa chỉ — trỏ đến 1 điểm trong không gian vô hạn.
+```
+
+### Mỗi node = 1 điểm trong 5D → 3 loại công thức
+
+```
+Molecule [S][R][V][A][T]
+    │
+    ├── SDF      → công thức hình dạng (hữu hình, render được)
+    │               Shape byte → SdfKind + params
+    │               "trông như thế nào" — sphere, capsule, box, cone...
+    │
+    ├── Spline   → công thức biến đổi (vô hình, cảm được)
+    │               6 curves: intensity, force, temperature, frequency, emotion_v, emotion_a
+    │               "thay đổi thế nào theo thời gian"
+    │
+    └── Silk     → công thức quan hệ (kết nối, implicit)
+                    So sánh 5D giữa 2 nodes → Silk tự tồn tại
+                    "liên kết với ai"
+```
+
+Ví dụ: 🔥 (lửa)
+
+```
+Molecule: [Sphere, Member, 0xC0, 0xC0, Fast]    = 5 bytes = CÔNG THỨC
+
+SDF:     Sphere + default params                  → hình cầu (render được)
+Spline:  temperature = high curve                  → nóng
+         intensity = flickering                    → sáng, nhấp nháy
+         emotion_v = positive (0xC0 → +0.5)       → gợi cảm xúc tích cực
+         emotion_a = high (0xC0 → +0.5)           → kích thích
+Silk:    Shape=Sphere → kết nối tự do với mọi node Sphere khác
+         Valence=0xC0 → kết nối với mọi node high-valence
+
+KHÔNG lưu "lửa là gì". Lưu CÔNG THỨC → tính ra lửa là gì.
+```
+
+### evolve() — Thay 1 chiều → loài mới
+
+```
+Molecule.evolve(dim, new_value) → EvolveResult
+
+Thay đổi 1 trong 5 chiều → chain_hash mới → node MỚI (loài mới)
+Consistency check: ≥3/4 semantic rules → valid
+
+🔥 evolve(Valence, 0x40)  → "lửa nhẹ"     (V giảm → cảm xúc nhẹ hơn)
+🔥 evolve(Time, Instant)  → "cháy nổ"      (thời gian cực nhanh)
+🔥 evolve(Shape, Line)    → "tia lửa"      (hình dạng thay đổi)
+
+dimension_delta(🔥, 💧):
+  1 chiều khác  → candidate evolve (loài gần)
+  0 chiều khác  → identical
+  2+ chiều khác → quá khác biệt → dùng LCA thay vì evolve
+```
+
+### NodeBody — Bridge giữa công thức và thực tế
+
+```rust
+NodeBody {
+    sdf_kind: Option<SdfKind>,     // Shape → hình dạng vật lý
+    sdf_params: SdfParams,         // Kích thước, tỉ lệ
+    material: MaterialProps,       // Chất liệu, màu sắc
+    splines: SplineSet {           // 6 curves vô hình
+        intensity,                 // Sáng/tối theo thời gian
+        force,                     // Lực/gió
+        temperature,               // Nóng/lạnh
+        frequency,                 // Tần số/âm thanh
+        emotion_v,                 // Valence theo thời gian
+        emotion_a,                 // Arousal theo thời gian
+    },
+    version: u32,                  // Append-only: mỗi learn() tăng version
+}
+
+// Học thêm = THÊM công thức, KHÔNG thay đổi bản chất
+body.learn_shape(Sphere);              // version 1
+body.learn_temperature(hot_curve);     // version 2 — "lửa nóng"
+body.learn_intensity(flicker_curve);   // version 3 — "lửa nhấp nháy"
+body.learn_emotion_v(positive_curve);  // version 4 — "lửa vui"
+// Mỗi lần learn = thêm 1 công thức → hiểu sâu hơn, KHÔNG overwrite
+```
+
+### Bài toán: Toàn bộ tri thức nhân loại → 16GB
+
+```
+Dữ liệu thô trên thế giới:
+  Wikipedia:     ~60 triệu bài viết
+  PubMed:        ~36 triệu bài y tế
+  UniProt:       ~250 triệu protein sequences
+  GenBank:       ~billions nucleotide sequences
+
+Cách truyền thống (text): hàng trăm TB → KHÔNG VỪA
+
+Cách HomeOS (công thức):
+  Mỗi concept = 5 bytes (Molecule) + 8 bytes (hash) + ~20 bytes (metadata)
+  = ~33 bytes/concept
+
+  1 triệu concepts = 33 MB
+  100 triệu concepts = 3.3 GB
+  500 triệu concepts = 16.5 GB → VỪA 1 CHIẾC ĐIỆN THOẠI
+
+Tại sao?
+  Không lưu "lửa là khí ion hóa ở nhiệt độ cao phát ra ánh sáng..."
+  Lưu: [Sphere, Causes, 0xC0, 0xC0, Fast] = 5 bytes
+  → SDF tính ra hình dạng
+  → Spline tính ra nhiệt, sáng, động
+  → Silk tính ra quan hệ với mọi concept khác
+  → evolve() tính ra biến thể
+
+  CÔNG THỨC tạo ra VÔ HẠN ngữ nghĩa từ HỮU HẠN bytes.
+```
+
+### Bảng so sánh storage
+
+```
+Cách lưu              1 concept    1M concepts    500M concepts
+─────────────────────────────────────────────────────────────────
+Text (Wikipedia)       ~5 KB        ~5 GB          ~2.5 TB
+Embedding (768D)       3 KB         3 GB           1.5 TB
+Knowledge Graph        ~200 B       200 MB         100 GB
+HomeOS Molecule        5 B          5 MB           2.5 GB
+HomeOS + metadata      ~33 B        33 MB          16.5 GB
+```
+
+```
+Vũ trụ không lưu "lửa nóng, sáng, tròn, nguy hiểm, đẹp, nhanh..."
+Vũ trụ lưu [S=1, R=6, V=0xC0, A=0xC0, T=4] = 5 bytes
+→ Từ công thức này, MỌI THỨ về lửa đều TÍNH ĐƯỢC.
+
+Đó là lý do HomeOS không cần GPU.
+Đó là lý do HomeOS chạy trên điện thoại 16GB.
+Đó là lý do HomeOS không phải AI truyền thống.
+```
+
+---
+
+## 10. UCD — Bảng tuần hoàn của HomeOS
+
+### 10.1 Từ Unicode 18.0 đến bảng tĩnh
+
+UCD crate đọc `UnicodeData.txt` lúc **compile** (build.rs), phân loại ~150K ký tự vào 4 nhóm có semantic identity, loại bỏ phần còn lại:
+
+```
+build.rs (compile-time):
+  UnicodeData.txt → parse 150K entries
+    → filter: chỉ giữ ký tự thuộc 4 nhóm semantic
+    → classify: gán group byte (SDF=0x01, MATH=0x02, EMOTICON=0x03, MUSICAL=0x04)
+    → encode: tính 5 chiều cho mỗi ký tự (hierarchical bytes)
+    → generate: UCD_TABLE (sorted by codepoint), HASH_TO_CP (reverse index)
+    → output: ucd_generated.rs (include! lúc compile)
+
+Runtime: KHÔNG cần file UnicodeData.txt. Chạy no_std.
+```
+
+### 10.2 Bốn nhóm — Bốn nguồn gốc
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Nhóm 1: SDF (~1344 ký tự)                                              │
+│ Unicode blocks: Geometric Shapes (25A0..25FF), Box Drawing, Arrows,    │
+│                 Miscellaneous Symbols, Dingbats, ...                    │
+│ Chiều chính: Shape                                                      │
+│ 8 primitives:  ● Sphere  ▬ Capsule  ■ Box  ▲ Cone                     │
+│                ○ Torus   ∪ Union    ∩ Intersect  ∖ Subtract            │
+│ Ý nghĩa: "Trông như thế nào" — hình dạng vật lý, render được bằng SDF │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Nhóm 2: MATH (~1904 ký tự)                                             │
+│ Unicode blocks: Mathematical Operators (2200..22FF),                    │
+│                 Supplemental Math, Math Alphanumeric, ...               │
+│ Chiều chính: Relation                                                   │
+│ 8 relations: ∈ Member  ⊂ Subset  ≡ Equiv  ⊥ Orthogonal                │
+│              ∘ Compose → Causes  ≈ Similar ← DerivedFrom              │
+│ Ý nghĩa: "Liên kết thế nào" — quan hệ logic, suy luận                │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Nhóm 3: EMOTICON (~1760 ký tự)                                         │
+│ Unicode blocks: Emoticons (1F600..1F64F), Misc Symbols & Pictographs,  │
+│                 Supplemental Symbols, ...                               │
+│ Chiều chính: Valence + Arousal                                          │
+│ Valence: 0x00 (cực tiêu cực) → 0x7F (trung lập) → 0xFF (cực tích cực)│
+│ Arousal: 0x00 (bình tĩnh) → 0xFF (kích thích)                         │
+│ Ý nghĩa: "Cảm thế nào" — cảm xúc, sắc thái tình cảm                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Nhóm 4: MUSICAL (~416 ký tự)                                           │
+│ Unicode blocks: Musical Symbols (1D100..1D1FF)                         │
+│ Chiều chính: Time                                                       │
+│ 5 tempos: Static(𝅝) Slow(𝅗) Medium(♩) Fast(♪) Instant(16th)          │
+│ Ý nghĩa: "Thay đổi thế nào" — nhịp, tốc độ biến đổi                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.3 Hierarchical encoding — Tại sao ~5400 mà phân biệt được
+
+Mỗi chiều dùng **hierarchical byte**, không phải enum đơn giản:
+
+```
+value = base_category + (sub_index × N_bases)
+
+Shape/Relation: N_bases = 8  → sub_index tối đa 31 → 248 variants/chiều
+Time:           N_bases = 5  → sub_index tối đa 51 → 255 variants/chiều
+
+Ví dụ Shape:
+  0x01 = Sphere (base, sub=0)
+  0x09 = Sphere sub 1 (nhóm cầu biến thể 1)
+  0x11 = Sphere sub 2
+  0x02 = Capsule (base, sub=0)
+  0x0A = Capsule sub 1
+
+Extract:
+  base = ((value - 1) % 8) + 1
+  sub  = (value - 1) / 8
+
+→ Mỗi ký tự Unicode KHÁC NHAU → hierarchical byte KHÁC NHAU
+→ ~5400 mẫu phân biệt trên 5 chiều
+```
+
+### 10.4 UCD API (runtime, no_std)
+
+```rust
+// Forward lookup: codepoint → 5 chiều
+ucd::lookup(0x1F525)         // → UcdEntry { cp, shape, relation, valence, arousal, time, group }
+ucd::shape_of(0x1F525)       // → hierarchical shape byte
+ucd::relation_of(0x1F525)    // → hierarchical relation byte
+ucd::valence_of(0x1F525)     // → valence byte
+ucd::arousal_of(0x1F525)     // → arousal byte
+ucd::time_of(0x1F525)        // → time byte
+ucd::group_of(0x1F525)       // → group byte (SDF=1, MATH=2, EMOTICON=3, MUSICAL=4)
+
+// Reverse lookup: chain_hash → codepoint
+ucd::decode_hash(hash)       // → Option<u32> (cần feature "reverse-index")
+
+// Bucket: (shape, relation) → candidates
+ucd::bucket_cps(0x01, 0x01)  // → &[u32] — tất cả codepoints cùng Sphere+Member
+
+// Meta
+ucd::table()                  // → &[UcdEntry] — toàn bộ ~5400 entries
+ucd::table_len()              // → ~5400
+ucd::is_sdf_primitive(cp)    // → true nếu cp là 1 trong 8 SDF primitives
+ucd::is_relation_primitive(cp)// → true nếu cp là 1 trong 8 relation primitives
+```
+
+---
+
+## 11. Node — Đơn vị sống của HomeOS
+
+### 11.1 Từ UCD → Molecule → Node
+
+```
+UnicodeData.txt (compile)
+       │
+       ▼
+  ucd::lookup(cp)        ← O(log n) binary search trên bảng tĩnh
+       │
+       ▼
+  encode_codepoint(cp)   ← HÀM GỐC: cp → 5 chiều → Molecule → MolecularChain
+       │
+       ▼
+  MolecularChain          ← DNA: chuỗi 1+ Molecule, mỗi Molecule = 5 bytes
+       │
+       ├─ chain_hash()    ← FNV-1a hash → địa chỉ duy nhất (u64)
+       │
+       ▼
+  Registry.insert()       ← Đăng ký vào sổ cái (QT⑧: mọi node PHẢI registry)
+       │
+       ├─ file.append()   ← TRƯỚC TIÊN: ghi origin.olang
+       ├─ entries.push()  ← SAU ĐÓ: cập nhật RAM
+       ├─ layer_rep.update() ← LCA đại diện tầng
+       └─ silk.connect()  ← Nối Silk cuối cùng
+```
+
+### 11.2 Molecule — 5 bytes = 1 tọa độ 5D
+
+```rust
+struct Molecule {
+    shape: u8,              // Chiều 1: Hình dạng (hierarchical byte, 8 bases)
+    relation: u8,           // Chiều 2: Quan hệ (hierarchical byte, 8 bases)
+    emotion: EmotionDim {   // Chiều 3+4:
+        valence: u8,        //   Valence (0x00..0xFF)
+        arousal: u8,        //   Arousal (0x00..0xFF)
+    },
+    time: u8,               // Chiều 5: Thời gian (hierarchical byte, 5 bases)
+}
+
+// ĐỌC base category:
+mol.shape_base()     // → ShapeBase::Sphere
+mol.relation_base()  // → RelationBase::Causes
+mol.time_base()      // → TimeDim::Fast
+
+// ĐỌC sub-variant:
+ShapeBase::sub_index(mol.shape)  // → 0 (base) / 1..31 (variant)
+```
+
+### 11.3 MolecularChain — DNA hoàn chỉnh
+
+```
+MolecularChain = Vec<Molecule>
+
+Đơn ký tự:   encode_codepoint(🔥)     → chain([Mol_fire])         — 1 molecule
+ZWJ sequence: encode_zwj_sequence(👨‍👩‍👦) → chain([Mol_👨∘, Mol_👩∘, Mol_👦∈]) — 3 molecules
+Cờ:          encode_flag(🇻, 🇳)       → chain([Mol_V∘, Mol_N∈])  — 2 molecules
+LCA:         lca(&[chain_a, chain_b])  → chain([Mol_parent])      — concept cha
+
+ZWJ rule:
+  mol[0..N-2].relation = ∘ (Compose — còn tiếp)
+  mol[N-1].relation    = ∈ (Member  — kết thúc)
+
+chain_hash = FNV-1a(all molecule bytes) → u64 duy nhất
+```
+
+### 11.4 Tagged Sparse Encoding (v0.05) — Wire format
+
+```
+RAM:  Molecule = 5 bytes cố định (nhanh, dễ xử lý)
+Wire: Tagged   = 1-6 bytes (tiết kiệm, chỉ ghi non-default)
+
+Format: [presence_mask: 1B] [non-default values: 0-5B]
+
+presence_mask bits:
+  bit 0 (0x01): shape    ≠ Sphere (0x01)
+  bit 1 (0x02): relation ≠ Member (0x01)
+  bit 2 (0x04): valence  ≠ 0x80
+  bit 3 (0x08): arousal  ≠ 0x80
+  bit 4 (0x10): time     ≠ Medium (0x03)
+
+Ví dụ:
+  ● (shape=Sphere, all defaults)     → [0x00]                        = 1 byte
+  🔥 (V=0xC0, A=0xC0, time=Fast)    → [0x1C][0xC0][0xC0][0x04]     = 4 bytes
+  ∈  (relation=Member, time=Static)  → [0x10][0x01]                  = 2 bytes
+
+Tiết kiệm trung bình: 40-60% so với 5-byte cố định.
+
+API:
+  mol.to_tagged_bytes()              // → Vec<u8> (1-6 bytes)
+  Molecule::from_tagged_bytes(&buf)  // → Option<(Molecule, consumed)>
+  mol.tagged_size()                  // → 1-6 (không allocate)
+  chain.to_tagged_bytes()            // → Vec<u8> cho cả chain
+  MolecularChain::from_tagged_bytes(&buf) // → Option<MolecularChain>
+```
+
+### 11.5 NodeKind — 10 loại node
+
+Mọi node trong HomeOS thuộc đúng 1 trong 10 loại:
+
+```
+Kind         Byte   Ý nghĩa                              Ví dụ
+─────────────────────────────────────────────────────────────────────────
+Alphabet     0x00   L0 Unicode innate (bẩm sinh)         🔥 💧 ● ∈ → ♩
+Knowledge    0x01   Kiến thức đã học, concepts, truths    "lửa nóng", LCA nodes
+Memory       0x02   STM observations, trí nhớ ngắn hạn   "user nói buồn lúc 14h"
+Agent        0x03   AAM, LeoAI, Chief, Worker defs       LeoAI node, Worker_camera
+Skill        0x04   Stateless functions                   IngestSkill, DreamSkill
+Program      0x05   VM ops, built-in functions            Olang programs
+Device       0x06   Thiết bị kết nối HomeOS               đèn phòng khách
+Sensor       0x07   Cảm biến                              nhiệt kế, camera
+Emotion      0x08   Emotion states, curve points          buồn_t=14h00
+System       0x09   Internal housekeeping                 layer reps, branch markers
+```
+
+**DNA metaphor:** Khi clone Worker sang thiết bị mới, chỉ cần copy L1 nodes (Knowledge + Skill + Device) → thiết bị tự biết mình là gì, biết làm gì. Không cần train lại.
+
+### 11.6 Registry — Sổ cái bất biến
+
+```
+Registry = bộ nhớ trung tâm, append-only, KHÔNG xóa, KHÔNG sửa.
+
+Cấu trúc in-memory (rebuild từ origin.olang lúc startup):
+  entries:      Vec<(u64, RegistryEntry)>    — hash → entry (sorted, binary search)
+  names:        Vec<(String, u64)>           — alias → hash ("lửa" → hash(🔥))
+  layer_rep:    [Option<u64>; 16]            — Lx → representative hash
+  branch_wm:    Vec<(u64, u8)>               — branch → leaf layer
+  qr_supersede: Vec<(u64, u64)>              — old QR → new QR (sửa sai = append)
+  hash_to_name: Vec<(u64, String)>           — reverse: hash → first alias
+
+RegistryEntry:
+  chain_hash:  u64      — FNV-1a identity
+  layer:       u8       — tầng (L0=0, L1=1, ...)
+  file_offset: u64      — vị trí trong origin.olang
+  created_at:  i64      — timestamp (nanoseconds)
+  is_qr:       bool     — false=ĐN (đang học), true=QR (đã chứng minh, ED25519 signed)
+  kind:        NodeKind  — 1 trong 10 loại
+```
+
+### 11.7 Node lifecycle — Từ sinh ra đến bất tử
+
+```
+              encode_codepoint(cp)
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+     L0 (Alphabet)       Learned node
+     Bẩm sinh, seeder    Qua learning pipeline
+          │                   │
+          └─────────┬─────────┘
+                    │
+          Registry.insert()      ← QT⑧: BẮT BUỘC
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+       is_qr=false          is_qr=true
+       ĐN (đang học)       QR (chứng minh)
+       STM, mutable         ED25519 signed
+       có thể promote       bất biến, append-only
+          │                   │
+          │   Dream cycle     │
+          │   cluster+promote │
+          ├───────────────────┤
+          │                   │
+          ▼                   ▼
+       Silk edges           Long-term memory
+       Hebbian learning     Axon (bất tử)
+       fire→wire→stronger   Không bao giờ xóa
+
+QR sai? → SupersedeQR(old_hash, new_hash) — append record mới, KHÔNG xóa cũ.
+```
+
+### 11.8 File format — origin.olang
+
+```
+Header: [○LNG] [0x05] [created_ts:8]  = 13 bytes
+                 ↑ version 0x05 = tagged encoding
+
+Records (append-only):
+  0x01 = Node  [chain_hash:8] [layer:1] [is_qr:1] [ts:8]     = 19 bytes
+  0x02 = Edge  [from:8] [to:8] [rel:1] [ts:8]                 = 26 bytes
+  0x03 = Alias [chain_hash:8] [lang:2] [name_len:2] [name:N]  = 13+N bytes
+
+Companion files:
+  origin.olang.weights   — Hebbian weights (Silk strength per edge)
+  origin.olang.registry  — chain index (rebuild được, cache)
+  log.olang              — event log (audit trail)
+```
+
+---
+
+## 12. Từ UCD đến ○ — Con đường hoàn chỉnh
+
+```
+UnicodeData.txt
+     │ (compile-time: build.rs)
+     ▼
+UCD_TABLE [~5400 entries]    ← Bảng tuần hoàn, sorted by codepoint
+     │ (runtime)
+     ▼
+encode_codepoint(cp)         ← Hàm gốc: cp → Molecule → MolecularChain
+     │
+     ▼
+MolecularChain               ← DNA: 5 bytes × N molecules
+     │
+     ├── chain_hash()        ← FNV-1a → u64 identity
+     ├── to_tagged_bytes()   ← Wire: 1-6 bytes/molecule (sparse)
+     │
+     ▼
+Registry.insert(chain, layer=0, kind=Alphabet)
+     │
+     ├── origin.olang ← append Node record
+     ├── entries[]    ← RAM index
+     ├── names[]      ← alias mapping ("lửa" → 🔥)
+     │
+     ▼
+Silk connections (implicit)  ← 5D comparison, 0 bytes
+     │
+     ▼
+LCA(group of L0) → L1 node  ← 37 base concepts
+     │
+     ▼
+LCA(group of L1) → L2..L6   ← Shrink theo Fibonacci
+     │
+     ▼
+  ○ (L7)                     ← Origin. Mọi thứ bắt đầu từ đây.
+
+Tổng: ~5400 UCD entries → 5461 nodes × 8 layers
+      43 KB Silk pointers + 0 bytes implicit Silk
+      = Toàn bộ tri thức nền tảng của HomeOS
+```
+
+---
+
 *"Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức."*

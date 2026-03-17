@@ -11,12 +11,27 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use context::engine::ContextEngine;
-use olang::molecular::{Dimension, MolecularChain};
+use olang::molecular::{Dimension, MolecularChain, Molecule};
 use silk::edge::EmotionTag;
-use silk::graph::SilkGraph;
+use silk::graph::{MolSummary, SilkGraph};
 
 use crate::encoder::{ContentEncoder, ContentInput, EncodedContent, SensorKind};
 use crate::gate::{GateVerdict, SecurityGate};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Molecule → MolSummary conversion
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Molecule → MolSummary cho Silk 5D comparison.
+fn mol_to_summary(mol: &Molecule) -> MolSummary {
+    MolSummary {
+        shape: mol.shape,
+        relation: mol.relation,
+        valence: mol.emotion.valence,
+        arousal: mol.emotion.arousal,
+        time: mol.time,
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ShortTermMemory (ĐN)
@@ -39,6 +54,8 @@ pub struct Observation {
     pub emotion: EmotionTag,
     pub timestamp: i64,
     pub fire_count: u32,
+    /// Cached 5D summary cho Silk comparison — tránh tính lại.
+    pub mol_summary: Option<MolSummary>,
 }
 
 impl ShortTermMemory {
@@ -80,11 +97,15 @@ impl ShortTermMemory {
             }
         }
 
+        // Cache MolSummary cho Silk 5D comparison
+        let mol_summary = chain.first().map(mol_to_summary);
+
         self.observations.push(Observation {
             chain,
             emotion,
             timestamp: ts,
             fire_count: 1,
+            mol_summary,
         });
     }
 
@@ -154,6 +175,8 @@ pub struct LearningLoop {
     graph: SilkGraph,
     /// Hash của chain trước — để co_activate Silk
     prev_hash: Option<u64>,
+    /// MolSummary của chain trước — cho 5D Silk comparison
+    prev_mol: Option<MolSummary>,
     /// Hash đại diện câu trước — link câu với câu
     prev_sent_hash: Option<u64>,
 }
@@ -167,6 +190,7 @@ impl LearningLoop {
             stm: ShortTermMemory::new(512),
             graph: SilkGraph::new(),
             prev_hash: None,
+            prev_mol: None,
             prev_sent_hash: None,
         }
     }
@@ -227,13 +251,23 @@ impl LearningLoop {
         self.stm.push(chain.clone(), emotion, ts);
 
         // ── 4. Silk — BẢN NĂNG: co_activate với node trước (liên tưởng) ──────
+        // Dùng co_activate_mol: 5D similarity boost kết nối giữa nodes tương đồng
+        let current_mol = chain.first().map(mol_to_summary);
         if let Some(prev) = self.prev_hash {
             if prev != hash {
-                self.graph
-                    .co_activate(prev, hash, emotion, emotion.intensity.max(0.1), ts);
+                self.graph.co_activate_mol(
+                    prev,
+                    hash,
+                    self.prev_mol,
+                    current_mol,
+                    emotion,
+                    emotion.intensity.max(0.1),
+                    ts,
+                );
             }
         }
         self.prev_hash = Some(hash);
+        self.prev_mol = current_mol;
 
         // ── 5. Học chuyên sâu theo modality ──────────────────────────────────
         match &input {
@@ -360,6 +394,34 @@ impl LearningLoop {
         }
     }
 
+    // ── Body Updates — cập nhật Spline từ learning ────────────────────────────
+
+    /// Collect body spline updates từ STM observations gần đây.
+    ///
+    /// Khi learning tích lũy đủ data về 1 concept (fire_count >= 2),
+    /// trả về danh sách (chain_hash, emotion) để Runtime cập nhật BodyStore.
+    ///
+    /// Đây là bridge: Learning → BodyStore (Spline cập nhật từ thực tế).
+    pub fn pending_body_updates(&self) -> Vec<BodyUpdate> {
+        let mut updates = Vec::new();
+
+        for obs in self.stm.all() {
+            // Chỉ cập nhật khi fire_count >= 2 (đủ evidence, không phải noise)
+            if obs.fire_count < 2 {
+                continue;
+            }
+
+            updates.push(BodyUpdate {
+                chain_hash: obs.chain.chain_hash(),
+                emotion: obs.emotion,
+                fire_count: obs.fire_count,
+                mol_summary: obs.mol_summary,
+            });
+        }
+
+        updates
+    }
+
     // ── Maintain — chăm sóc Ln-1 ─────────────────────────────────────────────
 
     /// Chăm sóc Silk graph: decay + cắt tỉa overflow.
@@ -462,6 +524,22 @@ pub struct EvolutionCandidate {
     pub old_value: u8,
     /// Giá trị mới (ở chain mới)
     pub new_value: u8,
+}
+
+/// Body update — cập nhật BodyStore splines từ learning data.
+///
+/// Runtime nhận BodyUpdate → cập nhật emotion_v, emotion_a splines.
+/// Đây là bridge "Learning → Body" — Spline thay đổi theo thực tế.
+#[derive(Debug, Clone)]
+pub struct BodyUpdate {
+    /// chain_hash của node cần cập nhật
+    pub chain_hash: u64,
+    /// Emotion tích lũy từ learning (blend qua nhiều observations)
+    pub emotion: EmotionTag,
+    /// Số lần fire — confidence indicator
+    pub fire_count: u32,
+    /// 5D coordinates (nếu có)
+    pub mol_summary: Option<MolSummary>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
