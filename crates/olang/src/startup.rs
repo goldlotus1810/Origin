@@ -94,13 +94,26 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     let mut registry = Registry::new();
     let mut stage = BootStage::SelfInit;
 
-    // Stage 2: Axiom Load — seed 4 axiom nodes + L1 system components
-    // Dùng UCD nếu có, không thì bỏ qua
+    // Stage 2: Axiom Load — seed axioms + L1 DNA + full L0 UCD
+    // Thứ tự quan trọng:
+    //   1. Axioms (nền tảng)
+    //   2. L1 DNA (Skills, Agents — cần đúng NodeKind TRƯỚC)
+    //   3. Full L0 (phần còn lại UCD — skip cái đã register)
     if ucd::table_len() > 0 {
+        // Phase 2a: 4 axiom nodes (○, ∅, ∘, ∈) — nền tảng
         seed_axioms(&mut registry);
-        // L1 seed: đăng ký tất cả Skills, Agents, VM ops, Sensors
-        // Quy tắc: mọi thứ tạo ra đều phải đăng ký Registry
+
+        // Phase 2b: L1 DNA — Skills, Agents, VM ops, Sensors
+        // Phải chạy TRƯỚC L0 full vì cùng codepoint → L1 cần đúng NodeKind
         seed_l1_system(&mut registry);
+
+        // Phase 2c: TOÀN BỘ ~5400 UCD entries → L0 (bảng tuần hoàn hoàn chỉnh)
+        // Skip cái đã register bởi axioms + L1
+        seed_l0_full(&mut registry);
+
+        // Phase 2d: Natural language aliases cho L0 atoms phổ biến
+        seed_l0_aliases(&mut registry);
+
         stage = BootStage::AxiomLoad;
     }
 
@@ -194,9 +207,9 @@ pub fn boot_empty() -> BootResult {
 // Seed axioms
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Seed 4 axiom nodes vào Registry.
+/// Seed 4 axiom nodes vào Registry — nền tảng bất biến.
 ///
-/// Không phụ thuộc vào file — đây là L0 bất biến.
+/// Luôn chạy trước seed_l0_full(). Không phụ thuộc vào file.
 fn seed_axioms(registry: &mut Registry) {
     let ts = 0i64; // boot time
 
@@ -227,6 +240,238 @@ fn seed_axioms(registry: &mut Registry) {
         registry.register_alias("instance", hm);
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L0 Full Seed — toàn bộ bảng tuần hoàn Unicode (~5400 nguyên tố)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Seed TOÀN BỘ UCD_TABLE vào Registry — ~5400 L0 nodes.
+///
+/// Mỗi Unicode character trong 5 nhóm = 1 nguyên tố bất biến.
+/// L0 = bảng tuần hoàn hoàn chỉnh: mọi hình dạng, mọi quan hệ,
+/// mọi cảm xúc, mọi nhịp thời gian mà hệ thống biết khi sinh ra.
+///
+/// Unicode NAME = alias duy nhất (đã chuẩn hóa bởi Unicode Consortium).
+/// Không đặt tên khác (QT②).
+///
+/// Returns: số L0 nodes đã seed.
+fn seed_l0_full(registry: &mut Registry) -> usize {
+    use crate::registry::NodeKind;
+
+    let table = ucd::table();
+    if table.is_empty() {
+        return 0;
+    }
+
+    let ts = 0i64;
+    let mut count = 0usize;
+
+    for (offset, entry) in table.iter().enumerate() {
+        let chain = encode_codepoint(entry.cp);
+        let hash = chain.chain_hash();
+
+        // Skip nếu đã seed bởi seed_axioms()
+        if registry.lookup_hash(hash).is_some() {
+            continue;
+        }
+
+        // L0, QR=true, offset dựa trên vị trí trong bảng
+        registry.insert_with_kind(
+            &chain,
+            0,                      // layer 0
+            offset as u64 + 100,    // offset (sau axioms)
+            ts,
+            true,                   // is_qr (L0 bất biến)
+            NodeKind::Alphabet,     // Tất cả L0 = Alphabet
+        );
+
+        // Unicode NAME = alias (QT②: tên ký tự Unicode = tên node)
+        registry.register_alias(entry.name, hash);
+
+        count += 1;
+    }
+
+    count
+}
+
+/// Số L0 nodes đã seed (axioms + full UCD).
+///
+/// Dùng bởi SystemManifest và tests.
+pub fn l0_expected_count() -> usize {
+    // 4 axioms + toàn bộ UCD table (minus overlap)
+    ucd::table_len()
+}
+
+/// Seed natural language aliases cho L0 atoms phổ biến.
+///
+/// QT③: Ngôn ngữ tự nhiên = alias → node. Không tạo node riêng.
+fn seed_l0_aliases(registry: &mut Registry) {
+    for &(alias, cp) in L0_NATURAL_ALIASES {
+        let chain = encode_codepoint(cp);
+        let hash = chain.chain_hash();
+        registry.register_alias(alias, hash);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bootstrap Programs — Olang source cho bản năng và nhận thức bẩm sinh
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Bootstrap Olang programs — firmware chạy trên VM ngay khi boot.
+///
+/// Mỗi program là 1 Olang source string:
+///   - Tự nhận thức: hệ thống biết mình có gì
+///   - Bản năng: 7 instincts định nghĩa bằng Olang
+///   - Quy tắc: axiom assertions
+///   - Quan hệ: nhóm cùng chiều → Silk edges
+///
+/// Runtime execute qua OlangVM → VmEvents → Silk/Registry.
+pub fn bootstrap_programs() -> Vec<&'static str> {
+    Vec::from(BOOTSTRAP_PROGRAMS)
+}
+
+/// Bootstrap programs — chạy theo thứ tự.
+///
+/// Phase 1: Axiom verification (nền tảng đúng)
+/// Phase 2: Self-awareness (biết mình có gì)
+/// Phase 3: Group binding (nhóm nguyên tố cùng chiều → Silk)
+/// Phase 4: Instinct prototypes (bản năng bẩm sinh)
+static BOOTSTRAP_PROGRAMS: &[&str] = &[
+    // ── Phase 1: Axiom verification ──────────────────────────────────────
+    // QT1: ○ là nguồn gốc — assert nó tồn tại
+    "○;",
+
+    // ── Phase 2: Self-awareness ──────────────────────────────────────────
+    // Hệ thống nhìn thấy chính mình
+    "stats;",
+
+    // ── Phase 3: Group binding — 8 SDF primitives ────────────────────────
+    // Hình dạng cơ bản: ● ▬ ■ ▲ ○ ∪ ∩ ∖
+    // LCA của nhóm → concept "shape" (trừu tượng)
+    "● ∘ ▬;",
+    "■ ∘ ▲;",
+    "● ∘ ■;",
+
+    // ── Phase 3b: Group binding — 8 RELATION primitives ──────────────────
+    // Quan hệ cơ bản: ∈ ⊂ ≡ ⊥ ∘ → ≈ ←
+    "∈ ∘ ⊂;",
+    "≡ ∘ →;",
+    "∈ ∘ ≡;",
+
+    // ── Phase 4: Instinct templates ──────────────────────────────────────
+    // Honesty: typeof trả về mức tin cậy — assert kiểm tra
+    "typeof ○;",
+
+    // Analogy: A ∘ B tìm LCA → delta giữa 2 concept
+    // Khi cần A:B :: C:? → tính delta, áp lên C
+    "● ∘ ▲;",      // shape delta: Sphere vs Cone
+
+    // Causality: → (Causes) là quan hệ bẩm sinh
+    // Khi 2 chain có temporal ordering + co-activate → causal
+    "→;",
+
+    // Contradiction: ⊥ (Orthogonal) = mâu thuẫn bẩm sinh
+    "⊥;",
+
+    // Curiosity: ≈ (Similar) tìm nearest → 1 - similarity = novelty
+    "≈;",
+
+    // Reflection: inspect → chain structure quality
+    "inspect ○;",
+];
+
+/// Bảng alias đa ngôn ngữ cho L0 atoms phổ biến.
+///
+/// Unicode NAME là alias chính (từ UCD). Bảng này thêm alias
+/// ngôn ngữ tự nhiên cho ~40 atoms thường dùng nhất.
+///
+/// QT③: Ngôn ngữ tự nhiên = alias → node. Không tạo node riêng.
+pub static L0_NATURAL_ALIASES: &[(&str, u32)] = &[
+    // fire
+    ("fire", 0x1F525), ("lửa", 0x1F525), ("lua", 0x1F525), ("feu", 0x1F525),
+    // water
+    ("water", 0x1F4A7), ("nước", 0x1F4A7), ("nuoc", 0x1F4A7), ("eau", 0x1F4A7),
+    // light
+    ("light", 0x1F4A1), ("anh-sang", 0x1F4A1),
+    // spark
+    ("spark", 0x2728), ("tia-lua", 0x2728),
+    // bolt / lightning
+    ("bolt", 0x26A1), ("lightning", 0x26A1), ("sét", 0x26A1),
+    // earth
+    ("earth", 0x1F30D), ("đất", 0x1F30D), ("dat", 0x1F30D),
+    // wind
+    ("wind", 0x1F32C), ("gió", 0x1F32C), ("gio", 0x1F32C),
+    // sound
+    ("sound", 0x1F50A), ("âm thanh", 0x1F50A),
+    // cold
+    ("cold", 0x2744), ("lạnh", 0x2744), ("lanh", 0x2744),
+    // warm
+    ("warm", 0x1F31E), ("ấm", 0x1F31E),
+    // sun
+    ("sun", 0x2600), ("mặt trời", 0x2600),
+    // joy
+    ("joy", 0x1F60C), ("vui", 0x1F60C), ("happy", 0x1F60C),
+    // sadness
+    ("sad", 0x1F614), ("buồn", 0x1F614), ("buồn bã", 0x1F614),
+    // pain
+    ("pain", 0x1F915), ("đau", 0x1F915),
+    // fatigue
+    ("tired", 0x1F634), ("mệt", 0x1F634), ("mệt mỏi", 0x1F634),
+    // hunger
+    ("hunger", 0x1F374), ("đói", 0x1F374),
+    // danger
+    ("danger", 0x26A0), ("nguy hiểm", 0x26A0),
+    // dark
+    ("dark", 0x1F311), ("tối", 0x1F311),
+    // alert
+    ("alert", 0x1F6A8), ("cảnh báo", 0x1F6A8),
+    // home / shelter
+    ("home", 0x1F3E0), ("nhà", 0x1F3E0), ("shelter", 0x1F3E0),
+    ("house", 0x1F3E1), ("nhà ở", 0x1F3E1),
+    // nature
+    ("nature", 0x1F333), ("thiên nhiên", 0x1F333),
+    // ocean
+    ("ocean", 0x1F30A), ("biển", 0x1F30A), ("sea", 0x1F30A),
+    // mind
+    ("mind", 0x1F9E0), ("tâm trí", 0x1F9E0), ("brain", 0x1F9E0),
+    // person
+    ("person", 0x1F464), ("người", 0x1F464),
+    // eye
+    ("eye", 0x1F441), ("mắt", 0x1F441),
+    // heart
+    ("heart", 0x2764), ("tim", 0x2764), ("trái tim", 0x2764),
+    // love
+    ("love", 0x2764), ("yêu", 0x2764),
+    // yes / no
+    ("yes", 0x2705), ("có", 0x2705),
+    ("no", 0x274C), ("không", 0x274C),
+    // now
+    ("now", 0x23F0), ("bây giờ", 0x23F0),
+    // all
+    ("all", 0x267E), ("tất cả", 0x267E),
+    // move / stop
+    ("move", 0x1F3C3), ("di chuyển", 0x1F3C3),
+    ("stop", 0x1F6D1), ("dừng", 0x1F6D1),
+    // open / close
+    ("open", 0x1F513), ("mở", 0x1F513),
+    ("close", 0x1F512), ("đóng", 0x1F512),
+    // origin
+    ("origin", 0x25CB), ("nguồn gốc", 0x25CB),
+    // anger
+    ("angry", 0x1F621), ("giận", 0x1F621), ("tức", 0x1F621),
+    // fear
+    ("scared", 0x1F628), ("sợ", 0x1F628), ("lo", 0x1F628),
+    // family
+    ("family", 0x1F46A), ("gia đình", 0x1F46A),
+    // star / great
+    ("great", 0x2B50), ("tuyệt", 0x2B50),
+    // bad
+    ("bad", 0x1F4A9), ("tệ", 0x1F4A9),
+    // compose / member
+    ("compose", 0x2218), ("∘", 0x2218),
+    ("member", 0x2208), ("∈", 0x2208), ("instance", 0x2208),
+    ("empty", 0x2205), ("∅", 0x2205),
+];
 
 /// L1 System Seed Entry — một component trong DNA của HomeOS.
 ///
@@ -445,6 +690,26 @@ fn write_missing_seeds(
             let _ = writer.append_alias(alias, hash, ts);
             written += 1;
         }
+    }
+
+    // L0 full UCD — toàn bộ ~5400 nguyên tố
+    let table = ucd::table();
+    for entry in table {
+        let chain = encode_codepoint(entry.cp);
+        let hash = chain.chain_hash();
+        if !existing_hashes.contains(&hash) {
+            let _ = writer.append_node(&chain, 0, true, ts);
+            let _ = writer.append_alias(entry.name, hash, ts);
+            written += 1;
+        }
+    }
+
+    // L0 natural language aliases
+    for &(alias, cp) in L0_NATURAL_ALIASES {
+        let chain = encode_codepoint(cp);
+        let hash = chain.chain_hash();
+        // Alias chỉ ghi nếu node đã tồn tại (đã ghi ở trên)
+        let _ = writer.append_alias(alias, hash, ts);
     }
 
     // L1 system seed

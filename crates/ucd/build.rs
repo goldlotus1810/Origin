@@ -749,51 +749,139 @@ fn main() {
     // Encoding: value = base + (sub_index * N_bases)
     // Shape/relation: N_bases = 8, Time: N_bases = 5
     // Sub-index tăng tuần tự trong mỗi base group → phân biệt ~5400 mẫu.
+    //
+    // Phase 1: hierarchical encoding trên shape/relation/time
+    // Phase 2: collision resolution — nếu 2+ entries cùng 5-tuple,
+    //          perturb valence/arousal (±1..±127) dùng codepoint làm seed.
+    //          Giữ nguyên semantic base, chỉ thay đổi tối thiểu.
     {
-        // Count per base → assign sub_index round-robin
-        let mut shape_counters: HashMap<u8, u8> = HashMap::new(); // base → next_sub
-        let mut relation_counters: HashMap<u8, u8> = HashMap::new();
-        let mut time_counters: HashMap<u8, u8> = HashMap::new();
+        // Count per base → assign sub_index (NO wrap-around, clamp at max)
+        let mut shape_counters: HashMap<u8, u16> = HashMap::new(); // base → next_sub
+        let mut relation_counters: HashMap<u8, u16> = HashMap::new();
+        let mut time_counters: HashMap<u8, u16> = HashMap::new();
 
         for entry in &mut entries {
             // Shape: base + sub*8, max sub = (255-base)/8
             let shape_base = entry.shape; // already 0x01-0x08
             let shape_sub = shape_counters.entry(shape_base).or_insert(0);
             let max_shape_sub = (255u16 - shape_base as u16) / 8;
-            if *shape_sub > 0 && (*shape_sub as u16) <= max_shape_sub {
-                entry.shape = shape_base + (*shape_sub) * 8;
+            if *shape_sub > 0 && *shape_sub <= max_shape_sub {
+                entry.shape = shape_base + (*shape_sub as u8) * 8;
+            } else if *shape_sub > max_shape_sub {
+                // Clamp at max — collision will be resolved in phase 2
+                entry.shape = shape_base + ((*shape_sub % (max_shape_sub + 1)) as u8) * 8;
             }
-            *shape_sub = shape_sub.wrapping_add(1);
-            if *shape_sub as u16 > max_shape_sub {
-                *shape_sub = 0; // wrap around
-            }
+            *shape_sub += 1;
 
             // Relation: base + sub*8
             let rel_base = entry.relation;
             let rel_sub = relation_counters.entry(rel_base).or_insert(0);
             let max_rel_sub = (255u16 - rel_base as u16) / 8;
-            if *rel_sub > 0 && (*rel_sub as u16) <= max_rel_sub {
-                entry.relation = rel_base + (*rel_sub) * 8;
+            if *rel_sub > 0 && *rel_sub <= max_rel_sub {
+                entry.relation = rel_base + (*rel_sub as u8) * 8;
+            } else if *rel_sub > max_rel_sub {
+                entry.relation = rel_base + ((*rel_sub % (max_rel_sub + 1)) as u8) * 8;
             }
-            *rel_sub = rel_sub.wrapping_add(1);
-            if *rel_sub as u16 > max_rel_sub {
-                *rel_sub = 0;
-            }
+            *rel_sub += 1;
 
             // Time: base + sub*5
             let time_base = entry.time;
             let time_sub = time_counters.entry(time_base).or_insert(0);
             let max_time_sub = (255u16 - time_base as u16) / 5;
-            if *time_sub > 0 && (*time_sub as u16) <= max_time_sub {
-                entry.time = time_base + (*time_sub) * 5;
+            if *time_sub > 0 && *time_sub <= max_time_sub {
+                entry.time = time_base + (*time_sub as u8) * 5;
+            } else if *time_sub > max_time_sub {
+                entry.time = time_base + ((*time_sub % (max_time_sub + 1)) as u8) * 5;
             }
-            *time_sub = time_sub.wrapping_add(1);
-            if *time_sub as u16 > max_time_sub {
-                *time_sub = 0;
-            }
+            *time_sub += 1;
+        }
 
-            // Recompute hash with hierarchical values
+        // Phase 2: Collision resolution via valence/arousal perturbation
+        // Group entries by their 5-tuple, resolve collisions by perturbing V/A.
+        use std::collections::HashSet;
+        let mut seen: HashSet<(u8, u8, u8, u8, u8)> = HashSet::with_capacity(entries.len());
+        for entry in &mut entries {
+            let tuple = (entry.shape, entry.relation, entry.valence, entry.arousal, entry.time);
+            if seen.contains(&tuple) {
+                // Collision — perturb valence and/or arousal using codepoint as seed.
+                // Try small perturbations first (±1, ±2, ...) to stay close to semantic value.
+                let mut resolved = false;
+                for delta in 1u8..=127 {
+                    // Try valence+delta
+                    let v_up = entry.valence.wrapping_add(delta);
+                    let t1 = (entry.shape, entry.relation, v_up, entry.arousal, entry.time);
+                    if !seen.contains(&t1) {
+                        entry.valence = v_up;
+                        seen.insert(t1);
+                        resolved = true;
+                        break;
+                    }
+                    // Try valence-delta
+                    let v_down = entry.valence.wrapping_sub(delta);
+                    let t2 = (entry.shape, entry.relation, v_down, entry.arousal, entry.time);
+                    if !seen.contains(&t2) {
+                        entry.valence = v_down;
+                        seen.insert(t2);
+                        resolved = true;
+                        break;
+                    }
+                    // Try arousal+delta
+                    let a_up = entry.arousal.wrapping_add(delta);
+                    let t3 = (entry.shape, entry.relation, entry.valence, a_up, entry.time);
+                    if !seen.contains(&t3) {
+                        entry.arousal = a_up;
+                        seen.insert(t3);
+                        resolved = true;
+                        break;
+                    }
+                    // Try arousal-delta
+                    let a_down = entry.arousal.wrapping_sub(delta);
+                    let t4 = (entry.shape, entry.relation, entry.valence, a_down, entry.time);
+                    if !seen.contains(&t4) {
+                        entry.arousal = a_down;
+                        seen.insert(t4);
+                        resolved = true;
+                        break;
+                    }
+                }
+                if !resolved {
+                    // Last resort: perturb both V and A
+                    for dv in 1u8..=127 {
+                        for da in 1u8..=127 {
+                            let v = entry.valence.wrapping_add(dv);
+                            let a = entry.arousal.wrapping_add(da);
+                            let t = (entry.shape, entry.relation, v, a, entry.time);
+                            if !seen.contains(&t) {
+                                entry.valence = v;
+                                entry.arousal = a;
+                                seen.insert(t);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                seen.insert(tuple);
+            }
+        }
+
+        // Recompute all hashes after collision resolution
+        for entry in &mut entries {
             entry.hash = chain_hash(entry.shape, entry.relation, entry.valence, entry.arousal, entry.time);
+        }
+
+        // Verify uniqueness at build time
+        let mut verify: HashSet<(u8, u8, u8, u8, u8)> = HashSet::with_capacity(entries.len());
+        let mut collisions = 0u32;
+        for entry in &entries {
+            if !verify.insert((entry.shape, entry.relation, entry.valence, entry.arousal, entry.time)) {
+                collisions += 1;
+            }
+        }
+        if collisions > 0 {
+            eprintln!("cargo:warning=UCD COLLISION WARNING: {collisions} entries still collide after resolution!");
+        } else {
+            eprintln!("cargo:warning=UCD: all {} entries have unique molecules ✓", entries.len());
         }
     }
 

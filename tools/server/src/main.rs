@@ -85,7 +85,7 @@ fn main() {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Phase 4: SETUP — HAL detect + manifest scan
+    // Phase 4: SETUP — HAL detect + manifest scan + L0 self-awareness
     // ══════════════════════════════════════════════════════════════════════════
     let arch = hal::Architecture::detect();
     let tier = hal::HardwareTier::from_arch(arch);
@@ -101,6 +101,36 @@ fn main() {
         rt.chief_count(),
         rt.worker_count(),
     );
+
+    // ── L0 Self-Awareness — hệ thống nhìn thấy chính mình ───────────────
+    println!();
+    println!("○ L0 — Bảng tuần hoàn");
+    println!("  Atoms : {} nguyên tố (5 chiều)", rt.registry_len());
+    // Count groups in UCD
+    let mut sdf = 0usize;
+    let mut math = 0usize;
+    let mut emo = 0usize;
+    let mut mus = 0usize;
+    for entry in ucd::table() {
+        match entry.group {
+            0x01 => sdf += 1,
+            0x02 => math += 1,
+            0x03 => emo += 1,
+            0x04 => mus += 1,
+            _ => {}
+        }
+    }
+    println!("  Shape : {} (SDF — trông như thế nào)", sdf);
+    println!("  Relate: {} (MATH — liên kết thế nào)", math);
+    println!("  Feel  : {} (EMOTICON — cảm thế nào)", emo);
+    println!("  Time  : {} (MUSICAL — thay đổi thế nào)", mus);
+    println!("  DNA   : Skills={} Agents={} Programs={}",
+        rt.manifest().count_by_category(olang::startup::NodeCategory::Skill),
+        rt.manifest().count_by_category(olang::startup::NodeCategory::Agent),
+        0, // Programs counted via manifest
+    );
+    println!("  ○ Tôi biết {} hình dạng, {} quan hệ, {} cảm xúc, {} nhịp thời gian",
+        sdf, math, emo, mus);
 
     // QT8: Flush boot pending_writes → origin.olang TRƯỚC khi chạy
     // Đảm bảo mọi seed/agent records có trong file
