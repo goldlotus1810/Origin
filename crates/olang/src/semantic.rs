@@ -276,6 +276,10 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             }
         }
 
+        Stmt::Use(_module) => {
+            // Module imports are valid at any point
+        }
+
         Stmt::TryCatch { try_block, catch_block } => {
             scope.enter();
             for s in try_block {
@@ -498,7 +502,8 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         | Stmt::Match { .. } | Stmt::TryCatch { .. } | Stmt::ForIn { .. }
         | Stmt::While { .. }
         | Stmt::Break | Stmt::Continue
-        | Stmt::Assign { .. } => ChainKind::Void,
+        | Stmt::Assign { .. }
+        | Stmt::Use(_) => ChainKind::Void,
         Stmt::Return(Some(expr)) => infer_expr_kind(expr),
         Stmt::Return(None) => ChainKind::Void,
     }
@@ -767,6 +772,12 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         Stmt::Assign { name, value } => {
             lower_expr(value, ctx);
             ctx.emit(Op::StoreUpdate(name.clone()));
+        }
+
+        Stmt::Use(module) => {
+            // Emit a Load for the module name — runtime can intercept and load the module
+            ctx.emit(Op::Load(module.clone()));
+            ctx.emit(Op::Call("__use_module".into()));
         }
 
         Stmt::Return(expr) => {

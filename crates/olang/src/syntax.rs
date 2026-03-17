@@ -128,6 +128,9 @@ pub enum Stmt {
 
     /// `return expr;` — return value from function
     Return(Option<Expr>),
+
+    /// `use "module";` or `use module;` — import module
+    Use(String),
 }
 
 /// Match arm — pattern + body.
@@ -364,6 +367,25 @@ impl<'a> Parser<'a> {
                     if self.check(&Token::Semi) { self.advance(); }
                     Ok(Stmt::Return(Some(expr)))
                 }
+            }
+            Token::Use => {
+                self.advance();
+                // use "module"; or use module;
+                let module = match self.peek() {
+                    Token::Str(s) => {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    }
+                    Token::Ident(s) => {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    }
+                    _ => return Err(ParseError::new("Expected module name after 'use'")),
+                };
+                if self.check(&Token::Semi) { self.advance(); }
+                Ok(Stmt::Use(module))
             }
             Token::Command(_) => self.parse_command(),
 

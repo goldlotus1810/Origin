@@ -335,6 +335,8 @@ pub enum Keyword {
     Continue,
     /// `return` — return value from function
     Return,
+    /// `use` — import module
+    Use,
 }
 
 /// Check xem string có phải keyword không.
@@ -355,6 +357,7 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "break" => Some(Keyword::Break),
         "continue" => Some(Keyword::Continue),
         "return" => Some(Keyword::Return),
+        "use" => Some(Keyword::Use),
         _ => None,
     }
 }
@@ -493,6 +496,8 @@ pub enum Token {
     Continue,
     /// `return`
     Return,
+    /// `use`
+    Use,
     /// `[`
     LBracket,
     /// `]`
@@ -769,6 +774,7 @@ impl<'a> Lexer<'a> {
                 Keyword::Break => Token::Break,
                 Keyword::Continue => Token::Continue,
                 Keyword::Return => Token::Return,
+                Keyword::Use => Token::Use,
             };
         }
 
