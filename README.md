@@ -93,7 +93,7 @@ tools/
 └── bench/      Performance benchmarks
 ```
 
-**~66,000 lines Rust · 1,644 tests · 0 clippy warnings · no_std core**
+**~66,000 lines Rust · 1,744 tests · 0 clippy warnings · 0 external deps · no_std core**
 
 ---
 
@@ -103,13 +103,14 @@ tools/
 |----------|------|
 | Thiết kế kiến trúc | 10/10 |
 | Chất lượng code | 8.5/10 |
-| Độ phủ test | 9/10 |
+| Độ phủ test | 9.5/10 |
 | Tuân thủ QT (23 quy tắc) | 9.5/10 (21 đầy đủ, 2 một phần) |
-| Tính năng hoàn thiện | 7/10 (54/80 features) |
+| Tính năng hoàn thiện | 7.5/10 |
 | Bảo mật | 9/10 |
-| **Tổng** | **8.66/10 — A-** |
+| Độc lập (0 external deps) | 10/10 |
+| **Tổng** | **8.81/10 — A** |
 
-Chi tiết: xem [REVIEW.md](REVIEW.md) và [REVIEW_VI.md](REVIEW_VI.md).
+Chi tiết: xem [docs/REVIEW_2026_03_17.md](docs/REVIEW_2026_03_17.md) (mới nhất), [REVIEW.md](REVIEW.md), [REVIEW_VI.md](REVIEW_VI.md).
 
 ---
 
@@ -213,17 +214,19 @@ HOÀN THÀNH (Foundation):
   ✅ Compiler backends (C/Rust/WASM)
   ✅ WASM browser bindings
 
-TIẾP THEO:
-  Phase 1: VM tính toán thật (1+2=3)          — ưu tiên CAO
-  Phase 2: Duyệt đồ thị (why/explain)         — ưu tiên TRUNG BÌNH
-  Phase 3: Tri thức L1+ (180+ domain nodes)    — ưu tiên TRUNG BÌNH
-  Phase 4: Toán ký hiệu kết nối VM            — ưu tiên TRUNG BÌNH
-  Phase 5: Điều phối Agent đầy đủ             — ưu tiên CAO
+HOÀN THÀNH (Phases):
+  ✅ Phase 1: VM tính toán thật (○{1 + 2} = 3)
+  ✅ Phase 2: Duyệt đồ thị (why/explain)
+  ✅ Phase 3: Tri thức L1+ (246 domain nodes)
+  ✅ Phase 4: Toán ký hiệu kết nối VM
+  ✅ Phase 5: Điều phối Agent đầy đủ
+  ✅ Phase 6-8: Perception, Programming, Build layers
+  ✅ Phase 9: Zero External Dependencies (native SHA-256, Ed25519, AES-256-GCM)
 
-DÀI HẠN:
-  Phase 6: Cảm nhận thật (sensor input)
-  Phase 7: Thêm compiler backends (Go/ARM)
-  Phase 8: Tầng Build (hypothesis testing)
+TIẾP THEO:
+  Phase 10: Dream→KnowTree L3 pipeline          — ưu tiên CAO
+  Phase 11: Display layer (chain_to_emoji)       — ưu tiên TRUNG BÌNH
+  Phase 12: Data L2-Ln seeding                   — ưu tiên TRUNG BÌNH
 ```
 
 Chi tiết: xem [HomeOS_Roadmap.md](HomeOS_Roadmap.md).
@@ -236,7 +239,7 @@ Chi tiết: xem [HomeOS_Roadmap.md](HomeOS_Roadmap.md).
 # Build toàn bộ
 cargo build --workspace
 
-# Test (1644+ tests)
+# Test (1744+ tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
@@ -288,7 +291,7 @@ f(x)     : -0.312
 |------|---------|
 | [CLAUDE.md](CLAUDE.md) | Hướng dẫn cho AI contributors |
 | [HomeOS_Architecture.md](HomeOS_Architecture.md) | Kiến trúc tổng thể |
-| [HomeOS_Roadmap.md](HomeOS_Roadmap.md) | Kế hoạch phát triển 8 phase |
+| [HomeOS_Roadmap.md](HomeOS_Roadmap.md) | Kế hoạch phát triển (Phase 1-9 hoàn thành) |
 | [HomeOS_Solutions.md](HomeOS_Solutions.md) | Hướng giải quyết hạn chế |
 | [HomeOS_Complete.md](HomeOS_Complete.md) | Thiết kế hoàn chỉnh |
 | [REVIEW.md](REVIEW.md) | Đánh giá dự án (English) |
@@ -296,6 +299,7 @@ f(x)     : -0.312
 | [docs/olang_guide.md](docs/olang_guide.md) | Hướng dẫn ngôn ngữ Olang |
 | [docs/architecture.md](docs/architecture.md) | Kiến trúc kỹ thuật chi tiết |
 | [docs/roadmap.md](docs/roadmap.md) | Kế hoạch tiếp theo |
+| [docs/REVIEW_2026_03_17.md](docs/REVIEW_2026_03_17.md) | Đánh giá mới nhất (8.81/10) |
 
 ---
 
@@ -310,4 +314,4 @@ Target:      1 tỷ nodes trên thiết bị phổ thông (RAM < 256MB, disk ~2G
 
 ---
 
-*Unicode 18.0.0 · Rust · no_std core · ~66K LoC · 1,644 tests · 0 clippy warnings · 2026*
+*Unicode 18.0.0 · Rust · no_std core · ~66K LoC · 1,744 tests · 0 clippy warnings · 0 external deps · 2026*

@@ -337,3 +337,16 @@ Master Plan 8 phase giai quyet tat ca lo hong theo dung thu tu phu thuoc.
 **Diem: 8.66/10 — Xep hang A-**
 
 > "Nen tang da vung. DNA da dung. Gio day no suy nghi."
+
+---
+
+## CAP NHAT — 2026-03-17
+
+Danh gia nay da duoc thay the boi **[docs/REVIEW_2026_03_17.md](docs/REVIEW_2026_03_17.md)** bao gom:
+
+- Phase 1 (VM arithmetic) hoan thanh — `○{1 + 2}` tra ve `= 3`
+- Phase 9 (Zero External Dependencies) hoan thanh — native SHA-256, Ed25519, AES-256-GCM
+- So test: 1,642 → **1,744** (+102 tests)
+- Clippy warnings: 8 → **0**
+- External deps: 3 → **0** (chi wasm-bindgen la build tool)
+- **Diem moi: 8.81/10 — Xep hang A**

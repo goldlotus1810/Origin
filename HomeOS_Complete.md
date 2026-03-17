@@ -1090,18 +1090,19 @@ homeos/
 │   │
 │   ├── agents/
 │   │   └── src/
-│   │       ├── content_encoder.rs  ContentInput → MolecularChain
-│   │       │                       Text/Audio/Sensor/Code/Math/System
-│   │       ├── learning_loop.rs    LearningLoop.process() — trái tim đập
-│   │       │                       tách câu/cụm/từ/ký tự → chain → STM
-│   │       ├── book_reader.rs      BookReader, BookShelf
-│   │       ├── sentence_affect.rs  SentenceAffect walk qua Silk
-│   │       ├── word_affect.rs      WordAffect lexicon, SelectWords
-│   │       ├── aam.rs              AAM: approve QR, route, audit
-│   │       ├── leoai.rs            LeoAI: Dream, Hebbian, Curate
-│   │       ├── skill_proposal.rs   SkillProposal, ComposedSkill
-│   │       └── gate.rs             SecurityGate, EpistemicFirewall
-│   │                               BlackCurtain, IntentVerify
+│   │       ├── encoder.rs      ContentInput → MolecularChain
+│   │       │                   Text/Audio/Sensor/Code/Math/System
+│   │       ├── learning.rs     LearningLoop.process() — trái tim đập
+│   │       │                   tách câu/cụm/từ/ký tự → chain → STM
+│   │       ├── book.rs         BookReader, BookShelf
+│   │       ├── instinct.rs     7 bản năng bẩm sinh (Analogy→Reflection)
+│   │       ├── leo.rs          LeoAI: Dream, Hebbian, Curate, Instincts
+│   │       ├── chief.rs        Chief agents (Home/Vision/Network)
+│   │       ├── worker.rs       Worker agents (camera/light/door/sensor)
+│   │       ├── skill.rs        Skill system, ExecContext, DomainSkills
+│   │       ├── domain_skills.rs 15 domain skills (QT4 compliant)
+│   │       └── gate.rs         SecurityGate, EpistemicFirewall
+│   │                           BlackCurtain, IntentVerify
 │   │
 │   ├── memory/
 │   │   └── src/
@@ -1216,7 +1217,7 @@ Silk:
 
 Kiến trúc:
   ⑭ L0 không import L1 — tuyệt đối
-  ⑮ Chỉ 2 Agent — không thêm
+  ⑮ Agent tiers: AAM(tier 0) + Chiefs(tier 1) + Workers(tier 2)
   ⑯ L2-Ln đổ vào SAU khi L0+L1 hoàn thiện
   ⑰ Fibonacci xuyên suốt — cấu trúc, threshold, render
   ⑱ Không đủ evidence → im lặng — không bịa (QT9)

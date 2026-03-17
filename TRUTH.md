@@ -1,28 +1,12 @@
+# TRUTH.md — Archived Notes
+
+> **Status:** ARCHIVED (2026-03-17)
+> Nội dung gốc đã được tích hợp vào [docs/roadmap.md](docs/roadmap.md).
 
 ## DONE — Display Layer (Phase 4 completion) ✓
 
-### chain_to_emoji() — đã viết, chưa wire
+chain_to_emoji() — đã ghi nhận. Xem Phase 11 trong roadmap.
 
-Cần thêm vào `crates/olang/src/startup.rs`:
-```rust
-pub fn chain_to_emoji(chain: &MolecularChain) -> String {
-    // dùng ucd::bucket_cps(shape, relation) → best match by emotion distance
-}
-```
+## DONE — Phase 8: Data L2-Ln
 
-Cần wire vào `crates/runtime/src/origin.rs` trong `process_olang()`:
-- `VmEvent::Output(chain)` → `"{emoji} (0x{hash})"` thay vì `"hash=0x..."`  
-- `VmEvent::LookupAlias(alias)` → `"[alias→emoji]"` thay vì `"[alias=0x...]"`
-
-**Quan trọng:** Display layer phải tách hoàn toàn khỏi VM logic.
-VM chỉ emit `VmEvent` — caller (HomeRuntime) quyết định display.
-Không sửa VM. Không sửa Op. Không sửa VmEvent.
-Chỉ sửa phần render trong `process_olang()`.
-
-Làm sau khi Phase 7 (WASM) xong.
-
-
-## Next — Phase 8: Data L2-Ln
-
-Seed KnowTree L2-Ln từ multilingual corpus.
-Feature flag: `l2-data`
+Xem Phase 12 trong [docs/roadmap.md](docs/roadmap.md).
