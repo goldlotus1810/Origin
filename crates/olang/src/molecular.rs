@@ -264,6 +264,89 @@ pub const TAGGED_DEFAULT_AROUSAL: u8 = 0x80; // moderate
 pub const TAGGED_DEFAULT_TIME: u8 = 0x03; // Medium
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Maturity — Molecule lifecycle: Formula → Evaluating → Mature
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Molecule lifecycle state.
+///
+/// "DNA không lưu CƠ THỂ. DNA lưu CÔNG THỨC TẠO cơ thể."
+///
+/// - **Formula**: Tiềm năng — 5 chiều là CÔNG THỨC, chưa có input đánh giá.
+///   Mỗi chiều = f(x), chưa biết x. L0 bẩm sinh bắt đầu ở đây.
+///
+/// - **Evaluating**: Đang đánh giá — có một số input, đang tích lũy evidence.
+///   Dream cycle kiểm tra: đủ co-activations? Đủ Hebbian weight?
+///
+/// - **Mature**: Chín — đủ evidence, 5 chiều đã "đông đặc" thành giá trị.
+///   Candidate cho QR promotion (bất tử, ED25519 signed).
+///
+/// Ln-1 dynamic — không hardcode max layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Maturity {
+    /// Công thức — tiềm năng, chưa evaluate
+    Formula = 0x00,
+    /// Đang đánh giá — có evidence, tích lũy
+    Evaluating = 0x01,
+    /// Chín — đủ evidence, sẵn sàng QR
+    Mature = 0x02,
+}
+
+impl Maturity {
+    /// Parse from byte.
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            0x01 => Self::Evaluating,
+            0x02 => Self::Mature,
+            _ => Self::Formula,
+        }
+    }
+
+    /// Byte representation.
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// Chuyển sang trạng thái tiếp theo nếu đủ điều kiện.
+    ///
+    /// Formula → Evaluating: khi fire_count > 0 (có ít nhất 1 co-activation)
+    /// Evaluating → Mature: khi weight ≥ threshold VÀ fire_count ≥ Fib[depth]
+    pub fn advance(self, fire_count: u32, weight: f32, fib_threshold: u32) -> Self {
+        match self {
+            Self::Formula => {
+                if fire_count > 0 {
+                    Self::Evaluating
+                } else {
+                    Self::Formula
+                }
+            }
+            Self::Evaluating => {
+                // φ⁻¹ + φ⁻³ ≈ 0.854 (PROMOTE_WEIGHT from hebbian.rs)
+                if weight >= 0.854 && fire_count >= fib_threshold {
+                    Self::Mature
+                } else {
+                    Self::Evaluating
+                }
+            }
+            Self::Mature => Self::Mature, // irreversible
+        }
+    }
+
+    /// Check if in Formula state (tiềm năng).
+    pub fn is_formula(self) -> bool { self == Self::Formula }
+    /// Check if in Evaluating state (đang đánh giá).
+    pub fn is_evaluating(self) -> bool { self == Self::Evaluating }
+    /// Check if in Mature state (chín, sẵn sàng QR).
+    pub fn is_mature(self) -> bool { self == Self::Mature }
+}
+
+impl Default for Maturity {
+    fn default() -> Self {
+        Self::Formula
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Molecule — 5 bytes (RAM) / 1-6 bytes (tagged wire format)
 // ─────────────────────────────────────────────────────────────────────────────
 
