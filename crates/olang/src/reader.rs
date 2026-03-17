@@ -9,7 +9,8 @@ use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
 use crate::writer::{
-    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_EDGE, RT_NODE, VERSION, VERSION_V03, VERSION_V04,
+    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_EDGE, RT_NODE, RT_NODE_KIND, VERSION, VERSION_V03,
+    VERSION_V04,
 };
 
 /// Read a little-endian u64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
@@ -60,6 +61,18 @@ pub struct ParsedEdge {
 pub struct ParsedAlias {
     pub name: String,
     pub chain_hash: u64,
+    pub timestamp: i64,
+    pub file_offset: u64,
+}
+
+/// NodeKind record đã parse — gán NodeKind cho node.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedNodeKind {
+    /// FNV-1a hash của chain được gán kind.
+    pub chain_hash: u64,
+    /// NodeKind byte (0=Alphabet, 1=Knowledge, ..., 9=System).
+    pub kind: u8,
     pub timestamp: i64,
     pub file_offset: u64,
 }
@@ -132,12 +145,13 @@ impl<'a> OlangReader<'a> {
         self.created_at
     }
 
-    /// Parse tất cả records (v0.03 + v0.04 compatible).
+    /// Parse tất cả records (v0.03 + v0.04 + v0.05 compatible).
     pub fn parse_all(&self) -> Result<ParsedFile, ParseError> {
         let mut nodes: Vec<ParsedNode> = Vec::new();
         let mut edges: Vec<ParsedEdge> = Vec::new();
         let mut aliases: Vec<ParsedAlias> = Vec::new();
         let mut amends: Vec<ParsedAmend> = Vec::new();
+        let mut node_kinds: Vec<ParsedNodeKind> = Vec::new();
 
         let mut pos = HEADER_SIZE;
 
@@ -274,6 +288,27 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_NODE_KIND => {
+                    // [chain_hash: 8][kind: 1][ts: 8] = 17 bytes
+                    if pos + 8 + 1 + 8 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+
+                    let hash = read_u64_le(self.data, pos);
+                    pos += 8;
+                    let kind = self.data[pos];
+                    pos += 1;
+                    let ts = read_i64_le(self.data, pos);
+                    pos += 8;
+
+                    node_kinds.push(ParsedNodeKind {
+                        chain_hash: hash,
+                        kind,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 other => return Err(ParseError::UnknownRecordType(other)),
             }
         }
@@ -287,6 +322,7 @@ impl<'a> OlangReader<'a> {
             edges,
             aliases,
             amends,
+            node_kinds,
             amended_offsets,
             created_at: self.created_at,
         })
@@ -317,6 +353,7 @@ impl<'a> OlangReader<'a> {
         let mut edges: Vec<ParsedEdge> = Vec::new();
         let mut aliases: Vec<ParsedAlias> = Vec::new();
         let mut amends: Vec<ParsedAmend> = Vec::new();
+        let mut node_kinds: Vec<ParsedNodeKind> = Vec::new();
 
         let mut pos = HEADER_SIZE;
         let mut error = None;
@@ -467,6 +504,25 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_NODE_KIND => {
+                    if pos + 8 + 1 + 8 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let hash = read_u64_le(self.data, pos);
+                    pos += 8;
+                    let kind = self.data[pos];
+                    pos += 1;
+                    let ts = read_i64_le(self.data, pos);
+                    pos += 8;
+                    node_kinds.push(ParsedNodeKind {
+                        chain_hash: hash,
+                        kind,
+                        timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 other => {
                     error = Some(ParseError::UnknownRecordType(other));
                     break;
@@ -474,7 +530,8 @@ impl<'a> OlangReader<'a> {
             }
         }
 
-        let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len();
+        let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len()
+            + node_kinds.len();
         let amended_offsets: alloc::collections::BTreeSet<u64> =
             amends.iter().map(|a| a.target_offset).collect();
         let file = ParsedFile {
@@ -482,6 +539,7 @@ impl<'a> OlangReader<'a> {
             edges,
             aliases,
             amends,
+            node_kinds,
             amended_offsets,
             created_at: self.created_at,
         };
@@ -506,6 +564,8 @@ pub struct ParsedFile {
     pub aliases: Vec<ParsedAlias>,
     /// Amendment records (v0.04+).
     pub amends: Vec<ParsedAmend>,
+    /// NodeKind records (v0.05+) — gán NodeKind cho nodes.
+    pub node_kinds: Vec<ParsedNodeKind>,
     /// Offsets đã bị amend — dùng để filter records.
     pub amended_offsets: alloc::collections::BTreeSet<u64>,
     /// Timestamp khi file được tạo.

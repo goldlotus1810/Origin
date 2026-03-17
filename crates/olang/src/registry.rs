@@ -246,6 +246,16 @@ impl Registry {
         self.names.insert(pos, (String::from(name), chain_hash));
     }
 
+    /// Cập nhật NodeKind cho một entry đã có trong sổ cái.
+    ///
+    /// Dùng khi load RT_NODE_KIND records từ origin.olang.
+    /// Nếu hash không tồn tại → bỏ qua (node chưa được load).
+    pub fn set_kind(&mut self, chain_hash: u64, kind: NodeKind) {
+        if let Ok(idx) = self.entries.binary_search_by_key(&chain_hash, |&(h, _)| h) {
+            self.entries[idx].1.kind = kind;
+        }
+    }
+
     // ── Lookup ───────────────────────────────────────────────────────────────
 
     /// Lookup bằng chain_hash — O(log n).

@@ -15,6 +15,8 @@
 //!   0x01 = NodeRecord
 //!   0x02 = EdgeRecord
 //!   0x03 = AliasRecord
+//!   0x04 = AmendRecord
+//!   0x05 = NodeKindRecord
 //!
 //! NodeRecord (v0.05 — tagged molecule encoding):
 //!   [0x01][mol_count: u8][tagged_chain_bytes...][layer: u8]
@@ -71,6 +73,14 @@ pub const RT_ALIAS: u8 = 0x03;
 ///
 /// QT8 compliant: không xóa record cũ — chỉ đánh dấu "đã thay thế".
 pub const RT_AMEND: u8 = 0x04;
+/// Record type: NodeKind — gán NodeKind cho một node đã có trong sổ cái.
+///
+/// Format: [0x05][chain_hash: 8][kind: u8][timestamp: 8]
+/// Total: 1 + 8 + 1 + 8 = 18 bytes
+///
+/// Cho phép origin.olang lưu trữ NodeKind (Skill/Agent/Program/Sensor/...)
+/// → L0 đọc file → biết mình có gì → cuốn sổ cái đầy đủ.
+pub const RT_NODE_KIND: u8 = 0x05;
 
 /// Header size: MAGIC(4) + VERSION(1) + CREATED(8) = 13 bytes
 pub const HEADER_SIZE: usize = 13;
@@ -220,6 +230,28 @@ impl OlangWriter {
 
         self.write_count += 1;
         Ok(offset)
+    }
+
+    /// Ghi NodeKindRecord — gán NodeKind cho một chain_hash.
+    ///
+    /// Ghi SAU append_node() (QT8: node phải tồn tại trước).
+    /// Cho phép origin.olang trở thành cuốn sổ cái đầy đủ:
+    /// L0 đọc file → thấy node + kind → biết mình có Skill/Agent/Program/Sensor gì.
+    pub fn append_node_kind(
+        &mut self,
+        chain_hash: u64,
+        kind: u8,
+        timestamp: i64,
+    ) -> u64 {
+        let offset = self.buf.len() as u64;
+
+        self.buf.push(RT_NODE_KIND);
+        self.buf.extend_from_slice(&chain_hash.to_le_bytes());
+        self.buf.push(kind);
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+
+        self.write_count += 1;
+        offset
     }
 
     /// Raw bytes của file (để flush to disk hoặc test).

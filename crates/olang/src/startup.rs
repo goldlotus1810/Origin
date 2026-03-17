@@ -191,6 +191,138 @@ fn seed_axioms(registry: &mut Registry) {
     }
 }
 
+/// L1 System Seed Entry — một component trong DNA của HomeOS.
+///
+/// Dùng chung giữa:
+///   - `seed_l1_system()` (boot vào RAM khi không có file)
+///   - `seeder` tool (ghi vào origin.olang)
+///
+/// Format: (codepoint, kind_byte, primary_name, aliases)
+pub struct L1SeedEntry {
+    /// Unicode codepoint (encode_codepoint sẽ tạo MolecularChain)
+    pub codepoint: u32,
+    /// NodeKind as u8 (dùng NodeKind::from_byte để convert)
+    pub kind: u8,
+    /// Primary name (e.g. "skill:honesty")
+    pub name: &'static str,
+    /// Additional aliases (e.g. &["Honesty"])
+    pub aliases: &'static [&'static str],
+}
+
+/// Toàn bộ L1 system components — DNA của HomeOS.
+///
+/// Mọi thứ HomeOS cần biết nó có gì: Skills, Agents, VM ops, Sensors.
+/// Bảng này là **source of truth** duy nhất — seeder đọc bảng này để ghi
+/// vào origin.olang, boot đọc bảng này nếu file cũ chưa có L1.
+pub static L1_SYSTEM_SEED: &[L1SeedEntry] = &[
+    // ── Skills: 7 Instinct ─────────────────────────────────────────────────
+    // Dùng Dingbats (0x2700-0x27BF) — SDF group, có trong UCD
+    L1SeedEntry { codepoint: 0x2700, kind: 4, name: "skill:honesty",       aliases: &["Honesty"] },
+    L1SeedEntry { codepoint: 0x2701, kind: 4, name: "skill:contradiction", aliases: &["Contradiction"] },
+    L1SeedEntry { codepoint: 0x2702, kind: 4, name: "skill:causality",     aliases: &["Causality"] },
+    L1SeedEntry { codepoint: 0x2703, kind: 4, name: "skill:abstraction",   aliases: &["Abstraction"] },
+    L1SeedEntry { codepoint: 0x2704, kind: 4, name: "skill:analogy",       aliases: &["Analogy"] },
+    L1SeedEntry { codepoint: 0x2706, kind: 4, name: "skill:curiosity",     aliases: &["Curiosity"] },
+    L1SeedEntry { codepoint: 0x2707, kind: 4, name: "skill:reflection",    aliases: &["Reflection"] },
+
+    // ── Skills: 11 LeoAI Domain ────────────────────────────────────────────
+    // Dùng Box Drawing chars (0x2500-0x257F) — SDF group, có trong UCD
+    L1SeedEntry { codepoint: 0x2500, kind: 4, name: "skill:ingest",         aliases: &["IngestSkill"] },
+    L1SeedEntry { codepoint: 0x2502, kind: 4, name: "skill:similarity",     aliases: &["SimilaritySkill"] },
+    L1SeedEntry { codepoint: 0x250C, kind: 4, name: "skill:delta",          aliases: &["DeltaSkill"] },
+    L1SeedEntry { codepoint: 0x2510, kind: 4, name: "skill:cluster",        aliases: &["ClusterSkill"] },
+    L1SeedEntry { codepoint: 0x2514, kind: 4, name: "skill:curator",        aliases: &["CuratorSkill"] },
+    L1SeedEntry { codepoint: 0x2518, kind: 4, name: "skill:merge",          aliases: &["MergeSkill"] },
+    L1SeedEntry { codepoint: 0x251C, kind: 4, name: "skill:prune",          aliases: &["PruneSkill"] },
+    L1SeedEntry { codepoint: 0x2524, kind: 4, name: "skill:hebbian",        aliases: &["HebbianSkill"] },
+    L1SeedEntry { codepoint: 0x252C, kind: 4, name: "skill:dream",          aliases: &["DreamSkill"] },
+    L1SeedEntry { codepoint: 0x2534, kind: 4, name: "skill:proposal",       aliases: &["ProposalSkill"] },
+    L1SeedEntry { codepoint: 0x253C, kind: 4, name: "skill:inverse_render", aliases: &["InverseRenderSkill"] },
+
+    // ── Skills: Advanced ───────────────────────────────────────────────────
+    L1SeedEntry { codepoint: 0x2550, kind: 4, name: "skill:generalization",   aliases: &["GeneralizationSkill"] },
+    L1SeedEntry { codepoint: 0x2551, kind: 4, name: "skill:temporal_pattern", aliases: &["TemporalPatternSkill"] },
+
+    // ── Skills: 4 Worker ───────────────────────────────────────────────────
+    // Dùng Geometric Shapes (0x25A0-0x25FF) — SDF group
+    L1SeedEntry { codepoint: 0x25A0, kind: 4, name: "skill:sensor",   aliases: &["SensorSkill"] },
+    L1SeedEntry { codepoint: 0x25A1, kind: 4, name: "skill:actuator", aliases: &["ActuatorSkill"] },
+    L1SeedEntry { codepoint: 0x25B2, kind: 4, name: "skill:security", aliases: &["SecuritySkill"] },
+    L1SeedEntry { codepoint: 0x25B3, kind: 4, name: "skill:network",  aliases: &["NetworkSkill"] },
+
+    // ── Agents ─────────────────────────────────────────────────────────────
+    // Dùng Misc Symbols (0x2600-0x26FF) — EMOTICON group, có trong UCD
+    // Chess symbols cho hierarchy
+    L1SeedEntry { codepoint: 0x2654, kind: 3, name: "agent:aam",             aliases: &["AAM"] },            // ♔ King = AAM
+    L1SeedEntry { codepoint: 0x2655, kind: 3, name: "agent:leo",             aliases: &["LeoAI"] },          // ♕ Queen = LeoAI
+    L1SeedEntry { codepoint: 0x2656, kind: 3, name: "agent:chief:home",      aliases: &["HomeChief"] },      // ♖ Rook
+    L1SeedEntry { codepoint: 0x2657, kind: 3, name: "agent:chief:vision",    aliases: &["VisionChief"] },    // ♗ Bishop
+    L1SeedEntry { codepoint: 0x2658, kind: 3, name: "agent:chief:network",   aliases: &["NetworkChief"] },   // ♘ Knight
+    L1SeedEntry { codepoint: 0x2659, kind: 3, name: "agent:chief:general",   aliases: &["GeneralChief"] },   // ♙ Pawn
+    // Workers — dùng black chess pieces
+    L1SeedEntry { codepoint: 0x265A, kind: 3, name: "agent:worker:sensor",   aliases: &["WorkerSensor"] },   // ♚
+    L1SeedEntry { codepoint: 0x265B, kind: 3, name: "agent:worker:actuator", aliases: &["WorkerActuator"] }, // ♛
+    L1SeedEntry { codepoint: 0x265C, kind: 3, name: "agent:worker:camera",   aliases: &["WorkerCamera"] },   // ♜
+    L1SeedEntry { codepoint: 0x265D, kind: 3, name: "agent:worker:network",  aliases: &["WorkerNetwork"] },  // ♝
+    L1SeedEntry { codepoint: 0x265E, kind: 3, name: "agent:worker:generic",  aliases: &["WorkerGeneric"] },  // ♞
+
+    // ── Program: VM Built-in Functions ─────────────────────────────────────
+    // Dùng Mathematical Operators (0x2200-0x22FF) — MATH group
+    L1SeedEntry { codepoint: 0x2211, kind: 5, name: "fn:hyp_add",  aliases: &["__hyp_add"] },  // ∑
+    L1SeedEntry { codepoint: 0x2212, kind: 5, name: "fn:hyp_sub",  aliases: &["__hyp_sub"] },  // −
+    L1SeedEntry { codepoint: 0x2217, kind: 5, name: "fn:hyp_mul",  aliases: &["__hyp_mul"] },  // ∗
+    L1SeedEntry { codepoint: 0x2215, kind: 5, name: "fn:hyp_div",  aliases: &["__hyp_div"] },  // ∕
+    L1SeedEntry { codepoint: 0x2214, kind: 5, name: "fn:phys_add", aliases: &["__phys_add"] }, // ∔
+    L1SeedEntry { codepoint: 0x2216, kind: 5, name: "fn:phys_sub", aliases: &["__phys_sub"] }, // ∖
+
+    // ── Program: VM Opcodes (26 ops) ───────────────────────────────────────
+    // Dùng Arrows (0x2190-0x21FF) — SDF group, có trong UCD
+    L1SeedEntry { codepoint: 0x2190, kind: 5, name: "op:push",        aliases: &["Push"] },      // ←
+    L1SeedEntry { codepoint: 0x2191, kind: 5, name: "op:push_num",    aliases: &["PushNum"] },   // ↑
+    L1SeedEntry { codepoint: 0x2192, kind: 5, name: "op:push_mol",    aliases: &["PushMol"] },   // →
+    L1SeedEntry { codepoint: 0x2193, kind: 5, name: "op:load",        aliases: &["Load"] },      // ↓
+    L1SeedEntry { codepoint: 0x2194, kind: 5, name: "op:lca",         aliases: &["Lca"] },       // ↔
+    L1SeedEntry { codepoint: 0x2195, kind: 5, name: "op:edge",        aliases: &["Edge"] },      // ↕
+    L1SeedEntry { codepoint: 0x2196, kind: 5, name: "op:query",       aliases: &["Query"] },     // ↖
+    L1SeedEntry { codepoint: 0x2197, kind: 5, name: "op:emit",        aliases: &["Emit"] },      // ↗
+    L1SeedEntry { codepoint: 0x2198, kind: 5, name: "op:dup",         aliases: &["Dup"] },       // ↘
+    L1SeedEntry { codepoint: 0x2199, kind: 5, name: "op:pop",         aliases: &["Pop"] },       // ↙
+    L1SeedEntry { codepoint: 0x219A, kind: 5, name: "op:swap",        aliases: &["Swap"] },      // ↚
+    L1SeedEntry { codepoint: 0x219B, kind: 5, name: "op:jmp",         aliases: &["Jmp"] },       // ↛
+    L1SeedEntry { codepoint: 0x21A0, kind: 5, name: "op:jz",          aliases: &["Jz"] },        // ↠
+    L1SeedEntry { codepoint: 0x21A3, kind: 5, name: "op:loop",        aliases: &["Loop"] },      // ↣
+    L1SeedEntry { codepoint: 0x21A6, kind: 5, name: "op:call",        aliases: &["Call"] },      // ↦
+    L1SeedEntry { codepoint: 0x21A9, kind: 5, name: "op:store",       aliases: &["Store"] },     // ↩
+    L1SeedEntry { codepoint: 0x21AA, kind: 5, name: "op:load_local",  aliases: &["LoadLocal"] }, // ↪
+    L1SeedEntry { codepoint: 0x21AB, kind: 5, name: "op:scope_begin", aliases: &["ScopeBegin"] },// ↫
+    L1SeedEntry { codepoint: 0x21AC, kind: 5, name: "op:scope_end",   aliases: &["ScopeEnd"] }, // ↬
+    L1SeedEntry { codepoint: 0x21AD, kind: 5, name: "op:fuse",        aliases: &["Fuse"] },      // ↭
+    L1SeedEntry { codepoint: 0x21AE, kind: 5, name: "op:trace",       aliases: &["Trace"] },     // ↮
+    L1SeedEntry { codepoint: 0x21B0, kind: 5, name: "op:inspect",     aliases: &["Inspect"] },   // ↰
+    L1SeedEntry { codepoint: 0x21B1, kind: 5, name: "op:assert",      aliases: &["Assert"] },    // ↱
+    L1SeedEntry { codepoint: 0x21B2, kind: 5, name: "op:typeof",      aliases: &["TypeOf"] },    // ↲
+    L1SeedEntry { codepoint: 0x21B3, kind: 5, name: "op:halt",        aliases: &["Halt"] },      // ↳
+    L1SeedEntry { codepoint: 0x21B4, kind: 5, name: "op:nop",         aliases: &["Nop"] },       // ↴
+
+    // ── Program: Compiler / Process ────────────────────────────────────────
+    // Dùng Supplemental Arrows-A (0x27F0-0x27FF) — SDF group
+    L1SeedEntry { codepoint: 0x27F0, kind: 5, name: "prog:vm",       aliases: &["OlangVM"] },
+    L1SeedEntry { codepoint: 0x27F1, kind: 5, name: "prog:compiler", aliases: &["OlangCompiler"] },
+    L1SeedEntry { codepoint: 0x27F5, kind: 5, name: "prog:parser",   aliases: &["OlangParser"] },
+    L1SeedEntry { codepoint: 0x27F6, kind: 5, name: "prog:program",  aliases: &["OlangProgram"] },
+    L1SeedEntry { codepoint: 0x27F7, kind: 5, name: "prog:ir",       aliases: &["OlangIR"] },
+    L1SeedEntry { codepoint: 0x27F8, kind: 5, name: "prog:semantic", aliases: &["OlangSemantic"] },
+
+    // ── Sensor types ───────────────────────────────────────────────────────
+    // Dùng Misc Symbols (0x2600-0x26FF) — EMOTICON group
+    L1SeedEntry { codepoint: 0x2600, kind: 7, name: "sensor:temperature", aliases: &["Temperature"] }, // ☀
+    L1SeedEntry { codepoint: 0x2601, kind: 7, name: "sensor:humidity",    aliases: &["Humidity"] },    // ☁
+    L1SeedEntry { codepoint: 0x2602, kind: 7, name: "sensor:light",       aliases: &["LightSensor"] },// ☂
+    L1SeedEntry { codepoint: 0x2603, kind: 7, name: "sensor:motion",      aliases: &["Motion"] },     // ☃
+    L1SeedEntry { codepoint: 0x2604, kind: 7, name: "sensor:sound",       aliases: &["SoundSensor"] },// ☄
+    L1SeedEntry { codepoint: 0x2607, kind: 7, name: "sensor:power",       aliases: &["Power"] },
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Seed L1 — đăng ký toàn bộ system components vào Registry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -200,7 +332,8 @@ fn seed_axioms(registry: &mut Registry) {
 /// Quy tắc bất biến: **mọi thứ tạo ra đều phải đăng ký Registry**.
 /// L1 = bản thiết kế DNA của HomeOS — clone sang thiết bị mới chỉ cần copy L1.
 ///
-/// Mỗi component → encode_codepoint(cp) → insert_with_kind(chain, 1, ..., NodeKind::Xxx)
+/// Đọc từ L1_SYSTEM_SEED (source of truth duy nhất).
+/// Dùng khi boot không có file, hoặc file cũ chưa có L1 nodes.
 pub fn seed_l1_system(registry: &mut Registry) {
     use crate::registry::NodeKind;
 
@@ -211,123 +344,16 @@ pub fn seed_l1_system(registry: &mut Registry) {
     let ts = 0i64;
     let mut offset = 1000u64; // L1 offsets start after L0
 
-    // Helper: register 1 component
-    let mut reg = |cp: u32, kind: NodeKind, name: &str, aliases: &[&str]| {
-        let chain = encode_codepoint(cp);
+    for entry in L1_SYSTEM_SEED {
+        let kind = NodeKind::from_byte(entry.kind).unwrap_or(NodeKind::Knowledge);
+        let chain = encode_codepoint(entry.codepoint);
         let h = registry.insert_with_kind(&chain, 1, offset, ts, true, kind);
-        registry.register_alias(name, h);
-        for &a in aliases {
+        registry.register_alias(entry.name, h);
+        for &a in entry.aliases {
             registry.register_alias(a, h);
         }
         offset += 1;
-    };
-
-    // ── Skills: 7 Instinct ─────────────────────────────────────────────────
-    // Dùng Dingbats (0x2700-0x27BF) — SDF group, có trong UCD
-    reg(0x2700, NodeKind::Skill, "skill:honesty",       &["Honesty"]);
-    reg(0x2701, NodeKind::Skill, "skill:contradiction",  &["Contradiction"]);
-    reg(0x2702, NodeKind::Skill, "skill:causality",      &["Causality"]);
-    reg(0x2703, NodeKind::Skill, "skill:abstraction",    &["Abstraction"]);
-    reg(0x2704, NodeKind::Skill, "skill:analogy",        &["Analogy"]);
-    reg(0x2706, NodeKind::Skill, "skill:curiosity",      &["Curiosity"]);
-    reg(0x2707, NodeKind::Skill, "skill:reflection",     &["Reflection"]);
-
-    // ── Skills: 11 LeoAI Domain ────────────────────────────────────────────
-    // Dùng Box Drawing chars (0x2500-0x257F) — SDF group, có trong UCD
-    reg(0x2500, NodeKind::Skill, "skill:ingest",         &["IngestSkill"]);
-    reg(0x2502, NodeKind::Skill, "skill:similarity",     &["SimilaritySkill"]);
-    reg(0x250C, NodeKind::Skill, "skill:delta",          &["DeltaSkill"]);
-    reg(0x2510, NodeKind::Skill, "skill:cluster",        &["ClusterSkill"]);
-    reg(0x2514, NodeKind::Skill, "skill:curator",        &["CuratorSkill"]);
-    reg(0x2518, NodeKind::Skill, "skill:merge",          &["MergeSkill"]);
-    reg(0x251C, NodeKind::Skill, "skill:prune",          &["PruneSkill"]);
-    reg(0x2524, NodeKind::Skill, "skill:hebbian",        &["HebbianSkill"]);
-    reg(0x252C, NodeKind::Skill, "skill:dream",          &["DreamSkill"]);
-    reg(0x2534, NodeKind::Skill, "skill:proposal",       &["ProposalSkill"]);
-    reg(0x253C, NodeKind::Skill, "skill:inverse_render", &["InverseRenderSkill"]);
-
-    // ── Skills: Advanced ───────────────────────────────────────────────────
-    reg(0x2550, NodeKind::Skill, "skill:generalization",    &["GeneralizationSkill"]);
-    reg(0x2551, NodeKind::Skill, "skill:temporal_pattern",  &["TemporalPatternSkill"]);
-
-    // ── Skills: 4 Worker ───────────────────────────────────────────────────
-    // Dùng Geometric Shapes (0x25A0-0x25FF) — SDF group
-    reg(0x25A0, NodeKind::Skill, "skill:sensor",         &["SensorSkill"]);
-    reg(0x25A1, NodeKind::Skill, "skill:actuator",       &["ActuatorSkill"]);
-    reg(0x25B2, NodeKind::Skill, "skill:security",       &["SecuritySkill"]);
-    reg(0x25B3, NodeKind::Skill, "skill:network",        &["NetworkSkill"]);
-
-    // ── Agents ─────────────────────────────────────────────────────────────
-    // Dùng Misc Symbols (0x2600-0x26FF) — EMOTICON group, có trong UCD
-    // Chess symbols cho hierarchy
-    reg(0x2654, NodeKind::Agent, "agent:aam",            &["AAM"]);       // ♔ King = AAM
-    reg(0x2655, NodeKind::Agent, "agent:leo",            &["LeoAI"]);     // ♕ Queen = LeoAI
-    reg(0x2656, NodeKind::Agent, "agent:chief:home",     &["HomeChief"]); // ♖ Rook
-    reg(0x2657, NodeKind::Agent, "agent:chief:vision",   &["VisionChief"]);  // ♗ Bishop
-    reg(0x2658, NodeKind::Agent, "agent:chief:network",  &["NetworkChief"]); // ♘ Knight
-    reg(0x2659, NodeKind::Agent, "agent:chief:general",  &["GeneralChief"]); // ♙ Pawn
-    // Workers — dùng black chess pieces
-    reg(0x265A, NodeKind::Agent, "agent:worker:sensor",   &["WorkerSensor"]);   // ♚
-    reg(0x265B, NodeKind::Agent, "agent:worker:actuator", &["WorkerActuator"]); // ♛
-    reg(0x265C, NodeKind::Agent, "agent:worker:camera",   &["WorkerCamera"]);   // ♜
-    reg(0x265D, NodeKind::Agent, "agent:worker:network",  &["WorkerNetwork"]);  // ♝
-    reg(0x265E, NodeKind::Agent, "agent:worker:generic",  &["WorkerGeneric"]);  // ♞
-
-    // ── Program: VM Built-in Functions ─────────────────────────────────────
-    // Dùng Mathematical Operators (0x2200-0x22FF) — MATH group
-    reg(0x2211, NodeKind::Program, "fn:hyp_add",         &["__hyp_add"]);  // ∑
-    reg(0x2212, NodeKind::Program, "fn:hyp_sub",         &["__hyp_sub"]);  // −
-    reg(0x2217, NodeKind::Program, "fn:hyp_mul",         &["__hyp_mul"]);  // ∗
-    reg(0x2215, NodeKind::Program, "fn:hyp_div",         &["__hyp_div"]);  // ∕
-    reg(0x2214, NodeKind::Program, "fn:phys_add",        &["__phys_add"]); // ∔
-    reg(0x2216, NodeKind::Program, "fn:phys_sub",        &["__phys_sub"]); // ∖
-
-    // ── Program: VM Opcodes (26 ops) ───────────────────────────────────────
-    // Dùng Arrows (0x2190-0x21FF) — SDF group, có trong UCD
-    reg(0x2190, NodeKind::Program, "op:push",            &["Push"]);      // ←
-    reg(0x2191, NodeKind::Program, "op:push_num",        &["PushNum"]);   // ↑
-    reg(0x2192, NodeKind::Program, "op:push_mol",        &["PushMol"]);   // →
-    reg(0x2193, NodeKind::Program, "op:load",            &["Load"]);      // ↓
-    reg(0x2194, NodeKind::Program, "op:lca",             &["Lca"]);       // ↔
-    reg(0x2195, NodeKind::Program, "op:edge",            &["Edge"]);      // ↕
-    reg(0x2196, NodeKind::Program, "op:query",           &["Query"]);     // ↖
-    reg(0x2197, NodeKind::Program, "op:emit",            &["Emit"]);      // ↗
-    reg(0x2198, NodeKind::Program, "op:dup",             &["Dup"]);       // ↘
-    reg(0x2199, NodeKind::Program, "op:pop",             &["Pop"]);       // ↙
-    reg(0x219A, NodeKind::Program, "op:swap",            &["Swap"]);      // ↚
-    reg(0x219B, NodeKind::Program, "op:jmp",             &["Jmp"]);       // ↛
-    reg(0x21A0, NodeKind::Program, "op:jz",              &["Jz"]);        // ↠
-    reg(0x21A3, NodeKind::Program, "op:loop",            &["Loop"]);      // ↣
-    reg(0x21A6, NodeKind::Program, "op:call",            &["Call"]);      // ↦
-    reg(0x21A9, NodeKind::Program, "op:store",           &["Store"]);     // ↩
-    reg(0x21AA, NodeKind::Program, "op:load_local",      &["LoadLocal"]); // ↪
-    reg(0x21AB, NodeKind::Program, "op:scope_begin",     &["ScopeBegin"]);// ↫
-    reg(0x21AC, NodeKind::Program, "op:scope_end",       &["ScopeEnd"]); // ↬
-    reg(0x21AD, NodeKind::Program, "op:fuse",            &["Fuse"]);      // ↭
-    reg(0x21AE, NodeKind::Program, "op:trace",           &["Trace"]);     // ↮
-    reg(0x21B0, NodeKind::Program, "op:inspect",         &["Inspect"]);   // ↰
-    reg(0x21B1, NodeKind::Program, "op:assert",          &["Assert"]);    // ↱
-    reg(0x21B2, NodeKind::Program, "op:typeof",          &["TypeOf"]);    // ↲
-    reg(0x21B3, NodeKind::Program, "op:halt",            &["Halt"]);      // ↳
-    reg(0x21B4, NodeKind::Program, "op:nop",             &["Nop"]);       // ↴
-
-    // ── Program: Compiler / Process ────────────────────────────────────────
-    // Dùng Supplemental Arrows-A (0x27F0-0x27FF) — SDF group
-    reg(0x27F0, NodeKind::Program, "prog:vm",            &["OlangVM"]);
-    reg(0x27F1, NodeKind::Program, "prog:compiler",      &["OlangCompiler"]);
-    reg(0x27F5, NodeKind::Program, "prog:parser",        &["OlangParser"]);
-    reg(0x27F6, NodeKind::Program, "prog:program",       &["OlangProgram"]);
-    reg(0x27F7, NodeKind::Program, "prog:ir",            &["OlangIR"]);
-    reg(0x27F8, NodeKind::Program, "prog:semantic",      &["OlangSemantic"]);
-
-    // ── Sensor types ───────────────────────────────────────────────────────
-    // Dùng Misc Symbols (0x2600-0x26FF) — EMOTICON group
-    reg(0x2600, NodeKind::Sensor, "sensor:temperature",  &["Temperature"]); // ☀
-    reg(0x2601, NodeKind::Sensor, "sensor:humidity",     &["Humidity"]);    // ☁
-    reg(0x2602, NodeKind::Sensor, "sensor:light",        &["LightSensor"]);// ☂
-    reg(0x2603, NodeKind::Sensor, "sensor:motion",       &["Motion"]);      // ☃
-    reg(0x2604, NodeKind::Sensor, "sensor:sound",        &["SoundSensor"]);// ☄
-    reg(0x2607, NodeKind::Sensor, "sensor:power",        &["Power"]);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
