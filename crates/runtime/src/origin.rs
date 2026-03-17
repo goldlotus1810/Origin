@@ -2356,6 +2356,41 @@ impl HomeRuntime {
         // ── T6: Learning pipeline — BẢN NĂNG: mọi modality ─────────────────
         let proc_result = self.learning.process_one(input.clone());
 
+        // ── T6a: QT8+QT9 — Ghi L1 node vào pending_writes TRƯỚC ────────
+        // Mọi input thành công → tạo node L1 trong origin.olang.
+        // L1 = learned node (chưa QR). QR promote → L2..Ln-1 qua Dream.
+        if let ProcessResult::Ok { ref chain, emotion: _ } = proc_result {
+            let hash = chain.chain_hash();
+            // Chỉ ghi nếu chưa có trong registry (tránh duplicate)
+            if self.registry.lookup_hash(hash).is_none() {
+                use olang::writer::OlangWriter;
+                let mut l1_writer = OlangWriter::new_append();
+                let _ = l1_writer.append_node(chain, 1, false, ts); // L1, chưa QR
+                self.pending_writes.extend_from_slice(l1_writer.as_bytes());
+                // QT9: Registry SAU khi đã ghi file
+                self.gated_insert(chain, 1, ts, false, olang::registry::NodeKind::Knowledge, "learn:L1");
+            }
+
+            // Silk edges mới từ process_one → ghi file
+            // Lấy edges liên quan đến chain mới, weight đủ mạnh
+            {
+                let graph = self.learning.graph();
+                let edges: alloc::vec::Vec<_> = graph.edges_from(hash)
+                    .iter()
+                    .filter(|e| e.weight >= 0.10)
+                    .map(|e| (e.from_hash, e.to_hash, e.kind.as_byte(), e.updated_at))
+                    .collect();
+                if !edges.is_empty() {
+                    use olang::writer::OlangWriter;
+                    let mut edge_writer = OlangWriter::new_append();
+                    for (from, to, kind, edge_ts) in &edges {
+                        edge_writer.append_edge(*from, *to, *kind, *edge_ts);
+                    }
+                    self.pending_writes.extend_from_slice(edge_writer.as_bytes());
+                }
+            }
+        }
+
         // ── T6b: KnowTree — store text as L2 compact node ───────────────
         if let ProcessResult::Ok { ref chain, emotion } = proc_result {
             if let ContentInput::Text { ref content, .. } = input {
