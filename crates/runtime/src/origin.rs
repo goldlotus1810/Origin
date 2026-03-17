@@ -994,36 +994,35 @@ impl HomeRuntime {
         related.dedup_by_key(|r| r.0);
         related.truncate(8);
 
-        // Find matching STM observations by hash
-        let mut context_parts: alloc::vec::Vec<String> = alloc::vec::Vec::new();
-        for &(h, w, emo) in &related {
+        // Find matching STM observations — check how often user mentioned related topics
+        let mut max_fire: u32 = 0;
+        let mut total_matches: usize = 0;
+        let mut dominant_valence: f32 = 0.0;
+        for &(h, _w, emo) in &related {
             if let Some(obs) = self.learning.stm().find_by_hash(h) {
-                let v_label = if emo.valence > 0.3 {
-                    "tích cực"
-                } else if emo.valence < -0.3 {
-                    "tiêu cực"
-                } else {
-                    "trung tính"
-                };
-                context_parts.push(format!(
-                    "[fire={}, w={:.2}, {}]",
-                    obs.fire_count, w, v_label
-                ));
+                if obs.fire_count > max_fire {
+                    max_fire = obs.fire_count;
+                }
+                dominant_valence += emo.valence;
+                total_matches += 1;
             }
         }
 
-        if context_parts.is_empty() {
-            // Return number of silk connections found even without STM match
-            Some(format!(
-                "({} liên kết Silk, chưa có trong STM)",
-                related.len()
-            ))
+        if total_matches == 0 {
+            // Silk connections exist but no STM match yet — first time seeing related topic
+            None
         } else {
-            Some(format!(
-                "({} liên kết: {})",
-                related.len(),
-                context_parts.join(", ")
-            ))
+            // Build human-readable recall
+            dominant_valence /= total_matches as f32;
+            if max_fire > 2 {
+                Some(format!("Bạn đã nhắc đến chủ đề này {} lần rồi", max_fire))
+            } else if dominant_valence < -0.3 {
+                "Mình nhớ bạn đã nói về điều tương tự trước đó".to_string().into()
+            } else if dominant_valence > 0.3 {
+                "Mình nhớ lần trước bạn cũng nhắc đến điều này".to_string().into()
+            } else {
+                "Mình đã ghi nhận điều này từ trước".to_string().into()
+            }
         }
     }
 
@@ -1062,12 +1061,13 @@ impl HomeRuntime {
             return None;
         }
 
-        found_concepts.truncate(5);
-        Some(format!(
-            "(KnowTree: {} matches: {})",
-            found_concepts.len(),
-            found_concepts.join(", ")
-        ))
+        // Return human-readable summary instead of debug format
+        let n = found_concepts.len();
+        if n >= 3 {
+            Some("Mình đã hiểu khá nhiều về chủ đề này".to_string())
+        } else {
+            Some("Mình có biết một chút về điều này".to_string())
+        }
     }
 
     // ── Contradiction Detection — so sánh với kiến thức đã học ──────────────
@@ -1620,7 +1620,6 @@ impl HomeRuntime {
                 emotion,
             } => {
                 use context::intent::IntentAction;
-                use context::word_guide::affect_components;
 
                 let final_v = if let Some(wt) = walk_tag {
                     emotion.valence * 0.40 + wt.valence * 0.60
@@ -1742,25 +1741,19 @@ impl HomeRuntime {
                 }
 
                 // ── Normal flow: contradiction / recall / proceed ────────────
-                // Build response with context awareness
+                // Build response with context awareness — use user's actual words
                 let original = if let Some(ref contra) = contradiction {
                     // Contradiction detected → inform user
                     Some(contra.clone())
                 } else {
                     match &action {
                         IntentAction::Proceed => {
-                            // Use recalled context if available for richer reply
                             if let Some(ref ctx) = recall {
+                                // Silk/KnowTree recalled related knowledge
                                 Some(contextual_reply(tone, final_v, input_text, ctx))
                             } else {
-                                let comps =
-                                    affect_components(self.learning.context().curve());
-                                Some(natural_reply(
-                                    tone,
-                                    final_v,
-                                    comps.lead_word,
-                                    comps.support_word,
-                                ))
+                                // No recall — still use user's actual words
+                                Some(natural_reply(tone, final_v, input_text))
                             }
                         }
                         _ => None,
@@ -2298,36 +2291,81 @@ impl HomeRuntime {
 // natural_reply — câu trả lời có nội dung từ word_guide
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Tạo câu trả lời từ tone + từ ngữ học được.
-/// Không hardcode string — dùng từ của lead_word/support_word từ lexicon.
+/// Tạo câu trả lời từ tone + nội dung thật của user.
+/// Trích xuất từ khóa từ input thay vì dùng emotion lexicon.
 fn natural_reply(
     tone: silk::walk::ResponseTone,
     v: f32,
-    lead: &str,
-    support: &str,
+    input_text: &str,
 ) -> alloc::string::String {
     use silk::walk::ResponseTone;
+
+    // Extract meaningful content words from user's actual input
+    let content_words: alloc::vec::Vec<&str> = input_text
+        .split_whitespace()
+        .filter(|w| w.chars().count() > 1 && !is_vn_stop_word(w))
+        .collect();
+
+    // Build topic from user's own words
+    let topic = if content_words.len() >= 2 {
+        content_words[..content_words.len().min(4)].join(" ")
+    } else if !content_words.is_empty() {
+        content_words[0].to_string()
+    } else {
+        // Fallback: use original input trimmed
+        let trimmed = input_text.trim();
+        if trimmed.len() > 30 {
+            alloc::format!("{}...", &trimmed[..trimmed.char_indices().nth(30).map(|(i, _)| i).unwrap_or(trimmed.len())])
+        } else {
+            trimmed.to_string()
+        }
+    };
+
+    if topic.is_empty() {
+        return crate::response_template::tone_fallback(tone, v);
+    }
+
     match tone {
         ResponseTone::Pause | ResponseTone::Supportive => {
             if v < -0.50 {
-                alloc::format!("Cảm giác {} và {} — bạn muốn kể thêm không?", lead, support)
+                alloc::format!(
+                    "\"{}\" — mình nghe thấy điều đó nặng nề thật. Bạn muốn kể thêm không?",
+                    topic
+                )
+            } else if v < -0.20 {
+                alloc::format!("\"{}\" — mình đang lắng nghe.", topic)
             } else {
-                alloc::format!("Mình nghe thấy điều đó. {} — bạn đang ổn không?", lead)
+                alloc::format!("Về {} — bạn muốn nói thêm không?", topic)
             }
         }
         ResponseTone::Gentle => {
-            alloc::format!("Cứ từ từ. {} thôi.", lead)
+            alloc::format!("Cứ từ từ nói về {} nhé.", topic)
         }
         ResponseTone::Reinforcing => {
-            alloc::format!("Đúng rồi — {} và {}.", lead, support)
+            alloc::format!("Đúng rồi — {} hay đấy.", topic)
         }
         ResponseTone::Celebratory => {
-            alloc::format!("Tuyệt! {} lắm.", lead)
+            alloc::format!("Tuyệt! {} thật tốt.", topic)
         }
         ResponseTone::Engaged => {
-            alloc::format!("{} — {}.", lead, support)
+            alloc::format!("\"{}\" — mình đang nghe.", topic)
         }
     }
+}
+
+/// Vietnamese stop words — loại bỏ để lấy content words.
+fn is_vn_stop_word(w: &str) -> bool {
+    matches!(
+        w.to_lowercase().as_str(),
+        "tôi" | "tui" | "mình" | "em" | "anh" | "chị" | "bạn"
+            | "là" | "và" | "với" | "của" | "cho" | "để" | "từ"
+            | "một" | "các" | "những" | "này" | "đó" | "kia"
+            | "có" | "không" | "đã" | "đang" | "sẽ" | "được" | "bị"
+            | "thì" | "mà" | "nếu" | "vì" | "nên" | "hay"
+            | "rất" | "lắm" | "quá" | "thật" | "cũng" | "vẫn"
+            | "ở" | "trong" | "ngoài" | "trên" | "dưới"
+            | "hôm" | "nay" | "ngày" | "khi"
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2431,8 +2469,8 @@ fn is_sentence_start(text: &str, word: &str) -> bool {
 // contextual_reply — câu trả lời dựa trên nội dung + ngữ cảnh
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Tạo câu trả lời phù hợp bối cảnh — dùng từ ngữ liên quan đến nội dung
-/// thay vì chỉ tone-based generic phrases.
+/// Tạo câu trả lời dựa trên nội dung thật + ngữ cảnh Silk recall.
+/// Dùng từ khóa thật từ input thay vì chỉ 1 từ đầu.
 fn contextual_reply(
     tone: silk::walk::ResponseTone,
     v: f32,
@@ -2441,55 +2479,74 @@ fn contextual_reply(
 ) -> alloc::string::String {
     use silk::walk::ResponseTone;
 
-    // Extract key content words from input for reference
-    let key_words: alloc::vec::Vec<&str> = input
+    // Extract content words from user's actual input
+    let content_words: alloc::vec::Vec<&str> = input
         .split_whitespace()
-        .filter(|w| w.chars().count() > 2)
-        .take(3)
+        .filter(|w| w.chars().count() > 1 && !is_vn_stop_word(w))
+        .take(4)
         .collect();
-    let topic = if key_words.is_empty() {
-        ""
+
+    let topic = if content_words.is_empty() {
+        input.trim().to_string()
     } else {
-        key_words[0]
+        content_words.join(" ")
     };
+
+    // context from recall is now human-readable
+    let has_context = !context.is_empty();
 
     match tone {
         ResponseTone::Supportive | ResponseTone::Pause => {
             if v < -0.50 {
-                alloc::format!(
-                    "Mình hiểu cảm giác khi nghĩ về {} — điều đó nặng nề thật. {}",
-                    topic, context
-                )
+                if has_context {
+                    alloc::format!(
+                        "\"{}\" — mình nhớ bạn đã nhắc đến điều tương tự. {} Bạn muốn kể thêm không?",
+                        topic, context
+                    )
+                } else {
+                    alloc::format!(
+                        "\"{}\" — điều đó nặng nề thật. Bạn muốn kể thêm không?",
+                        topic
+                    )
+                }
             } else if v < -0.20 {
-                alloc::format!(
-                    "Mình nghe thấy điều bạn nói về {}. {}", topic, context
-                )
+                if has_context {
+                    alloc::format!("\"{}\" — {}. Mình đang lắng nghe.", topic, context)
+                } else {
+                    alloc::format!("\"{}\" — mình đang lắng nghe.", topic)
+                }
+            } else if has_context {
+                alloc::format!("Về {} — {}.", topic, context)
             } else {
-                alloc::format!(
-                    "Về {} — mình đang lắng nghe. {}", topic, context
-                )
+                alloc::format!("Về {} — bạn muốn nói thêm không?", topic)
             }
         }
         ResponseTone::Gentle => {
-            alloc::format!("Cứ từ từ nói về {} nhé. {}", topic, context)
+            if has_context {
+                alloc::format!("Cứ từ từ nói về {} nhé. {}.", topic, context)
+            } else {
+                alloc::format!("Cứ từ từ nói về {} nhé.", topic)
+            }
         }
         ResponseTone::Reinforcing => {
-            if v > 0.30 {
-                alloc::format!("Đúng rồi — {} thú vị đấy. {}", topic, context)
+            if has_context {
+                alloc::format!("Đúng rồi — {} thú vị đấy. {}.", topic, context)
             } else {
-                alloc::format!(
-                    "Mình ghi nhận về {}. {}", topic, context
-                )
+                alloc::format!("Đúng rồi — {} hay đấy.", topic)
             }
         }
         ResponseTone::Celebratory => {
-            alloc::format!("Tuyệt! {} hay lắm. {}", topic, context)
+            if has_context {
+                alloc::format!("Tuyệt! {} — {}.", topic, context)
+            } else {
+                alloc::format!("Tuyệt! {} thật tốt.", topic)
+            }
         }
         ResponseTone::Engaged => {
-            if context.is_empty() {
-                alloc::format!("Về {} — mình đang nghe.", topic)
+            if has_context {
+                alloc::format!("\"{}\" — {}.", topic, context)
             } else {
-                alloc::format!("Về {} — {}.", topic, context)
+                alloc::format!("\"{}\" — mình đang nghe.", topic)
             }
         }
     }
