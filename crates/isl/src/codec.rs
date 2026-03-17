@@ -177,39 +177,29 @@ impl ISLCodec {
     /// AES-256-GCM: authenticated encryption.
     /// Output = 12 + plaintext.len() + 16 bytes.
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, ISLError> {
-        use aes_gcm::aead::generic_array::GenericArray;
-        use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
-
-        let cipher = Aes256Gcm::new(GenericArray::from_slice(&self.key));
         let nonce_bytes = self.next_nonce();
-        let nonce = GenericArray::from_slice(&nonce_bytes);
 
-        let ciphertext = cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|_| ISLError::AuthFailed)?;
+        let ciphertext_and_tag =
+            olang::aes256gcm::aes256gcm_encrypt(&self.key, &nonce_bytes, plaintext, &[]);
 
-        let mut out = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
+        let mut out = Vec::with_capacity(NONCE_SIZE + ciphertext_and_tag.len());
         out.extend_from_slice(&nonce_bytes);
-        out.extend_from_slice(&ciphertext);
+        out.extend_from_slice(&ciphertext_and_tag);
         Ok(out)
     }
 
     /// Decrypt `[nonce:12B][ciphertext+tag]` → plaintext.
     pub fn decrypt(&self, encrypted: &[u8]) -> Result<Vec<u8>, ISLError> {
-        use aes_gcm::aead::generic_array::GenericArray;
-        use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
-
         if encrypted.len() < NONCE_SIZE + TAG_SIZE {
             return Err(ISLError::TooShort);
         }
 
-        let cipher = Aes256Gcm::new(GenericArray::from_slice(&self.key));
-        let nonce = GenericArray::from_slice(&encrypted[..NONCE_SIZE]);
-        let ciphertext = &encrypted[NONCE_SIZE..];
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&encrypted[..NONCE_SIZE]);
+        let ciphertext_and_tag = &encrypted[NONCE_SIZE..];
 
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|_| ISLError::AuthFailed)
+        olang::aes256gcm::aes256gcm_decrypt(&self.key, &nonce, ciphertext_and_tag, &[])
+            .ok_or(ISLError::AuthFailed)
     }
 
     /// Encode + encrypt ISLMessage.

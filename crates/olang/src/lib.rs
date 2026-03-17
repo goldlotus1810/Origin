@@ -25,6 +25,7 @@ pub mod log;
 pub mod math;
 pub mod molecular;
 pub mod precision;
+pub mod aes256gcm;
 pub mod ed25519;
 pub mod qr;
 pub mod sha256;

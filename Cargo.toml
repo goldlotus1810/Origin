@@ -34,4 +34,3 @@ memory  = { path = "crates/memory" }
 runtime = { path = "crates/runtime" }
 hal      = { path = "crates/hal" }
 homemath = { path = "crates/homemath" }
-aes-gcm       = { version = "0.10", default-features = false, features = ["alloc", "aes"] }
