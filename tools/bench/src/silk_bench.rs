@@ -532,153 +532,229 @@ fn bench_ram() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn bench_projection() {
-    println!("══ 4. DỰ TOÁN 500M CONCEPTS (Phone Target) ═══════════════════");
+    println!("══ 4. DỰ TOÁN 2B NODES (Phone 16GB Target) ═══════════════════");
     println!();
 
-    let concepts = 500_000_000u64;
-    let avg_edges = 3u64; // average connections per node
+    // ── Layer breakdown from document ──
+    // L0: 5400 UCD nodes (fixed formulas)
+    // L1: 37 nodes (LCA of L0 buckets)
+    // L2→Ln-1: 2,000,000,000 nodes (learned knowledge)
+    // Silk: 72 horizontal (implicit, 0B) + vertical parent pointers
 
-    // Node storage (33 bytes per concept: 5 mol + 8 hash + 20 metadata)
-    let node_bytes = concepts * 33;
+    let l0_nodes = 5_400u64;
+    let l1_nodes = 37u64;
+    let l2_ln_nodes = 2_000_000_000u64; // 2B as specified by user
+    let total_nodes = l0_nodes + l1_nodes + l2_ln_nodes;
+    let avg_edges = 3u64;
 
-    // Old model: all edges are SilkEdge (46 bytes)
-    let old_edge_bytes = concepts * avg_edges * 46;
-    let old_total = node_bytes + old_edge_bytes;
-
-    // New model: 80% implicit (0B) + 15% HebbianLink (19B) + 5% SilkEdge (46B)
-    let implicit_count = concepts * avg_edges * 80 / 100;
-    let hebbian_count = concepts * avg_edges * 15 / 100;
-    let structural_count = concepts * avg_edges * 5 / 100;
-
-    let implicit_bytes = implicit_count * 0; // 0 bytes!
-    let hebbian_bytes = hebbian_count * 19;
-    let structural_bytes = structural_count * 46;
-    let new_edge_bytes = implicit_bytes + hebbian_bytes + structural_bytes;
-
-    // Index overhead: ~40 bytes per node (5 buckets × 8 bytes per hash entry)
-    let index_bytes = concepts * 40;
-    let new_total = node_bytes + new_edge_bytes + index_bytes;
-
-    println!("  ── 500M concepts × {} avg edges ──", avg_edges);
-    println!();
-    println!("    OLD MODEL (SilkEdge only):");
-    println!("      Nodes        : {} × 33B = {}", format_count(concepts), format_bytes(node_bytes));
-    println!("      Edges        : {} × 46B = {}", format_count(concepts * avg_edges), format_bytes(old_edge_bytes));
-    println!("      ────────────────────────────────────");
-    println!("      TOTAL        : {}", format_bytes(old_total));
+    println!("  ── Layer distribution ──");
+    println!("    L0 (UCD)       : {:>12} nodes (fixed formulas)", format_count(l0_nodes));
+    println!("    L1 (LCA)       : {:>12} nodes (37 base concepts)", format_count(l1_nodes));
+    println!("    L2→Ln-1        : {:>12} nodes (learned knowledge)", format_count(l2_ln_nodes));
+    println!("    Total          : {:>12} nodes", format_count(total_nodes));
     println!();
 
-    println!("    NEW MODEL (3-Layer Silk):");
-    println!("      Nodes        : {} × 33B = {}", format_count(concepts), format_bytes(node_bytes));
-    println!("      Implicit     : {} × 0B  = {}", format_count(implicit_count), format_bytes(implicit_bytes));
-    println!("      HebbianLink  : {} × 19B = {}", format_count(hebbian_count), format_bytes(hebbian_bytes));
-    println!("      Structural   : {} × 46B = {}", format_count(structural_count), format_bytes(structural_bytes));
-    println!("      5D Index     : {} × 40B = {}", format_count(concepts), format_bytes(index_bytes));
-    println!("      ────────────────────────────────────");
-    println!("      TOTAL        : {}", format_bytes(new_total));
+    // ══════════════════════════════════════════════════════════════════════
+    // Model A: OLD — SilkEdge only, 33B/node
+    // ══════════════════════════════════════════════════════════════════════
+    let old_node_bytes = total_nodes * 33;
+    let old_edge_bytes = total_nodes * avg_edges * 46;
+    let old_total = old_node_bytes + old_edge_bytes;
+
+    println!("    ╔═══════════════════════════════════════════════════╗");
+    println!("    ║  MODEL A: OLD (SilkEdge, 33B/node, 46B/edge)    ║");
+    println!("    ╚═══════════════════════════════════════════════════╝");
+    println!("    Nodes          : {} × 33B = {}", format_count(total_nodes), format_bytes(old_node_bytes));
+    println!("    Edges          : {} × 46B = {}", format_count(total_nodes * avg_edges), format_bytes(old_edge_bytes));
+    println!("    ────────────────────────────────────────────────────");
+    println!("    TOTAL          : {}  ✗", format_bytes(old_total));
     println!();
 
-    let savings_pct = 100.0 * (1.0 - new_total as f64 / old_total as f64);
-    let fits_phone = new_total < 16_000_000_000; // 16GB
+    // ══════════════════════════════════════════════════════════════════════
+    // Model B: 3-Layer Silk, compact 19B/node
+    // ══════════════════════════════════════════════════════════════════════
+    let b_node_bytes = total_nodes * 19; // tagged sparse avg
+    let b_hebbian = total_nodes * avg_edges * 4 / 100; // 4% learned
+    let b_structural = total_nodes * avg_edges * 1 / 100; // 1% parent ptrs
+    let b_hebb_bytes = b_hebbian * 19;
+    let b_struct_bytes = b_structural * 17;
+    let b_total = b_node_bytes + b_hebb_bytes + b_struct_bytes;
 
-    println!("    SAVINGS:");
-    println!("      Old total    : {}", format_bytes(old_total));
-    println!("      New total    : {}", format_bytes(new_total));
-    println!("      Reduced      : {} ({:.0}%)", format_bytes(old_total - new_total), savings_pct);
-    println!("      Fits 16GB?   : {} {}", if fits_phone { "YES" } else { "NO" },
-        if fits_phone { "✓" } else { "✗" });
+    println!("    ╔═══════════════════════════════════════════════════╗");
+    println!("    ║  MODEL B: 3-Layer Silk (compact, 19B/node)       ║");
+    println!("    ╚═══════════════════════════════════════════════════╝");
+    println!("    Nodes          : {} × 19B = {}", format_count(total_nodes), format_bytes(b_node_bytes));
+    println!("    Implicit Silk  : {} × 0B  = 0 B (95%)", format_count(total_nodes * avg_edges * 95 / 100));
+    println!("    HebbianLink    : {} × 19B = {} (4%)", format_count(b_hebbian), format_bytes(b_hebb_bytes));
+    println!("    Parent ptrs    : {} × 17B = {} (1%)", format_count(b_structural), format_bytes(b_struct_bytes));
+    println!("    Index on disk  : 0 B (rebuilt from mol bytes at boot)");
+    println!("    ────────────────────────────────────────────────────");
+    println!("    TOTAL          : {}  {}", format_bytes(b_total),
+        if b_total < 16_000_000_000 { "✓ FITS 16GB" } else { "✗ VƯỢT 16GB" });
     println!();
 
-    // Visual comparison
-    let max_gb = old_total as f64 / 1_073_741_824.0;
-    let new_gb = new_total as f64 / 1_073_741_824.0;
+    // ══════════════════════════════════════════════════════════════════════
+    // Model C: FORMULA + DELTA — Molecule = công thức, not data
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // From doc "node va silk.md":
+    //   L0 = 5400 formulas × 10B
+    //   L2+ = compose(ref_L0, ref_L0) + op = 5B (formula ref)
+    //   OR delta from parent = 2-3B (90% of L4+ nodes)
+    //
+    // compact.rs already has DeltaMolecule: [bitmask:1B][changed:1-2B] = 2-3B
+    //   → 60% savings vs full for nodes that only vary in V/A
+
+    // L0: full formula (10B each)
+    let c_l0 = l0_nodes * 10;
+    // L1: LCA results (5B tagged each)
+    let c_l1 = l1_nodes * 5;
+    // L2-L3 concepts (~2.5% of L2+): compose refs = 5B
+    let l2_l3_count = l2_ln_nodes * 25 / 1000; // 2.5%
+    let c_l2_l3 = l2_l3_count * 5;
+    // L4+ learned (~97.5% of L2+): delta from parent = avg 2.5B
+    let l4_plus_count = l2_ln_nodes - l2_l3_count;
+    let c_l4_plus = l4_plus_count * 25 / 10; // 2.5B avg
+    // chain_hash per node: 8B (needed for lookup)
+    let c_hashes = total_nodes * 8;
+    // Parent pointers: each L2+ node has 1 parent = varint 4B avg
+    let c_parents = l2_ln_nodes * 4;
+    // HebbianLink: 2% of edges (only strong discovered connections)
+    let c_hebbian_count = l2_ln_nodes * avg_edges * 2 / 100;
+    let c_hebb = c_hebbian_count * 19;
+
+    let c_total = c_l0 + c_l1 + c_l2_l3 + c_l4_plus + c_hashes + c_parents + c_hebb;
+
+    println!("    ╔═══════════════════════════════════════════════════╗");
+    println!("    ║  MODEL C: FORMULA + DELTA (Molecule = công thức) ║");
+    println!("    ╚═══════════════════════════════════════════════════╝");
+    println!("    L0 formulas    : {:>5} × 10B  = {}", format_count(l0_nodes), format_bytes(c_l0));
+    println!("    L1 LCA         : {:>5} × 5B   = {}", format_count(l1_nodes), format_bytes(c_l1));
+    println!("    L2-L3 compose  : {} × 5B   = {} (2.5%)", format_count(l2_l3_count), format_bytes(c_l2_l3));
+    println!("    L4+ delta      : {} × 2.5B = {} (97.5%)", format_count(l4_plus_count), format_bytes(c_l4_plus));
+    println!("    chain_hash     : {} × 8B   = {}", format_count(total_nodes), format_bytes(c_hashes));
+    println!("    Parent ptrs    : {} × 4B   = {}", format_count(l2_ln_nodes), format_bytes(c_parents));
+    println!("    Implicit Silk  : {} × 0B   = 0 B (98%)", format_count(l2_ln_nodes * avg_edges * 98 / 100));
+    println!("    HebbianLink    : {} × 19B  = {} (2%)", format_count(c_hebbian_count), format_bytes(c_hebb));
+    println!("    ────────────────────────────────────────────────────");
+    println!("    DISK TOTAL     : {}  {}", format_bytes(c_total),
+        if c_total < 16_000_000_000 { "✓ FITS 16GB" } else { "✗ VƯỢT 16GB" });
+    println!("    Dư còn         : {}", format_bytes(16_000_000_000u64.saturating_sub(c_total)));
+    println!();
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Model D: ZERO-HASH — hash = computed from formula, not stored
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // Key insight: if Molecule = FORMULA, then chain_hash = f(formula).
+    // Hash is DETERMINISTIC from the formula → no need to store it!
+    // Recompute on demand: hash(parent_hash XOR delta_bytes) = O(1)
+    //
+    // Node on disk = [parent_offset:3B][delta_mask:1B][changed:0-2B]
+    //              = 4-6 bytes (no hash stored!)
+    // Parent offset: 3B supports up to 16M nodes per level-group (varint)
+
+    let d_l0 = l0_nodes * 10; // full formulas
+    let d_l1 = l1_nodes * 5;
+    // L2-L3: compose refs (no hash) = [ref1:2B][ref2:2B][op:1B] = 5B
+    let d_l2_l3 = l2_l3_count * 5;
+    // L4+: delta (no hash) = [parent_offset:3B][mask:1B][changed:0-2B] = avg 4.5B
+    let d_l4_plus = l4_plus_count * 45 / 10; // 4.5B avg
+    // Hash: 0 bytes stored! Computed from formula on demand.
+    // HebbianLink: still needs from_hash + to_hash (but these are runtime-only)
+    // On disk: HebbianLink stored as [parent_offset_a:3B][parent_offset_b:3B][weight:1B] = 7B
+    let d_hebbian_count = l2_ln_nodes * avg_edges * 2 / 100;
+    let d_hebb = d_hebbian_count * 7; // compact HebbianLink on disk
+
+    let d_total = d_l0 + d_l1 + d_l2_l3 + d_l4_plus + d_hebb;
+
+    println!("    ╔═══════════════════════════════════════════════════╗");
+    println!("    ║  MODEL D: ZERO-HASH (hash = computed, not stored)║");
+    println!("    ╚═══════════════════════════════════════════════════╝");
+    println!("    L0 formulas    : {:>5} × 10B   = {}", format_count(l0_nodes), format_bytes(d_l0));
+    println!("    L1 LCA         : {:>5} × 5B    = {}", format_count(l1_nodes), format_bytes(d_l1));
+    println!("    L2-L3 compose  : {} × 5B    = {} (2.5%)", format_count(l2_l3_count), format_bytes(d_l2_l3));
+    println!("    L4+ delta      : {} × 4.5B  = {} (97.5%)", format_count(l4_plus_count), format_bytes(d_l4_plus));
+    println!("    chain_hash     : 0 B (computed from formula — KHÔNG LƯU)");
+    println!("    Parent ptrs    : implicit in parent_offset (3B, included above)");
+    println!("    Implicit Silk  : {} × 0B    = 0 B (98%)", format_count(l2_ln_nodes * avg_edges * 98 / 100));
+    println!("    HebbianLink    : {} × 7B    = {} (compact, 2%)", format_count(d_hebbian_count), format_bytes(d_hebb));
+    println!("    ────────────────────────────────────────────────────");
+    println!("    DISK TOTAL     : {}  {}", format_bytes(d_total),
+        if d_total < 16_000_000_000 { "✓ FITS 16GB" } else { "✗ VƯỢT 16GB" });
+    println!("    Dư còn         : {} (cho aliases, runtime, evolution)",
+        format_bytes(16_000_000_000u64.saturating_sub(d_total)));
+    println!();
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Visual comparison 4 models
+    // ══════════════════════════════════════════════════════════════════════
     let bar_width = 50;
+    let max_val = old_total as f64;
 
-    println!("    ── Visual: Total Storage ──");
-    let old_fill = bar_width;
-    let new_fill = ((new_gb / max_gb) * bar_width as f64) as usize;
-    let limit_fill = ((16.0 / max_gb) * bar_width as f64).min(bar_width as f64) as usize;
-
-    print!("      Old  ");
-    for _ in 0..old_fill { print!("█"); }
-    println!(" {:.1} GB", max_gb);
-
-    print!("      New  ");
+    println!("    ── Visual: DISK Storage (2B nodes) ──");
+    print_bar("  Old (33B+46B)", old_total, max_val, bar_width);
+    print_bar("  3-Layer (19B)", b_total, max_val, bar_width);
+    print_bar("  Formula+Delta", c_total, max_val, bar_width);
+    print_bar("  Zero-Hash(4.5B)", d_total, max_val, bar_width);
+    // 16GB line
+    print!("      16GB limit ");
+    let limit_pos = ((16_000_000_000.0 / max_val) * bar_width as f64).min(bar_width as f64) as usize;
     for i in 0..bar_width {
-        if i < new_fill { print!("█"); } else { print!("░"); }
+        if i == limit_pos { print!("│"); } else { print!("─"); }
     }
-    println!(" {:.1} GB", new_gb);
-
-    print!("      16GB ");
-    for i in 0..bar_width {
-        if i == limit_fill { print!("│"); } else { print!(" "); }
-    }
-    println!(" ← phone limit");
-
+    println!();
     println!();
 
-    // Optimized model — DISK vs RAM separation
-    // Key insight: SilkIndex is runtime-only (rebuilt from molecules on boot).
-    // On DISK: only nodes + learned edges. Index = computed from 5D bytes.
-    println!("  ── OPTIMIZED MODEL (Silk = formula, not data) ──");
-    println!();
-    {
-        // Disk: compact node (tagged sparse mol avg ~3B + 8 hash + 8 ts = 19B)
-        // Per CLAUDE.md: "1 concept = ~33 bytes (5 mol + 8 hash + 20 metadata)"
-        // With tagged sparse: ~3B avg mol + 8 hash + 8 ts = 19B
-        let compact_node = 19u64;
-        let node_disk = concepts * compact_node;
+    // ══════════════════════════════════════════════════════════════════════
+    // RAM Working Set for 2B nodes
+    // ══════════════════════════════════════════════════════════════════════
+    println!("    ── RAM Working Set (2B nodes, Model D) ──");
+    println!("    {:>6} {:>12} {:>14} {:>14} {:>14}", "%Active", "Nodes",
+        "Old RAM", "ZeroHash RAM", "Savings");
+    println!("    {}", "─".repeat(65));
 
-        // 95% implicit (0B disk) + 4% HebbianLink (19B) + 1% structural parent ptr (8B hash-pair)
-        let hebbian_count = concepts * avg_edges * 4 / 100;
-        let structural_count = concepts * avg_edges * 1 / 100;
-        let hebb_disk = hebbian_count * 19;
-        // Structural = parent pointer pairs, compact: from_hash(8)+to_hash(8)+kind(1)=17B
-        let struct_disk = structural_count * 17;
-        // No index on disk — SilkIndex is rebuilt from node molecules at boot
-
-        let disk_total = node_disk + hebb_disk + struct_disk;
-        let fits_disk = disk_total < 16_000_000_000;
-
-        println!("    ── DISK (persistent) ──");
-        println!("    Compact nodes  : {} × {}B = {}", format_count(concepts), compact_node, format_bytes(node_disk));
-        println!("    Implicit edges : {} × 0B  = 0 B (95% — computed from 5D)", format_count(concepts * avg_edges * 95 / 100));
-        println!("    HebbianLink    : {} × 19B = {} (4%)", format_count(hebbian_count), format_bytes(hebb_disk));
-        println!("    Parent pointers: {} × 17B = {} (1%)", format_count(structural_count), format_bytes(struct_disk));
-        println!("    5D Index       : 0 B (rebuilt at boot from mol bytes)");
-        println!("    ────────────────────────────────────");
-        println!("    DISK TOTAL     : {} {}", format_bytes(disk_total), if fits_disk { "✓ FITS 16GB" } else { "✗" });
-        println!();
-
-        // RAM: only active working set + index for active nodes
-        let active_pct = 2u64; // 2% active at any time
-        let active = concepts * active_pct / 100;
-        let ram_nodes = active * compact_node;
-        let ram_index = active * 40; // 5D index for active nodes
-        let ram_hebbian = (hebbian_count * active_pct / 100) * std::mem::size_of::<HebbianLink>() as u64;
-        let ram_total = ram_nodes + ram_index + ram_hebbian;
-
-        println!("    ── RAM ({}% active = {} nodes) ──", active_pct, format_count(active));
-        println!("    Active nodes   : {}", format_bytes(ram_nodes));
-        println!("    5D Index       : {}", format_bytes(ram_index));
-        println!("    Active Hebbian : {}", format_bytes(ram_hebbian));
-        println!("    ────────────────────────────────────");
-        println!("    RAM TOTAL      : {}", format_bytes(ram_total));
-        println!();
-    }
-
-    // RAM estimate for active working set
-    println!("  ── RAM Working Set (active subset) ──");
-    for &active_pct in &[1u64, 5, 10] {
-        let active = concepts * active_pct / 100;
+    for &pct in &[1u64, 2, 5] {
+        let active = total_nodes * pct / 100;
         let active_edges = active * avg_edges;
-        let old_ram = active * 33 + active_edges * std::mem::size_of::<SilkEdge>() as u64;
-        let new_ram = active * 33 + (active_edges * 20 / 100) * std::mem::size_of::<HebbianLink>() as u64
-            + active * 40; // index
-        println!("    {}% active ({}):", active_pct, format_count(active));
-        println!("      Old RAM: {}   New RAM: {}   Savings: {:.0}%",
-            format_bytes(old_ram), format_bytes(new_ram),
-            100.0 * (1.0 - new_ram as f64 / old_ram as f64));
+
+        // Old: 33B/node + 46B/edge (all explicit)
+        let old_ram = active * 33 + active_edges * 46;
+
+        // Model D in RAM: nodes need hash at runtime (recomputed), delta + index
+        // Active node in RAM: 4.5B delta + 8B computed hash + 40B index = ~52.5B
+        let new_ram = active * 53 // delta + hash (runtime) + index
+            + (active_edges * 2 / 100) * std::mem::size_of::<HebbianLink>() as u64; // 2% hebbian
+
+        let savings = 100.0 * (1.0 - new_ram as f64 / old_ram as f64);
+        println!("    {:>5}% {:>12} {:>14} {:>14} {:>13.0}%",
+            pct, format_count(active), format_bytes(old_ram), format_bytes(new_ram), savings);
     }
     println!();
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Summary table
+    // ══════════════════════════════════════════════════════════════════════
+    println!("    ── Tóm tắt ──");
+    println!("    {:30} {:>12} {:>10}", "Model", "Disk", "Fits 16GB?");
+    println!("    {}", "─".repeat(55));
+    println!("    {:30} {:>12} {:>10}", "A: Old (SilkEdge)",
+        format_bytes(old_total), "✗");
+    println!("    {:30} {:>12} {:>10}", "B: 3-Layer (compact 19B)",
+        format_bytes(b_total), if b_total < 16_000_000_000 { "✓" } else { "✗" });
+    println!("    {:30} {:>12} {:>10}", "C: Formula + Delta (hash lưu)",
+        format_bytes(c_total), if c_total < 16_000_000_000 { "✓" } else { "✗" });
+    println!("    {:30} {:>12} {:>10}", "D: Zero-Hash (hash tính lại)",
+        format_bytes(d_total), if d_total < 16_000_000_000 { "✓" } else { "✗" });
+    println!();
+}
+
+fn print_bar(label: &str, value: u64, max: f64, width: usize) {
+    let filled = ((value as f64 / max) * width as f64).min(width as f64) as usize;
+    let gb = value as f64 / 1_073_741_824.0;
+    print!("    {:>15} ", label);
+    for i in 0..width {
+        if i < filled { print!("█"); } else { print!("░"); }
+    }
+    println!(" {:.1} GB", gb);
 }
