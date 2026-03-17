@@ -16,21 +16,24 @@ Foundation hoàn chỉnh: UCD, Olang, Silk, Emotion, Memory, ISL, HAL, VSDF, Age
 
 ## Kế hoạch Phase tiếp theo
 
-### Phase 1 — VM Tính Toán Thật (Ưu tiên: CAO)
+### Phase 1 — VM Tính Toán Thật (HOÀN THÀNH)
 
 **Vấn đề:** `1 + 2` tạo sự kiện nhưng KHÔNG trả về `3`.
+**Giải pháp:** Thêm Arithmetic variant vào parser + IR, nối pipeline parser → IR → VM.
 
 ```
-Cần làm:
-  [1.1] Thêm Op::PushNum(f64) vào IR
-  [1.2] Dispatch __hyp_add/__hyp_sub/__hyp_mul/__hyp_div trong Op::Call
-  [1.3] Kết nối math.rs AST vào VM execution
-  [1.4] Test: ○{1 + 2} → Output(3.0)
+✅ HOÀN THÀNH:
+  ✅ [1.1] ArithOp enum + OlangExpr::Arithmetic variant trong parser.rs
+  ✅ [1.2] OlangIrExpr::Arithmetic variant trong ir.rs
+  ✅ [1.3] Pipeline: parser detect số + operator → olang_expr_to_ir → emit PushNum + Call(__hyp_*)
+  ✅ [1.4] VM đã có sẵn __hyp_add/sub/mul/div dispatch
+  ✅ [1.5] Tests: ○{1 + 2}=3, ○{10 - 3}=7, ○{6 × 7}=42, ○{8 ÷ 2}=4, ○{3.14 + 2.86}=6
+  ✅ [1.6] Hỗ trợ cả Unicode (×÷) và ASCII (*/) operators
 
-Files cần sửa:
-  crates/olang/src/ir.rs      — thêm Op::PushNum
-  crates/olang/src/vm.rs      — dispatch builtins
-  crates/olang/src/syntax.rs  — parse numeric expressions
+Files đã sửa:
+  crates/runtime/src/parser.rs  — ArithOp, Arithmetic variant, try_parse_arithmetic()
+  crates/olang/src/ir.rs        — OlangIrExpr::Arithmetic, emit_expr()
+  crates/runtime/src/origin.rs  — olang_expr_to_ir() Arithmetic case + 5 e2e tests
 ```
 
 ### Phase 2 — Duyệt Đồ Thị (Ưu tiên: TRUNG BÌNH)
@@ -169,7 +172,7 @@ Files cần sửa:
 ## Đường đi tới hạn
 
 ```
-Phase 1 (VM tính toán)
+Phase 1 (VM tính toán) — ✅ HOÀN THÀNH
 ├── Phase 2 (Duyệt đồ thị)
 │   ├── Phase 5 (Điều phối Agent) — QUAN TRỌNG NHẤT
 │   │   ├── Phase 6 (Cảm nhận)

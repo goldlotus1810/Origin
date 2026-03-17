@@ -93,6 +93,19 @@ impl RelationOp {
 // OlangExpr — parsed expression
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Arithmetic operator trong ○{}.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithOp {
+    /// + addition (QT3: giả thuyết)
+    Add,
+    /// - subtraction (QT3: giả thuyết)
+    Sub,
+    /// × multiplication (QT3: giả thuyết)
+    Mul,
+    /// ÷ division (QT3: giả thuyết)
+    Div,
+}
+
 /// Một expression đã parse từ ○{...}.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OlangExpr {
@@ -113,6 +126,12 @@ pub enum OlangExpr {
     Command(String),
     /// ○{○{🔥} ∈ ?} — pipeline
     Pipeline(Vec<OlangExpr>),
+    /// ○{1 + 2} — arithmetic (QT3: giả thuyết)
+    Arithmetic {
+        lhs: f64,
+        op: ArithOp,
+        rhs: f64,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,7 +206,12 @@ impl OlangParser {
             return Ok(OlangExpr::Query(trimmed.to_string()));
         }
 
-        // + operator without relation ops → route to separator parser
+        // Arithmetic: detect numeric expressions like "1 + 2", "3.5 × 4", "10 - 3", "8 ÷ 2"
+        if let Some(arith) = try_parse_arithmetic(trimmed) {
+            return Ok(arith);
+        }
+
+        // + operator with non-numeric operands → Compose (e.g. 🔥 + 💧)
         if trimmed.contains('+') && !trimmed.chars().any(|c| RelationOp::from_char(c).is_some()) {
             return Ok(OlangExpr::Compose {
                 a: trimmed.split('+').next().unwrap_or("").trim().to_string(),
@@ -345,6 +369,93 @@ fn tokenize(expr: &str) -> Vec<OlangToken> {
 
 fn token_from_str(s: &str) -> OlangToken {
     OlangToken::Node(s.to_string())
+}
+
+/// Try to parse arithmetic expression: "1 + 2", "3.14 × 2", "10 - 3", "8 ÷ 2"
+/// Returns None if not a valid arithmetic expression (falls through to Compose/Query).
+fn try_parse_arithmetic(s: &str) -> Option<OlangExpr> {
+    // Find arithmetic operator (scan left to right, last +/- wins for precedence,
+    // but we keep it simple: single operator between two numbers)
+    let ops: &[(char, ArithOp)] = &[
+        ('+', ArithOp::Add),
+        ('-', ArithOp::Sub),
+        ('×', ArithOp::Mul),
+        ('÷', ArithOp::Div),
+        ('*', ArithOp::Mul),
+        ('/', ArithOp::Div),
+    ];
+
+    for &(op_char, ref op) in ops {
+        // Split on operator — find it (skip if it's a negative sign at start)
+        if let Some(pos) = find_arith_op(s, op_char) {
+            let lhs_str = s[..pos].trim();
+            let rhs_str = s[pos + op_char.len_utf8()..].trim();
+
+            if let (Ok(lhs), Ok(rhs)) = (parse_number(lhs_str), parse_number(rhs_str)) {
+                return Some(OlangExpr::Arithmetic {
+                    lhs,
+                    op: *op,
+                    rhs,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Find arithmetic operator position, skipping leading negative sign.
+fn find_arith_op(s: &str, op: char) -> Option<usize> {
+    let mut chars = s.char_indices().peekable();
+    // Skip leading whitespace and optional leading minus (negative number)
+    while let Some(&(_, c)) = chars.peek() {
+        if c.is_whitespace() {
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    // Skip leading minus (negative number, not subtraction)
+    if let Some(&(_, '-')) = chars.peek() {
+        chars.next();
+        // Skip digits/dots after minus
+        while let Some(&(_, c)) = chars.peek() {
+            if c.is_ascii_digit() || c == '.' {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    } else {
+        // Skip digits/dots of first number
+        while let Some(&(_, c)) = chars.peek() {
+            if c.is_ascii_digit() || c == '.' {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    }
+    // Now look for the operator
+    for (i, c) in chars {
+        if c == op {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Parse number string, supporting integers and decimals.
+fn parse_number(s: &str) -> Result<f64, ()> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err(());
+    }
+    // Only allow valid numeric characters
+    let valid = trimmed.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-');
+    if !valid {
+        return Err(());
+    }
+    trimmed.parse::<f64>().map_err(|_| ())
 }
 
 fn is_command(s: &str) -> bool {
@@ -661,6 +772,107 @@ mod tests {
     fn parse_fib_ratio_command() {
         let r = parser().parse("○{fib ratio 20}");
         assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+    }
+
+    // ── Arithmetic ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_arithmetic_add() {
+        let r = parser().parse("○{1 + 2}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 1.0,
+                op: ArithOp::Add,
+                rhs: 2.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_sub() {
+        let r = parser().parse("○{10 - 3}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 10.0,
+                op: ArithOp::Sub,
+                rhs: 3.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_mul() {
+        let r = parser().parse("○{6 × 7}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 6.0,
+                op: ArithOp::Mul,
+                rhs: 7.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_div() {
+        let r = parser().parse("○{8 ÷ 2}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 8.0,
+                op: ArithOp::Div,
+                rhs: 2.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_mul_ascii() {
+        let r = parser().parse("○{3 * 4}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 3.0,
+                op: ArithOp::Mul,
+                rhs: 4.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_div_ascii() {
+        let r = parser().parse("○{10 / 5}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 10.0,
+                op: ArithOp::Div,
+                rhs: 5.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_decimal() {
+        let r = parser().parse("○{3.14 + 2.86}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 3.14,
+                op: ArithOp::Add,
+                rhs: 2.86,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_non_numeric_plus_is_compose() {
+        // Non-numeric operands → Compose (emoji + emoji)
+        let r = parser().parse("○{🔥 + 💧}");
+        // Should NOT be Arithmetic since 🔥 is not a number
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Compose { .. })));
     }
 
     #[test]

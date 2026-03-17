@@ -308,6 +308,14 @@ pub enum OlangIrExpr {
     Command(String),
     /// Pipeline
     Pipeline(Vec<OlangIrExpr>),
+    /// ○{1 + 2} — arithmetic (QT3: giả thuyết)
+    /// Compiles to: PushNum(lhs), PushNum(rhs), Call("__hyp_<op>")
+    Arithmetic {
+        lhs: f64,
+        /// "__hyp_add", "__hyp_sub", "__hyp_mul", "__hyp_div"
+        builtin: String,
+        rhs: f64,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -359,6 +367,12 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             for e in exprs {
                 emit_expr(e, prog);
             }
+        }
+
+        OlangIrExpr::Arithmetic { lhs, builtin, rhs } => {
+            prog.push_op(Op::PushNum(*lhs));
+            prog.push_op(Op::PushNum(*rhs));
+            prog.push_op(Op::Call(builtin.clone()));
         }
     }
 }

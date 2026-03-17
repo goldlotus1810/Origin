@@ -2285,6 +2285,46 @@ mod tests {
     }
 
     #[test]
+    fn olang_arithmetic_add() {
+        let mut rt = rt();
+        let r = rt.process_text("○{1 + 2}", 1000);
+        assert_eq!(r.kind, ResponseKind::OlangResult);
+        assert!(r.text.contains("= 3"), "1 + 2 = 3, got: {}", r.text);
+    }
+
+    #[test]
+    fn olang_arithmetic_sub() {
+        let mut rt = rt();
+        let r = rt.process_text("○{10 - 3}", 1000);
+        assert_eq!(r.kind, ResponseKind::OlangResult);
+        assert!(r.text.contains("= 7"), "10 - 3 = 7, got: {}", r.text);
+    }
+
+    #[test]
+    fn olang_arithmetic_mul() {
+        let mut rt = rt();
+        let r = rt.process_text("○{6 × 7}", 1000);
+        assert_eq!(r.kind, ResponseKind::OlangResult);
+        assert!(r.text.contains("= 42"), "6 × 7 = 42, got: {}", r.text);
+    }
+
+    #[test]
+    fn olang_arithmetic_div() {
+        let mut rt = rt();
+        let r = rt.process_text("○{8 ÷ 2}", 1000);
+        assert_eq!(r.kind, ResponseKind::OlangResult);
+        assert!(r.text.contains("= 4"), "8 ÷ 2 = 4, got: {}", r.text);
+    }
+
+    #[test]
+    fn olang_arithmetic_decimal() {
+        let mut rt = rt();
+        let r = rt.process_text("○{3.14 + 2.86}", 1000);
+        assert_eq!(r.kind, ResponseKind::OlangResult);
+        assert!(r.text.contains("= 6"), "3.14 + 2.86 = 6, got: {}", r.text);
+    }
+
+    #[test]
     fn olang_help_command() {
         let mut rt = rt();
         let r = rt.process_text("○{help}", 1000);
@@ -2549,6 +2589,21 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
         }
 
         OlangExpr::Command(cmd) => OlangIrExpr::Command(cmd),
+
+        OlangExpr::Arithmetic { lhs, op, rhs } => {
+            use crate::parser::ArithOp;
+            let builtin = match op {
+                ArithOp::Add => "__hyp_add",
+                ArithOp::Sub => "__hyp_sub",
+                ArithOp::Mul => "__hyp_mul",
+                ArithOp::Div => "__hyp_div",
+            };
+            OlangIrExpr::Arithmetic {
+                lhs,
+                builtin: builtin.into(),
+                rhs,
+            }
+        }
     }
 }
 
