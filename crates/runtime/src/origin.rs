@@ -3187,6 +3187,26 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
             name,
             value: alloc::boxed::Box::new(olang_expr_to_ir(*value)),
         },
+
+        OlangExpr::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => OlangIrExpr::IfElse {
+            condition: alloc::boxed::Box::new(olang_expr_to_ir(*condition)),
+            then_branch: then_body.into_iter().map(olang_expr_to_ir).collect(),
+            else_branch: else_body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::LoopBlock { count, body } => OlangIrExpr::LoopBlock {
+            count,
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::FnDef { name, body } => OlangIrExpr::FnDef {
+            name,
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
     }
 }
 

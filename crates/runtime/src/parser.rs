@@ -169,7 +169,23 @@ pub enum OlangExpr {
     /// ○{let x = fire} — variable binding
     LetBinding {
         name: String,
-        value: Box<OlangExpr>,
+        value: alloc::boxed::Box<OlangExpr>,
+    },
+    /// ○{if fire { stats } else { dream }} — conditional
+    IfElse {
+        condition: alloc::boxed::Box<OlangExpr>,
+        then_body: Vec<OlangExpr>,
+        else_body: Vec<OlangExpr>,
+    },
+    /// ○{loop 3 { emit fire }} — loop N times
+    LoopBlock {
+        count: u32,
+        body: Vec<OlangExpr>,
+    },
+    /// ○{fn test { emit fire }} — function definition
+    FnDef {
+        name: String,
+        body: Vec<OlangExpr>,
     },
 }
 
@@ -253,6 +269,21 @@ impl OlangParser {
         // Let binding: let x = <expr>
         if let Some(binding) = self.try_parse_let(trimmed) {
             return Ok(binding);
+        }
+
+        // If/else conditional: if <cond> { <then> } else { <else> }
+        if let Some(if_expr) = self.try_parse_if(trimmed) {
+            return Ok(if_expr);
+        }
+
+        // Loop: loop N { <body> }
+        if let Some(loop_expr) = self.try_parse_loop(trimmed) {
+            return Ok(loop_expr);
+        }
+
+        // Function definition: fn name { <body> }
+        if let Some(fn_expr) = self.try_parse_fn(trimmed) {
+            return Ok(fn_expr);
         }
 
         // Arithmetic: detect numeric expressions like "1 + 2", "3.5 × 4", "10 - 3", "8 ÷ 2"
@@ -346,6 +377,139 @@ impl OlangParser {
             value: alloc::boxed::Box::new(value_expr),
         })
     }
+
+    /// Try to parse if/else: "if fire { stats } else { dream }"
+    fn try_parse_if(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("if ") {
+            return None;
+        }
+        let rest = trimmed["if ".len()..].trim();
+
+        // Find opening brace for then-body
+        let then_open = rest.find('{')?;
+        let cond_str = rest[..then_open].trim();
+        if cond_str.is_empty() {
+            return None;
+        }
+
+        // Find matching closing brace
+        let then_close = find_matching_brace(rest, then_open)?;
+        let then_str = rest[then_open + 1..then_close].trim();
+
+        // Parse condition
+        let condition = self.parse_expr(cond_str).ok()?;
+
+        // Parse then body (semicolon-separated statements)
+        let then_body = self.parse_block(then_str);
+
+        // Check for else clause
+        let after_then = rest[then_close + 1..].trim();
+        let else_body = if after_then.starts_with("else") {
+            let else_rest = after_then.strip_prefix("else").unwrap_or("").trim();
+            let else_open = else_rest.find('{')?;
+            let else_close = find_matching_brace(else_rest, else_open)?;
+            let else_str = else_rest[else_open + 1..else_close].trim();
+            self.parse_block(else_str)
+        } else {
+            Vec::new()
+        };
+
+        Some(OlangExpr::IfElse {
+            condition: alloc::boxed::Box::new(condition),
+            then_body,
+            else_body,
+        })
+    }
+
+    /// Try to parse loop: "loop 3 { emit fire }"
+    fn try_parse_loop(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("loop ") {
+            return None;
+        }
+        let rest = trimmed["loop ".len()..].trim();
+
+        // Find opening brace
+        let brace_open = rest.find('{')?;
+        let count_str = rest[..brace_open].trim();
+        let count: u32 = count_str.parse().ok()?;
+
+        if count == 0 {
+            return None;
+        }
+
+        // Find matching closing brace
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let body_str = rest[brace_open + 1..brace_close].trim();
+
+        let body = self.parse_block(body_str);
+
+        Some(OlangExpr::LoopBlock { count, body })
+    }
+
+    /// Try to parse function definition: "fn test { emit fire }"
+    fn try_parse_fn(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("fn ") {
+            return None;
+        }
+        let rest = trimmed["fn ".len()..].trim();
+
+        // Find opening brace
+        let brace_open = rest.find('{')?;
+        let name = rest[..brace_open].trim();
+        if name.is_empty() {
+            return None;
+        }
+
+        // Find matching closing brace
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let body_str = rest[brace_open + 1..brace_close].trim();
+
+        let body = self.parse_block(body_str);
+
+        Some(OlangExpr::FnDef {
+            name: name.to_string(),
+            body,
+        })
+    }
+
+    /// Parse a block of semicolon-separated statements into Vec<OlangExpr>.
+    fn parse_block(&self, block: &str) -> Vec<OlangExpr> {
+        if block.is_empty() {
+            return Vec::new();
+        }
+        block
+            .split(';')
+            .filter_map(|stmt| {
+                let s = stmt.trim();
+                if s.is_empty() {
+                    None
+                } else {
+                    self.parse_expr(s).ok()
+                }
+            })
+            .collect()
+    }
+}
+
+/// Find matching closing brace for opening brace at `open_pos`.
+fn find_matching_brace(s: &str, open_pos: usize) -> Option<usize> {
+    let mut depth = 0u32;
+    for (i, c) in s[open_pos..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_pos + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 impl Default for OlangParser {
@@ -1126,5 +1290,132 @@ mod tests {
             let s = op.as_str();
             assert_eq!(s.chars().next().unwrap(), c, "roundtrip failed for {c}");
         }
+    }
+
+    // ── If/Else ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_if_then() {
+        let r = parser().parse("○{if fire { stats }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::IfElse {
+                condition,
+                then_body,
+                else_body,
+            }) => {
+                assert_eq!(*condition, OlangExpr::Query("fire".to_string()));
+                assert_eq!(then_body.len(), 1);
+                assert_eq!(then_body[0], OlangExpr::Command("stats".to_string()));
+                assert!(else_body.is_empty());
+            }
+            other => panic!("expected IfElse, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_if_else() {
+        let r = parser().parse("○{if fire { stats } else { dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::IfElse {
+                condition,
+                then_body,
+                else_body,
+            }) => {
+                assert_eq!(*condition, OlangExpr::Query("fire".to_string()));
+                assert_eq!(then_body.len(), 1);
+                assert_eq!(else_body.len(), 1);
+                assert_eq!(else_body[0], OlangExpr::Command("dream".to_string()));
+            }
+            other => panic!("expected IfElse, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_if_multi_stmt() {
+        let r = parser().parse("○{if fire { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::IfElse { then_body, .. }) => {
+                assert_eq!(then_body.len(), 2);
+            }
+            other => panic!("expected IfElse, got {:?}", other),
+        }
+    }
+
+    // ── Loop ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_loop_basic() {
+        let r = parser().parse("○{loop 3 { stats }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::LoopBlock { count, body }) => {
+                assert_eq!(count, 3);
+                assert_eq!(body.len(), 1);
+                assert_eq!(body[0], OlangExpr::Command("stats".to_string()));
+            }
+            other => panic!("expected LoopBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_loop_zero_is_none() {
+        let r = parser().parse("○{loop 0 { stats }}");
+        // loop 0 returns None from try_parse_loop, falls through to query
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Query(_))));
+    }
+
+    #[test]
+    fn parse_loop_multi_stmt() {
+        let r = parser().parse("○{loop 5 { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::LoopBlock { count, body }) => {
+                assert_eq!(count, 5);
+                assert_eq!(body.len(), 2);
+            }
+            other => panic!("expected LoopBlock, got {:?}", other),
+        }
+    }
+
+    // ── Function Definition ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_fn_def() {
+        let r = parser().parse("○{fn test { stats }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::FnDef { name, body }) => {
+                assert_eq!(name, "test");
+                assert_eq!(body.len(), 1);
+                assert_eq!(body[0], OlangExpr::Command("stats".to_string()));
+            }
+            other => panic!("expected FnDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_fn_multi_stmt() {
+        let r = parser().parse("○{fn boot { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::FnDef { name, body }) => {
+                assert_eq!(name, "boot");
+                assert_eq!(body.len(), 2);
+            }
+            other => panic!("expected FnDef, got {:?}", other),
+        }
+    }
+
+    // ── Braces helper ──────────────────────────────────────────────────────
+
+    #[test]
+    fn find_matching_brace_simple() {
+        assert_eq!(find_matching_brace("{ hello }", 0), Some(8));
+    }
+
+    #[test]
+    fn find_matching_brace_nested() {
+        assert_eq!(find_matching_brace("{ { a } }", 0), Some(8));
+    }
+
+    #[test]
+    fn find_matching_brace_unclosed() {
+        assert_eq!(find_matching_brace("{ hello", 0), None);
     }
 }

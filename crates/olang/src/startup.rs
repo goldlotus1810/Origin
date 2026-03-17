@@ -378,6 +378,16 @@ static BOOTSTRAP_PROGRAMS: &[&str] = &[
 
     // Reflection: inspect → chain structure quality
     "inspect ○;",
+
+    // ── Phase 5: Self-test with new syntax ─────────────────────────────
+    // Loop: verify SDF primitives 3 times (stability test)
+    "loop 3 { stats; };",
+
+    // Let binding: assign concept to variable
+    "let origin = ○;",
+
+    // Assert: verify origin exists
+    "assert origin;",
 ];
 
 /// Bảng alias đa ngôn ngữ cho L0 atoms phổ biến.

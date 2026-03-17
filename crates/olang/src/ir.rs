@@ -329,6 +329,22 @@ pub enum OlangIrExpr {
         name: String,
         value: alloc::boxed::Box<OlangIrExpr>,
     },
+    /// if <cond> { <then> } else { <else> } — conditional branch
+    IfElse {
+        condition: alloc::boxed::Box<OlangIrExpr>,
+        then_branch: Vec<OlangIrExpr>,
+        else_branch: Vec<OlangIrExpr>,
+    },
+    /// loop N { <body> } — repeat N times
+    LoopBlock {
+        count: u32,
+        body: Vec<OlangIrExpr>,
+    },
+    /// fn name { <body> } — function definition (inline block)
+    FnDef {
+        name: String,
+        body: Vec<OlangIrExpr>,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -401,6 +417,83 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
         OlangIrExpr::LetBinding { name, value } => {
             emit_expr(value, prog);
             prog.push_op(Op::Store(name.clone()));
+        }
+
+        OlangIrExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            // Emit condition → stack top
+            emit_expr(condition, prog);
+            // Jz to else/end (placeholder, patch later)
+            let jz_idx = prog.ops.len();
+            prog.push_op(Op::Jz(0)); // placeholder
+
+            // Then branch
+            prog.push_op(Op::ScopeBegin);
+            for e in then_branch {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+
+            if else_branch.is_empty() {
+                // Patch Jz → jump past then
+                let end = prog.ops.len();
+                prog.ops[jz_idx] = Op::Jz(end);
+            } else {
+                // Jmp past else (placeholder)
+                let jmp_idx = prog.ops.len();
+                prog.push_op(Op::Jmp(0)); // placeholder
+
+                // Patch Jz → jump to else start
+                let else_start = prog.ops.len();
+                prog.ops[jz_idx] = Op::Jz(else_start);
+
+                // Else branch
+                prog.push_op(Op::ScopeBegin);
+                for e in else_branch {
+                    emit_expr(e, prog);
+                }
+                prog.push_op(Op::ScopeEnd);
+
+                // Patch Jmp → jump past else
+                let end = prog.ops.len();
+                prog.ops[jmp_idx] = Op::Jmp(end);
+            }
+        }
+
+        OlangIrExpr::LoopBlock { count, body } => {
+            prog.push_op(Op::Loop(*count));
+            prog.push_op(Op::ScopeBegin);
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+        }
+
+        OlangIrExpr::FnDef { name, body } => {
+            // Jump over the function body (don't execute at definition time)
+            let jmp_idx = prog.ops.len();
+            prog.push_op(Op::Jmp(0)); // placeholder
+
+            // Function entry point — Call(name) will jump here
+            let fn_start = prog.ops.len();
+            prog.push_op(Op::ScopeBegin);
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+            prog.push_op(Op::Ret);
+
+            // Patch jump over function body
+            let after_fn = prog.ops.len();
+            prog.ops[jmp_idx] = Op::Jmp(after_fn);
+
+            // Register function name → entry point (store as alias for Call)
+            // Use Store to remember fn_start as a named entry
+            // For now, emit a Nop — function lookup happens via Call(name)
+            let _ = (name, fn_start); // fn table would go here
         }
     }
 }
@@ -565,5 +658,87 @@ mod tests {
             let b = op.to_bytes();
             assert!(!b.is_empty(), "{} serialize không được empty", op.name());
         }
+    }
+
+    #[test]
+    fn compile_if_then() {
+        let expr = OlangIrExpr::IfElse {
+            condition: alloc::boxed::Box::new(OlangIrExpr::Query("fire".into())),
+            then_branch: alloc::vec![OlangIrExpr::Command("stats".into())],
+            else_branch: alloc::vec![],
+        };
+        let prog = compile_expr(&expr);
+        // Should contain: Load fire, Jz(end), ScopeBegin, Stats, ScopeEnd, Emit, Halt
+        assert!(prog.ops.contains(&Op::Load("fire".into())));
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))));
+        assert!(prog.ops.contains(&Op::ScopeBegin));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::ScopeEnd));
+    }
+
+    #[test]
+    fn compile_if_else() {
+        let expr = OlangIrExpr::IfElse {
+            condition: alloc::boxed::Box::new(OlangIrExpr::Query("fire".into())),
+            then_branch: alloc::vec![OlangIrExpr::Command("stats".into())],
+            else_branch: alloc::vec![OlangIrExpr::Command("dream".into())],
+        };
+        let prog = compile_expr(&expr);
+        // Should contain: Load, Jz, ScopeBegin, Stats, ScopeEnd, Jmp, ScopeBegin, Dream, ScopeEnd
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))));
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jmp(_))));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::Dream));
+    }
+
+    #[test]
+    fn compile_loop_block() {
+        let expr = OlangIrExpr::LoopBlock {
+            count: 3,
+            body: alloc::vec![OlangIrExpr::Command("stats".into())],
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.contains(&Op::Loop(3)));
+        assert!(prog.ops.contains(&Op::ScopeBegin));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::ScopeEnd));
+    }
+
+    #[test]
+    fn compile_fn_def() {
+        let expr = OlangIrExpr::FnDef {
+            name: "test".into(),
+            body: alloc::vec![OlangIrExpr::Command("stats".into())],
+        };
+        let prog = compile_expr(&expr);
+        // Should contain: Jmp(skip fn), ScopeBegin, Stats, ScopeEnd, Ret
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jmp(_))));
+        assert!(prog.ops.contains(&Op::ScopeBegin));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::Ret));
+    }
+
+    #[test]
+    fn compile_let_binding() {
+        let expr = OlangIrExpr::LetBinding {
+            name: "x".into(),
+            value: alloc::boxed::Box::new(OlangIrExpr::Query("fire".into())),
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.contains(&Op::Load("fire".into())));
+        assert!(prog.ops.contains(&Op::Store("x".into())));
+    }
+
+    #[test]
+    fn compile_molecular_literal() {
+        let expr = OlangIrExpr::MolecularLiteral {
+            shape: 1,
+            relation: 6,
+            valence: 200,
+            arousal: 180,
+            time: 4,
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.contains(&Op::PushMol(1, 6, 200, 180, 4)));
     }
 }

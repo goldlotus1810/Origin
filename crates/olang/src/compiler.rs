@@ -513,4 +513,50 @@ mod tests {
         // Function name derived from program name
         assert!(src.contains("void "), "Function declaration");
     }
+
+    #[test]
+    fn compile_if_else_all_targets() {
+        use crate::ir::{compile_expr, OlangIrExpr};
+        let expr = OlangIrExpr::IfElse {
+            condition: alloc::boxed::Box::new(OlangIrExpr::Query("fire".into())),
+            then_branch: alloc::vec![OlangIrExpr::Command("stats".into())],
+            else_branch: alloc::vec![OlangIrExpr::Command("dream".into())],
+        };
+        let prog = compile_expr(&expr);
+        for target in [Target::C, Target::Rust, Target::Wasm] {
+            let result = Compiler::new(target).emit(&prog);
+            assert!(result.is_ok(), "{} if/else failed: {:?}", target.name(), result.err());
+        }
+    }
+
+    #[test]
+    fn compile_loop_all_targets() {
+        use crate::ir::{compile_expr, OlangIrExpr};
+        let expr = OlangIrExpr::LoopBlock {
+            count: 5,
+            body: alloc::vec![OlangIrExpr::Command("stats".into())],
+        };
+        let prog = compile_expr(&expr);
+        for target in [Target::C, Target::Rust, Target::Wasm] {
+            let result = Compiler::new(target).emit(&prog);
+            assert!(result.is_ok(), "{} loop failed: {:?}", target.name(), result.err());
+            let src = result.unwrap();
+            // C: for loop, Rust: for loop, WAT: loop structure
+            assert!(!src.is_empty(), "{} loop output rỗng", target.name());
+        }
+    }
+
+    #[test]
+    fn compile_fn_def_all_targets() {
+        use crate::ir::{compile_expr, OlangIrExpr};
+        let expr = OlangIrExpr::FnDef {
+            name: "boot".into(),
+            body: alloc::vec![OlangIrExpr::Command("stats".into())],
+        };
+        let prog = compile_expr(&expr);
+        for target in [Target::C, Target::Rust, Target::Wasm] {
+            let result = Compiler::new(target).emit(&prog);
+            assert!(result.is_ok(), "{} fn failed: {:?}", target.name(), result.err());
+        }
+    }
 }
