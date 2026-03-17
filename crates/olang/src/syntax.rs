@@ -412,7 +412,13 @@ impl<'a> Parser<'a> {
         let then_block = self.parse_block()?;
         let else_block = if self.check(&Token::Else) {
             self.advance();
-            Some(self.parse_block()?)
+            if self.check(&Token::If) {
+                // else if → nested if as single-stmt else block
+                let nested_if = self.parse_if()?;
+                Some(alloc::vec![nested_if])
+            } else {
+                Some(self.parse_block()?)
+            }
         } else {
             None
         };

@@ -1009,6 +1009,9 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             let builtin = match name.as_str() {
                 "len" => Some("__array_len"),
                 "push" => Some("__array_push"),
+                "concat" => Some("__concat"),
+                "head" => Some("__head"),
+                "tail" => Some("__tail"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {

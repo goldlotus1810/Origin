@@ -597,6 +597,33 @@ impl OlangVM {
                                 let _ = stack.push(MolecularChain::from_number(count as f64));
                             }
                         }
+                        "__concat" => {
+                            // Concatenate two chains: pop b, pop a, push a+b
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(a.0.iter().copied());
+                            result.0.extend(b.0.iter().copied());
+                            let _ = stack.push(result);
+                        }
+                        "__head" => {
+                            // First molecule of chain
+                            let chain = vm_pop!(stack, events);
+                            if let Some(mol) = chain.0.first() {
+                                let _ = stack.push(MolecularChain(alloc::vec![*mol]));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__tail" => {
+                            // Chain without first molecule
+                            let chain = vm_pop!(stack, events);
+                            if chain.0.len() > 1 {
+                                let _ = stack.push(MolecularChain(chain.0[1..].to_vec()));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
                         "__array_push" => {
                             // Stack: [array, element]
                             let elem = vm_pop!(stack, events);
