@@ -330,6 +330,70 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Type Inference — dự đoán kiểu chain từ expression
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Kiểu suy luận cho expression. Olang chỉ có 1 kiểu (MolecularChain),
+/// nhưng type hints giúp phát hiện lỗi sớm và tối ưu codegen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChainKind {
+    /// Chain chứa SDF primitives (geometric shapes)
+    Sdf,
+    /// Chain chứa Math/Relation ops
+    Math,
+    /// Chain chứa cảm xúc mạnh (extreme valence)
+    Emoticon,
+    /// Chain số (từ PushNum hoặc arithmetic)
+    Numeric,
+    /// Chưa biết (runtime mới xác định)
+    Unknown,
+    /// Void — statements không trả về chain (let, emit, command)
+    Void,
+}
+
+/// Infer chain kind cho expression (best-effort, static analysis).
+pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
+    match expr {
+        Expr::Int(_) => ChainKind::Numeric,
+        Expr::Ident(_) | Expr::Str(_) => ChainKind::Unknown,
+        Expr::Compose(a, b) => {
+            // LCA of two chains: if both same kind → same kind; otherwise Unknown
+            let ka = infer_expr_kind(a);
+            let kb = infer_expr_kind(b);
+            if ka == kb { ka } else { ChainKind::Unknown }
+        }
+        Expr::Arith { .. } => ChainKind::Numeric,
+        Expr::PhysOp { .. } => ChainKind::Numeric,
+        Expr::Truth { .. } => ChainKind::Unknown,
+        Expr::RelEdge { .. } | Expr::RelQuery { .. } | Expr::Chain { .. } => ChainKind::Unknown,
+        Expr::Call { .. } => ChainKind::Unknown,
+        Expr::Group(inner) => infer_expr_kind(inner),
+        Expr::MolLiteral { shape, valence, .. } => {
+            // Heuristic: check shape and valence to classify
+            match shape {
+                Some(s) if *s <= 4 => ChainKind::Sdf, // Sphere..Cone
+                Some(s) if *s >= 5 => ChainKind::Math, // Torus..Subtract
+                _ => match valence {
+                    Some(v) if *v < 80 || *v > 176 => ChainKind::Emoticon,
+                    _ => ChainKind::Unknown,
+                },
+            }
+        }
+    }
+}
+
+/// Infer kind cho statement (most statements → Void).
+pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
+    match stmt {
+        Stmt::Let { .. } | Stmt::Emit(_) | Stmt::Command(_) | Stmt::CommandArg { .. } => {
+            ChainKind::Void
+        }
+        Stmt::Expr(expr) => infer_expr_kind(expr),
+        Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. } => ChainKind::Void,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Lowering — AST → OlangProgram
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1123,5 +1187,53 @@ mod tests {
         let prog = lower(&stmts);
         assert!(prog.ops.contains(&Op::PushMol(2, 3, 100, 50, 1)));
         assert!(prog.ops.contains(&Op::Emit));
+    }
+
+    // ── Type Inference ──────────────────────────────────────────────────
+
+    #[test]
+    fn infer_int_is_numeric() {
+        let stmts = parse("42").unwrap();
+        if let Stmt::Expr(ref e) = stmts[0] {
+            assert_eq!(infer_expr_kind(e), ChainKind::Numeric);
+        }
+    }
+
+    #[test]
+    fn infer_arith_is_numeric() {
+        let stmts = parse("1 + 2").unwrap();
+        if let Stmt::Expr(ref e) = stmts[0] {
+            assert_eq!(infer_expr_kind(e), ChainKind::Numeric);
+        }
+    }
+
+    #[test]
+    fn infer_ident_is_unknown() {
+        let stmts = parse("fire").unwrap();
+        if let Stmt::Expr(ref e) = stmts[0] {
+            assert_eq!(infer_expr_kind(e), ChainKind::Unknown);
+        }
+    }
+
+    #[test]
+    fn infer_mol_literal_sdf() {
+        let stmts = parse("{ S=1 }").unwrap();
+        if let Stmt::Expr(ref e) = stmts[0] {
+            assert_eq!(infer_expr_kind(e), ChainKind::Sdf);
+        }
+    }
+
+    #[test]
+    fn infer_mol_literal_emoticon() {
+        let stmts = parse("{ V=200 A=200 }").unwrap();
+        if let Stmt::Expr(ref e) = stmts[0] {
+            assert_eq!(infer_expr_kind(e), ChainKind::Emoticon);
+        }
+    }
+
+    #[test]
+    fn infer_let_is_void() {
+        let stmts = parse("let x = fire;").unwrap();
+        assert_eq!(infer_stmt_kind(&stmts[0]), ChainKind::Void);
     }
 }

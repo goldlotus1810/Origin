@@ -23,6 +23,8 @@ use silk::walk::ResponseTone;
 use crate::parser::{OlangExpr, OlangParser, ParseResult, RelationOp};
 use olang::compiler::{Compiler, Target};
 use olang::ir::{compile_expr, OlangIrExpr};
+use olang::semantic;
+use olang::syntax;
 use olang::knowtree::KnowTree;
 use olang::registry::Registry;
 use vsdf::body::{body_from_molecule, BodyStore};
@@ -1288,31 +1290,49 @@ impl HomeRuntime {
                     }
                 };
 
-                // Parse source as Olang expression
-                let parse_result = self.parser.parse(&format!("○{{{}}}", source));
-                let expr = match parse_result {
-                    ParseResult::OlangExpr(e) => e,
-                    ParseResult::Error(e) => {
-                        return Response {
-                            text: format!("Parse error: {}", e),
-                            tone: ResponseTone::Engaged,
-                            fx: 0.0,
-                            kind: ResponseKind::System,
-                        };
+                // Try full Olang syntax pipeline first (with semantic validation)
+                let prog = match syntax::parse(source) {
+                    Ok(stmts) => {
+                        // Semantic validation
+                        let errors = semantic::validate(&stmts);
+                        if !errors.is_empty() {
+                            let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
+                            return Response {
+                                text: format!("Semantic error:\n{}", msgs.join("\n")),
+                                tone: ResponseTone::Engaged,
+                                fx: 0.0,
+                                kind: ResponseKind::System,
+                            };
+                        }
+                        // Lower AST → OlangProgram (IR)
+                        semantic::lower(&stmts)
                     }
-                    _ => {
-                        return Response {
-                            text: String::from("compile: source must be an Olang expression"),
-                            tone: ResponseTone::Engaged,
-                            fx: 0.0,
-                            kind: ResponseKind::System,
+                    Err(_) => {
+                        // Fallback: try ○{} parser for simple expressions
+                        let parse_result = self.parser.parse(&format!("○{{{}}}", source));
+                        let expr = match parse_result {
+                            ParseResult::OlangExpr(e) => e,
+                            ParseResult::Error(e) => {
+                                return Response {
+                                    text: format!("Parse error: {}", e),
+                                    tone: ResponseTone::Engaged,
+                                    fx: 0.0,
+                                    kind: ResponseKind::System,
+                                };
+                            }
+                            _ => {
+                                return Response {
+                                    text: String::from("compile: source must be an Olang expression"),
+                                    tone: ResponseTone::Engaged,
+                                    fx: 0.0,
+                                    kind: ResponseKind::System,
+                                };
+                            }
                         };
+                        let ir_expr = olang_expr_to_ir(expr);
+                        compile_expr(&ir_expr)
                     }
                 };
-
-                // Compile: Expr → IR → Program → Target source
-                let ir_expr = olang_expr_to_ir(expr);
-                let prog = compile_expr(&ir_expr);
                 let compiler = Compiler::new(target);
                 match compiler.emit(&prog) {
                     Ok(output) => Response {

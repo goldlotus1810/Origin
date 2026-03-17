@@ -393,6 +393,37 @@ static BOOTSTRAP_PROGRAMS: &[&str] = &[
 
     // Assert: verify origin exists
     "assert origin;",
+
+    // ── Phase 6: Axiom verification ─────────────────────────────────────
+    // QT1: ○ là nguồn gốc — compose origin with self = same origin
+    "let qt1 = ○ ∘ ○;",
+    "assert qt1;",
+
+    // QT2: ∞-1 is correct — fuse ensures finite chain
+    "fuse;",
+
+    // QT3: group shape primitives — 4 SDF shapes compose to abstract "shape"
+    "let shapes = ● ∘ ▬ ∘ ■ ∘ ▲;",
+    "assert shapes;",
+
+    // QT3: group relations — abstract "relation" from primitives
+    "let rels = ∈ ∘ ⊂ ∘ ≡ ∘ →;",
+    "assert rels;",
+
+    // ── Phase 7: Instinct definitions (Olang programs) ──────────────────
+    // Honesty instinct: typeof checks knowledge quality
+    "fn check_honesty { typeof ○; };",
+
+    // Analogy instinct: compute delta between two concepts
+    "fn check_analogy { let d = ● ∘ ▲; assert d; };",
+
+    // Causality instinct: verify → relation exists
+    "fn check_causality { let c = ● → ▲; assert c; };",
+
+    // Run instinct checks
+    "check_honesty;",
+    "check_analogy;",
+    "check_causality;",
 ];
 
 /// Bảng alias đa ngôn ngữ cho L0 atoms phổ biến.
