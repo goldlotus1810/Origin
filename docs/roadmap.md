@@ -1,6 +1,4 @@
-# HomeOS — Kế Hoạch (LỊCH SỬ)
-
-> **⚠️ FILE NÀY LÀ LỊCH SỬ. Trạng thái hiện tại xem: [NEXT_PLAN.md](../NEXT_PLAN.md)**
+# HomeOS — Kế Hoạch Tiếp Theo
 
 **Ngày:** 2026-03-17
 **Dựa trên:** REVIEW.md, HomeOS_Roadmap.md, HomeOS_Solutions.md
