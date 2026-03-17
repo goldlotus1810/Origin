@@ -20,8 +20,8 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+use crate::sha256::Sha256;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use sha2::{Digest, Sha256};
 
 use crate::molecular::MolecularChain;
 

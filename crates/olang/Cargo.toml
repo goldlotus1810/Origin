@@ -14,5 +14,4 @@ std     = []
 ucd = { workspace = true }
 
 ed25519-dalek = { workspace = true }
-sha2          = { workspace = true }
 homemath      = { workspace = true }

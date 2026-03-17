@@ -26,6 +26,7 @@ pub mod math;
 pub mod molecular;
 pub mod precision;
 pub mod qr;
+pub mod sha256;
 pub mod reader;
 pub mod registry;
 pub mod self_model;
