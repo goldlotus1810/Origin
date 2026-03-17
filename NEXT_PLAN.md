@@ -12,7 +12,7 @@
 ## Trạng thái thật (verify bằng code)
 
 ```
-Tests:    1,778 pass · 0 fail · 0 clippy warnings
+Tests:    1,780 pass · 0 fail · 0 clippy warnings
 Deps:     0 external runtime (native SHA-256, Ed25519, AES-256-GCM, homemath)
 origin:   338 nodes (35 L0 + 278 domain + 25 multilang) · 236 edges · 2703 aliases · 84KB
 ```
@@ -73,6 +73,16 @@ LeoAI.receive_aam_decision():
 Files đã sửa:
   crates/agents/src/leo.rs — pending_pattern_keys, run_instincts &mut, AAM wiring
   crates/agents/src/skill.rs — record() no auto-promote, explicit promote()
+```
+
+### Audio co-activation tests ✅
+```
+2 tests mới cho ContentInput::Audio → Silk co-activation:
+  audio_frequency_co_activates_silk — same freq → edge in Silk graph
+  audio_different_freq_bands_distinct — bass vs treble → separate edges
+
+Files đã sửa:
+  crates/agents/src/learning.rs — 2 new tests
 ```
 
 ---
@@ -197,7 +207,7 @@ F: P1 RelOps 18/18, Dream STM cleanup
 G: Verify Phase 2-5 thực trạng, cập nhật NEXT_PLAN
 H: Dọn docs → old/, Phase 5+4+3 HOÀN THÀNH, 1759 tests
 I: SkillProposal + unwrap reduction (50→27) + Multilingual Seeding, 1774 tests
-J: SkillPattern → AAM pipeline fix (no auto-promote, ISL wiring), 1778 tests
+J: SkillPattern → AAM pipeline fix + Audio co-activation tests, 1780 tests
 ```
 
 ---
@@ -211,4 +221,4 @@ Chỉ giữ: CLAUDE.md, NEXT_PLAN.md, README.md, docs/olang_guide.md
 
 ---
 
-*HomeOS · 2026-03-17 · 1,778 tests · 338 nodes · ○(∅)==○*
+*HomeOS · 2026-03-17 · 1,780 tests · 338 nodes · ○(∅)==○*

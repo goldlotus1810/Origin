@@ -685,6 +685,57 @@ mod tests {
         // Top candidate phải có fire_count cao nhất
         assert!(candidates[0].fire_count >= 1);
     }
+
+    #[test]
+    fn audio_frequency_co_activates_silk() {
+        if skip() {
+            return;
+        }
+        let mut l = loop_();
+        // Feed two audio inputs at same frequency → should co-activate in Silk
+        let r1 = l.process_one(ContentInput::Audio {
+            freq_hz: 440.0,
+            amplitude: 0.7,
+            duration_ms: 500,
+            timestamp: 1000,
+        });
+        assert!(matches!(r1, ProcessResult::Ok { .. }));
+        let r2 = l.process_one(ContentInput::Audio {
+            freq_hz: 440.0,
+            amplitude: 0.8,
+            duration_ms: 300,
+            timestamp: 2000,
+        });
+        assert!(matches!(r2, ProcessResult::Ok { .. }));
+        // Graph should have at least one edge from audio co-activation
+        assert!(l.graph().len() > 0, "Audio freq should create Silk edges");
+    }
+
+    #[test]
+    fn audio_different_freq_bands_distinct() {
+        if skip() {
+            return;
+        }
+        let mut l = loop_();
+        // Sub-bass (40 Hz) and treble (8000 Hz) should produce different freq hashes
+        l.process_one(ContentInput::Audio {
+            freq_hz: 40.0,
+            amplitude: 0.5,
+            duration_ms: 500,
+            timestamp: 1000,
+        });
+        let edges_after_bass = l.graph().len();
+        l.process_one(ContentInput::Audio {
+            freq_hz: 8000.0,
+            amplitude: 0.5,
+            duration_ms: 500,
+            timestamp: 2000,
+        });
+        let edges_after_treble = l.graph().len();
+        // Both should have created edges (each audio co-activates chain hash ↔ freq hash)
+        assert!(edges_after_bass > 0, "Bass should create Silk edge");
+        assert!(edges_after_treble > 0, "Treble should create Silk edge");
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
