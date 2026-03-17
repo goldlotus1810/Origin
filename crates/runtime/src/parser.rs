@@ -131,6 +131,8 @@ pub enum CmpOp {
     Le,
     /// >= greater or equal
     Ge,
+    /// != not equal
+    Ne,
 }
 
 /// Arithmetic operator trong ○{}.
@@ -736,7 +738,7 @@ impl OlangParser {
     /// Try to parse comparison: "x < 10", "count >= 5", "3 <= y"
     fn try_parse_compare(&self, s: &str) -> Option<OlangExpr> {
         // Try two-char operators first (<=, >=), then single-char (<, >)
-        for (pat, op) in &[("<=", CmpOp::Le), (">=", CmpOp::Ge), ("<", CmpOp::Lt), (">", CmpOp::Gt)] {
+        for (pat, op) in &[("!=", CmpOp::Ne), ("<=", CmpOp::Le), (">=", CmpOp::Ge), ("<", CmpOp::Lt), (">", CmpOp::Gt)] {
             if let Some(pos) = s.find(pat) {
                 let lhs_str = s[..pos].trim();
                 let rhs_str = s[pos + pat.len()..].trim();
@@ -1927,6 +1929,17 @@ mod tests {
                 assert!(!body.is_empty());
             }
             other => panic!("expected While, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_compare_ne() {
+        let r = parser().parse("○{x != 3}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Compare { op, .. }) => {
+                assert_eq!(op, CmpOp::Ne);
+            }
+            other => panic!("expected Compare Ne, got {:?}", other),
         }
     }
 }

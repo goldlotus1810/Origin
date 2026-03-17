@@ -79,7 +79,7 @@ pub fn classify(c: char) -> CharClass {
         // Physical (QT3: proven — đã chứng minh)
         '⧺' | '⊖' => CharClass::Physical,
         // Delimiters
-        '{' | '}' | '(' | ')' | ';' | ',' | '=' | '?' | '"' | '|' => CharClass::Delimiter,
+        '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',' | '=' | '?' | '"' | '|' | '.' | ':' => CharClass::Delimiter,
         // Whitespace
         ' ' | '\t' | '\n' | '\r' => CharClass::Whitespace,
         // Digits
@@ -329,6 +329,14 @@ pub enum Keyword {
     In,
     /// `while` — conditional loop
     While,
+    /// `break` — exit loop
+    Break,
+    /// `continue` — skip to next iteration
+    Continue,
+    /// `return` — return value from function
+    Return,
+    /// `use` — import module
+    Use,
 }
 
 /// Check xem string có phải keyword không.
@@ -346,6 +354,10 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "for" => Some(Keyword::For),
         "in" => Some(Keyword::In),
         "while" => Some(Keyword::While),
+        "break" => Some(Keyword::Break),
+        "continue" => Some(Keyword::Continue),
+        "return" => Some(Keyword::Return),
+        "use" => Some(Keyword::Use),
         _ => None,
     }
 }
@@ -470,6 +482,32 @@ pub enum Token {
     Le,
     /// `>=` — greater than or equal
     Ge,
+    /// `!=` — not equal
+    Ne,
+    /// `!` — logical not
+    Not,
+    /// `&&` — logical and
+    And,
+    /// `||` — logical or
+    Or,
+    /// `break`
+    Break,
+    /// `continue`
+    Continue,
+    /// `return`
+    Return,
+    /// `use`
+    Use,
+    /// `[`
+    LBracket,
+    /// `]`
+    RBracket,
+    /// `.`
+    Dot,
+    /// `:`
+    Colon,
+    /// `|>` — pipe operator (Julia-style: output feeds into next)
+    PipeArrow,
 
     // ── End ──
     /// End of input
@@ -561,6 +599,14 @@ impl<'a> Lexer<'a> {
                 self.chars.next();
                 return Token::RParen;
             }
+            '[' => {
+                self.chars.next();
+                return Token::LBracket;
+            }
+            ']' => {
+                self.chars.next();
+                return Token::RBracket;
+            }
             ';' => {
                 self.chars.next();
                 return Token::Semi;
@@ -583,13 +629,38 @@ impl<'a> Lexer<'a> {
                 }
                 return Token::Eq;
             }
+            '!' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Ne;
+                }
+                return Token::Not;
+            }
             '?' => {
                 self.chars.next();
                 return Token::Wild;
             }
             '|' => {
                 self.chars.next();
+                if let Some(&(_, '|')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Or;
+                }
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::PipeArrow;
+                }
                 return Token::Pipe;
+            }
+            '&' => {
+                self.chars.next();
+                if let Some(&(_, '&')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::And;
+                }
+                // Single & is not a valid token, treat as ident
+                return Token::Ident("&".into());
             }
             '"' => {
                 return self.lex_string();
@@ -600,7 +671,11 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     return Token::DotDot;
                 }
-                return Token::Ident(".".into());
+                return Token::Dot;
+            }
+            ':' => {
+                self.chars.next();
+                return Token::Colon;
             }
             '<' => {
                 self.chars.next();
@@ -645,11 +720,39 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(&(_, c)) = self.chars.peek() {
-            if c.is_whitespace() {
-                self.chars.next();
-            } else {
-                break;
+        loop {
+            match self.chars.peek() {
+                Some(&(_, c)) if c.is_whitespace() => {
+                    self.chars.next();
+                }
+                // // line comment
+                Some(&(pos, '/')) => {
+                    let next_pos = pos + 1;
+                    // Peek two chars ahead manually
+                    let src_bytes = self.src.as_bytes();
+                    if next_pos < src_bytes.len() && src_bytes[next_pos] == b'/' {
+                        // Line comment: skip until newline
+                        self.chars.next(); // consume first /
+                        self.chars.next(); // consume second /
+                        while let Some(&(_, c)) = self.chars.peek() {
+                            if c == '\n' { break; }
+                            self.chars.next();
+                        }
+                    } else if next_pos < src_bytes.len() && src_bytes[next_pos] == b'*' {
+                        // Block comment: skip until */
+                        self.chars.next(); // consume /
+                        self.chars.next(); // consume *
+                        let mut prev = ' ';
+                        while let Some(&(_, c)) = self.chars.peek() {
+                            self.chars.next();
+                            if prev == '*' && c == '/' { break; }
+                            prev = c;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
             }
         }
     }
@@ -710,6 +813,10 @@ impl<'a> Lexer<'a> {
                 Keyword::For => Token::For,
                 Keyword::In => Token::In,
                 Keyword::While => Token::While,
+                Keyword::Break => Token::Break,
+                Keyword::Continue => Token::Continue,
+                Keyword::Return => Token::Return,
+                Keyword::Use => Token::Use,
             };
         }
 

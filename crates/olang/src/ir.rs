@@ -118,6 +118,10 @@ pub enum Op {
     TryBegin(usize),
     /// CatchEnd: end of catch handler, marks the resume point after try/catch.
     CatchEnd,
+    /// Pop top, update existing variable searching ALL scopes (for reassignment).
+    /// Unlike Store which always writes to innermost scope, StoreUpdate
+    /// searches from innermost outward and updates the first match.
+    StoreUpdate(String),
 }
 
 impl Op {
@@ -157,6 +161,7 @@ impl Op {
             Self::PushMol(..) => "PUSH_MOL",
             Self::TryBegin(_) => "TRY_BEGIN",
             Self::CatchEnd => "CATCH_END",
+            Self::StoreUpdate(_) => "STORE_UPDATE",
         }
     }
 
@@ -241,6 +246,12 @@ impl Op {
                 b
             }
             Self::CatchEnd => alloc::vec![0x38],
+            Self::StoreUpdate(s) => {
+                let sb = s.as_bytes();
+                let mut b = alloc::vec![0x39, sb.len() as u8];
+                b.extend_from_slice(sb);
+                b
+            }
         }
     }
 }

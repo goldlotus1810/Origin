@@ -152,6 +152,29 @@ impl VmStack {
 /// Classify chain by dominant molecule characteristics.
 ///
 /// Maps ShapeBase to Unicode group categories:
+/// Split an array-encoded MolecularChain by separator molecules (shape=0, relation=0).
+fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
+    if chain.is_empty() {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    let mut current = Vec::new();
+    for mol in &chain.0 {
+        if mol.shape == 0 && mol.relation == 0
+            && mol.emotion.valence == 0 && mol.emotion.arousal == 0
+            && mol.time == 0
+        {
+            // Separator — finalize current element
+            result.push(MolecularChain(core::mem::take(&mut current)));
+        } else {
+            current.push(*mol);
+        }
+    }
+    // Last element (no trailing separator)
+    result.push(MolecularChain(current));
+    result
+}
+
 /// - SDF shapes (Sphere●, Capsule▬, Box■, Cone▲) → geometric primitives
 /// - CSG ops (Torus○, Union∪, Intersect∩, Subtract∖) → mathematical composition
 /// - High emotion valence → emoticon-like
@@ -432,7 +455,7 @@ impl OlangVM {
                             };
                             let _ = stack.push(MolecularChain::from_number(result));
                         }
-                        "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" => {
+                        "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
                             let na = a.to_number().unwrap_or(0.0);
@@ -442,11 +465,21 @@ impl OlangVM {
                                 "__cmp_gt" => na > nb,
                                 "__cmp_le" => na <= nb,
                                 "__cmp_ge" => na >= nb,
+                                "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
                                 _ => false,
                             };
                             // true → non-empty chain (1.0), false → empty chain
                             // Jz checks is_empty() so empty = falsy
                             if truthy {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__logic_not" => {
+                            let a = vm_pop!(stack, events);
+                            // Invert: empty → 1.0 (truthy), non-empty → empty (falsy)
+                            if a.is_empty() {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
                             } else {
                                 let _ = stack.push(MolecularChain::empty());
@@ -517,6 +550,257 @@ impl OlangVM {
                                 let _ = stack.push(MolecularChain::empty());
                             }
                         }
+                        "__array_new" => {
+                            // Stack: [... elem0, elem1, ..., elemN-1, count]
+                            // Pop count first (on top), then elements in reverse order
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut elements = Vec::new();
+                            for _ in 0..count {
+                                elements.push(vm_pop!(stack, events));
+                            }
+                            elements.reverse(); // restore original order
+                            // Build array chain: elem0 | sep | elem1 | sep | elem2 ...
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (i, elem) in elements.into_iter().enumerate() {
+                                if i > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_get" => {
+                            // Stack: [array, index]
+                            let idx_chain = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let idx = idx_chain.to_number().unwrap_or(0.0) as usize;
+                            // Split array by separator molecules (shape=0, relation=0)
+                            let elements = split_array_chain(&arr);
+                            if idx < elements.len() {
+                                let _ = stack.push(elements[idx].clone());
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__array_len" => {
+                            let arr = vm_pop!(stack, events);
+                            if arr.is_empty() {
+                                let _ = stack.push(MolecularChain::from_number(0.0));
+                            } else {
+                                let count = split_array_chain(&arr).len();
+                                let _ = stack.push(MolecularChain::from_number(count as f64));
+                            }
+                        }
+                        "__concat" => {
+                            // Concatenate two chains: pop b, pop a, push a+b
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(a.0.iter().copied());
+                            result.0.extend(b.0.iter().copied());
+                            let _ = stack.push(result);
+                        }
+                        "__head" => {
+                            // First molecule of chain
+                            let chain = vm_pop!(stack, events);
+                            if let Some(mol) = chain.0.first() {
+                                let _ = stack.push(MolecularChain(alloc::vec![*mol]));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__tail" => {
+                            // Chain without first molecule
+                            let chain = vm_pop!(stack, events);
+                            if chain.0.len() > 1 {
+                                let _ = stack.push(MolecularChain(chain.0[1..].to_vec()));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__array_push" => {
+                            // Stack: [array, element]
+                            let elem = vm_pop!(stack, events);
+                            let mut arr = vm_pop!(stack, events);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            if !arr.is_empty() {
+                                arr.0.push(sep);
+                            }
+                            arr.0.extend(elem.0.iter().cloned());
+                            let _ = stack.push(arr);
+                        }
+                        "__dict_new" => {
+                            // Stack: [key0, val0, key1, val1, ..., count]
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut pairs = Vec::new();
+                            for _ in 0..count {
+                                let val = vm_pop!(stack, events);
+                                let key = vm_pop!(stack, events);
+                                pairs.push((key, val));
+                            }
+                            pairs.reverse();
+                            // Encode as flat chain: key0|sep|val0|sep|key1|sep|val1...
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (i, (key, val)) in pairs.into_iter().enumerate() {
+                                if i > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(key.0.iter().cloned());
+                                result.0.push(sep);
+                                result.0.extend(val.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__dict_get" => {
+                            // Stack: [dict, key]
+                            let key = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            let elements = split_array_chain(&dict);
+                            // Keys at even indices, values at odd indices
+                            let mut found = false;
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == key.0 {
+                                    let _ = stack.push(elements[i + 1].clone());
+                                    found = true;
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            if !found {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__dict_keys" => {
+                            // Stack: [dict]
+                            // Returns array of keys (even-indexed elements)
+                            let dict = vm_pop!(stack, events);
+                            let elements = split_array_chain(&dict);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            let mut key_idx = 0;
+                            let mut i = 0;
+                            while i < elements.len() {
+                                if key_idx > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(elements[i].0.iter().cloned());
+                                key_idx += 1;
+                                i += 2; // skip values
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__dict_set" => {
+                            // Stack: [dict, key, value]
+                            let value = vm_pop!(stack, events);
+                            let key = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            let mut elements = split_array_chain(&dict);
+                            // Find and update existing key, or append
+                            let mut found = false;
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == key.0 {
+                                    elements[i + 1] = value.clone();
+                                    found = true;
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            if !found {
+                                elements.push(key);
+                                elements.push(value);
+                            }
+                            // Rebuild chain from elements
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (j, elem) in elements.into_iter().enumerate() {
+                                if j > 0 {
+                                    result.0.push(sep);
+                                }
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__str_len" => {
+                            // String length: count molecules in chain
+                            let s = vm_pop!(stack, events);
+                            let _ = stack.push(MolecularChain::from_number(s.0.len() as f64));
+                        }
+                        "__str_concat" => {
+                            // Concatenate two chains
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let mut result = a.0.clone();
+                            result.extend(b.0.iter().cloned());
+                            let _ = stack.push(MolecularChain(result));
+                        }
+                        "__to_string" => {
+                            // Number → string chain: encode digits as molecules
+                            let val = vm_pop!(stack, events);
+                            let n = val.to_number().unwrap_or(0.0);
+                            let s = if n == (n as i64 as f64) {
+                                alloc::format!("{}", n as i64)
+                            } else {
+                                alloc::format!("{}", n)
+                            };
+                            let mut mols = Vec::new();
+                            for b in s.bytes() {
+                                mols.push(Molecule {
+                                    shape: 0x02, relation: 0x01,
+                                    emotion: EmotionDim { valence: b, arousal: 0 },
+                                    time: 0x01,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__to_number" => {
+                            // String chain → number: decode molecules back to digits
+                            let val = vm_pop!(stack, events);
+                            // Try as number first
+                            if let Some(n) = val.to_number() {
+                                let _ = stack.push(MolecularChain::from_number(n));
+                            } else {
+                                // Decode string bytes from valence
+                                let s: String = val.0.iter()
+                                    .map(|m| m.emotion.valence as char)
+                                    .collect();
+                                if let Ok(n) = s.parse::<f64>() {
+                                    let _ = stack.push(MolecularChain::from_number(n));
+                                } else {
+                                    let _ = stack.push(MolecularChain::from_number(0.0));
+                                }
+                            }
+                        }
+                        "__print" => {
+                            // Print: emit top of stack as output (same as Emit but via call)
+                            let val = vm_pop!(stack, events);
+                            events.push(VmEvent::Output(val));
+                        }
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
@@ -546,6 +830,25 @@ impl OlangVM {
                         entry.1 = val;
                     } else {
                         scope.push((name.clone(), val));
+                    }
+                }
+
+                Op::StoreUpdate(name) => {
+                    let val = vm_pop!(stack, events);
+                    // Search ALL scopes from innermost outward; update first match.
+                    // If not found anywhere, store in current scope (fallback).
+                    let mut found = false;
+                    for scope in scopes.iter_mut().rev() {
+                        if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
+                            entry.1 = val.clone();
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        if let Some(scope) = scopes.last_mut() {
+                            scope.push((name.clone(), val));
+                        }
                     }
                 }
 
@@ -761,6 +1064,23 @@ impl OlangVM {
                                     if let Some((_, c)) = scope.iter().find(|(n, _)| n == name) {
                                         let _ = stack.push(c.clone());
                                         break;
+                                    }
+                                }
+                            }
+                            Op::StoreUpdate(name) => {
+                                if let Ok(c) = stack.pop() {
+                                    let mut found = false;
+                                    for scope in scopes.iter_mut().rev() {
+                                        if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
+                                            entry.1 = c.clone();
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    if !found {
+                                        if let Some(scope) = scopes.last_mut() {
+                                            scope.push((name.clone(), c));
+                                        }
                                     }
                                 }
                             }
@@ -1868,5 +2188,215 @@ mod tests {
         assert!((v0 - 0.0).abs() < f64::EPSILON);
         assert!((v1 - 1.0).abs() < f64::EPSILON);
         assert!((v2 - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cmp_ne_true() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(3.0))
+            .push_op(Op::PushNum(5.0))
+            .push_op(Op::Call("__cmp_ne".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON, "3 != 5 should be true");
+    }
+
+    #[test]
+    fn cmp_ne_false() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(5.0))
+            .push_op(Op::PushNum(5.0))
+            .push_op(Op::Call("__cmp_ne".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result.outputs()[0].is_empty(), "5 != 5 should be false");
+    }
+
+    #[test]
+    fn logic_not_empty_becomes_truthy() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(MolecularChain::empty()))
+            .push_op(Op::Call("__logic_not".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON, "!empty should be truthy (1.0)");
+    }
+
+    #[test]
+    fn logic_not_truthy_becomes_empty() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(42.0))
+            .push_op(Op::Call("__logic_not".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        assert!(result.outputs()[0].is_empty(), "!42 should be empty (falsy)");
+    }
+
+    // ── StoreUpdate ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn store_update_modifies_outer_scope() {
+        // Root: x = 10
+        // Inner scope: StoreUpdate x = 20, emit x (should be 20)
+        // After scope end: emit x (should be 20 — updated in outer scope)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::Store("x".into()))
+            .push_op(Op::ScopeBegin)
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::StoreUpdate("x".into()))
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 20
+            .push_op(Op::ScopeEnd)
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 20 (outer scope was updated)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "StoreUpdate errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+        let inner = outputs[0].to_number().unwrap();
+        let outer = outputs[1].to_number().unwrap();
+        assert!((inner - 20.0).abs() < f64::EPSILON, "Inner scope sees 20: {}", inner);
+        assert!((outer - 20.0).abs() < f64::EPSILON, "Outer scope updated to 20: {}", outer);
+    }
+
+    #[test]
+    fn store_update_vs_store_shadowing() {
+        // Store shadows (creates new in inner scope), StoreUpdate modifies outer.
+        // Root: x = 10
+        // Inner scope: Store(x)=99 → shadows outer
+        // After scope end: emit x (should be 10, shadow discarded)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::Store("x".into()))
+            .push_op(Op::ScopeBegin)
+            .push_op(Op::PushNum(99.0))
+            .push_op(Op::Store("x".into())) // shadows, not updates outer
+            .push_op(Op::ScopeEnd)
+            .push_op(Op::LoadLocal("x".into()))
+            .push_op(Op::Emit) // should output 10
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let outer = result.outputs()[0].to_number().unwrap();
+        assert!((outer - 10.0).abs() < f64::EPSILON, "Store shadows, outer still 10: {}", outer);
+    }
+
+    // ── Array builtins ───────────────────────────────────────────────────────
+
+    #[test]
+    fn array_new_and_get() {
+        // [10, 20, 30] then get index 1
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::PushNum(30.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__array_new".into()))
+            .push_op(Op::Store("arr".into()))
+            .push_op(Op::LoadLocal("arr".into()))
+            .push_op(Op::PushNum(1.0))
+            .push_op(Op::Call("__array_get".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "array errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number();
+        assert!(v.is_some(), "arr[1] should be number, mol_count={}", outputs[0].len());
+        assert!((v.unwrap() - 20.0).abs() < f64::EPSILON, "arr[1]=20, got {}", v.unwrap());
+    }
+
+    #[test]
+    fn array_len() {
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::PushNum(30.0))
+            .push_op(Op::PushNum(3.0))
+            .push_op(Op::Call("__array_new".into()))
+            .push_op(Op::Call("__array_len".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "len=3, got {}", v);
+    }
+
+    // ── Dict builtins ────────────────────────────────────────────────────────
+
+    fn key_chain(s: &str) -> MolecularChain {
+        let mut mols = alloc::vec::Vec::new();
+        for b in s.bytes() {
+            mols.push(Molecule {
+                shape: 0x02, relation: 0x01,
+                emotion: EmotionDim { valence: b, arousal: 0 },
+                time: 0x01,
+            });
+        }
+        MolecularChain(mols)
+    }
+
+    #[test]
+    fn dict_new_and_get() {
+        // Create dict {key1: 10, key2: 20}, get key2 → 20
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::PushNum(10.0))
+            .push_op(Op::Push(key_chain("key2")))
+            .push_op(Op::PushNum(20.0))
+            .push_op(Op::PushNum(2.0))
+            .push_op(Op::Call("__dict_new".into()))
+            .push_op(Op::Store("d".into()))
+            // Get key2
+            .push_op(Op::LoadLocal("d".into()))
+            .push_op(Op::Push(key_chain("key2")))
+            .push_op(Op::Call("__dict_get".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "Should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 20.0).abs() < f64::EPSILON, "dict.key2 should be 20, got {}", v);
+    }
+
+    #[test]
+    fn dict_set_updates_value() {
+        // Create dict {key1: 10}, set key1 = 99, get key1 → 99
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::PushNum(10.0))
+            .push_op(Op::PushNum(1.0))
+            .push_op(Op::Call("__dict_new".into()))
+            // Set key1 = 99
+            .push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::PushNum(99.0))
+            .push_op(Op::Call("__dict_set".into()))
+            .push_op(Op::Store("d".into()))
+            // Get key1
+            .push_op(Op::LoadLocal("d".into()))
+            .push_op(Op::Push(key_chain("key1")))
+            .push_op(Op::Call("__dict_get".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let v = result.outputs()[0].to_number().unwrap();
+        assert!((v - 99.0).abs() < f64::EPSILON, "dict.key1 should be 99, got {}", v);
     }
 }
