@@ -1033,7 +1033,136 @@ impl MolecularChain {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CompactQR — 2-byte QR node cho L2→Ln-1
+// FormulaTable — Bảng công thức chia sẻ (shared dictionary)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Bảng công thức: u16 index ↔ Molecule (LOSSLESS).
+///
+/// Theo "node va silk.md":
+///   L0 (5400 node) = 5400 CÔNG THỨC GỐC.
+///   Mỗi node mới = tổ hợp các công thức L0.
+///   Silk = "2 node chia sẻ cùng công thức trên chiều nào?"
+///
+/// FormulaTable = bảng tuần hoàn trung tâm:
+///   - Entries 0..N_UCD: pre-populated từ UCD (deterministic, cùng thứ tự)
+///   - Entries N_UCD..65535: dynamic slots cho learned/LCA molecules
+///   - Reverse lookup: molecule bytes → index (binary search)
+///
+/// ## Dung lượng
+///
+/// ```text
+/// FormulaTable: max 65536 entries × 5 bytes = 320 KB (shared, 1 bản duy nhất)
+/// Reverse index: max 65536 × 7 bytes         = 448 KB
+/// Tổng shared cost:                           ≈ 768 KB
+///
+/// Per node: 2 bytes (chỉ lưu index)
+/// 2B nodes × 2 bytes = 4 GB ← giống hệt CompactQR cũ
+/// ```
+///
+/// ## So sánh packed vs dictionary
+///
+/// ```text
+///                     Packed (cũ)              Dictionary (mới)
+/// Per node            2 bytes                  2 bytes
+/// Sub-variant         MẤT (chỉ base 0-7)      GIỮ (full hierarchical)
+/// Valence             ±8 sai số (16 zones)     CHÍNH XÁC (0-255)
+/// Arousal             ±16 sai số (8 zones)     CHÍNH XÁC (0-255)
+/// Silk channels       37 kênh (base only)      ~5400 kênh (precise)
+/// Shared cost         0                        ~768 KB (1 lần)
+/// Reconstruct         Lossy (zone center)      LOSSLESS (exact molecule)
+/// ```
+pub struct FormulaTable {
+    /// Forward: index → Molecule (exact, lossless).
+    entries: Vec<Molecule>,
+    /// Reverse: sorted (molecule_bytes_u64, index) for binary search.
+    /// molecule_bytes_u64 = 5 bytes packed into u64 for fast comparison.
+    reverse: Vec<(u64, u16)>,
+}
+
+/// Pack 5 molecule bytes into u64 for fast comparison.
+fn mol_to_key(mol: &Molecule) -> u64 {
+    ((mol.shape as u64) << 32)
+        | ((mol.relation as u64) << 24)
+        | ((mol.emotion.valence as u64) << 16)
+        | ((mol.emotion.arousal as u64) << 8)
+        | (mol.time as u64)
+}
+
+impl FormulaTable {
+    /// Tạo bảng rỗng.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            reverse: Vec::new(),
+        }
+    }
+
+    /// Tạo với capacity dự kiến.
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(cap),
+            reverse: Vec::with_capacity(cap),
+        }
+    }
+
+    /// Đăng ký Molecule → trả u16 index.
+    ///
+    /// Nếu đã có → trả index hiện tại (dedup).
+    /// Nếu chưa → thêm mới, trả index mới.
+    /// Nếu bảng đầy (65536) → trả None.
+    pub fn register(&mut self, mol: &Molecule) -> Option<u16> {
+        let key = mol_to_key(mol);
+
+        // Binary search reverse index
+        match self.reverse.binary_search_by_key(&key, |&(k, _)| k) {
+            Ok(pos) => Some(self.reverse[pos].1),
+            Err(insert_pos) => {
+                if self.entries.len() >= 65536 {
+                    return None; // bảng đầy
+                }
+                let idx = self.entries.len() as u16;
+                self.entries.push(*mol);
+                self.reverse.insert(insert_pos, (key, idx));
+                Some(idx)
+            }
+        }
+    }
+
+    /// Lookup index → Molecule (exact, lossless).
+    pub fn lookup(&self, index: u16) -> Option<&Molecule> {
+        self.entries.get(index as usize)
+    }
+
+    /// Tìm Molecule → index (nếu đã đăng ký).
+    pub fn find(&self, mol: &Molecule) -> Option<u16> {
+        let key = mol_to_key(mol);
+        match self.reverse.binary_search_by_key(&key, |&(k, _)| k) {
+            Ok(pos) => Some(self.reverse[pos].1),
+            Err(_) => None,
+        }
+    }
+
+    /// Số entries đã đăng ký.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Bảng rỗng?
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// RAM usage estimate (bytes).
+    pub fn ram_usage(&self) -> usize {
+        // entries: Molecule = 5 bytes each (but Vec stores full struct, aligned)
+        // reverse: (u64, u16) = 10 bytes each
+        self.entries.len() * core::mem::size_of::<Molecule>()
+            + self.reverse.len() * core::mem::size_of::<(u64, u16)>()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CompactQR — 2-byte QR node cho L2→Ln-1 (LOSSLESS via FormulaTable)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// 2-byte compressed QR node — DNA của tri thức.
@@ -1041,45 +1170,59 @@ impl MolecularChain {
 /// Khi node đạt `Maturity::Mature` → Dream promote → QR signed →
 /// **nén thành 2 bytes** lưu vào L2→Ln-1.
 ///
-/// ## Encoding (16 bits = 2 bytes)
+/// ## Encoding: Dictionary Index (LOSSLESS)
 ///
 /// ```text
-/// Byte 0:  [shape:3][relation:3][time:2(hi)]
-/// Byte 1:  [time:1(lo)][valence:4][arousal:3]
+/// 2 bytes = u16 index vào FormulaTable.
+/// FormulaTable[index] = exact Molecule (5 bytes, full precision).
 ///
-/// shape    = 3 bits (0-7) → 8 ShapeBase categories
-/// relation = 3 bits (0-7) → 8 RelationBase categories
-/// time     = 3 bits (0-4) → 5 TimeDim categories (split: 2 hi + 1 lo)
-/// valence  = 4 bits (0-15) → 16 zones of 16 (V/16 = zone)
-/// arousal  = 3 bits (0-7) → 8 zones of 32 (A/32 = zone)
+/// Không pack 5D vào 16 bits.
+/// Không mất sub-variant.
+/// Không mất V/A precision.
 /// ```
 ///
-/// ## Tại sao 2 bytes?
+/// ## Theo "node va silk.md"
 ///
-/// "Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức."
+/// ```text
+/// "L0 VỪA là alphabet, VỪA là Silk channel."
+/// "5400 công thức L0 → mỗi công thức = 1 nhóm máu"
+/// "Silk = 2 node chia sẻ cùng công thức trên chiều nào?"
 ///
-/// 2 bytes = 5D tọa độ trong không gian Silk.
-/// Từ 2 bytes → reconstruct full Molecule (fill zone centers).
-/// Từ 2 bytes → Silk bucket address (implicit, 0 bytes edges).
-/// Từ 2 bytes → similarity O(1) (so sánh 2 bytes = so sánh 5D).
+/// FormulaTable = bảng tuần hoàn (shared, ~768 KB).
+/// CompactQR = index vào bảng (per node, 2 bytes).
+/// Reconstruct = FormulaTable[index] → exact Molecule.
+/// ```
 ///
-/// ## Dùng ở đâu?
+/// ## Tại sao 2 bytes đủ?
 ///
-/// - **L2→Ln-1**: QR nodes nén lại lưu trên disk (origin.olang)
-/// - **L1 Memory**: STM/LTM dùng CompactQR làm data cho L0
-/// - **Silk**: 2 bytes IS the Silk address — node = coordinate
+/// ```text
+/// u16 = 65536 slots.
+/// L0: ~5400 UCD formulas (pre-assigned, deterministic).
+/// L1-L7: ~61 LCA nodes.
+/// Dynamic: ~60000 slots cho learned/evolved nodes.
+/// Dedup: cùng Molecule → cùng index → tự động nén.
+/// ```
 ///
 /// ## Storage impact
 ///
 /// ```text
-/// 2B nodes × 2 bytes = 4 GB    (vs 33B old = 66 GB)
-/// Silk edges          = 0 B     (implicit from 2-byte comparison)
-/// HebbianLink 2%      ≈ 0.84 GB
-/// Total              ≈ 4.84 GB → FITS 16GB (11 GB dư)
+/// FormulaTable (shared):  ~768 KB (1 bản cho toàn hệ thống)
+/// 2B nodes × 2 bytes   =    4 GB (per node cost giữ nguyên)
+/// Silk edges            =    0 B  (implicit từ 5D comparison)
+/// Tổng                  ≈ 4.77 GB → FITS 16GB (11 GB dư)
+/// ```
+///
+/// ## Silk channels
+///
+/// ```text
+/// Packed (cũ):  37 kênh base (mất sub-variant)
+/// Dictionary:   ~5400 kênh precise (giữ full hierarchical)
+///              + 31 mẫu compound (C(5,1)+...+C(5,5))
+///              = TOÀN BỘ Silk theo doc
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompactQR {
-    /// 2-byte packed 5D coordinate.
+    /// 2-byte FormulaTable index.
     bytes: [u8; 2],
 }
 
@@ -1087,26 +1230,31 @@ impl CompactQR {
     /// Số bytes trên disk.
     pub const SIZE: usize = 2;
 
-    /// Nén Molecule → 2 bytes.
+    /// Nén Molecule → 2 bytes (LOSSLESS via FormulaTable).
     ///
-    /// Lấy base category + zone cho mỗi chiều.
-    /// Thông tin sub-variant bị mất — chỉ giữ BASE.
-    /// Đây là nén LOSSY nhưng giữ đúng vị trí 5D (bucket address).
-    pub fn from_molecule(mol: &Molecule) -> Self {
-        // Shape: 3 bits (base 0-7)
+    /// Đăng ký mol vào table, lưu u16 index.
+    /// Reconstruct: `to_molecule(table)` trả lại CHÍNH XÁC molecule gốc.
+    ///
+    /// Trả None nếu table đầy (65536 entries).
+    pub fn from_molecule(mol: &Molecule, table: &mut FormulaTable) -> Option<Self> {
+        let idx = table.register(mol)?;
+        Some(Self {
+            bytes: idx.to_be_bytes(),
+        })
+    }
+
+    /// Nén Molecule → 2 bytes (LOSSY — không cần FormulaTable).
+    ///
+    /// Packed 5D: [shape:3][relation:3][time:3][valence:4][arousal:3] = 16 bits.
+    /// Mất sub-variant, V/A chỉ giữ zone.
+    /// Dùng khi không có FormulaTable (standalone, backward compat).
+    pub fn from_molecule_lossy(mol: &Molecule) -> Self {
         let s = if mol.shape == 0 { 0 } else { ((mol.shape - 1) % 8) as u16 };
-        // Relation: 3 bits (base 0-7)
         let r = if mol.relation == 0 { 0 } else { ((mol.relation - 1) % 8) as u16 };
-        // Time: 3 bits (base 0-4)
         let t = if mol.time == 0 { 2 } else { (((mol.time - 1) % 5) as u16).min(4) };
-        // Valence: 4 bits (zone 0-15, each zone = 16 wide)
-        let v = (mol.emotion.valence / 16) as u16; // 0-15
-        // Arousal: 3 bits (zone 0-7, each zone = 32 wide)
-        let a = (mol.emotion.arousal / 32) as u16; // 0-7
-
-        // Pack: [shape:3][relation:3][time_hi:2] [time_lo:1][valence:4][arousal:3]
+        let v = (mol.emotion.valence / 16) as u16;
+        let a = (mol.emotion.arousal / 32) as u16;
         let bits = (s << 13) | (r << 10) | (t << 7) | (v << 3) | a;
-
         Self {
             bytes: [(bits >> 8) as u8, (bits & 0xFF) as u8],
         }
@@ -1122,71 +1270,135 @@ impl CompactQR {
         self.bytes
     }
 
-    /// Unpack → 5D components (base indices).
-    fn unpack(self) -> (u8, u8, u8, u8, u8) {
-        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
-        let s = ((bits >> 13) & 0x07) as u8; // 0-7
-        let r = ((bits >> 10) & 0x07) as u8; // 0-7
-        let t = ((bits >> 7) & 0x07) as u8;  // 0-4
-        let v = ((bits >> 3) & 0x0F) as u8;  // 0-15
-        let a = (bits & 0x07) as u8;          // 0-7
-        (s, r, t, v, a)
+    /// FormulaTable index (u16).
+    pub fn index(self) -> u16 {
+        u16::from_be_bytes(self.bytes)
     }
 
-    /// Reconstruct full Molecule từ 2 bytes.
+    /// Reconstruct EXACT Molecule từ 2 bytes (LOSSLESS).
     ///
-    /// Lossy: sub-variant = 0, V/A = zone center.
-    /// Đủ cho Silk implicit comparison và L0 formula evaluation.
-    pub fn to_molecule(self) -> Molecule {
-        let (s, r, t, v, a) = self.unpack();
+    /// FormulaTable[index] → exact Molecule, giữ full:
+    ///   - Sub-variant (shape=0x09 = Sphere variant 1)
+    ///   - Valence precision (0xC0 = chính xác 0xC0, không phải zone center)
+    ///   - Arousal precision (0xC0 = chính xác 0xC0)
+    ///   - Time sub-variant
+    pub fn to_molecule(self, table: &FormulaTable) -> Option<Molecule> {
+        table.lookup(self.index()).copied()
+    }
+
+    /// Reconstruct Molecule (LOSSY — không cần FormulaTable).
+    ///
+    /// Unpack 16 bits → zone centers. Backward compat.
+    pub fn to_molecule_lossy(self) -> Molecule {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        let s = ((bits >> 13) & 0x07) as u8;
+        let r = ((bits >> 10) & 0x07) as u8;
+        let t = ((bits >> 7) & 0x07) as u8;
+        let v = ((bits >> 3) & 0x0F) as u8;
+        let a = (bits & 0x07) as u8;
         Molecule {
-            shape: s + 1,               // base 1-8
-            relation: r + 1,            // base 1-8
+            shape: s + 1,
+            relation: r + 1,
             emotion: EmotionDim {
-                valence: v * 16 + 8,    // zone center (zone * 16 + 8)
-                arousal: a * 32 + 16,   // zone center (zone * 32 + 16)
+                valence: v * 16 + 8,
+                arousal: a * 32 + 16,
             },
-            time: t + 1,                // base 1-5
+            time: t + 1,
         }
     }
 
-    /// Shape base index (0-7).
-    pub fn shape_idx(self) -> u8 { self.unpack().0 }
-    /// Relation base index (0-7).
-    pub fn relation_idx(self) -> u8 { self.unpack().1 }
-    /// Time base index (0-4).
-    pub fn time_idx(self) -> u8 { self.unpack().2 }
-    /// Valence zone (0-15).
-    pub fn valence_zone(self) -> u8 { self.unpack().3 }
-    /// Arousal zone (0-7).
-    pub fn arousal_zone(self) -> u8 { self.unpack().4 }
-
-    /// Implicit Silk: số chiều chung giữa 2 CompactQR.
+    /// Implicit Silk: số chiều chung giữa 2 CompactQR (LOSSLESS).
     ///
-    /// O(1) — chỉ so sánh 2 bytes, trích 5 fields.
-    /// Trả về (shared_count, strength).
-    /// strength = shared_count / 5.0 (base).
-    pub fn silk_compare(self, other: Self) -> (u8, f32) {
-        let (s1, r1, t1, v1, a1) = self.unpack();
-        let (s2, r2, t2, v2, a2) = other.unpack();
+    /// So sánh FULL 5D với sub-variant precision.
+    /// Theo "node va silk.md":
+    ///   - Base Silk (37 kênh): base category match
+    ///   - Precise Silk (~5400 kênh): exact value match
+    ///   - Compound Silk (31 mẫu): multi-dim match patterns
+    ///
+    /// Trả về (shared_base, shared_exact, strength).
+    ///   shared_base  = số chiều cùng base category (0-5)
+    ///   shared_exact = số chiều giống CHÍNH XÁC (0-5)
+    ///   strength     = weighted: exact=1.0, base_only=0.5, miss=0.0
+    pub fn silk_compare(self, other: Self, table: &FormulaTable) -> (u8, u8, f32) {
+        let a = match self.to_molecule(table) {
+            Some(m) => m,
+            None => return (0, 0, 0.0),
+        };
+        let b = match other.to_molecule(table) {
+            Some(m) => m,
+            None => return (0, 0, 0.0),
+        };
 
-        let mut shared = 0u8;
-        if s1 == s2 { shared += 1; }
-        if r1 == r2 { shared += 1; }
-        if t1 == t2 { shared += 1; }
-        if v1 == v2 { shared += 1; }
-        if a1 == a2 { shared += 1; }
+        let mut base_shared = 0u8;
+        let mut exact_shared = 0u8;
+        let mut strength = 0.0f32;
 
-        let strength = shared as f32 / 5.0;
-        (shared, strength)
+        // Shape: base + exact
+        let a_sb = a.shape_base() as u8;
+        let b_sb = b.shape_base() as u8;
+        if a_sb == b_sb {
+            base_shared += 1;
+            if a.shape == b.shape { exact_shared += 1; strength += 1.0; }
+            else { strength += 0.5; }
+        }
+
+        // Relation: base + exact
+        let a_rb = a.relation_base() as u8;
+        let b_rb = b.relation_base() as u8;
+        if a_rb == b_rb {
+            base_shared += 1;
+            if a.relation == b.relation { exact_shared += 1; strength += 1.0; }
+            else { strength += 0.5; }
+        }
+
+        // Valence: zone (base) + exact
+        let a_vz = a.emotion.valence / 32; // 8 zones per doc
+        let b_vz = b.emotion.valence / 32;
+        if a_vz == b_vz {
+            base_shared += 1;
+            if a.emotion.valence == b.emotion.valence { exact_shared += 1; strength += 1.0; }
+            else { strength += 0.5; }
+        }
+
+        // Arousal: zone (base) + exact
+        let a_az = a.emotion.arousal / 32; // 8 zones per doc
+        let b_az = b.emotion.arousal / 32;
+        if a_az == b_az {
+            base_shared += 1;
+            if a.emotion.arousal == b.emotion.arousal { exact_shared += 1; strength += 1.0; }
+            else { strength += 0.5; }
+        }
+
+        // Time: base + exact
+        let a_tb = a.time_base() as u8;
+        let b_tb = b.time_base() as u8;
+        if a_tb == b_tb {
+            base_shared += 1;
+            if a.time == b.time { exact_shared += 1; strength += 1.0; }
+            else { strength += 0.5; }
+        }
+
+        strength /= 5.0;
+        (base_shared, exact_shared, strength)
     }
 
-    /// Tính chain_hash từ 2 bytes — deterministic, KHÔNG cần lưu hash.
+    /// Silk compare (LOSSY — không cần FormulaTable, backward compat).
     ///
-    /// "hash = f(formula)" — tính lại bất cứ lúc nào từ 2 bytes.
-    /// Dùng FNV-1a 64-bit (same as MolecularChain::chain_hash).
+    /// Dùng packed 16 bits, chỉ so sánh base/zone.
+    pub fn silk_compare_lossy(self, other: Self) -> (u8, f32) {
+        let bits_a = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        let bits_b = ((other.bytes[0] as u16) << 8) | (other.bytes[1] as u16);
+        let mut shared = 0u8;
+        if (bits_a >> 13) & 0x07 == (bits_b >> 13) & 0x07 { shared += 1; } // shape
+        if (bits_a >> 10) & 0x07 == (bits_b >> 10) & 0x07 { shared += 1; } // relation
+        if (bits_a >> 7) & 0x07 == (bits_b >> 7) & 0x07 { shared += 1; }   // time
+        if (bits_a >> 3) & 0x0F == (bits_b >> 3) & 0x0F { shared += 1; }   // valence
+        if bits_a & 0x07 == bits_b & 0x07 { shared += 1; }                  // arousal
+        (shared, shared as f32 / 5.0)
+    }
+
+    /// Tính chain_hash từ 2 bytes — deterministic.
     pub fn compute_hash(self) -> u64 {
-        // FNV-1a 64-bit — consistent with chain_hash
         let mut h: u64 = 0xcbf29ce484222325;
         h ^= self.bytes[0] as u64;
         h = h.wrapping_mul(0x100000001b3);
@@ -1195,11 +1407,31 @@ impl CompactQR {
         h
     }
 
-    /// Evolve: thay 1 chiều → CompactQR mới (loài mới).
+    /// Evolve: thay 1 chiều → CompactQR mới (LOSSLESS).
     ///
-    /// dim: 0=shape, 1=relation, 2=time, 3=valence, 4=arousal
-    pub fn evolve(self, dim: u8, new_val: u8) -> Self {
-        let (mut s, mut r, mut t, mut v, mut a) = self.unpack();
+    /// Lấy molecule gốc từ table, mutate 1 chiều, đăng ký molecule mới.
+    /// dim: 0=shape, 1=relation, 2=valence, 3=arousal, 4=time
+    pub fn evolve(self, dim: u8, new_val: u8, table: &mut FormulaTable) -> Option<Self> {
+        let mut mol = self.to_molecule(table)?;
+        match dim {
+            0 => mol.shape = new_val,
+            1 => mol.relation = new_val,
+            2 => mol.emotion.valence = new_val,
+            3 => mol.emotion.arousal = new_val,
+            4 => mol.time = new_val,
+            _ => {}
+        }
+        Self::from_molecule(&mol, table)
+    }
+
+    /// Evolve (LOSSY — không cần FormulaTable, backward compat).
+    pub fn evolve_lossy(self, dim: u8, new_val: u8) -> Self {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        let mut s = ((bits >> 13) & 0x07) as u8;
+        let mut r = ((bits >> 10) & 0x07) as u8;
+        let mut t = ((bits >> 7) & 0x07) as u8;
+        let mut v = ((bits >> 3) & 0x0F) as u8;
+        let mut a = (bits & 0x07) as u8;
         match dim {
             0 => s = new_val.min(7),
             1 => r = new_val.min(7),
@@ -1208,17 +1440,44 @@ impl CompactQR {
             4 => a = new_val.min(7),
             _ => {}
         }
-        let bits = ((s as u16) << 13) | ((r as u16) << 10) | ((t as u16) << 7) | ((v as u16) << 3) | (a as u16);
+        let new_bits = ((s as u16) << 13) | ((r as u16) << 10) | ((t as u16) << 7) | ((v as u16) << 3) | (a as u16);
         Self {
-            bytes: [(bits >> 8) as u8, (bits & 0xFF) as u8],
+            bytes: [(new_bits >> 8) as u8, (new_bits & 0xFF) as u8],
         }
+    }
+
+    // ── Lossy helper accessors (backward compat, dùng khi không có table) ──
+
+    /// Shape base index (0-7) — từ packed bits (lossy mode).
+    pub fn shape_idx_lossy(self) -> u8 {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        ((bits >> 13) & 0x07) as u8
+    }
+    /// Relation base index (0-7) — lossy mode.
+    pub fn relation_idx_lossy(self) -> u8 {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        ((bits >> 10) & 0x07) as u8
+    }
+    /// Time base index (0-4) — lossy mode.
+    pub fn time_idx_lossy(self) -> u8 {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        ((bits >> 7) & 0x07) as u8
+    }
+    /// Valence zone (0-15) — lossy mode.
+    pub fn valence_zone_lossy(self) -> u8 {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        ((bits >> 3) & 0x0F) as u8
+    }
+    /// Arousal zone (0-7) — lossy mode.
+    pub fn arousal_zone_lossy(self) -> u8 {
+        let bits = ((self.bytes[0] as u16) << 8) | (self.bytes[1] as u16);
+        (bits & 0x07) as u8
     }
 }
 
 impl core::fmt::Display for CompactQR {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let (s, r, t, v, a) = self.unpack();
-        write!(f, "QR[S{} R{} T{} V{} A{}]", s, r, t, v, a)
+        write!(f, "QR[#{}]", self.index())
     }
 }
 
@@ -1740,7 +1999,52 @@ mod tests {
         assert_eq!(deltas.len(), 5, "All 5 dimensions differ");
     }
 
-    // ── CompactQR tests ─────────────────────────────────────────────────
+    // ── FormulaTable tests ────────────────────────────────────────────────
+
+    #[test]
+    fn formula_table_register_and_lookup() {
+        let mut table = FormulaTable::new();
+        let mol = test_mol(0x09, 0x0E, 0xC0, 0xC0, 0x04); // Sphere sub1, Causes sub1
+        let idx = table.register(&mol).unwrap();
+        assert_eq!(idx, 0, "First entry = index 0");
+        let looked = table.lookup(idx).unwrap();
+        assert_eq!(*looked, mol, "Lookup returns exact molecule");
+    }
+
+    #[test]
+    fn formula_table_dedup() {
+        let mut table = FormulaTable::new();
+        let mol = test_mol(0x09, 0x0E, 0xC0, 0xC0, 0x04);
+        let idx1 = table.register(&mol).unwrap();
+        let idx2 = table.register(&mol).unwrap();
+        assert_eq!(idx1, idx2, "Same molecule → same index (dedup)");
+        assert_eq!(table.len(), 1, "Only 1 entry");
+    }
+
+    #[test]
+    fn formula_table_multiple() {
+        let mut table = FormulaTable::new();
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let ice = test_mol(0x01, 0x06, 0x30, 0x30, 0x02);
+        let idx_f = table.register(&fire).unwrap();
+        let idx_i = table.register(&ice).unwrap();
+        assert_ne!(idx_f, idx_i);
+        assert_eq!(table.len(), 2);
+        assert_eq!(*table.lookup(idx_f).unwrap(), fire);
+        assert_eq!(*table.lookup(idx_i).unwrap(), ice);
+    }
+
+    #[test]
+    fn formula_table_find() {
+        let mut table = FormulaTable::new();
+        let mol = test_mol(0x09, 0x0E, 0xC0, 0xC0, 0x04);
+        let idx = table.register(&mol).unwrap();
+        assert_eq!(table.find(&mol), Some(idx));
+        let other = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        assert_eq!(table.find(&other), None, "Not registered → None");
+    }
+
+    // ── CompactQR tests (LOSSLESS with FormulaTable) ────────────────────
 
     #[test]
     fn compact_qr_size() {
@@ -1749,147 +2053,195 @@ mod tests {
     }
 
     #[test]
-    fn compact_qr_roundtrip_defaults() {
-        // Default Molecule: Sphere, Member, V=0x80, A=0x80, Medium
-        let mol = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let qr = CompactQR::from_molecule(&mol);
-        let restored = qr.to_molecule();
-        // Base categories must match exactly
-        assert_eq!(restored.shape_base(), mol.shape_base());
-        assert_eq!(restored.relation_base(), mol.relation_base());
-        assert_eq!(restored.time_base(), mol.time_base());
-        // V/A within zone (lossy but same bucket)
-        assert_eq!(restored.emotion.valence / 16, mol.emotion.valence / 16, "Same V zone");
-        assert_eq!(restored.emotion.arousal / 32, mol.emotion.arousal / 32, "Same A zone");
+    fn compact_qr_lossless_roundtrip() {
+        let mut table = FormulaTable::new();
+        // Molecule with sub-variant — previously LOST by packed encoding
+        let mol = test_mol(0x09, 0x0E, 0xC3, 0xA7, 0x09);
+        // shape=0x09 (Sphere sub1), relation=0x0E (Causes sub1), V=0xC3, A=0xA7, time=0x09 (Fast sub1)
+        let qr = CompactQR::from_molecule(&mol, &mut table).unwrap();
+        let restored = qr.to_molecule(&table).unwrap();
+        // LOSSLESS: exact match on ALL fields
+        assert_eq!(restored, mol, "Lossless roundtrip — exact molecule preserved");
+        assert_eq!(restored.shape, 0x09, "Sub-variant preserved (was lost in packed)");
+        assert_eq!(restored.emotion.valence, 0xC3, "Exact V preserved (was ±8 in packed)");
+        assert_eq!(restored.emotion.arousal, 0xA7, "Exact A preserved (was ±16 in packed)");
     }
 
     #[test]
-    fn compact_qr_fire_molecule() {
-        // 🔥 = Sphere, Causes, V=0xC0, A=0xC0, Fast
+    fn compact_qr_lossless_fire() {
+        let mut table = FormulaTable::new();
         let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
-        let qr = CompactQR::from_molecule(&fire);
-        assert_eq!(qr.shape_idx(), 0, "Sphere = base 0");
-        assert_eq!(qr.relation_idx(), 5, "Causes = base 5");
-        assert_eq!(qr.time_idx(), 3, "Fast = base 3");
-        assert_eq!(qr.valence_zone(), 12, "0xC0/16 = 12");
-        assert_eq!(qr.arousal_zone(), 6, "0xC0/32 = 6");
+        let qr = CompactQR::from_molecule(&fire, &mut table).unwrap();
+        let back = qr.to_molecule(&table).unwrap();
+        assert_eq!(back, fire, "🔥 lossless roundtrip");
     }
 
     #[test]
-    fn compact_qr_silk_compare_identical() {
+    fn compact_qr_silk_compare_lossless_identical() {
+        let mut table = FormulaTable::new();
         let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
-        let qr = CompactQR::from_molecule(&fire);
-        let (shared, strength) = qr.silk_compare(qr);
-        assert_eq!(shared, 5, "Identical → 5/5 dims");
+        let qr = CompactQR::from_molecule(&fire, &mut table).unwrap();
+        let (base, exact, strength) = qr.silk_compare(qr, &table);
+        assert_eq!(base, 5, "Identical → 5/5 base dims");
+        assert_eq!(exact, 5, "Identical → 5/5 exact dims");
         assert!((strength - 1.0).abs() < 0.01);
     }
 
     #[test]
-    fn compact_qr_silk_compare_partial() {
-        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04); // Sphere, Causes, V=12, A=6, Fast
-        let ice = test_mol(0x01, 0x06, 0x30, 0x30, 0x02);   // Sphere, Causes, V=3, A=1, Slow
-        let qr_f = CompactQR::from_molecule(&fire);
-        let qr_i = CompactQR::from_molecule(&ice);
-        let (shared, _) = qr_f.silk_compare(qr_i);
-        assert_eq!(shared, 2, "Fire/Ice share Shape + Relation = 2");
-    }
-
-    #[test]
-    fn compact_qr_silk_compare_zero() {
-        let a = test_mol(0x01, 0x01, 0x10, 0x10, 0x01); // Sphere, Member, V=1, A=0, Static
-        let b = test_mol(0x04, 0x06, 0xF0, 0xE0, 0x05); // Cone, Causes, V=15, A=7, Instant
-        let qr_a = CompactQR::from_molecule(&a);
-        let qr_b = CompactQR::from_molecule(&b);
-        let (shared, _) = qr_a.silk_compare(qr_b);
-        assert_eq!(shared, 0, "Completely different → 0 shared");
-    }
-
-    #[test]
-    fn compact_qr_evolve() {
+    fn compact_qr_silk_compare_lossless_partial() {
+        let mut table = FormulaTable::new();
         let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
-        let qr = CompactQR::from_molecule(&fire);
-        // Evolve Valence zone: 12 → 2 (like "lửa nhẹ")
-        let evolved = qr.evolve(3, 2);
-        assert_eq!(evolved.valence_zone(), 2);
-        // Other dims unchanged
-        assert_eq!(evolved.shape_idx(), qr.shape_idx());
-        assert_eq!(evolved.relation_idx(), qr.relation_idx());
-        assert_eq!(evolved.time_idx(), qr.time_idx());
-        assert_eq!(evolved.arousal_zone(), qr.arousal_zone());
+        let ice = test_mol(0x01, 0x06, 0x30, 0x30, 0x02);
+        let qr_f = CompactQR::from_molecule(&fire, &mut table).unwrap();
+        let qr_i = CompactQR::from_molecule(&ice, &mut table).unwrap();
+        let (base, exact, _) = qr_f.silk_compare(qr_i, &table);
+        assert_eq!(base, 2, "Fire/Ice share Shape + Relation base = 2");
+        assert_eq!(exact, 2, "Also exact match (same base values)");
+    }
+
+    #[test]
+    fn compact_qr_silk_precise_vs_base() {
+        let mut table = FormulaTable::new();
+        // Same base (Sphere) but different sub-variant
+        let a = test_mol(0x01, 0x01, 0x80, 0x80, 0x03); // Sphere base
+        let b = test_mol(0x09, 0x01, 0x80, 0x80, 0x03); // Sphere sub1
+        let qr_a = CompactQR::from_molecule(&a, &mut table).unwrap();
+        let qr_b = CompactQR::from_molecule(&b, &mut table).unwrap();
+        let (base, exact, _) = qr_a.silk_compare(qr_b, &table);
+        // Shape: same base (Sphere) but different exact → base_shared but NOT exact_shared
+        assert_eq!(base, 5, "All 5 bases match (R,V,A,T identical; S same base)");
+        assert_eq!(exact, 4, "4 exact (R,V,A,T). Shape = base only, not exact");
+    }
+
+    #[test]
+    fn compact_qr_silk_compare_lossless_zero() {
+        let mut table = FormulaTable::new();
+        let a = test_mol(0x01, 0x01, 0x10, 0x10, 0x01);
+        let b = test_mol(0x04, 0x06, 0xF0, 0xE0, 0x05);
+        let qr_a = CompactQR::from_molecule(&a, &mut table).unwrap();
+        let qr_b = CompactQR::from_molecule(&b, &mut table).unwrap();
+        let (base, exact, _) = qr_a.silk_compare(qr_b, &table);
+        assert_eq!(base, 0, "Completely different → 0 base shared");
+        assert_eq!(exact, 0, "Completely different → 0 exact shared");
+    }
+
+    #[test]
+    fn compact_qr_evolve_lossless() {
+        let mut table = FormulaTable::new();
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule(&fire, &mut table).unwrap();
+        // Evolve Valence: 0xC0 → 0x40 (like "lửa nhẹ")
+        let evolved = qr.evolve(2, 0x40, &mut table).unwrap();
+        let evolved_mol = evolved.to_molecule(&table).unwrap();
+        assert_eq!(evolved_mol.emotion.valence, 0x40, "Exact V=0x40");
+        // Other dims unchanged — EXACT
+        assert_eq!(evolved_mol.shape, fire.shape);
+        assert_eq!(evolved_mol.relation, fire.relation);
+        assert_eq!(evolved_mol.emotion.arousal, fire.emotion.arousal);
+        assert_eq!(evolved_mol.time, fire.time);
         // Different node
         assert_ne!(qr.compute_hash(), evolved.compute_hash());
     }
 
     #[test]
-    fn compact_qr_hash_deterministic() {
+    fn compact_qr_dedup_in_table() {
+        let mut table = FormulaTable::new();
         let mol = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
-        let qr = CompactQR::from_molecule(&mol);
+        let qr1 = CompactQR::from_molecule(&mol, &mut table).unwrap();
+        let qr2 = CompactQR::from_molecule(&mol, &mut table).unwrap();
+        assert_eq!(qr1, qr2, "Same molecule → same CompactQR (dedup)");
+        assert_eq!(table.len(), 1, "Table deduplicates");
+    }
+
+    #[test]
+    fn compact_qr_hash_deterministic() {
+        let mut table = FormulaTable::new();
+        let mol = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule(&mol, &mut table).unwrap();
         let h1 = qr.compute_hash();
         let h2 = qr.compute_hash();
         assert_eq!(h1, h2, "Hash must be deterministic");
-        // Different QR → different hash
-        let qr2 = qr.evolve(0, 3);
-        assert_ne!(qr.compute_hash(), qr2.compute_hash());
     }
 
     #[test]
     fn compact_qr_byte_roundtrip() {
+        let mut table = FormulaTable::new();
         let mol = test_mol(0x03, 0x07, 0xA0, 0x60, 0x02);
-        let qr = CompactQR::from_molecule(&mol);
+        let qr = CompactQR::from_molecule(&mol, &mut table).unwrap();
         let bytes = qr.to_bytes();
         let restored = CompactQR::from_bytes(bytes);
         assert_eq!(qr, restored, "Byte roundtrip must be lossless");
+        // And molecule roundtrip via restored
+        let mol_back = restored.to_molecule(&table).unwrap();
+        assert_eq!(mol_back, mol, "Full molecule roundtrip through bytes");
     }
 
     #[test]
     fn compact_qr_display() {
+        let mut table = FormulaTable::new();
         let mol = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
-        let qr = CompactQR::from_molecule(&mol);
+        let qr = CompactQR::from_molecule(&mol, &mut table).unwrap();
         let s = alloc::format!("{}", qr);
         assert!(s.starts_with("QR["), "Display format: {}", s);
     }
 
+    // ── Lossy backward compat tests ─────────────────────────────────────
+
     #[test]
-    fn compact_qr_all_bases_representable() {
-        // All 8 shape bases
+    fn compact_qr_lossy_roundtrip() {
+        let mol = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let qr = CompactQR::from_molecule_lossy(&mol);
+        let restored = qr.to_molecule_lossy();
+        assert_eq!(restored.shape_base(), mol.shape_base());
+        assert_eq!(restored.relation_base(), mol.relation_base());
+        assert_eq!(restored.time_base(), mol.time_base());
+    }
+
+    #[test]
+    fn compact_qr_lossy_fire() {
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule_lossy(&fire);
+        assert_eq!(qr.shape_idx_lossy(), 0, "Sphere = base 0");
+        assert_eq!(qr.relation_idx_lossy(), 5, "Causes = base 5");
+        assert_eq!(qr.time_idx_lossy(), 3, "Fast = base 3");
+        assert_eq!(qr.valence_zone_lossy(), 12, "0xC0/16 = 12");
+        assert_eq!(qr.arousal_zone_lossy(), 6, "0xC0/32 = 6");
+    }
+
+    #[test]
+    fn compact_qr_lossy_silk_compare() {
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule_lossy(&fire);
+        let (shared, strength) = qr.silk_compare_lossy(qr);
+        assert_eq!(shared, 5, "Identical → 5/5 dims");
+        assert!((strength - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn compact_qr_lossy_evolve() {
+        let fire = test_mol(0x01, 0x06, 0xC0, 0xC0, 0x04);
+        let qr = CompactQR::from_molecule_lossy(&fire);
+        let evolved = qr.evolve_lossy(3, 2);
+        assert_eq!(evolved.valence_zone_lossy(), 2);
+        assert_eq!(evolved.shape_idx_lossy(), qr.shape_idx_lossy());
+    }
+
+    #[test]
+    fn compact_qr_lossy_all_bases() {
         for s in 1u8..=8 {
             let mol = test_mol(s, 0x01, 0x80, 0x80, 0x03);
-            let qr = CompactQR::from_molecule(&mol);
-            assert_eq!(qr.shape_idx(), s - 1, "Shape base {} → idx {}", s, s - 1);
+            let qr = CompactQR::from_molecule_lossy(&mol);
+            assert_eq!(qr.shape_idx_lossy(), s - 1);
         }
-        // All 8 relation bases
         for r in 1u8..=8 {
             let mol = test_mol(0x01, r, 0x80, 0x80, 0x03);
-            let qr = CompactQR::from_molecule(&mol);
-            assert_eq!(qr.relation_idx(), r - 1);
+            let qr = CompactQR::from_molecule_lossy(&mol);
+            assert_eq!(qr.relation_idx_lossy(), r - 1);
         }
-        // All 5 time bases
         for t in 1u8..=5 {
             let mol = test_mol(0x01, 0x01, 0x80, 0x80, t);
-            let qr = CompactQR::from_molecule(&mol);
-            assert_eq!(qr.time_idx(), t - 1);
-        }
-    }
-
-    #[test]
-    fn compact_qr_valence_zones() {
-        // 16 zones (0-15)
-        for zone in 0u8..16 {
-            let v = zone * 16 + 8; // zone center
-            let mol = test_mol(0x01, 0x01, v, 0x80, 0x03);
-            let qr = CompactQR::from_molecule(&mol);
-            assert_eq!(qr.valence_zone(), zone, "V={:#X} → zone {}", v, zone);
-        }
-    }
-
-    #[test]
-    fn compact_qr_arousal_zones() {
-        // 8 zones (0-7)
-        for zone in 0u8..8 {
-            let a = zone * 32 + 16; // zone center
-            let mol = test_mol(0x01, 0x01, 0x80, a, 0x03);
-            let qr = CompactQR::from_molecule(&mol);
-            assert_eq!(qr.arousal_zone(), zone, "A={:#X} → zone {}", a, zone);
+            let qr = CompactQR::from_molecule_lossy(&mol);
+            assert_eq!(qr.time_idx_lossy(), t - 1);
         }
     }
 
@@ -1900,6 +2252,17 @@ mod tests {
         let storage = nodes * CompactQR::SIZE as u64;
         assert!(storage < 16_000_000_000, "2B × 2B = {} < 16GB", storage);
         assert_eq!(storage, 4_000_000_000, "Exactly 4 GB");
+    }
+
+    #[test]
+    fn formula_table_ram_usage() {
+        let mut table = FormulaTable::with_capacity(100);
+        for i in 0u8..50 {
+            let mol = test_mol(i % 8 + 1, i % 8 + 1, i * 5, i * 5, i % 5 + 1);
+            table.register(&mol);
+        }
+        assert!(table.ram_usage() > 0);
+        assert_eq!(table.len(), 50);
     }
 }
 

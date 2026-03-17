@@ -802,48 +802,52 @@ fn bench_projection() {
     // ══════════════════════════════════════════════════════════════════════
     println!("    ── CompactQR Live Benchmark ──");
     {
-        use olang::molecular::CompactQR;
+        use olang::molecular::{CompactQR, FormulaTable};
 
-        // Encode fire codepoint → Molecule → CompactQR
+        let mut table = FormulaTable::new();
+
+        // Encode fire codepoint → Molecule → CompactQR (LOSSLESS)
         let fire_chain = olang::encoder::encode_codepoint(0x1F525);
         let fire_mol = fire_chain.0[0];
-        let fire_cqr = CompactQR::from_molecule(&fire_mol);
+        let fire_cqr = CompactQR::from_molecule(&fire_mol, &mut table).unwrap();
         println!("    🔥 Fire: {:?} → CompactQR {}", fire_mol, fire_cqr);
 
-        // Roundtrip fidelity
-        let back = fire_cqr.to_molecule();
-        println!("    Roundtrip: {:?} (shape={}, rel={}, V={}, A={}, T={})",
+        // Roundtrip fidelity (LOSSLESS)
+        let back = fire_cqr.to_molecule(&table).unwrap();
+        println!("    Roundtrip: {:?} (shape={}, rel={}, V={}, A={}, T={}) [LOSSLESS]",
             back, back.shape, back.relation, back.emotion.valence, back.emotion.arousal, back.time);
+        assert_eq!(back, fire_mol, "Lossless roundtrip");
 
-        // Silk compare: fire vs water
+        // Silk compare: fire vs water (LOSSLESS — full precision)
         let water_chain = olang::encoder::encode_codepoint(0x1F4A7);
         let water_mol = water_chain.0[0];
-        let water_cqr = CompactQR::from_molecule(&water_mol);
-        let (matching, sim) = fire_cqr.silk_compare(water_cqr);
-        println!("    🔥↔💧 silk_compare: {}/5 dims match, similarity={:.2}", matching, sim);
+        let water_cqr = CompactQR::from_molecule(&water_mol, &mut table).unwrap();
+        let (base_match, exact_match, sim) = fire_cqr.silk_compare(water_cqr, &table);
+        println!("    🔥↔💧 silk_compare: base={}/5 exact={}/5 strength={:.2}", base_match, exact_match, sim);
 
-        // Evolve: fire → gentle fire (lower valence)
-        let gentle = fire_cqr.evolve(3, 4); // dim 3 = valence, zone 4
-        println!("    🔥→🕯️ evolve(V, 4): {}", gentle);
+        // Evolve: fire → gentle fire (lower valence) — LOSSLESS
+        let gentle = fire_cqr.evolve(2, 0x40, &mut table).unwrap(); // dim 2 = valence
+        println!("    🔥→🕯️ evolve(V, 0x40): {}", gentle);
+        println!("    FormulaTable: {} entries, ~{} bytes RAM", table.len(), table.ram_usage());
 
-        // Speed: from_molecule
+        // Speed: from_molecule (lossless — includes table lookup)
         let t = std::time::Instant::now();
         let iters = 1_000_000u64;
         for _ in 0..iters {
-            let _ = CompactQR::from_molecule(&fire_mol);
+            let _ = CompactQR::from_molecule(&fire_mol, &mut table);
         }
         let elapsed = t.elapsed();
-        println!("    from_molecule : {:.0} ops/s ({:.1}ns/call)",
+        println!("    from_molecule : {:.0} ops/s ({:.1}ns/call) [lossless]",
             iters as f64 / elapsed.as_secs_f64(),
             elapsed.as_nanos() as f64 / iters as f64);
 
-        // Speed: silk_compare
+        // Speed: silk_compare (lossless — full 5D)
         let t = std::time::Instant::now();
         for _ in 0..iters {
-            let _ = fire_cqr.silk_compare(water_cqr);
+            let _ = fire_cqr.silk_compare(water_cqr, &table);
         }
         let elapsed = t.elapsed();
-        println!("    silk_compare  : {:.0} ops/s ({:.1}ns/call)",
+        println!("    silk_compare  : {:.0} ops/s ({:.1}ns/call) [lossless]",
             iters as f64 / elapsed.as_secs_f64(),
             elapsed.as_nanos() as f64 / iters as f64);
 
@@ -857,13 +861,13 @@ fn bench_projection() {
             iters as f64 / elapsed.as_secs_f64(),
             elapsed.as_nanos() as f64 / iters as f64);
 
-        // Speed: evolve
+        // Speed: from_molecule_lossy (backward compat — no table)
         let t = std::time::Instant::now();
         for _ in 0..iters {
-            let _ = fire_cqr.evolve(3, 4);
+            let _ = CompactQR::from_molecule_lossy(&fire_mol);
         }
         let elapsed = t.elapsed();
-        println!("    evolve        : {:.0} ops/s ({:.1}ns/call)",
+        println!("    from_mol_lossy: {:.0} ops/s ({:.1}ns/call) [packed, no table]",
             iters as f64 / elapsed.as_secs_f64(),
             elapsed.as_nanos() as f64 / iters as f64);
     }
