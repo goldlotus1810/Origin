@@ -283,9 +283,6 @@ mod tests {
     use super::*;
     use crate::encoder::encode_codepoint;
 
-    fn skip_if_empty() -> bool {
-        ucd::table_len() == 0
-    }
 
     /// Test signing key từ seed cố định.
     fn test_signer() -> QRSigner {
@@ -297,9 +294,6 @@ mod tests {
 
     #[test]
     fn sign_and_verify_fire() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525); // 🔥
         let record = signer.sign_qr(&chain, 1000);
@@ -311,9 +305,6 @@ mod tests {
 
     #[test]
     fn sign_and_verify_water() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F4A7); // 💧
         let record = signer.sign_qr(&chain, 2000);
@@ -322,9 +313,6 @@ mod tests {
 
     #[test]
     fn tamper_chain_fails_verify() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525);
         let mut record = signer.sign_qr(&chain, 1000);
@@ -336,9 +324,6 @@ mod tests {
 
     #[test]
     fn tamper_timestamp_fails_verify() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525);
         let mut record = signer.sign_qr(&chain, 1000);
@@ -353,9 +338,6 @@ mod tests {
 
     #[test]
     fn tamper_signature_fails_verify() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525);
         let mut record = signer.sign_qr(&chain, 1000);
@@ -370,9 +352,6 @@ mod tests {
 
     #[test]
     fn wrong_key_fails_verify() {
-        if skip_if_empty() {
-            return;
-        }
         let signer1 = test_signer();
         let signer2 = QRSigner::from_seed(&[0xFF; 32]); // key khác
 
@@ -388,9 +367,6 @@ mod tests {
 
     #[test]
     fn signature_deterministic() {
-        if skip_if_empty() {
-            return;
-        }
         // ED25519 deterministic: cùng input → cùng signature
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525);
@@ -401,9 +377,6 @@ mod tests {
 
     #[test]
     fn different_timestamps_different_signatures() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525);
         let r1 = signer.sign_qr(&chain, 1000);
@@ -418,9 +391,6 @@ mod tests {
 
     #[test]
     fn qr_record_roundtrip() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525);
         let record = signer.sign_qr(&chain, 1000);
@@ -446,9 +416,6 @@ mod tests {
 
     #[test]
     fn supersede_and_verify() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB); // ○ (giả sử QR cũ)
         let chain_new = encode_codepoint(0x25CF); // ● (QR mới đúng hơn)
@@ -471,9 +438,6 @@ mod tests {
 
     #[test]
     fn supersession_old_still_valid() {
-        if skip_if_empty() {
-            return;
-        }
         // QR_old vẫn valid sau khi bị supersede (QT8)
         let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB);
@@ -495,9 +459,6 @@ mod tests {
 
     #[test]
     fn supersession_tamper_fails() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB);
         let chain_new = encode_codepoint(0x25CF);
@@ -518,9 +479,6 @@ mod tests {
 
     #[test]
     fn supersession_roundtrip() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB);
         let chain_new = encode_codepoint(0x25CF);
@@ -552,9 +510,6 @@ mod tests {
 
     #[test]
     fn qr_hash_matches_chain_hash() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let chain = encode_codepoint(0x1F525);
         let record = signer.sign_qr(&chain, 1000);
@@ -568,9 +523,6 @@ mod tests {
 
     #[test]
     fn sign_all_ucd_entries_sample() {
-        if skip_if_empty() {
-            return;
-        }
         let signer = test_signer();
         let sample_cps = [
             0x1F525u32, // 🔥

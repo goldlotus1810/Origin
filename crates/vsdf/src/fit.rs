@@ -234,9 +234,6 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     /// Tạo point cloud trên bề mặt sphere.
     fn sphere_points(r: f32, n: usize) -> Vec<Vec3> {
@@ -281,9 +278,6 @@ mod tests {
 
     #[test]
     fn fit_sphere_high_confidence() {
-        if skip() {
-            return;
-        }
         let pts = sphere_points(1.0, 50);
         let fitter = SdfFitter::new();
         let result = fitter.fit_best(&pts).expect("phải tìm được fit");
@@ -305,9 +299,6 @@ mod tests {
 
     #[test]
     fn fit_sphere_has_chain() {
-        if skip() {
-            return;
-        }
         let pts = sphere_points(0.5, 30);
         let result = SdfFitter::new().fit_best(&pts).unwrap();
         assert!(!result.chain.is_empty(), "FitResult phải có chain");
@@ -315,9 +306,6 @@ mod tests {
 
     #[test]
     fn fit_box_reasonable() {
-        if skip() {
-            return;
-        }
         // Box points — confidence thấp hơn sphere vì sampling đơn giản
         let pts = box_points(1.0, 1.0, 1.0, 24);
         let result = SdfFitter::new().fit_best(&pts);
@@ -339,9 +327,6 @@ mod tests {
 
     #[test]
     fn fit_single_point() {
-        if skip() {
-            return;
-        }
         // 1 điểm → bất kỳ primitive nào đều có thể fit
         let pts = vec![Vec3::new(1.0, 0.0, 0.0)];
         let result = SdfFitter::new().fit_best(&pts);
@@ -351,9 +336,6 @@ mod tests {
 
     #[test]
     fn confidence_thresholds() {
-        if skip() {
-            return;
-        }
         let pts = sphere_points(1.0, 50);
         let result = SdfFitter::new().fit_best(&pts).unwrap();
         // Test threshold logic
@@ -376,9 +358,6 @@ mod tests {
 
     #[test]
     fn kind_to_codepoint_all_valid() {
-        if skip() {
-            return;
-        }
         for b in 0x01u8..=0x12 {
             let kind = SdfKind::from_byte(b).unwrap();
             let cp = kind_to_codepoint(kind);

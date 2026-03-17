@@ -262,9 +262,6 @@ mod tests {
 
     #[test]
     fn homeos_wasm_process_olang() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let mut os = HomeOSWasm::new();
         let r = os.process("○{stats}");
         assert!(
@@ -288,9 +285,6 @@ mod tests {
 
     #[test]
     fn encode_cp_fire() {
-        if ucd::table_len() == 0 {
-            return;
-        }
         let hash = HomeOSWasm::encode_cp(0x1F525); // 🔥
         assert!(hash > 0, "🔥 hash phải > 0: {}", hash);
     }

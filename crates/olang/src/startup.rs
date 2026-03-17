@@ -665,10 +665,6 @@ pub static L1_SYSTEM_SEED: &[L1SeedEntry] = &[
 pub fn seed_l1_system(registry: &mut Registry) {
     use crate::registry::NodeKind;
 
-    if ucd::table_len() == 0 {
-        return;
-    }
-
     let ts = 0i64;
     let mut offset = 1000u64; // L1 offsets start after L0
 
@@ -834,10 +830,6 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<Vec<BootEdge
 ///
 /// Lấy một chain từ registry → LCA(x, x) == x.
 fn verify_identity(_registry: &Registry) -> Result<(), String> {
-    if ucd::table_len() == 0 {
-        return Ok(());
-    } // skip nếu không có UCD
-
     // Test với origin node
     let origin = encode_codepoint(0x25CB);
     let lca_result = lca(&origin, &origin);
@@ -1288,7 +1280,7 @@ fn find_alias(hash: u64, _registry: &Registry) -> Option<String> {
 pub fn chain_to_emoji(chain: &MolecularChain) -> alloc::string::String {
     use alloc::string::ToString;
 
-    if chain.is_empty() || ucd::table_len() == 0 {
+    if chain.is_empty() {
         return "○".to_string();
     }
 
@@ -1459,10 +1451,6 @@ pub fn resolve_with_cp(name: &str, registry: &Registry) -> (MolecularChain, Opti
 mod tests {
     use super::*;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
-
     #[test]
     fn boot_empty_ok() {
         let result = boot_empty();
@@ -1479,9 +1467,6 @@ mod tests {
 
     #[test]
     fn boot_with_ucd_reaches_verified() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         assert!(
             result.stage >= BootStage::Verified,
@@ -1497,9 +1482,6 @@ mod tests {
 
     #[test]
     fn boot_seeds_axioms() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         // Registry phải có origin node
         assert!(
@@ -1519,9 +1501,6 @@ mod tests {
 
     #[test]
     fn boot_axiom_identity() {
-        if skip() {
-            return;
-        }
         // Verify: LCA(○,○)==○
         let origin = encode_codepoint(0x25CB);
         let lca_result = lca(&origin, &origin);
@@ -1530,9 +1509,6 @@ mod tests {
 
     #[test]
     fn boot_from_seeded_file() {
-        if skip() {
-            return;
-        }
         // Tạo mini file với 1 node
         use crate::writer::OlangWriter;
         let chain = encode_codepoint(0x1F525); // 🔥
@@ -1575,9 +1551,6 @@ mod tests {
 
     #[test]
     fn resolve_single_emoji() {
-        if skip() {
-            return;
-        }
         let registry = Registry::new();
         let chain = resolve("🔥", &registry);
         assert!(!chain.is_empty(), "resolve('🔥') phải trả non-empty chain");
@@ -1593,9 +1566,6 @@ mod tests {
 
     #[test]
     fn resolve_origin_symbol() {
-        if skip() {
-            return;
-        }
         let registry = Registry::new();
         let chain = resolve("○", &registry);
         assert!(!chain.is_empty(), "○ → non-empty chain");
@@ -1613,9 +1583,6 @@ mod tests {
 
     #[test]
     fn manifest_after_boot() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         assert!(!result.manifest.is_empty(), "Boot manifest không rỗng");
         // Axiom nodes phải có
@@ -1627,9 +1594,6 @@ mod tests {
 
     #[test]
     fn manifest_by_category() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         let axioms = result.manifest.by_category(NodeCategory::Axiom);
         assert!(!axioms.is_empty(), "Phải có axiom entries");
@@ -1640,9 +1604,6 @@ mod tests {
 
     #[test]
     fn manifest_summary_has_categories() {
-        if skip() {
-            return;
-        }
         let result = boot_empty();
         let summary = result.manifest.summary();
         assert!(summary.contains("SystemManifest"), "Summary header");
@@ -1653,9 +1614,6 @@ mod tests {
 
     #[test]
     fn manifest_from_seeded_file() {
-        if skip() {
-            return;
-        }
         use crate::writer::OlangWriter;
         // Seed a fire node + alias
         let chain = encode_codepoint(0x1F525);
@@ -1673,7 +1631,6 @@ mod tests {
 
     #[test]
     fn l1_seed_registers_skills() {
-        if skip() { return; }
         use crate::registry::NodeKind;
         let mut r = Registry::new();
         seed_l1_system(&mut r);
@@ -1689,7 +1646,6 @@ mod tests {
 
     #[test]
     fn l1_seed_registers_agents() {
-        if skip() { return; }
         use crate::registry::NodeKind;
         let mut r = Registry::new();
         seed_l1_system(&mut r);
@@ -1701,7 +1657,6 @@ mod tests {
 
     #[test]
     fn l1_seed_registers_program_components() {
-        if skip() { return; }
         use crate::registry::NodeKind;
         let mut r = Registry::new();
         seed_l1_system(&mut r);
@@ -1713,7 +1668,6 @@ mod tests {
 
     #[test]
     fn l1_seed_registers_sensors() {
-        if skip() { return; }
         use crate::registry::NodeKind;
         let mut r = Registry::new();
         seed_l1_system(&mut r);
@@ -1724,7 +1678,6 @@ mod tests {
 
     #[test]
     fn l1_seed_all_have_aliases() {
-        if skip() { return; }
         let mut r = Registry::new();
         seed_l1_system(&mut r);
         // Every L1 node should have at least 1 alias
@@ -1735,7 +1688,6 @@ mod tests {
 
     #[test]
     fn l1_seed_lookup_by_name() {
-        if skip() { return; }
         let mut r = Registry::new();
         seed_l1_system(&mut r);
         // Should be able to find skills by name
@@ -1751,7 +1703,6 @@ mod tests {
 
     #[test]
     fn l1_seed_kind_summary() {
-        if skip() { return; }
         let mut r = Registry::new();
         seed_l1_system(&mut r);
         let summary = r.kind_summary();
@@ -1766,7 +1717,6 @@ mod tests {
 
     #[test]
     fn boot_includes_l1_seed() {
-        if skip() { return; }
         use crate::registry::NodeKind;
         let result = boot(None);
         // Boot should include L1 system nodes

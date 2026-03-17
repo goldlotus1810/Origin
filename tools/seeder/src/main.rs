@@ -27,11 +27,6 @@ fn main() {
     println!("[seeder] HomeOS Origin Seeder — Full L0");
     println!("[seeder] Unicode 18.0 — bảng tuần hoàn hoàn chỉnh");
 
-    if ucd::table_len() == 0 {
-        eprintln!("[seeder] ERROR: UCD table empty");
-        std::process::exit(1);
-    }
-
     let table = ucd::table();
     println!("[seeder] UCD: {} entries (5 nhóm × 5 chiều)", table.len());
 

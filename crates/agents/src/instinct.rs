@@ -686,9 +686,6 @@ mod tests {
     use super::*;
     use olang::encoder::encode_codepoint;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     fn chain_fire() -> MolecularChain {
         encode_codepoint(0x1F525)
@@ -730,9 +727,6 @@ mod tests {
 
     #[test]
     fn analogy_produces_output() {
-        if skip() {
-            return;
-        }
         let skill = AnalogySkill;
         let mut c = ctx();
         c.push_input(chain_fire());
@@ -746,9 +740,6 @@ mod tests {
 
     #[test]
     fn analogy_is_stateless() {
-        if skip() {
-            return;
-        }
         let skill = AnalogySkill;
         // Call twice — same result
         let mut c1 = ctx();
@@ -776,9 +767,6 @@ mod tests {
 
     #[test]
     fn abstraction_similar_chains_low_variance() {
-        if skip() {
-            return;
-        }
         let skill = AbstractionSkill;
         let mut c = ctx();
         c.push_input(chain_happy());
@@ -792,9 +780,6 @@ mod tests {
 
     #[test]
     fn abstraction_diverse_chains_high_variance() {
-        if skip() {
-            return;
-        }
         let skill = AbstractionSkill;
         let mut c = ctx();
         c.push_input(chain_happy());
@@ -811,9 +796,6 @@ mod tests {
 
     #[test]
     fn causality_insufficient_without_evidence() {
-        if skip() {
-            return;
-        }
         let skill = CausalitySkill;
         let mut c = ctx();
         c.push_input(chain_fire());
@@ -828,9 +810,6 @@ mod tests {
 
     #[test]
     fn causality_detects_with_evidence() {
-        if skip() {
-            return;
-        }
         let skill = CausalitySkill;
         let mut c = ctx();
         c.push_input(chain_fire());
@@ -847,9 +826,6 @@ mod tests {
 
     #[test]
     fn contradiction_happy_angry() {
-        if skip() {
-            return;
-        }
         let skill = ContradictionSkill;
         let mut c = ctx();
         c.push_input(chain_happy());
@@ -866,9 +842,6 @@ mod tests {
 
     #[test]
     fn contradiction_similar_no_conflict() {
-        if skip() {
-            return;
-        }
         let skill = ContradictionSkill;
         let mut c = ctx();
         c.push_input(chain_star());
@@ -883,9 +856,6 @@ mod tests {
 
     #[test]
     fn curiosity_everything_new() {
-        if skip() {
-            return;
-        }
         let skill = CuriositySkill;
         let mut c = ctx();
         c.push_input(chain_brain());
@@ -897,9 +867,6 @@ mod tests {
 
     #[test]
     fn curiosity_known_territory() {
-        if skip() {
-            return;
-        }
         let skill = CuriositySkill;
         let mut c = ctx();
         c.push_input(chain_fire());
@@ -915,9 +882,6 @@ mod tests {
 
     #[test]
     fn curiosity_novel_territory() {
-        if skip() {
-            return;
-        }
         let skill = CuriositySkill;
         let mut c = ctx();
         c.push_input(chain_brain());
@@ -943,9 +907,6 @@ mod tests {
 
     #[test]
     fn reflection_strong_knowledge() {
-        if skip() {
-            return;
-        }
         let skill = ReflectionSkill;
         let mut c = ctx();
         c.push_input(chain_fire());
@@ -965,9 +926,6 @@ mod tests {
 
     #[test]
     fn reflection_fragile_knowledge() {
-        if skip() {
-            return;
-        }
         let skill = ReflectionSkill;
         let mut c = ctx();
         c.push_input(chain_water());
@@ -983,9 +941,6 @@ mod tests {
 
     #[test]
     fn honesty_silence_when_unsure() {
-        if skip() {
-            return;
-        }
         let skill = HonestySkill;
         let mut c = ctx();
         c.push_input(chain_fire());
@@ -1000,9 +955,6 @@ mod tests {
 
     #[test]
     fn honesty_fact_when_certain() {
-        if skip() {
-            return;
-        }
         let skill = HonestySkill;
         let mut c = ctx();
         c.push_input(chain_fire());
@@ -1014,9 +966,6 @@ mod tests {
 
     #[test]
     fn honesty_hypothesis_when_uncertain() {
-        if skip() {
-            return;
-        }
         let skill = HonestySkill;
         let mut c = ctx();
         c.push_input(chain_brain());
@@ -1043,9 +992,6 @@ mod tests {
 
     #[test]
     fn all_instincts_are_stateless() {
-        if skip() {
-            return;
-        }
         let instincts = innate_instincts();
         // Mỗi instinct gọi 2 lần với context trống → luôn Insufficient
         for skill in instincts {

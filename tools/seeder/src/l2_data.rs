@@ -334,11 +334,6 @@ fn main() {
     println!("[l2_data] L2 Multilingual Seeder");
     println!("[l2_data] {} L2 concept nodes", L2_NODES.len());
 
-    if ucd::table_len() == 0 {
-        eprintln!("[l2_data] ERROR: UCD empty");
-        std::process::exit(1);
-    }
-
     let ts = now_ns();
     let seed = [0x4Cu8; 32]; // L2 seed
     let signer = QRSigner::from_seed(&seed);

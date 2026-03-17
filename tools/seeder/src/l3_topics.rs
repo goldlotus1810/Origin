@@ -409,11 +409,6 @@ fn main() {
     println!("[l3_topics] L3 Topic Cluster Seeder");
     println!("[l3_topics] {} topic clusters", L3_CLUSTERS.len());
 
-    if ucd::table_len() == 0 {
-        eprintln!("[l3_topics] ERROR: UCD empty");
-        std::process::exit(1);
-    }
-
     let ts = now_ns();
     let seed = [0x4Cu8; 32];
     let signer = QRSigner::from_seed(&seed);

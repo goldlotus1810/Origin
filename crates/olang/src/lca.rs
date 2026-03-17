@@ -442,17 +442,11 @@ mod tests {
         encode_codepoint(0x1F9E0)
     } // 🧠
 
-    fn skip_if_empty() -> bool {
-        ucd::table_len() == 0
-    }
 
     // ── Property 1: Idempotent ──────────────────────────────────────────────
 
     #[test]
     fn property_idempotent_fire() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let result = lca(&f, &f);
         assert_eq!(result, f, "LCA(a,a) phải == a");
@@ -460,9 +454,6 @@ mod tests {
 
     #[test]
     fn property_idempotent_water() {
-        if skip_if_empty() {
-            return;
-        }
         let w = water();
         assert_eq!(lca(&w, &w), w);
     }
@@ -471,9 +462,6 @@ mod tests {
 
     #[test]
     fn property_commutative() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let w = water();
         assert_eq!(lca(&f, &w), lca(&w, &f), "LCA(a,b) phải == LCA(b,a)");
@@ -481,9 +469,6 @@ mod tests {
 
     #[test]
     fn property_commutative_cold_brain() {
-        if skip_if_empty() {
-            return;
-        }
         let c = cold();
         let b = brain();
         assert_eq!(lca(&c, &b), lca(&b, &c));
@@ -493,9 +478,6 @@ mod tests {
 
     #[test]
     fn property_similarity_bound() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let w = water();
         let parent = lca(&f, &w);
@@ -524,9 +506,6 @@ mod tests {
 
     #[test]
     fn property_associative() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let w = water();
         let c = cold();
@@ -548,9 +527,6 @@ mod tests {
 
     #[test]
     fn lca_fire_water_middle() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let w = water();
         let parent = lca(&f, &w);
@@ -576,9 +552,6 @@ mod tests {
 
     #[test]
     fn lca_mode_detection() {
-        if skip_if_empty() {
-            return;
-        }
         // 3 chains đều là Sphere, 1 chain là Capsule
         // → mode = Sphere (3/4 = 75% ≥ 60%)
         let sphere1 = encode_codepoint(0x25CF); // ●
@@ -596,9 +569,6 @@ mod tests {
 
     #[test]
     fn lca_weighted_fire_favored() {
-        if skip_if_empty() {
-            return;
-        }
         // Fire (weight=10) vs Water (weight=1) → kết quả gần fire hơn
         let f = fire();
         let w = water();
@@ -632,9 +602,6 @@ mod tests {
 
     #[test]
     fn lca_single_chain() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let result = lca_many(&[f.clone()]);
         assert_eq!(result, f, "LCA của 1 chain = chính nó");
@@ -642,9 +609,6 @@ mod tests {
 
     #[test]
     fn lca_many_thermodynamics() {
-        if skip_if_empty() {
-            return;
-        }
         // 🔥 ♨️ ❄️ → LCA = L3_Thermodynamics (trung gian về nhiệt)
         let f = fire();
         let c = cold();
@@ -670,9 +634,6 @@ mod tests {
 
     #[test]
     fn lca_variance_identical_is_zero() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
         assert!(
@@ -684,9 +645,6 @@ mod tests {
 
     #[test]
     fn lca_variance_similar_is_concrete() {
-        if skip_if_empty() {
-            return;
-        }
         // 🔥 và 🔥 (identical) → variance < 0.15 = concrete
         let f1 = fire();
         let f2 = fire();
@@ -700,9 +658,6 @@ mod tests {
 
     #[test]
     fn lca_variance_diverse_is_abstract() {
-        if skip_if_empty() {
-            return;
-        }
         // 🔥 💧 ❄ 🧠 → very different → variance should be notable
         let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
         assert!(
@@ -714,9 +669,6 @@ mod tests {
 
     #[test]
     fn lca_variance_single_chain_zero() {
-        if skip_if_empty() {
-            return;
-        }
         let result = super::lca_many_with_variance(&[fire()]);
         assert_eq!(result.variance, 0.0, "Single chain → variance = 0");
     }
@@ -769,9 +721,6 @@ mod tests {
 
     #[test]
     fn extremity_identical_chains() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
         // Extremity should be consistent (same chain → same extremity)
@@ -784,9 +733,6 @@ mod tests {
 
     #[test]
     fn extremity_diverse_higher_than_neutral() {
-        if skip_if_empty() {
-            return;
-        }
         // 🔥 💧 ❄ 🧠 → inputs spread out → extremity measurable
         let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
         // Just verify it's valid — actual extremity depends on UCD values
@@ -795,9 +741,6 @@ mod tests {
 
     #[test]
     fn dim_variance_shape() {
-        if skip_if_empty() {
-            return;
-        }
         // dim_variance[0] = shape variance
         let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
         // All 5 dims should be non-negative
@@ -808,9 +751,6 @@ mod tests {
 
     #[test]
     fn dim_variance_identical_is_zero() {
-        if skip_if_empty() {
-            return;
-        }
         let f = fire();
         let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
         for (i, dv) in result.dim_variance.iter().enumerate() {

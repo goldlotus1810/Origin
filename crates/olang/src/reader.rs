@@ -607,9 +607,6 @@ mod tests {
     use crate::encoder::encode_codepoint;
     use crate::writer::OlangWriter;
 
-    fn skip_if_empty() -> bool {
-        ucd::table_len() == 0
-    }
 
     fn roundtrip(write: impl FnOnce(&mut OlangWriter)) -> ParsedFile {
         let mut w = OlangWriter::new(42);
@@ -646,9 +643,6 @@ mod tests {
 
     #[test]
     fn roundtrip_one_node() {
-        if skip_if_empty() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525); // 🔥
         let pf = roundtrip(|w| {
             w.append_node(&chain, 0, false, 1000).unwrap();
@@ -664,9 +658,6 @@ mod tests {
 
     #[test]
     fn roundtrip_qr_node() {
-        if skip_if_empty() {
-            return;
-        }
         let chain = encode_codepoint(0x1F4A7); // 💧
         let pf = roundtrip(|w| {
             w.append_node(&chain, 2, true, 5000).unwrap();
@@ -706,9 +697,6 @@ mod tests {
 
     #[test]
     fn roundtrip_mixed_records() {
-        if skip_if_empty() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         let hash = chain.chain_hash();
 
@@ -725,9 +713,6 @@ mod tests {
 
     #[test]
     fn roundtrip_many_nodes() {
-        if skip_if_empty() {
-            return;
-        }
         let cps = [0x1F525u32, 0x1F4A7, 0x2744, 0x25CF, 0x2208];
 
         let pf = roundtrip(|w| {
@@ -748,9 +733,6 @@ mod tests {
 
     #[test]
     fn file_offsets_increasing() {
-        if skip_if_empty() {
-            return;
-        }
         let pf = roundtrip(|w| {
             w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
                 .unwrap();
@@ -772,9 +754,6 @@ mod tests {
 
     #[test]
     fn crash_recovery_partial_write() {
-        if skip_if_empty() {
-            return;
-        }
         // Giả lập crash: file bị cắt giữa chừng
         let mut w = OlangWriter::new(0);
         w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
@@ -806,9 +785,6 @@ mod tests {
 
     #[test]
     fn recoverable_full_file() {
-        if skip_if_empty() {
-            return;
-        }
         let chain = encode_codepoint(0x1F525);
         let mut w = OlangWriter::new(0);
         w.append_node(&chain, 0, false, 1000).unwrap();
@@ -826,9 +802,6 @@ mod tests {
 
     #[test]
     fn recoverable_truncated_recovers_first() {
-        if skip_if_empty() {
-            return;
-        }
         let mut w = OlangWriter::new(0);
         w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
             .unwrap();
@@ -857,9 +830,6 @@ mod tests {
 
     #[test]
     fn recoverable_unknown_record_type() {
-        if skip_if_empty() {
-            return;
-        }
         let mut w = OlangWriter::new(0);
         w.append_node(&encode_codepoint(0x1F525), 0, false, 1000)
             .unwrap();

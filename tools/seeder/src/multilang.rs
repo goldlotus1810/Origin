@@ -510,11 +510,6 @@ fn main() {
         CONCEPT_NODES.len(),
     );
 
-    if ucd::table_len() == 0 {
-        eprintln!("[multilang] ERROR: UCD table empty");
-        std::process::exit(1);
-    }
-
     let ts = now_ns();
     let seed = [0x42u8; 32];
     let signer = QRSigner::from_seed(&seed);

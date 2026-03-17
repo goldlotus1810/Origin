@@ -24,10 +24,6 @@ fn main() {
     println!("[seed_domains] HomeOS Domain Knowledge Seeder");
     println!("[seed_domains] Domains: math, physics, chemistry, biology, philosophy, algorithms");
 
-    if ucd::table_len() == 0 {
-        eprintln!("[seed_domains] ERROR: UCD table empty");
-        std::process::exit(1);
-    }
     println!("[seed_domains] UCD: {} entries", ucd::table_len());
 
     let ts = now_ns();

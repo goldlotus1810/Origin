@@ -12,6 +12,7 @@ use alloc::string::{String, ToString};
 
 use crate::response_template::{render, ResponseParams};
 use agents::encoder::ContentInput;
+use agents::gate::GateVerdict;
 use agents::learning::{LearningLoop, ProcessResult};
 use context::emotion::sentence_affect;
 use context::emotion::IntentKind;
@@ -163,6 +164,44 @@ struct RecentText {
     timestamp: i64,
     /// Tên riêng đã extract được (nếu có)
     names: alloc::vec::Vec<String>,
+}
+
+/// Extract text content from OlangExpr for SecurityGate checking.
+fn olang_expr_text(expr: &OlangExpr) -> String {
+    match expr {
+        OlangExpr::Query(s) | OlangExpr::Command(s) | OlangExpr::Use(s) => s.clone(),
+        OlangExpr::RelationQuery { subject, object, .. } => {
+            let mut t = subject.clone();
+            if let Some(o) = object {
+                t.push(' ');
+                t.push_str(o);
+            }
+            t
+        }
+        OlangExpr::Compose { a, b } => format!("{} {}", a, b),
+        OlangExpr::ContextQuery { term, context } => format!("{} {}", term, context),
+        OlangExpr::LetBinding { name, value } => {
+            format!("{} {}", name, olang_expr_text(value))
+        }
+        OlangExpr::FnDef { name, body } => {
+            let mut t = name.clone();
+            for e in body {
+                let s = olang_expr_text(e);
+                if !s.is_empty() {
+                    t.push(' ');
+                    t.push_str(&s);
+                }
+            }
+            t
+        }
+        OlangExpr::Pipeline(exprs) | OlangExpr::Pipe(exprs) => {
+            let parts: alloc::vec::Vec<String> =
+                exprs.iter().map(olang_expr_text).filter(|s| !s.is_empty()).collect();
+            parts.join(" ")
+        }
+        OlangExpr::Emit(inner) | OlangExpr::Return(inner) => olang_expr_text(inner),
+        _ => String::new(),
+    }
 }
 
 impl HomeRuntime {
@@ -375,6 +414,38 @@ impl HomeRuntime {
     // ── ○{} expression — compile và execute qua OlangVM ─────────────────────
 
     fn process_olang(&mut self, expr: OlangExpr, ts: i64) -> Response {
+        // ── SecurityGate — chạy TRƯỚC MỌI THỨ (QT: Gate trước mọi pipeline) ──
+        let raw_text = olang_expr_text(&expr);
+        if !raw_text.is_empty() {
+            match self.learning.gate().check_text(&raw_text) {
+                GateVerdict::Allow => {}
+                GateVerdict::Crisis { message } => {
+                    return Response {
+                        text: message,
+                        tone: ResponseTone::Supportive,
+                        fx: self.learning.context().fx(),
+                        kind: ResponseKind::Crisis,
+                    };
+                }
+                GateVerdict::Block { reason } => {
+                    return Response {
+                        text: format!("⚠ SecurityGate blocked: {:?}", reason),
+                        tone: ResponseTone::Gentle,
+                        fx: self.learning.context().fx(),
+                        kind: ResponseKind::Blocked,
+                    };
+                }
+                GateVerdict::BlackCurtain => {
+                    return Response {
+                        text: String::from("…"),
+                        tone: ResponseTone::Gentle,
+                        fx: self.learning.context().fx(),
+                        kind: ResponseKind::Blocked,
+                    };
+                }
+            }
+        }
+
         // Commands bypass VM
         if let OlangExpr::Command(ref cmd) = expr {
             return self.handle_command(cmd, ts);
@@ -3374,9 +3445,7 @@ mod tests {
 
     #[test]
     fn olang_compose_lca() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
         let r = rt.process_text("○{🔥 ∘ 💧}", 1000);
         assert_eq!(r.kind, ResponseKind::OlangResult);
@@ -3534,9 +3603,7 @@ mod tests {
 
     #[test]
     fn read_book_stores_in_knowtree() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
         let n = rt.read_book(
             "Andrei nằm trên chiến trường. Bầu trời xanh vô tận. Tất cả vô nghĩa.",
@@ -3582,9 +3649,7 @@ mod tests {
 
     #[test]
     fn mvhos_compose_lca() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         // □ ○{🔥 ∘ 💧} → LCA result
         let mut rt = rt();
         let r = rt.process_text("○{🔥 ∘ 💧}", 1000);
@@ -3636,9 +3701,7 @@ mod tests {
 
     #[test]
     fn mvhos_crash_recovery() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         // □ Crash → restart → state giữ nguyên
         // Simulate: learn → serialize → boot from bytes → verify state
         let mut rt1 = rt();
@@ -3658,9 +3721,7 @@ mod tests {
 
     #[test]
     fn mvhos_no_hardcoded_molecule() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         // □ 0 hardcoded Molecule
         // Verify encode_codepoint → UCD lookup, not hardcoded
         let chain = olang::encoder::encode_codepoint(0x1F525);
@@ -4337,9 +4398,7 @@ mod stm_verification_tests {
     /// STM tạo node khi chat — ghi nhớ nội dung.
     #[test]
     fn stm_creates_nodes_during_chat() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
         assert_eq!(rt.learning.stm().len(), 0, "STM rỗng trước khi chat");
 
@@ -4354,9 +4413,7 @@ mod stm_verification_tests {
     /// STM tích lũy qua nhiều turns — mỗi turn thêm observations.
     #[test]
     fn stm_accumulates_across_turns() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         rt.process_text("xin chào", 1000);
@@ -4375,9 +4432,7 @@ mod stm_verification_tests {
     /// STM fire_count tăng khi cùng nội dung lặp lại — ghi nhớ sâu hơn.
     #[test]
     fn stm_fire_count_increases_on_repeat() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         // Nói "buồn" nhiều lần → fire_count tăng
@@ -4397,9 +4452,7 @@ mod stm_verification_tests {
     /// Silk edges hình thành khi chat — liên tưởng giữa các khái niệm.
     #[test]
     fn silk_edges_form_during_chat() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         rt.process_text("tôi yêu thích âm nhạc", 1000);
@@ -4417,9 +4470,7 @@ mod stm_verification_tests {
     /// Universal pipeline: Audio input cũng tạo STM observations.
     #[test]
     fn universal_audio_creates_stm() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         let r = rt.process_audio(440.0, 0.7, 120.0, 0.0, 1000);
@@ -4433,9 +4484,7 @@ mod stm_verification_tests {
     /// Universal pipeline: Sensor input qua full pipeline.
     #[test]
     fn universal_sensor_creates_stm() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         let input = ContentInput::Sensor {
@@ -4454,9 +4503,7 @@ mod stm_verification_tests {
     /// Universal pipeline: Code input qua full pipeline.
     #[test]
     fn universal_code_creates_stm() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         let input = ContentInput::Code {
@@ -4475,9 +4522,7 @@ mod stm_verification_tests {
     /// Universal pipeline: Image input qua process_image().
     #[test]
     fn universal_image_creates_stm() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         let r = rt.process_image(0.5, 0.7, 0.8, 0.1, None, 1000);
@@ -4491,9 +4536,7 @@ mod stm_verification_tests {
     /// Universal pipeline: process_input() trực tiếp với System event.
     #[test]
     fn process_input_system_event() {
-        if ucd::table_len() == 0 {
-            return;
-        }
+
         let mut rt = rt();
 
         let input = ContentInput::System {
@@ -4621,17 +4664,12 @@ mod integration_tests {
     use olang::reader::OlangReader;
     use olang::writer::OlangWriter;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     // ── 1. serialize_learned → OlangReader round-trip ────────────────────────
 
     #[test]
     fn serialize_roundtrip_edges() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA1A1);
         // Feed REPETITIVE text → build strong Silk edges (weight >= 0.30)
         // and repeated observations → fire_count >= 3
@@ -4681,9 +4719,7 @@ mod integration_tests {
 
     #[test]
     fn dream_pending_writes_parseable() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB2B2);
         // Feed 12 turns → trigger Dream at turn 8
         for i in 0..12 {
@@ -4720,9 +4756,7 @@ mod integration_tests {
 
     #[test]
     fn reload_from_serialized_bytes() {
-        if skip() {
-            return;
-        }
+
         // Phase 1: Learn
         let mut rt1 = HomeRuntime::new(0xC3C3);
         for i in 0..8 {
@@ -4745,9 +4779,7 @@ mod integration_tests {
 
     #[test]
     fn amend_roundtrip() {
-        if skip() {
-            return;
-        }
+
         let chain = olang::encoder::encode_codepoint(0x1F525); // 🔥
 
         let mut writer = OlangWriter::new(1000);
@@ -4793,9 +4825,7 @@ mod integration_tests {
 
     #[test]
     fn multiple_amends_same_target() {
-        if skip() {
-            return;
-        }
+
         let chain = olang::encoder::encode_codepoint(0x1F4A7); // 💧
 
         let mut writer = OlangWriter::new(0);
@@ -4819,9 +4849,7 @@ mod integration_tests {
 
     #[test]
     fn full_mix_roundtrip() {
-        if skip() {
-            return;
-        }
+
         let fire = olang::encoder::encode_codepoint(0x1F525);
         let water = olang::encoder::encode_codepoint(0x1F4A7);
         let fire_hash = fire.chain_hash();
@@ -4870,9 +4898,7 @@ mod integration_tests {
 
     #[test]
     fn v03_file_readable() {
-        if skip() {
-            return;
-        }
+
         // Manually build v0.03 file: same magic, version=0x03, then a node
         use olang::writer::{MAGIC, VERSION_V03};
         let chain = olang::encoder::encode_codepoint(0x1F525);
@@ -4900,9 +4926,7 @@ mod integration_tests {
 
     #[test]
     fn health_command_returns_diagnostics() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xE001);
         let resp = rt.process_text("○{health}", 1000);
         assert_eq!(resp.kind, ResponseKind::System);
@@ -4920,9 +4944,7 @@ mod integration_tests {
 
     #[test]
     fn force_learn_qr_writes_pending() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xF001);
         // Drain boot seed writes (QT8)
         let _ = rt.drain_pending_writes();
@@ -4945,9 +4967,7 @@ mod integration_tests {
 
     #[test]
     fn confirm_learn_qr_promotes_last() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xF002);
         // Learn something first
         rt.process_text("Atlanta bị đốt trong chiến tranh", 1000);
@@ -4972,9 +4992,7 @@ mod integration_tests {
 
     #[test]
     fn learn_command_ghi_nho() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xF004);
         let resp = rt.process_text("ghi nhớ rằng Rhett Butler yêu Scarlett", 1000);
         assert!(
@@ -4986,9 +5004,7 @@ mod integration_tests {
 
     #[test]
     fn learn_command_en() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xF005);
         let resp = rt.process_text("remember this: Tara is a plantation", 1000);
         assert!(
@@ -5002,9 +5018,7 @@ mod integration_tests {
 
     #[test]
     fn learn_historical_war_content() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA001);
 
         // Feed historical war content
@@ -5033,9 +5047,7 @@ mod integration_tests {
 
     #[test]
     fn learn_novel_gone_with_the_wind() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA002);
 
         // Feed Gone with the Wind content
@@ -5075,9 +5087,7 @@ mod integration_tests {
 
     #[test]
     fn learn_then_recall_context() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA003);
 
         // Teach facts
@@ -5114,9 +5124,7 @@ mod integration_tests {
 
     #[test]
     fn contradiction_different_valence() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA004);
 
         // Teach positive fact about Scarlett
@@ -5131,9 +5139,7 @@ mod integration_tests {
 
     #[test]
     fn learn_and_confirm_knowledge() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA005);
 
         // Learn a fact
@@ -5150,9 +5156,7 @@ mod integration_tests {
 
     #[test]
     fn learn_war_then_wrong_info() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA006);
 
         // Teach correct fact
@@ -5170,9 +5174,7 @@ mod integration_tests {
 
     #[test]
     fn multiple_sessions_recall() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA007);
 
         // Learn extensively about one topic
@@ -5194,9 +5196,7 @@ mod integration_tests {
 
     #[test]
     fn response_tone_matches_content() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA008);
 
         // Positive content
@@ -5211,9 +5211,7 @@ mod integration_tests {
 
     #[test]
     fn read_book_then_query() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA009);
 
         // Use read_book API
@@ -5233,9 +5231,7 @@ mod integration_tests {
 
     #[test]
     fn recall_context_returns_silk_info() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA010);
 
         // Build knowledge
@@ -5258,9 +5254,7 @@ mod integration_tests {
 
     #[test]
     fn listen_boredom_no_context_stays_quiet() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB001);
         // Không có context trước đó
         let resp = rt.process_text("Hôm nay thật chán!!!", 1000);
@@ -5276,9 +5270,7 @@ mod integration_tests {
 
     #[test]
     fn listen_boredom_with_pending_suggests() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB002);
         // Tạo context trước
         rt.process_text("Scarlett O'Hara sống ở đồn điền Tara", 1000);
@@ -5292,9 +5284,7 @@ mod integration_tests {
 
     #[test]
     fn listen_boredom_excited_stays_quiet() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB003);
         let resp = rt.process_text("mệt quá!!!", 1000);
         assert_eq!(resp.kind, ResponseKind::Natural);
@@ -5311,9 +5301,7 @@ mod integration_tests {
 
     #[test]
     fn listen_ref_unknown_stays_quiet() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB004);
         // Không có context → "bà ấy" = unknown
         let resp = rt.process_text("Bà ấy mới mất. thật tội nghiệp", 1000);
@@ -5328,9 +5316,7 @@ mod integration_tests {
 
     #[test]
     fn listen_ref_known_gives_condolence() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB005);
         // Tạo context: nói về bà Nguyễn
         rt.process_text("Bà Nguyễn là hàng xóm tốt bụng", 1000);
@@ -5349,9 +5335,7 @@ mod integration_tests {
 
     #[test]
     fn listen_ref_male_resolves() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB006);
         // Context: talk about ông Trần
         rt.process_text("Ông Trần Văn Minh là giáo viên giỏi", 1000);
@@ -5366,9 +5350,7 @@ mod integration_tests {
 
     #[test]
     fn listen_exclamation_ah_silent() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB007);
         let resp = rt.process_text("Ah!", 1000);
         assert_eq!(resp.kind, ResponseKind::Natural);
@@ -5382,9 +5364,7 @@ mod integration_tests {
 
     #[test]
     fn listen_exclamation_ya_silent() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB008);
         let resp = rt.process_text("ya..!", 1000);
         assert_eq!(resp.kind, ResponseKind::Natural);
@@ -5398,9 +5378,7 @@ mod integration_tests {
 
     #[test]
     fn listen_exclamation_oi_silent() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB009);
         let resp = rt.process_text("Ôi!", 1000);
         assert_eq!(resp.kind, ResponseKind::Natural);
@@ -5413,9 +5391,7 @@ mod integration_tests {
 
     #[test]
     fn listen_exclamation_then_more_context() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xB010);
         // "Ah!" → silent
         let r1 = rt.process_text("Ah!", 1000);
@@ -5556,15 +5532,10 @@ mod integration_tests {
 mod phase10_tests {
     use super::*;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     #[test]
     fn fibonacci_dream_schedule_initial() {
-        if skip() {
-            return;
-        }
+
         let rt = HomeRuntime::new(0xA001);
         // Initial Fib index = 4 → Fib[4] = 5 turns
         assert_eq!(rt.dream_fib_interval(), 5, "Initial dream interval = Fib[4] = 5");
@@ -5572,9 +5543,7 @@ mod phase10_tests {
 
     #[test]
     fn dream_stats_track_cycles() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA002);
         assert_eq!(rt.dream_cycles(), 0);
 
@@ -5610,9 +5579,7 @@ mod phase10_tests {
 
     #[test]
     fn dream_fib_grows_when_unproductive() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA003);
         let initial_interval = rt.dream_fib_interval();
 
@@ -5634,9 +5601,7 @@ mod phase10_tests {
 
     #[test]
     fn knowtree_sentences_grow_with_input() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA004);
         assert_eq!(rt.knowtree_sentences(), 0);
 
@@ -5652,9 +5617,7 @@ mod phase10_tests {
 
     #[test]
     fn metrics_include_dream_and_knowtree() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA005);
         rt.process_text("tôi buồn vì mất việc", 1000);
 
@@ -5678,9 +5641,7 @@ mod phase10_tests {
 
     #[test]
     fn recall_from_knowtree_after_learning() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA006);
         // Feed several related sentences to build KnowTree
         rt.process_text("tôi buồn vì mất việc", 1000);
@@ -5700,9 +5661,7 @@ mod phase10_tests {
 
     #[test]
     fn dream_command_shows_phase10_stats() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA007);
         for i in 0..6 {
             let text = alloc::format!("buồn đau mất mát {}", i);
@@ -5717,9 +5676,7 @@ mod phase10_tests {
 
     #[test]
     fn combined_recall_silk_and_knowtree() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xA008);
         // Build up knowledge
         for i in 0..10 {
@@ -5746,15 +5703,10 @@ mod phase10_tests {
 mod evolution_integration_tests {
     use super::*;
 
-    fn skip() -> bool {
-        ucd::table_len() == 0
-    }
 
     #[test]
     fn body_store_populated_after_processing() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xE001);
         rt.process_text("lửa cháy sáng", 1000);
         assert!(rt.body_count() > 0, "Processing text creates bodies");
@@ -5762,9 +5714,7 @@ mod evolution_integration_tests {
 
     #[test]
     fn evolution_creates_silk_edges() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xE002);
         // Feed diverse inputs to build varied STM entries
         rt.process_text("🔥", 1000); // fire
@@ -5779,9 +5729,7 @@ mod evolution_integration_tests {
 
     #[test]
     fn body_count_grows_with_diverse_inputs() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xE003);
         rt.process_text("mặt trời mọc", 1000);
         let bodies_1 = rt.body_count();
@@ -5795,9 +5743,7 @@ mod evolution_integration_tests {
 
     #[test]
     fn evolution_pipeline_no_panic() {
-        if skip() {
-            return;
-        }
+
         let mut rt = HomeRuntime::new(0xE004);
         // Stress test: many inputs with varying emotion contexts
         let texts = [
