@@ -30,6 +30,7 @@
 //! EXPLAIN            → pop 1, trace chain's origin
 
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -112,6 +113,11 @@ pub enum Op {
     /// `{ S=1 R=2 V=128 A=128 T=3 }` → MolecularChain with 1 Molecule.
     /// Used by LeoAI to express knowledge as Olang code.
     PushMol(u8, u8, u8, u8, u8),
+    /// Try: begin error-catching block. If any VmError occurs before
+    /// the matching CatchEnd, jump to the catch handler instead of halting.
+    TryBegin(usize),
+    /// CatchEnd: end of catch handler, marks the resume point after try/catch.
+    CatchEnd,
 }
 
 impl Op {
@@ -149,6 +155,8 @@ impl Op {
             Self::Why => "WHY",
             Self::Explain => "EXPLAIN",
             Self::PushMol(..) => "PUSH_MOL",
+            Self::TryBegin(_) => "TRY_BEGIN",
+            Self::CatchEnd => "CATCH_END",
         }
     }
 
@@ -227,6 +235,12 @@ impl Op {
             Self::Why => alloc::vec![0x0F],
             Self::Explain => alloc::vec![0x12],
             Self::PushMol(s, r, v, a, t) => alloc::vec![0x36, *s, *r, *v, *a, *t],
+            Self::TryBegin(target) => {
+                let mut b = alloc::vec![0x37];
+                b.extend_from_slice(&(*target as u32).to_le_bytes());
+                b
+            }
+            Self::CatchEnd => alloc::vec![0x38],
         }
     }
 }
@@ -316,6 +330,77 @@ pub enum OlangIrExpr {
         builtin: String,
         rhs: f64,
     },
+    /// { S=1 R=6 V=200 A=180 T=4 } — molecular literal → PushMol opcode
+    MolecularLiteral {
+        shape: u8,
+        relation: u8,
+        valence: u8,
+        arousal: u8,
+        time: u8,
+    },
+    /// let x = <expr> — variable binding → emit value + Store(name)
+    LetBinding {
+        name: String,
+        value: alloc::boxed::Box<OlangIrExpr>,
+    },
+    /// if <cond> { <then> } else { <else> } — conditional branch
+    IfElse {
+        condition: alloc::boxed::Box<OlangIrExpr>,
+        then_branch: Vec<OlangIrExpr>,
+        else_branch: Vec<OlangIrExpr>,
+    },
+    /// loop N { <body> } — repeat N times
+    LoopBlock {
+        count: u32,
+        body: Vec<OlangIrExpr>,
+    },
+    /// fn name { <body> } — function definition (inline block)
+    FnDef {
+        name: String,
+        body: Vec<OlangIrExpr>,
+    },
+    /// spawn { <body> } — concurrent execution (Go-style: emit body as async task)
+    Spawn {
+        body: Vec<OlangIrExpr>,
+    },
+    /// expr |> expr |> expr — pipe chain (Julia-style: output of each feeds into next)
+    Pipe(Vec<OlangIrExpr>),
+    /// use <module> — import skill/module (Python-style)
+    Use(String),
+    /// emit <expr> — explicit output
+    EmitExpr(alloc::boxed::Box<OlangIrExpr>),
+    /// return <expr> — return from function
+    ReturnExpr(alloc::boxed::Box<OlangIrExpr>),
+    /// match <expr> { pattern => { body }, _ => { body } }
+    Match {
+        subject: alloc::boxed::Box<OlangIrExpr>,
+        /// (pattern_name, body) — pattern is type name or "_" for wildcard
+        arms: Vec<(String, Vec<OlangIrExpr>)>,
+    },
+    /// try { body } catch { handler } — error recovery
+    TryCatch {
+        try_body: Vec<OlangIrExpr>,
+        catch_body: Vec<OlangIrExpr>,
+    },
+    /// for var in start..end { body } — range iteration
+    ForIn {
+        var: String,
+        start: u32,
+        end: u32,
+        body: Vec<OlangIrExpr>,
+    },
+    /// while cond { body } — conditional loop (QT2: capped at 1024)
+    While {
+        cond: Box<OlangIrExpr>,
+        body: Vec<OlangIrExpr>,
+    },
+    /// x < 10 — comparison → PushNum(lhs), PushNum(rhs), Call("__cmp_*")
+    Compare {
+        lhs: Box<OlangIrExpr>,
+        /// "__cmp_lt", "__cmp_gt", "__cmp_le", "__cmp_ge"
+        builtin: String,
+        rhs: Box<OlangIrExpr>,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -372,6 +457,256 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
         OlangIrExpr::Arithmetic { lhs, builtin, rhs } => {
             prog.push_op(Op::PushNum(*lhs));
             prog.push_op(Op::PushNum(*rhs));
+            prog.push_op(Op::Call(builtin.clone()));
+        }
+
+        OlangIrExpr::MolecularLiteral {
+            shape,
+            relation,
+            valence,
+            arousal,
+            time,
+        } => {
+            prog.push_op(Op::PushMol(*shape, *relation, *valence, *arousal, *time));
+        }
+
+        OlangIrExpr::LetBinding { name, value } => {
+            emit_expr(value, prog);
+            prog.push_op(Op::Store(name.clone()));
+        }
+
+        OlangIrExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            // Emit condition → stack top
+            emit_expr(condition, prog);
+            // Jz to else/end (placeholder, patch later)
+            let jz_idx = prog.ops.len();
+            prog.push_op(Op::Jz(0)); // placeholder
+
+            // Then branch
+            prog.push_op(Op::ScopeBegin);
+            for e in then_branch {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+
+            if else_branch.is_empty() {
+                // Patch Jz → jump past then
+                let end = prog.ops.len();
+                prog.ops[jz_idx] = Op::Jz(end);
+            } else {
+                // Jmp past else (placeholder)
+                let jmp_idx = prog.ops.len();
+                prog.push_op(Op::Jmp(0)); // placeholder
+
+                // Patch Jz → jump to else start
+                let else_start = prog.ops.len();
+                prog.ops[jz_idx] = Op::Jz(else_start);
+
+                // Else branch
+                prog.push_op(Op::ScopeBegin);
+                for e in else_branch {
+                    emit_expr(e, prog);
+                }
+                prog.push_op(Op::ScopeEnd);
+
+                // Patch Jmp → jump past else
+                let end = prog.ops.len();
+                prog.ops[jmp_idx] = Op::Jmp(end);
+            }
+        }
+
+        OlangIrExpr::LoopBlock { count, body } => {
+            prog.push_op(Op::Loop(*count));
+            prog.push_op(Op::ScopeBegin);
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+        }
+
+        OlangIrExpr::FnDef { name, body } => {
+            // Jump over the function body (don't execute at definition time)
+            let jmp_idx = prog.ops.len();
+            prog.push_op(Op::Jmp(0)); // placeholder
+
+            // Function entry point — Call(name) will jump here
+            let fn_start = prog.ops.len();
+            prog.push_op(Op::ScopeBegin);
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+            prog.push_op(Op::Ret);
+
+            // Patch jump over function body
+            let after_fn = prog.ops.len();
+            prog.ops[jmp_idx] = Op::Jmp(after_fn);
+
+            // Register function name → entry point (store as alias for Call)
+            // Use Store to remember fn_start as a named entry
+            // For now, emit a Nop — function lookup happens via Call(name)
+            let _ = (name, fn_start); // fn table would go here
+        }
+
+        OlangIrExpr::Spawn { body } => {
+            // Go-style: wrap body in scope, VM can detect spawn for async
+            // For now: sequential execution with spawn marker event
+            prog.push_op(Op::Nop); // placeholder: spawn marker
+            prog.push_op(Op::ScopeBegin);
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+        }
+
+        OlangIrExpr::Pipe(exprs) => {
+            // Julia-style: each expr's output feeds into next
+            // First expr pushes result, subsequent exprs consume + push
+            for e in exprs {
+                emit_expr(e, prog);
+            }
+            // Final result is on top of stack
+            prog.push_op(Op::Emit);
+        }
+
+        OlangIrExpr::Use(module) => {
+            // Python-style: load module/skill into scope
+            prog.push_op(Op::Load(module.clone()));
+        }
+
+        OlangIrExpr::EmitExpr(inner) => {
+            emit_expr(inner, prog);
+            prog.push_op(Op::Emit);
+        }
+
+        OlangIrExpr::ReturnExpr(inner) => {
+            emit_expr(inner, prog);
+            prog.push_op(Op::Ret);
+        }
+
+        OlangIrExpr::Match { subject, arms } => {
+            // Evaluate subject
+            emit_expr(subject, prog);
+
+            let mut end_jumps: Vec<usize> = Vec::new();
+
+            for (pattern, body) in arms {
+                if pattern == "_" {
+                    // Wildcard: always execute
+                    prog.push_op(Op::ScopeBegin);
+                    for e in body {
+                        emit_expr(e, prog);
+                    }
+                    prog.push_op(Op::ScopeEnd);
+                    break;
+                }
+                // Type match: DUP subject, TypeOf, Load pattern, compare
+                prog.push_op(Op::Dup);
+                prog.push_op(Op::TypeOf);
+                prog.push_op(Op::Load(pattern.clone()));
+                prog.push_op(Op::Call("__match_type".into()));
+                let jz_idx = prog.ops.len();
+                prog.push_op(Op::Jz(0)); // placeholder
+                prog.push_op(Op::Pop); // pop match result
+
+                prog.push_op(Op::ScopeBegin);
+                for e in body {
+                    emit_expr(e, prog);
+                }
+                prog.push_op(Op::ScopeEnd);
+
+                end_jumps.push(prog.ops.len());
+                prog.push_op(Op::Jmp(0)); // placeholder
+
+                let next = prog.ops.len();
+                prog.ops[jz_idx] = Op::Jz(next);
+                prog.push_op(Op::Pop); // pop match result on no-match
+            }
+
+            // Pop subject
+            prog.push_op(Op::Pop);
+
+            // Patch end jumps
+            let end = prog.ops.len();
+            for jmp_pos in end_jumps {
+                prog.ops[jmp_pos] = Op::Jmp(end);
+            }
+        }
+
+        OlangIrExpr::TryCatch { try_body, catch_body } => {
+            // TryBegin(catch_pc), [try_body], Jmp(end), [catch_body], CatchEnd
+            let try_begin_idx = prog.ops.len();
+            prog.push_op(Op::TryBegin(0)); // placeholder
+
+            prog.push_op(Op::ScopeBegin);
+            for e in try_body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+
+            let jmp_idx = prog.ops.len();
+            prog.push_op(Op::Jmp(0)); // skip catch on success
+
+            // Catch block
+            let catch_start = prog.ops.len();
+            prog.ops[try_begin_idx] = Op::TryBegin(catch_start);
+
+            prog.push_op(Op::ScopeBegin);
+            for e in catch_body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+            prog.push_op(Op::CatchEnd);
+
+            let end = prog.ops.len();
+            prog.ops[jmp_idx] = Op::Jmp(end);
+        }
+
+        OlangIrExpr::ForIn { var, start, end, body } => {
+            // Counter lives on stack; each iteration DUP into scoped var.
+            let count = end.saturating_sub(*start);
+            prog.push_op(Op::PushNum(*start as f64));
+            if count > 0 {
+                prog.push_op(Op::Loop(count));
+                prog.push_op(Op::ScopeBegin);
+                prog.push_op(Op::Dup);
+                prog.push_op(Op::Store(var.clone()));
+                for e in body {
+                    emit_expr(e, prog);
+                }
+                // Increment counter on stack
+                prog.push_op(Op::PushNum(1.0));
+                prog.push_op(Op::Call("__hyp_add".into()));
+                prog.push_op(Op::ScopeEnd);
+            }
+            prog.push_op(Op::Pop);
+        }
+
+        OlangIrExpr::While { cond, body } => {
+            // QT2: ∞-1 — capped at 1024 iterations
+            // Layout: Loop(1024) ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd [end:] Pop
+            prog.push_op(Op::Loop(1024));
+            prog.push_op(Op::ScopeBegin);
+            emit_expr(cond, prog);
+            let jz_idx = prog.ops.len();
+            prog.push_op(Op::Jz(0)); // placeholder
+            prog.push_op(Op::Pop); // pop cond (true path)
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd); // loop jump-back
+            let end = prog.ops.len();
+            prog.ops[jz_idx] = Op::Jz(end);
+            prog.push_op(Op::Pop); // pop cond (false path)
+        }
+
+        OlangIrExpr::Compare { lhs, builtin, rhs } => {
+            emit_expr(lhs, prog);
+            emit_expr(rhs, prog);
             prog.push_op(Op::Call(builtin.clone()));
         }
     }
@@ -537,5 +872,87 @@ mod tests {
             let b = op.to_bytes();
             assert!(!b.is_empty(), "{} serialize không được empty", op.name());
         }
+    }
+
+    #[test]
+    fn compile_if_then() {
+        let expr = OlangIrExpr::IfElse {
+            condition: alloc::boxed::Box::new(OlangIrExpr::Query("fire".into())),
+            then_branch: alloc::vec![OlangIrExpr::Command("stats".into())],
+            else_branch: alloc::vec![],
+        };
+        let prog = compile_expr(&expr);
+        // Should contain: Load fire, Jz(end), ScopeBegin, Stats, ScopeEnd, Emit, Halt
+        assert!(prog.ops.contains(&Op::Load("fire".into())));
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))));
+        assert!(prog.ops.contains(&Op::ScopeBegin));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::ScopeEnd));
+    }
+
+    #[test]
+    fn compile_if_else() {
+        let expr = OlangIrExpr::IfElse {
+            condition: alloc::boxed::Box::new(OlangIrExpr::Query("fire".into())),
+            then_branch: alloc::vec![OlangIrExpr::Command("stats".into())],
+            else_branch: alloc::vec![OlangIrExpr::Command("dream".into())],
+        };
+        let prog = compile_expr(&expr);
+        // Should contain: Load, Jz, ScopeBegin, Stats, ScopeEnd, Jmp, ScopeBegin, Dream, ScopeEnd
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))));
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jmp(_))));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::Dream));
+    }
+
+    #[test]
+    fn compile_loop_block() {
+        let expr = OlangIrExpr::LoopBlock {
+            count: 3,
+            body: alloc::vec![OlangIrExpr::Command("stats".into())],
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.contains(&Op::Loop(3)));
+        assert!(prog.ops.contains(&Op::ScopeBegin));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::ScopeEnd));
+    }
+
+    #[test]
+    fn compile_fn_def() {
+        let expr = OlangIrExpr::FnDef {
+            name: "test".into(),
+            body: alloc::vec![OlangIrExpr::Command("stats".into())],
+        };
+        let prog = compile_expr(&expr);
+        // Should contain: Jmp(skip fn), ScopeBegin, Stats, ScopeEnd, Ret
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jmp(_))));
+        assert!(prog.ops.contains(&Op::ScopeBegin));
+        assert!(prog.ops.contains(&Op::Stats));
+        assert!(prog.ops.contains(&Op::Ret));
+    }
+
+    #[test]
+    fn compile_let_binding() {
+        let expr = OlangIrExpr::LetBinding {
+            name: "x".into(),
+            value: alloc::boxed::Box::new(OlangIrExpr::Query("fire".into())),
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.contains(&Op::Load("fire".into())));
+        assert!(prog.ops.contains(&Op::Store("x".into())));
+    }
+
+    #[test]
+    fn compile_molecular_literal() {
+        let expr = OlangIrExpr::MolecularLiteral {
+            shape: 1,
+            relation: 6,
+            valence: 200,
+            arousal: 180,
+            time: 4,
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.contains(&Op::PushMol(1, 6, 200, 180, 4)));
     }
 }

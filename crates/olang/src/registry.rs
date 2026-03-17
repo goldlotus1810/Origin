@@ -156,6 +156,16 @@ pub struct Registry {
     /// Cache: all chains for LCA computation
     /// (layer, chain_hash, chain) — dùng khi cập nhật layer_rep
     chain_cache: Vec<(u8, u64, MolecularChain)>,
+
+    /// Bulk mode: skip per-insert sorting + layer_rep update.
+    /// Call `finalize_bulk()` when done.
+    bulk_mode: bool,
+
+    /// Number of sorted entries at start of bulk (for lookup split).
+    bulk_sorted_prefix: usize,
+
+    /// Layers that need layer_rep recalculation after bulk insert.
+    dirty_layers: u16, // bitmask: bit i = layer i needs recalc
 }
 
 impl Registry {
@@ -168,6 +178,61 @@ impl Registry {
             branch_wm: Vec::new(),
             qr_supersede: Vec::new(),
             chain_cache: Vec::new(),
+            bulk_mode: false,
+            bulk_sorted_prefix: 0,
+            dirty_layers: 0,
+        }
+    }
+
+    /// Enter bulk insert mode — skips O(n²) sorting + LCA per insert.
+    /// MUST call `finalize_bulk()` after all inserts.
+    pub fn begin_bulk(&mut self) {
+        self.bulk_mode = true;
+        self.bulk_sorted_prefix = self.entries.len();
+    }
+
+    /// Finalize bulk insert: sort entries + recalculate layer_rep.
+    /// O(n log n) sort + O(k) LCA calls (k = dirty layers).
+    pub fn finalize_bulk(&mut self) {
+        self.bulk_mode = false;
+        self.bulk_sorted_prefix = 0;
+
+        // Sort entries by hash, then by layer DESC (so L1 comes before L0 for same hash)
+        // This ensures dedup keeps L1 (with correct NodeKind) over L0 duplicate
+        self.entries.sort_by(|a, b| {
+            a.0.cmp(&b.0).then(b.1.layer.cmp(&a.1.layer))
+        });
+
+        // Deduplicate: keep first (= lowest layer = L1 over L0)
+        self.entries.dedup_by_key(|&mut (h, _)| h);
+
+        // Sort names by name (binary search requirement)
+        self.names.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        self.names.dedup_by(|(a, _), (b, _)| a == b);
+
+        // Recalculate layer_rep for dirty layers — ONE LCA per layer
+        for layer in 0..16u8 {
+            if self.dirty_layers & (1 << layer) != 0 {
+                self.recalc_layer_rep(layer);
+            }
+        }
+        self.dirty_layers = 0;
+    }
+
+    /// Recalculate layer representative from chain_cache — O(n) for that layer.
+    fn recalc_layer_rep(&mut self, layer: u8) {
+        let same_layer: Vec<(&MolecularChain, u32)> = self
+            .chain_cache
+            .iter()
+            .filter(|(l, _, _)| *l == layer)
+            .map(|(_, _, c)| (c, 1u32))
+            .collect();
+
+        if same_layer.is_empty() {
+            self.layer_rep[layer as usize] = None;
+        } else {
+            let rep = lca_weighted(&same_layer);
+            self.layer_rep[layer as usize] = Some(rep.chain_hash());
         }
     }
 
@@ -219,15 +284,18 @@ impl Registry {
             kind,
         };
 
-        // Insert vào entries (sorted by hash)
-        let pos = self.entries.partition_point(|&(h, _)| h < hash);
-        self.entries.insert(pos, (hash, entry));
-
-        // Cập nhật chain_cache cho LCA
-        self.chain_cache.push((layer, hash, chain.clone()));
-
-        // Cập nhật layer_rep qua LCA
-        self.update_layer_rep(layer, chain);
+        if self.bulk_mode {
+            // Bulk mode: push unsorted, defer layer_rep
+            self.entries.push((hash, entry));
+            self.chain_cache.push((layer, hash, chain.clone()));
+            self.dirty_layers |= 1 << layer;
+        } else {
+            // Normal mode: insert sorted + update layer_rep
+            let pos = self.entries.partition_point(|&(h, _)| h < hash);
+            self.entries.insert(pos, (hash, entry));
+            self.chain_cache.push((layer, hash, chain.clone()));
+            self.update_layer_rep(layer, chain);
+        }
 
         hash
     }
@@ -238,12 +306,17 @@ impl Registry {
     /// "fire" → hash(🔥)
     /// Không tạo node mới — chỉ thêm alias.
     pub fn register_alias(&mut self, name: &str, chain_hash: u64) {
-        // Kiểm tra đã có chưa
-        if self.lookup_name(name).is_some() {
-            return;
+        if self.bulk_mode {
+            // Bulk mode: push unsorted, sort at finalize
+            self.names.push((String::from(name), chain_hash));
+        } else {
+            // Normal mode: insert sorted
+            if self.lookup_name(name).is_some() {
+                return;
+            }
+            let pos = self.names.partition_point(|(n, _)| n.as_str() < name);
+            self.names.insert(pos, (String::from(name), chain_hash));
         }
-        let pos = self.names.partition_point(|(n, _)| n.as_str() < name);
-        self.names.insert(pos, (String::from(name), chain_hash));
     }
 
     /// Cập nhật NodeKind cho một entry đã có trong sổ cái.
@@ -258,12 +331,26 @@ impl Registry {
 
     // ── Lookup ───────────────────────────────────────────────────────────────
 
-    /// Lookup bằng chain_hash — O(log n).
+    /// Lookup bằng chain_hash — O(log n) normal, O(log p + k) bulk mode.
+    ///
+    /// In bulk mode: binary search sorted prefix (p pre-bulk entries),
+    /// skip unsorted tail (k bulk entries are unique UCD — dedup at finalize).
     pub fn lookup_hash(&self, hash: u64) -> Option<&RegistryEntry> {
-        self.entries
-            .binary_search_by_key(&hash, |&(h, _)| h)
-            .ok()
-            .map(|i| &self.entries[i].1)
+        if self.bulk_mode {
+            // Binary search sorted prefix only (pre-bulk entries)
+            let prefix = &self.entries[..self.bulk_sorted_prefix];
+            prefix
+                .binary_search_by_key(&hash, |&(h, _)| h)
+                .ok()
+                .map(|i| &prefix[i].1)
+            // NOTE: does NOT search bulk tail — bulk entries come from UCD
+            // which has unique codepoints. Duplicates resolved at finalize_bulk().
+        } else {
+            self.entries
+                .binary_search_by_key(&hash, |&(h, _)| h)
+                .ok()
+                .map(|i| &self.entries[i].1)
+        }
     }
 
     /// Lookup bằng chain — tính hash rồi lookup.
@@ -377,6 +464,14 @@ impl Registry {
     /// Số aliases đã đăng ký.
     pub fn alias_count(&self) -> usize {
         self.names.len()
+    }
+
+    /// Reverse lookup: tìm alias đầu tiên cho chain_hash — O(n).
+    pub fn alias_for_hash(&self, hash: u64) -> Option<&str> {
+        self.names
+            .iter()
+            .find(|(_, h)| *h == hash)
+            .map(|(name, _)| name.as_str())
     }
 
     /// Tất cả entries theo tầng.

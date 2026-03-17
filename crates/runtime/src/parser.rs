@@ -19,6 +19,7 @@
 //!   ○{stats}           → System command
 
 extern crate alloc;
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -119,6 +120,19 @@ impl RelationOp {
 // OlangExpr — parsed expression
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Comparison operator trong ○{}.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    /// < less than
+    Lt,
+    /// > greater than
+    Gt,
+    /// <= less or equal
+    Le,
+    /// >= greater or equal
+    Ge,
+}
+
 /// Arithmetic operator trong ○{}.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArithOp {
@@ -157,6 +171,75 @@ pub enum OlangExpr {
         lhs: f64,
         op: ArithOp,
         rhs: f64,
+    },
+    /// ○{{ S=1 R=6 V=200 A=180 T=4 }} — molecular literal
+    MolecularLiteral {
+        shape: u8,
+        relation: u8,
+        valence: u8,
+        arousal: u8,
+        time: u8,
+    },
+    /// ○{let x = fire} — variable binding
+    LetBinding {
+        name: String,
+        value: alloc::boxed::Box<OlangExpr>,
+    },
+    /// ○{if fire { stats } else { dream }} — conditional
+    IfElse {
+        condition: alloc::boxed::Box<OlangExpr>,
+        then_body: Vec<OlangExpr>,
+        else_body: Vec<OlangExpr>,
+    },
+    /// ○{loop 3 { emit fire }} — loop N times
+    LoopBlock {
+        count: u32,
+        body: Vec<OlangExpr>,
+    },
+    /// ○{fn test { emit fire }} — function definition
+    FnDef {
+        name: String,
+        body: Vec<OlangExpr>,
+    },
+    /// ○{spawn { loop 3 { stats } }} — concurrent execution (Go-style)
+    Spawn {
+        body: Vec<OlangExpr>,
+    },
+    /// ○{fire |> typeof |> emit} — pipe chain (Julia-style)
+    Pipe(Vec<OlangExpr>),
+    /// ○{use cluster} — import skill/module (Python-style)
+    Use(String),
+    /// ○{emit fire} — explicit emit (output to caller)
+    Emit(alloc::boxed::Box<OlangExpr>),
+    /// ○{return fire} — return value from function
+    Return(alloc::boxed::Box<OlangExpr>),
+    /// ○{match fire { SDF => { stats } _ => { dream } }} — pattern matching
+    Match {
+        subject: alloc::boxed::Box<OlangExpr>,
+        arms: Vec<(String, Vec<OlangExpr>)>, // (pattern_name, body)
+    },
+    /// ○{try { risky } catch { fallback }} — error handling
+    TryCatch {
+        try_body: Vec<OlangExpr>,
+        catch_body: Vec<OlangExpr>,
+    },
+    /// ○{for i in 0..10 { emit i }} — range iteration
+    ForIn {
+        var: String,
+        start: u32,
+        end: u32,
+        body: Vec<OlangExpr>,
+    },
+    /// ○{x < 10} — comparison expression
+    Compare {
+        lhs: alloc::boxed::Box<OlangExpr>,
+        op: CmpOp,
+        rhs: alloc::boxed::Box<OlangExpr>,
+    },
+    /// ○{while x < 10 { emit x; let x = x + 1 }} — conditional loop
+    While {
+        cond: alloc::boxed::Box<OlangExpr>,
+        body: Vec<OlangExpr>,
     },
 }
 
@@ -211,7 +294,17 @@ impl OlangParser {
 
         // Empty
         if trimmed.is_empty() {
-            return Err("Empty expression".to_string());
+            return Err("Empty expression — use ○{help} for syntax guide".to_string());
+        }
+
+        // Unmatched braces
+        let open_count = trimmed.chars().filter(|&c| c == '{').count();
+        let close_count = trimmed.chars().filter(|&c| c == '}').count();
+        if open_count != close_count {
+            return Err(format!(
+                "Unmatched braces: {} open, {} close",
+                open_count, close_count
+            ));
         }
 
         // System commands: dream, stats, seed, ...
@@ -230,6 +323,83 @@ impl OlangParser {
         // ZWJ sequence: contains U+200D → ZwjSeq node
         if trimmed.contains('\u{200D}') {
             return Ok(OlangExpr::Query(trimmed.to_string()));
+        }
+
+        // Molecular literal: { S=1 R=6 V=200 A=180 T=4 }
+        if let Some(mol) = try_parse_molecular_literal(trimmed) {
+            return Ok(mol);
+        }
+
+        // Let binding: let x = <expr>
+        if let Some(binding) = self.try_parse_let(trimmed) {
+            return Ok(binding);
+        }
+
+        // If/else conditional: if <cond> { <then> } else { <else> }
+        if let Some(if_expr) = self.try_parse_if(trimmed) {
+            return Ok(if_expr);
+        }
+
+        // Loop: loop N { <body> }
+        if let Some(loop_expr) = self.try_parse_loop(trimmed) {
+            return Ok(loop_expr);
+        }
+
+        // Function definition: fn name { <body> }
+        if let Some(fn_expr) = self.try_parse_fn(trimmed) {
+            return Ok(fn_expr);
+        }
+
+        // Spawn (Go-style concurrency): spawn { <body> }
+        if let Some(spawn_expr) = self.try_parse_spawn(trimmed) {
+            return Ok(spawn_expr);
+        }
+
+        // Match (pattern matching): match <expr> { <arm> => { <body> } ... }
+        if let Some(match_expr) = self.try_parse_match(trimmed) {
+            return Ok(match_expr);
+        }
+
+        // Try/catch (error handling): try { body } catch { handler }
+        if let Some(try_expr) = self.try_parse_try_catch(trimmed) {
+            return Ok(try_expr);
+        }
+
+        // For-in (range iteration): for var in start..end { body }
+        if let Some(for_expr) = self.try_parse_for_in(trimmed) {
+            return Ok(for_expr);
+        }
+
+        // While (conditional loop): while cond { body }
+        if let Some(while_expr) = self.try_parse_while(trimmed) {
+            return Ok(while_expr);
+        }
+
+        // Use (Python-style import): use <skill>
+        if let Some(use_expr) = try_parse_use(trimmed) {
+            return Ok(use_expr);
+        }
+
+        // Emit: emit <expr>
+        if let Some(emit_expr) = self.try_parse_emit(trimmed) {
+            return Ok(emit_expr);
+        }
+
+        // Return: return <expr>
+        if let Some(ret_expr) = self.try_parse_return(trimmed) {
+            return Ok(ret_expr);
+        }
+
+        // Pipe (Julia-style): expr |> expr |> expr
+        if trimmed.contains("|>") {
+            if let Some(pipe_expr) = self.try_parse_pipe(trimmed) {
+                return Ok(pipe_expr);
+            }
+        }
+
+        // Comparison: x < 10, x >= 5, etc.
+        if let Some(cmp_expr) = self.try_parse_compare(trimmed) {
+            return Ok(cmp_expr);
         }
 
         // Arithmetic: detect numeric expressions like "1 + 2", "3.5 × 4", "10 - 3", "8 ÷ 2"
@@ -299,6 +469,420 @@ impl OlangParser {
             _ => Ok(OlangExpr::Query(trimmed.to_string())),
         }
     }
+
+    /// Try to parse let binding: "let x = fire" or "let x = { S=1 R=6 }"
+    fn try_parse_let(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("let ") {
+            return None;
+        }
+        let rest = trimmed["let ".len()..].trim();
+        let eq_pos = rest.find('=')?;
+        let name = rest[..eq_pos].trim();
+        let value_str = rest[eq_pos + 1..].trim();
+
+        if name.is_empty() || value_str.is_empty() {
+            return None;
+        }
+
+        // Parse the value expression recursively
+        let value_expr = self.parse_expr(value_str).ok()?;
+
+        Some(OlangExpr::LetBinding {
+            name: name.to_string(),
+            value: alloc::boxed::Box::new(value_expr),
+        })
+    }
+
+    /// Try to parse if/else: "if fire { stats } else { dream }"
+    fn try_parse_if(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("if ") {
+            return None;
+        }
+        let rest = trimmed["if ".len()..].trim();
+
+        // Find opening brace for then-body
+        let then_open = rest.find('{')?;
+        let cond_str = rest[..then_open].trim();
+        if cond_str.is_empty() {
+            return None;
+        }
+
+        // Find matching closing brace
+        let then_close = find_matching_brace(rest, then_open)?;
+        let then_str = rest[then_open + 1..then_close].trim();
+
+        // Parse condition
+        let condition = self.parse_expr(cond_str).ok()?;
+
+        // Parse then body (semicolon-separated statements)
+        let then_body = self.parse_block(then_str);
+
+        // Check for else clause
+        let after_then = rest[then_close + 1..].trim();
+        let else_body = if after_then.starts_with("else") {
+            let else_rest = after_then.strip_prefix("else").unwrap_or("").trim();
+            let else_open = else_rest.find('{')?;
+            let else_close = find_matching_brace(else_rest, else_open)?;
+            let else_str = else_rest[else_open + 1..else_close].trim();
+            self.parse_block(else_str)
+        } else {
+            Vec::new()
+        };
+
+        Some(OlangExpr::IfElse {
+            condition: alloc::boxed::Box::new(condition),
+            then_body,
+            else_body,
+        })
+    }
+
+    /// Try to parse loop: "loop 3 { emit fire }"
+    fn try_parse_loop(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("loop ") {
+            return None;
+        }
+        let rest = trimmed["loop ".len()..].trim();
+
+        // Find opening brace
+        let brace_open = rest.find('{')?;
+        let count_str = rest[..brace_open].trim();
+        let count: u32 = count_str.parse().ok()?;
+
+        if count == 0 {
+            return None;
+        }
+
+        // Find matching closing brace
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let body_str = rest[brace_open + 1..brace_close].trim();
+
+        let body = self.parse_block(body_str);
+
+        Some(OlangExpr::LoopBlock { count, body })
+    }
+
+    /// Try to parse function definition: "fn test { emit fire }"
+    fn try_parse_fn(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("fn ") {
+            return None;
+        }
+        let rest = trimmed["fn ".len()..].trim();
+
+        // Find opening brace
+        let brace_open = rest.find('{')?;
+        let name = rest[..brace_open].trim();
+        if name.is_empty() {
+            return None;
+        }
+
+        // Find matching closing brace
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let body_str = rest[brace_open + 1..brace_close].trim();
+
+        let body = self.parse_block(body_str);
+
+        Some(OlangExpr::FnDef {
+            name: name.to_string(),
+            body,
+        })
+    }
+
+    /// Try to parse spawn (Go-style concurrency): "spawn { stats; dream }"
+    fn try_parse_spawn(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("spawn ") && !trimmed.starts_with("spawn{") {
+            return None;
+        }
+        let rest = if let Some(r) = trimmed.strip_prefix("spawn ") {
+            r.trim()
+        } else if let Some(r) = trimmed.strip_prefix("spawn") {
+            r
+        } else {
+            return None;
+        };
+        let brace_open = rest.find('{')?;
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let body_str = rest[brace_open + 1..brace_close].trim();
+        let body = self.parse_block(body_str);
+        Some(OlangExpr::Spawn { body })
+    }
+
+    /// Try to parse match: "match fire { SDF => { stats } _ => { dream } }"
+    fn try_parse_match(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("match ") {
+            return None;
+        }
+        let rest = trimmed.strip_prefix("match ")?.trim();
+
+        // Find the outer { that starts the match arms
+        let brace_open = rest.find('{')?;
+        let subject_str = rest[..brace_open].trim();
+        if subject_str.is_empty() {
+            return None;
+        }
+        let subject = self.parse_expr(subject_str).ok()?;
+
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let arms_str = rest[brace_open + 1..brace_close].trim();
+
+        // Parse arms: "pattern => { body }, pattern => { body }"
+        let mut arms = Vec::new();
+        let mut remaining = arms_str;
+        while !remaining.is_empty() {
+            remaining = remaining.trim();
+            if remaining.is_empty() {
+                break;
+            }
+            // Find =>
+            let arrow = remaining.find("=>")?;
+            let pattern = remaining[..arrow].trim().to_string();
+            remaining = remaining[arrow + 2..].trim();
+
+            // Parse body: { ... }
+            let body_open = remaining.find('{')?;
+            let body_close = find_matching_brace(remaining, body_open)?;
+            let body_str = remaining[body_open + 1..body_close].trim();
+            let body = self.parse_block(body_str);
+
+            arms.push((pattern, body));
+            remaining = remaining[body_close + 1..].trim();
+            // Skip comma/semicolon separator
+            if remaining.starts_with(',') || remaining.starts_with(';') {
+                remaining = &remaining[1..];
+            }
+        }
+
+        Some(OlangExpr::Match {
+            subject: alloc::boxed::Box::new(subject),
+            arms,
+        })
+    }
+
+    /// Try to parse try/catch: "try { risky } catch { fallback }"
+    fn try_parse_try_catch(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("try ") && !trimmed.starts_with("try{") {
+            return None;
+        }
+        let rest = if let Some(r) = trimmed.strip_prefix("try ") {
+            r.trim()
+        } else if let Some(r) = trimmed.strip_prefix("try") {
+            r
+        } else {
+            return None;
+        };
+        let try_open = rest.find('{')?;
+        let try_close = find_matching_brace(rest, try_open)?;
+        let try_str = rest[try_open + 1..try_close].trim();
+        let try_body = self.parse_block(try_str);
+
+        let after_try = rest[try_close + 1..].trim();
+        let catch_rest = after_try.strip_prefix("catch")?.trim();
+        let catch_open = catch_rest.find('{')?;
+        let catch_close = find_matching_brace(catch_rest, catch_open)?;
+        let catch_str = catch_rest[catch_open + 1..catch_close].trim();
+        let catch_body = self.parse_block(catch_str);
+
+        Some(OlangExpr::TryCatch {
+            try_body,
+            catch_body,
+        })
+    }
+
+    /// Try to parse for-in: "for i in 0..10 { body }"
+    fn try_parse_for_in(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("for ") {
+            return None;
+        }
+        let rest = trimmed.strip_prefix("for ")?.trim();
+        // Parse: VAR in START..END { body }
+        let in_pos = rest.find(" in ")?;
+        let var = rest[..in_pos].trim().to_string();
+        if var.is_empty() {
+            return None;
+        }
+        let after_in = rest[in_pos + 4..].trim();
+        // Parse range: START..END
+        let dotdot = after_in.find("..")?;
+        let start_str = after_in[..dotdot].trim();
+        let after_dots = after_in[dotdot + 2..].trim();
+        // END is before the first space or {
+        let end_end = after_dots
+            .find([' ', '{'])
+            .unwrap_or(after_dots.len());
+        let end_str = after_dots[..end_end].trim();
+        let start: u32 = start_str.parse().ok()?;
+        let end: u32 = end_str.parse().ok()?;
+        // Find body
+        let body_rest = after_dots[end_end..].trim();
+        let open = body_rest.find('{')?;
+        let close = find_matching_brace(body_rest, open)?;
+        let body_str = body_rest[open + 1..close].trim();
+        let body = self.parse_block(body_str);
+        Some(OlangExpr::ForIn {
+            var,
+            start,
+            end,
+            body,
+        })
+    }
+
+    /// Try to parse comparison: "x < 10", "count >= 5", "3 <= y"
+    fn try_parse_compare(&self, s: &str) -> Option<OlangExpr> {
+        // Try two-char operators first (<=, >=), then single-char (<, >)
+        for (pat, op) in &[("<=", CmpOp::Le), (">=", CmpOp::Ge), ("<", CmpOp::Lt), (">", CmpOp::Gt)] {
+            if let Some(pos) = s.find(pat) {
+                let lhs_str = s[..pos].trim();
+                let rhs_str = s[pos + pat.len()..].trim();
+                if lhs_str.is_empty() || rhs_str.is_empty() {
+                    continue;
+                }
+                // Don't match if it's inside braces (could be part of block)
+                if lhs_str.contains('{') || rhs_str.contains('{') {
+                    continue;
+                }
+                let lhs = self.parse_expr(lhs_str).ok()?;
+                let rhs = self.parse_expr(rhs_str).ok()?;
+                return Some(OlangExpr::Compare {
+                    lhs: alloc::boxed::Box::new(lhs),
+                    op: *op,
+                    rhs: alloc::boxed::Box::new(rhs),
+                });
+            }
+        }
+        None
+    }
+
+    /// Try to parse while loop: while COND { body }
+    fn try_parse_while(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("while ") {
+            return None;
+        }
+        let rest = trimmed.strip_prefix("while ")?.trim();
+        // Find the opening brace for the body
+        let open = rest.find('{')?;
+        let cond_str = rest[..open].trim();
+        if cond_str.is_empty() {
+            return None;
+        }
+        let close = find_matching_brace(rest, open)?;
+        let body_str = rest[open + 1..close].trim();
+        // Parse condition as an expression
+        let cond = self.parse_expr(cond_str).ok()?;
+        let body = self.parse_block(body_str);
+        Some(OlangExpr::While {
+            cond: alloc::boxed::Box::new(cond),
+            body,
+        })
+    }
+
+    /// Try to parse pipe (Julia-style): "fire |> typeof |> emit"
+    fn try_parse_pipe(&self, s: &str) -> Option<OlangExpr> {
+        let parts: Vec<&str> = s.split("|>").collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        let exprs: Vec<OlangExpr> = parts
+            .iter()
+            .filter_map(|part| {
+                let t = part.trim();
+                if t.is_empty() {
+                    None
+                } else {
+                    self.parse_expr(t).ok()
+                }
+            })
+            .collect();
+        if exprs.len() >= 2 {
+            Some(OlangExpr::Pipe(exprs))
+        } else {
+            None
+        }
+    }
+
+    /// Try to parse emit: "emit fire"
+    fn try_parse_emit(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("emit ") {
+            return None;
+        }
+        let arg = trimmed["emit ".len()..].trim();
+        if arg.is_empty() {
+            return None;
+        }
+        let expr = self.parse_expr(arg).ok()?;
+        Some(OlangExpr::Emit(alloc::boxed::Box::new(expr)))
+    }
+
+    /// Try to parse return: "return fire"
+    fn try_parse_return(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("return ") {
+            return None;
+        }
+        let arg = trimmed["return ".len()..].trim();
+        if arg.is_empty() {
+            return None;
+        }
+        let expr = self.parse_expr(arg).ok()?;
+        Some(OlangExpr::Return(alloc::boxed::Box::new(expr)))
+    }
+
+    /// Parse a block of semicolon-separated statements into Vec<OlangExpr>.
+    fn parse_block(&self, block: &str) -> Vec<OlangExpr> {
+        if block.is_empty() {
+            return Vec::new();
+        }
+        block
+            .split(';')
+            .filter_map(|stmt| {
+                let s = stmt.trim();
+                if s.is_empty() {
+                    None
+                } else {
+                    self.parse_expr(s).ok()
+                }
+            })
+            .collect()
+    }
+}
+
+/// Try to parse use/import: "use cluster" or "use similarity"
+fn try_parse_use(s: &str) -> Option<OlangExpr> {
+    let trimmed = s.trim();
+    if !trimmed.starts_with("use ") {
+        return None;
+    }
+    let module = trimmed["use ".len()..].trim();
+    if module.is_empty() {
+        return None;
+    }
+    Some(OlangExpr::Use(module.to_string()))
+}
+
+/// Find matching closing brace for opening brace at `open_pos`.
+fn find_matching_brace(s: &str, open_pos: usize) -> Option<usize> {
+    let mut depth = 0u32;
+    for (i, c) in s[open_pos..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_pos + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 impl Default for OlangParser {
@@ -395,6 +979,55 @@ fn tokenize(expr: &str) -> Vec<OlangToken> {
 
 fn token_from_str(s: &str) -> OlangToken {
     OlangToken::Node(s.to_string())
+}
+
+/// Try to parse molecular literal: { S=1 R=6 V=200 A=180 T=4 }
+///
+/// All 5 dimensions optional, defaults: S=1 R=1 V=128 A=128 T=3
+fn try_parse_molecular_literal(s: &str) -> Option<OlangExpr> {
+    let trimmed = s.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return None;
+    }
+    let inner = trimmed[1..trimmed.len() - 1].trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    // Defaults (from CLAUDE.md semantic: Sphere, Member, neutral, Medium)
+    let mut shape: u8 = 1;    // Sphere
+    let mut relation: u8 = 1; // Member
+    let mut valence: u8 = 128; // Neutral
+    let mut arousal: u8 = 128; // Neutral
+    let mut time: u8 = 3;     // Medium
+
+    let mut found_any = false;
+    for part in inner.split_whitespace() {
+        let kv: alloc::vec::Vec<&str> = part.splitn(2, '=').collect();
+        if kv.len() != 2 {
+            return None; // not a key=value pair
+        }
+        let key = kv[0].trim();
+        let val: u8 = match kv[1].trim().parse() {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+        match key {
+            "S" | "s" => shape = val,
+            "R" | "r" => relation = val,
+            "V" | "v" => valence = val,
+            "A" | "a" => arousal = val,
+            "T" | "t" => time = val,
+            _ => return None, // unknown dimension
+        }
+        found_any = true;
+    }
+
+    if !found_any {
+        return None;
+    }
+
+    Some(OlangExpr::MolecularLiteral { shape, relation, valence, arousal, time })
 }
 
 /// Try to parse arithmetic expression: "1 + 2", "3.14 × 2", "10 - 3", "8 ÷ 2"
@@ -496,7 +1129,8 @@ fn is_command(s: &str) -> bool {
             | "reboot"
             | "status"
             | "help"
-    ) || is_math_command(s)
+    ) || s.starts_with("compile ")
+        || is_math_command(s)
         || is_constant_command(s)
         || is_leo_command(s)
 }
@@ -1029,6 +1663,263 @@ mod tests {
             let op = RelationOp::from_char(c).unwrap_or_else(|| panic!("from_char failed for {c}"));
             let s = op.as_str();
             assert_eq!(s.chars().next().unwrap(), c, "roundtrip failed for {c}");
+        }
+    }
+
+    // ── If/Else ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_if_then() {
+        let r = parser().parse("○{if fire { stats }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::IfElse {
+                condition,
+                then_body,
+                else_body,
+            }) => {
+                assert_eq!(*condition, OlangExpr::Query("fire".to_string()));
+                assert_eq!(then_body.len(), 1);
+                assert_eq!(then_body[0], OlangExpr::Command("stats".to_string()));
+                assert!(else_body.is_empty());
+            }
+            other => panic!("expected IfElse, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_if_else() {
+        let r = parser().parse("○{if fire { stats } else { dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::IfElse {
+                condition,
+                then_body,
+                else_body,
+            }) => {
+                assert_eq!(*condition, OlangExpr::Query("fire".to_string()));
+                assert_eq!(then_body.len(), 1);
+                assert_eq!(else_body.len(), 1);
+                assert_eq!(else_body[0], OlangExpr::Command("dream".to_string()));
+            }
+            other => panic!("expected IfElse, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_if_multi_stmt() {
+        let r = parser().parse("○{if fire { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::IfElse { then_body, .. }) => {
+                assert_eq!(then_body.len(), 2);
+            }
+            other => panic!("expected IfElse, got {:?}", other),
+        }
+    }
+
+    // ── Loop ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_loop_basic() {
+        let r = parser().parse("○{loop 3 { stats }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::LoopBlock { count, body }) => {
+                assert_eq!(count, 3);
+                assert_eq!(body.len(), 1);
+                assert_eq!(body[0], OlangExpr::Command("stats".to_string()));
+            }
+            other => panic!("expected LoopBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_loop_zero_is_none() {
+        let r = parser().parse("○{loop 0 { stats }}");
+        // loop 0 returns None from try_parse_loop, falls through to query
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Query(_))));
+    }
+
+    #[test]
+    fn parse_loop_multi_stmt() {
+        let r = parser().parse("○{loop 5 { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::LoopBlock { count, body }) => {
+                assert_eq!(count, 5);
+                assert_eq!(body.len(), 2);
+            }
+            other => panic!("expected LoopBlock, got {:?}", other),
+        }
+    }
+
+    // ── Function Definition ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_fn_def() {
+        let r = parser().parse("○{fn test { stats }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::FnDef { name, body }) => {
+                assert_eq!(name, "test");
+                assert_eq!(body.len(), 1);
+                assert_eq!(body[0], OlangExpr::Command("stats".to_string()));
+            }
+            other => panic!("expected FnDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_fn_multi_stmt() {
+        let r = parser().parse("○{fn boot { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::FnDef { name, body }) => {
+                assert_eq!(name, "boot");
+                assert_eq!(body.len(), 2);
+            }
+            other => panic!("expected FnDef, got {:?}", other),
+        }
+    }
+
+    // ── Braces helper ──────────────────────────────────────────────────────
+
+    #[test]
+    fn find_matching_brace_simple() {
+        assert_eq!(find_matching_brace("{ hello }", 0), Some(8));
+    }
+
+    #[test]
+    fn find_matching_brace_nested() {
+        assert_eq!(find_matching_brace("{ { a } }", 0), Some(8));
+    }
+
+    #[test]
+    fn find_matching_brace_unclosed() {
+        assert_eq!(find_matching_brace("{ hello", 0), None);
+    }
+
+    // ── Spawn (Go-style) ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_spawn() {
+        let r = parser().parse("○{spawn { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Spawn { body }) => {
+                assert_eq!(body.len(), 2);
+                assert_eq!(body[0], OlangExpr::Command("stats".to_string()));
+                assert_eq!(body[1], OlangExpr::Command("dream".to_string()));
+            }
+            other => panic!("expected Spawn, got {:?}", other),
+        }
+    }
+
+    // ── Pipe (Julia-style) ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_pipe() {
+        let r = parser().parse("○{fire |> typeof}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Pipe(exprs)) => {
+                assert_eq!(exprs.len(), 2);
+                assert_eq!(exprs[0], OlangExpr::Query("fire".to_string()));
+            }
+            other => panic!("expected Pipe, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pipe_three_stages() {
+        let r = parser().parse("○{fire |> typeof |> stats}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Pipe(exprs)) => {
+                assert_eq!(exprs.len(), 3);
+            }
+            other => panic!("expected Pipe 3 stages, got {:?}", other),
+        }
+    }
+
+    // ── Use (Python-style) ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_use_module() {
+        let r = parser().parse("○{use cluster}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Use(module)) => {
+                assert_eq!(module, "cluster");
+            }
+            other => panic!("expected Use, got {:?}", other),
+        }
+    }
+
+    // ── Emit / Return ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_emit_expr() {
+        let r = parser().parse("○{emit fire}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Emit(inner)) => {
+                assert_eq!(*inner, OlangExpr::Query("fire".to_string()));
+            }
+            other => panic!("expected Emit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_return_expr() {
+        let r = parser().parse("○{return fire}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Return(inner)) => {
+                assert_eq!(*inner, OlangExpr::Query("fire".to_string()));
+            }
+            other => panic!("expected Return, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_match_expr() {
+        let r = parser().parse("○{match fire { SDF => { stats } _ => { dream } }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Match { subject, arms }) => {
+                assert_eq!(*subject, OlangExpr::Query("fire".to_string()));
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].0, "SDF");
+                assert_eq!(arms[1].0, "_");
+            }
+            other => panic!("expected Match, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_compare_lt() {
+        let r = parser().parse("○{x < 10}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Compare { lhs, op, rhs }) => {
+                assert_eq!(*lhs, OlangExpr::Query("x".to_string()));
+                assert_eq!(op, CmpOp::Lt);
+                assert_eq!(*rhs, OlangExpr::Query("10".to_string()));
+            }
+            other => panic!("expected Compare, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_compare_ge() {
+        let r = parser().parse("○{count >= 5}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Compare { op, .. }) => {
+                assert_eq!(op, CmpOp::Ge);
+            }
+            other => panic!("expected Compare, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_while_basic() {
+        let r = parser().parse("○{while x < 3 { emit x }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::While { cond, body }) => {
+                match *cond {
+                    OlangExpr::Compare { op, .. } => assert_eq!(op, CmpOp::Lt),
+                    other => panic!("expected Compare cond, got {:?}", other),
+                }
+                assert!(!body.is_empty());
+            }
+            other => panic!("expected While, got {:?}", other),
         }
     }
 }

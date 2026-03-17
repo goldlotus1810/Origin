@@ -103,6 +103,9 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         // Phase 2a: 4 axiom nodes (○, ∅, ∘, ∈) — nền tảng
         seed_axioms(&mut registry);
 
+        // Bulk mode: O(n log n) thay vì O(n²) — skip per-insert sort + LCA
+        registry.begin_bulk();
+
         // Phase 2b: L1 DNA — Skills, Agents, VM ops, Sensors
         // Phải chạy TRƯỚC L0 full vì cùng codepoint → L1 cần đúng NodeKind
         seed_l1_system(&mut registry);
@@ -110,6 +113,8 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         // Phase 2c: TOÀN BỘ ~5400 UCD entries → L0 (bảng tuần hoàn hoàn chỉnh)
         // Skip cái đã register bởi axioms + L1
         seed_l0_full(&mut registry);
+
+        registry.finalize_bulk();
 
         // Phase 2d: Natural language aliases cho L0 atoms phổ biến
         seed_l0_aliases(&mut registry);
@@ -378,6 +383,47 @@ static BOOTSTRAP_PROGRAMS: &[&str] = &[
 
     // Reflection: inspect → chain structure quality
     "inspect ○;",
+
+    // ── Phase 5: Self-test with new syntax ─────────────────────────────
+    // Loop: verify SDF primitives 3 times (stability test)
+    "loop 3 { stats; };",
+
+    // Let binding: assign concept to variable
+    "let origin = ○;",
+
+    // Assert: verify origin exists
+    "assert origin;",
+
+    // ── Phase 6: Axiom verification ─────────────────────────────────────
+    // QT1: ○ là nguồn gốc — compose origin with self = same origin
+    "let qt1 = ○ ∘ ○;",
+    "assert qt1;",
+
+    // QT2: ∞-1 is correct — fuse ensures finite chain
+    "fuse;",
+
+    // QT3: group shape primitives — 4 SDF shapes compose to abstract "shape"
+    "let shapes = ● ∘ ▬ ∘ ■ ∘ ▲;",
+    "assert shapes;",
+
+    // QT3: group relations — abstract "relation" from primitives
+    "let rels = ∈ ∘ ⊂ ∘ ≡ ∘ →;",
+    "assert rels;",
+
+    // ── Phase 7: Instinct definitions (Olang programs) ──────────────────
+    // Honesty instinct: typeof checks knowledge quality
+    "fn check_honesty { typeof ○; };",
+
+    // Analogy instinct: compute delta between two concepts
+    "fn check_analogy { let d = ● ∘ ▲; assert d; };",
+
+    // Causality instinct: verify → relation exists
+    "fn check_causality { let c = ● → ▲; assert c; };",
+
+    // Run instinct checks
+    "check_honesty;",
+    "check_analogy;",
+    "check_causality;",
 ];
 
 /// Bảng alias đa ngôn ngữ cho L0 atoms phổ biến.

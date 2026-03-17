@@ -20,8 +20,12 @@ use context::intent::{decide_action, estimate_intent, IntentAction};
 use memory::dream::{DreamConfig, DreamCycle};
 use silk::walk::ResponseTone;
 
-use crate::parser::{OlangExpr, OlangParser, ParseResult, RelationOp};
+use crate::parser::{CmpOp, OlangExpr, OlangParser, ParseResult, RelationOp};
+use olang::compiler::{Compiler, Target};
 use olang::ir::{compile_expr, OlangIrExpr};
+use olang::optimize::{self, OptLevel};
+use olang::semantic;
+use olang::syntax;
 use olang::knowtree::KnowTree;
 use olang::registry::Registry;
 use vsdf::body::{body_from_molecule, BodyStore};
@@ -32,6 +36,8 @@ use olang::vm::{OlangVM, VmEvent};
 use agents::leo::{LeoAI, ProgOutput};
 use agents::chief::{Chief, ChiefKind};
 use agents::worker::Worker;
+use agents::skill::{ExecContext, Skill};
+use agents::domain_skills::{ClusterSkill, SimilaritySkill, GeneralizationSkill};
 use crate::router::MessageRouter;
 use memory::proposal::{AlertLevel, RegistryGate};
 
@@ -144,6 +150,8 @@ pub struct HomeRuntime {
     manifest: SystemManifest,
     /// Boot errors (nếu có)
     boot_errors: alloc::vec::Vec<String>,
+    /// Execution tracing toggle (○{trace} bật/tắt)
+    trace_enabled: bool,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -221,6 +229,7 @@ impl HomeRuntime {
             boot_stage: boot_result.stage,
             manifest: boot_result.manifest,
             boot_errors: boot_result.errors,
+            trace_enabled: false,
         }
     }
 
@@ -677,31 +686,57 @@ impl HomeRuntime {
                 let result = self
                     .dream
                     .run(self.learning.stm(), self.learning.graph(), ts);
-                let text = format!(
-                    "Dream cycle ○\n\
-                     Scanned    : {}\n\
-                     Clusters   : {}\n\
-                     Proposals  : {}\n\
-                     Approved   : {}\n\
-                     ─── Lifetime ───\n\
-                     Total cycles: {}\n\
-                     Total approved: {}\n\
-                     L3 concepts : {}\n\
-                     Fib interval: {} turns\n\
-                     KnowTree    : {} nodes, {} L3",
-                    result.scanned,
-                    result.clusters_found,
-                    result.proposals.len(),
-                    result.approved,
-                    self.dream_cycles,
-                    self.dream_approved_total,
-                    self.dream_l3_created,
-                    silk::hebbian::fib(self.dream_fib_index),
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(String::from("Dream cycle ○"));
+                lines.push(format!("Scanned    : {}", result.scanned));
+                lines.push(format!("Clusters   : {}", result.clusters_found));
+                lines.push(format!("Proposals  : {}", result.proposals.len()));
+                lines.push(format!("Approved   : {}", result.approved));
+
+                // Show what was discovered
+                if !result.proposals.is_empty() {
+                    lines.push(String::from("─── Discovered ───"));
+                    for p in &result.proposals {
+                        match &p.kind {
+                            memory::proposal::ProposalKind::NewNode { chain, sources, .. } => {
+                                let hash = chain.chain_hash();
+                                let label = self.registry.alias_for_hash(hash)
+                                    .unwrap_or("(new concept)");
+                                lines.push(format!(
+                                    "  L3 concept: {} (from {} sources, confidence {:.2})",
+                                    label, sources.len(), p.confidence
+                                ));
+                            }
+                            memory::proposal::ProposalKind::PromoteQR { chain_hash, fire_count } => {
+                                let label = self.registry.alias_for_hash(*chain_hash)
+                                    .unwrap_or("(memory)");
+                                lines.push(format!(
+                                    "  Promote QR: {} (fire={})",
+                                    label, fire_count
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                lines.push(String::from("─── Lifetime ───"));
+                lines.push(format!("Total cycles: {}", self.dream_cycles));
+                lines.push(format!("Total approved: {}", self.dream_approved_total));
+                lines.push(format!("L3 concepts : {}", self.dream_l3_created));
+                lines.push(format!(
+                    "Fib interval: {} turns",
+                    silk::hebbian::fib(self.dream_fib_index)
+                ));
+                lines.push(format!(
+                    "KnowTree    : {} nodes, {} L3",
                     self.knowtree.total_nodes(),
-                    self.knowtree.concepts(),
-                );
+                    self.knowtree.concepts()
+                ));
+
                 Response {
-                    text,
+                    text: lines.join("\n"),
                     tone: ResponseTone::Engaged,
                     fx: 0.0,
                     kind: ResponseKind::System,
@@ -743,6 +778,176 @@ impl HomeRuntime {
                 }
             }
 
+            "memory" | "nho" => {
+                // ○{memory} — show what the system remembers
+                let stm = self.learning.stm();
+                if stm.is_empty() {
+                    return Response {
+                        text: String::from("Trí nhớ ngắn hạn trống — chưa học gì."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(format!("Trí nhớ ngắn hạn ○ ({} observations)", stm.len()));
+                lines.push(String::from("────────────────────────────────"));
+
+                // Top observations by fire_count
+                let top = stm.top_n(10);
+                for (i, obs) in top.iter().enumerate() {
+                    let hash = obs.chain.chain_hash();
+                    let v = obs.emotion.valence;
+                    let a = obs.emotion.arousal;
+                    let fire = obs.fire_count;
+
+                    // Try to find alias in registry
+                    let label = self.registry.alias_for_hash(hash)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("{:016X}", hash));
+
+                    let mood = if v > 0.3 { "+" } else if v < -0.3 { "-" } else { "~" };
+                    lines.push(format!(
+                        "  {}. {} [{}] fire={} V={:.2} A={:.2}",
+                        i + 1, label, mood, fire, v, a
+                    ));
+                }
+
+                // Silk connections summary
+                let silk_edges = self.learning.graph().len();
+                let silk_nodes = self.learning.graph().node_count();
+                if silk_edges > 0 {
+                    lines.push(String::new());
+                    lines.push(format!("Silk: {} liên kết giữa {} concepts", silk_edges, silk_nodes));
+                }
+
+                // LeoAI knowledge expression
+                let expressed = self.leo.express_all();
+                if !expressed.is_empty() {
+                    lines.push(String::new());
+                    lines.push(format!("LeoAI biểu đạt: {} patterns", expressed.len()));
+                    for (i, expr) in expressed.iter().take(5).enumerate() {
+                        lines.push(format!("  {}. {}", i + 1, expr));
+                    }
+                    if expressed.len() > 5 {
+                        lines.push(format!("  ... và {} nữa", expressed.len() - 5));
+                    }
+                }
+
+                Response {
+                    text: lines.join("\n"),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            "cluster" => {
+                // ○{cluster} — cluster STM observations using ClusterSkill
+                let stm = self.learning.stm();
+                if stm.len() < 2 {
+                    return Response {
+                        text: String::from("Cần ít nhất 2 observations để cluster."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+
+                // Feed all STM chains into skill
+                for obs in stm.all().iter().take(32) {
+                    ctx.push_input(obs.chain.clone());
+                }
+
+                let skill = ClusterSkill;
+                let result = skill.execute(&mut ctx);
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(String::from("Cluster ○"));
+                match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let count = ctx.get("cluster_count").unwrap_or("?");
+                        lines.push(format!("Input    : {} observations", stm.len().min(32)));
+                        lines.push(format!("Clusters : {}", count));
+                        lines.push(format!("Note     : {}", note));
+
+                        // Show cluster representatives
+                        for (i, chain) in ctx.output_chains.iter().enumerate().take(8) {
+                            let hash = chain.chain_hash();
+                            let label = self.registry.alias_for_hash(hash)
+                                .unwrap_or("(cluster)");
+                            lines.push(format!(
+                                "  {}. {} (hash {:016X}, {} molecules)",
+                                i + 1, label, hash, chain.0.len()
+                            ));
+                        }
+                    }
+                    _ => lines.push(String::from("Không đủ data để cluster.")),
+                }
+
+                Response {
+                    text: lines.join("\n"),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            "generalize" | "rules" => {
+                // ○{generalize} — extract IF-THEN rules from STM
+                let stm = self.learning.stm();
+                if stm.len() < 3 {
+                    return Response {
+                        text: String::from("Cần ít nhất 3 observations để generalize."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+
+                for obs in stm.all().iter().take(32) {
+                    ctx.push_input(obs.chain.clone());
+                }
+
+                let skill = GeneralizationSkill;
+                let result = skill.execute(&mut ctx);
+
+                let mut lines: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+                lines.push(String::from("Generalization ○"));
+                match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let rule_count: usize = ctx.get("rule_count")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        lines.push(format!("Input : {} observations", stm.len().min(32)));
+                        lines.push(format!("Rules : {}", rule_count));
+                        lines.push(format!("Note  : {}", note));
+                        lines.push(String::from("────────────────────────────────"));
+                        for i in 0..rule_count {
+                            let key = alloc::format!("rule_{}", i);
+                            if let Some(rule) = ctx.get(&key) {
+                                lines.push(format!("  {}", rule));
+                            }
+                        }
+                    }
+                    _ => lines.push(String::from("Không đủ data để generalize.")),
+                }
+
+                Response {
+                    text: lines.join("\n"),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
             "help" => Response {
                 text: String::from(
                     "HomeOS ○{} Commands:\n\
@@ -754,6 +959,9 @@ impl HomeRuntime {
                      ○{dream}              — run Dream cycle\n\
                      ○{stats}              — system statistics\n\
                      ○{health}             — system health check\n\
+                     ○{memory}             — show learned knowledge\n\
+                     ○{cluster}            — cluster STM observations\n\
+                     ○{generalize}         — extract IF-THEN rules\n\
                      ○{solve \"2x+3=7\"}     — solve equation\n\
                      ○{derive \"x^2+3x\"}   — symbolic derivative\n\
                      ○{integrate \"2x\"}     — symbolic integral\n\
@@ -767,12 +975,227 @@ impl HomeRuntime {
                      ○{leo emit fire ∘ water;}  — LeoAI lập trình VM\n\
                      ○{program emit { S=1 R=6 T=4 };} — LeoAI chạy Olang\n\
                      ○{run let x = 1 + 2; emit x;} — LeoAI chạy + học\n\
+                     ○{inspect 🔥}          — inspect chain structure\n\
+                     ○{typeof 🔥}           — classify chain type\n\
+                     ○{assert 🔥}           — verify node exists\n\
+                     ○{explain 🔥}          — trace node origin\n\
+                     ○{why fire water}      — find connection\n\
+                     ○{trace}              — toggle execution tracing\n\
+                     ○{fuse 🔥}             — QT2 finiteness check\n\
+                     ○{compile c 🔥 ∘ 💧}  — compile to C\n\
+                     ○{compile rust stats} — compile to Rust\n\
+                     ○{compile wasm 1 + 2} — compile to WASM\n\
+                     ○{similar term1 term2} — compare 2 concepts\n\
+                     ○{if fire { stats }}  — conditional\n\
+                     ○{loop 3 { stats }}   — loop N times\n\
+                     ○{fn test { stats }}  — function definition\n\
+                     ○{let x = fire}       — variable binding\n\
+                     ○{{ S=1 R=6 V=200 }}  — molecular literal\n\
                      ○{help}               — this message",
                 ),
                 tone: ResponseTone::Engaged,
                 fx: 0.0,
                 kind: ResponseKind::System,
             },
+
+            // ── inspect <node> — hiển thị cấu trúc chain ──────────────────
+            _ if cmd.starts_with("inspect ") => {
+                let arg = cmd["inspect ".len()..].trim();
+                let (chain, _) = resolve_with_cp(arg, &self.registry);
+                if chain.is_empty() {
+                    return Response {
+                        text: format!("○ inspect: '{}' not found in registry", arg),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let hash = chain.chain_hash();
+                let bytes = chain.to_bytes();
+                let classification = classify_chain_type(&chain);
+                let mol_details: alloc::vec::Vec<String> = chain.0.iter().enumerate().map(|(i, mol)| {
+                    format!(
+                        "  mol[{}]: S={} R={} V={} A={} T={}",
+                        i, mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time
+                    )
+                }).collect();
+                Response {
+                    text: format!(
+                        "Inspect ○ '{}'\n\
+                         Hash     : {:016x}\n\
+                         Molecules: {}\n\
+                         Bytes    : {}\n\
+                         Type     : {}\n\
+                         {}",
+                        arg, hash, chain.len(), bytes.len(), classification,
+                        mol_details.join("\n")
+                    ),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            // ── typeof <node> — phân loại chain (SDF/MATH/EMOTICON/Mixed) ───
+            _ if cmd.starts_with("typeof ") => {
+                let arg = cmd["typeof ".len()..].trim();
+                let (chain, _) = resolve_with_cp(arg, &self.registry);
+                if chain.is_empty() {
+                    return Response {
+                        text: format!("○ typeof: '{}' not found", arg),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let classification = classify_chain_type(&chain);
+                Response {
+                    text: format!("typeof '{}' = {}", arg, classification),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            // ── assert <node> — kiểm tra node tồn tại (non-empty) ──────────
+            _ if cmd.starts_with("assert ") => {
+                let arg = cmd["assert ".len()..].trim();
+                let (chain, _) = resolve_with_cp(arg, &self.registry);
+                let passed = !chain.is_empty();
+                Response {
+                    text: if passed {
+                        format!("✓ assert '{}' — OK ({} molecules)", arg, chain.len())
+                    } else {
+                        format!("✗ assert '{}' — FAILED (not found)", arg)
+                    },
+                    tone: if passed { ResponseTone::Engaged } else { ResponseTone::Gentle },
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            // ── explain <node> — truy ngược nguồn gốc node ─────────────────
+            _ if cmd.starts_with("explain ") => {
+                let arg = cmd["explain ".len()..].trim();
+                let (chain, _) = resolve_with_cp(arg, &self.registry);
+                if chain.is_empty() {
+                    return Response {
+                        text: format!("○ explain: '{}' not found", arg),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let hash = chain.chain_hash();
+                // Trace origin qua Silk graph (depth=5 ≈ Fib[5])
+                let origins = silk::walk::trace_origin(self.learning.graph(), hash, 5);
+                if origins.is_empty() {
+                    Response {
+                        text: format!("explain '{}' — root node, no incoming edges", arg),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    }
+                } else {
+                    let origin_text = silk::walk::format_origin(&origins);
+                    Response {
+                        text: format!(
+                            "explain '{}' — {} incoming connections:\n{}",
+                            arg, origins.len(), origin_text
+                        ),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    }
+                }
+            }
+
+            // ── why <a> <b> — tìm kết nối giữa 2 nodes ────────────────────
+            _ if cmd.starts_with("why ") => {
+                let args: alloc::vec::Vec<&str> = cmd["why ".len()..].trim().splitn(2, ' ').collect();
+                if args.len() < 2 {
+                    return Response {
+                        text: String::from("○ why: cần 2 arguments — ○{why fire water}"),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let (chain_a, _) = resolve_with_cp(args[0], &self.registry);
+                let (chain_b, _) = resolve_with_cp(args[1], &self.registry);
+                if chain_a.is_empty() || chain_b.is_empty() {
+                    return Response {
+                        text: format!(
+                            "○ why: {} not found",
+                            if chain_a.is_empty() { args[0] } else { args[1] }
+                        ),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let hash_a = chain_a.chain_hash();
+                let hash_b = chain_b.chain_hash();
+                // BFS path (max depth=8 ≈ Fib[6])
+                let path = silk::walk::find_path(self.learning.graph(), hash_a, hash_b, 8);
+                if path.is_empty() {
+                    // Try LCA as semantic connection
+                    let common = olang::lca::lca(&chain_a, &chain_b);
+                    let emoji = chain_to_emoji(&common);
+                    Response {
+                        text: format!(
+                            "why '{}' ↔ '{}' — no Silk path, LCA = {}",
+                            args[0], args[1], emoji
+                        ),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    }
+                } else {
+                    let path_text = silk::walk::format_path(&path);
+                    Response {
+                        text: format!(
+                            "why '{}' ↔ '{}' — {} hops:\n{}",
+                            args[0], args[1], path.len() - 1, path_text
+                        ),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    }
+                }
+            }
+
+            // ── trace — toggle execution tracing ────────────────────────────
+            "trace" => {
+                self.trace_enabled = !self.trace_enabled;
+                Response {
+                    text: format!("Trace: {}", if self.trace_enabled { "ON" } else { "OFF" }),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            // ── fuse <node> — QT2 check: chain hữu hạn? ───────────────────
+            _ if cmd.starts_with("fuse ") => {
+                let arg = cmd["fuse ".len()..].trim();
+                let (chain, _) = resolve_with_cp(arg, &self.registry);
+                if chain.is_empty() {
+                    return Response {
+                        text: format!("○ fuse: '{}' → ∞ (empty/not found = invalid)", arg),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                // QT2: ∞ sai, ∞-1 đúng. Non-empty chain = finite = valid.
+                Response {
+                    text: format!("✓ fuse '{}' → ∞-1 (finite, {} molecules = valid)", arg, chain.len()),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
 
             _ if cmd.starts_with("leo ") || cmd.starts_with("program ") || cmd.starts_with("run ") => {
                 // ── LeoAI programming — AAM approves → LeoAI mở VM ─────────
@@ -833,6 +1256,193 @@ impl HomeRuntime {
                     tone: ResponseTone::Engaged,
                     fx: self.learning.context().fx(),
                     kind: ResponseKind::OlangResult,
+                }
+            }
+
+            // ── compile <target> <source> ──────────────────────────────────────
+            // ○{compile c fire ∘ water}   → C source
+            // ○{compile rust stats}       → Rust source
+            // ○{compile wasm 1 + 2}       → WASM (WAT) source
+            _ if cmd.starts_with("compile ") => {
+                let rest = cmd["compile ".len()..].trim();
+                // First word = target, rest = Olang source
+                let (target_str, source) = match rest.find(' ') {
+                    Some(pos) => (rest[..pos].trim(), rest[pos + 1..].trim()),
+                    None => {
+                        return Response {
+                            text: String::from("compile <target> <source>\ntargets: c, rust, wasm"),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        };
+                    }
+                };
+                let target = match target_str {
+                    "c" | "C" => Target::C,
+                    "rust" | "Rust" | "rs" => Target::Rust,
+                    "wasm" | "WASM" | "wat" | "WAT" => Target::Wasm,
+                    other => {
+                        return Response {
+                            text: format!("Unknown target '{}' — use: c, rust, wasm", other),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        };
+                    }
+                };
+
+                // Try full Olang syntax pipeline first (with semantic validation)
+                let mut prog = match syntax::parse(source) {
+                    Ok(stmts) => {
+                        // Semantic validation
+                        let errors = semantic::validate(&stmts);
+                        if !errors.is_empty() {
+                            let msgs: alloc::vec::Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
+                            return Response {
+                                text: format!("Semantic error:\n{}", msgs.join("\n")),
+                                tone: ResponseTone::Engaged,
+                                fx: 0.0,
+                                kind: ResponseKind::System,
+                            };
+                        }
+                        // Lower AST → OlangProgram (IR)
+                        semantic::lower(&stmts)
+                    }
+                    Err(_) => {
+                        // Fallback: try ○{} parser for simple expressions
+                        let parse_result = self.parser.parse(&format!("○{{{}}}", source));
+                        let expr = match parse_result {
+                            ParseResult::OlangExpr(e) => e,
+                            ParseResult::Error(e) => {
+                                return Response {
+                                    text: format!("Parse error: {}", e),
+                                    tone: ResponseTone::Engaged,
+                                    fx: 0.0,
+                                    kind: ResponseKind::System,
+                                };
+                            }
+                            _ => {
+                                return Response {
+                                    text: String::from("compile: source must be an Olang expression"),
+                                    tone: ResponseTone::Engaged,
+                                    fx: 0.0,
+                                    kind: ResponseKind::System,
+                                };
+                            }
+                        };
+                        let ir_expr = olang_expr_to_ir(expr);
+                        compile_expr(&ir_expr)
+                    }
+                };
+                // Optimize before compilation
+                let before_ops = prog.ops.len();
+                let opt_stats = optimize::optimize(&mut prog, OptLevel::O2);
+                let compiler = Compiler::new(target);
+                match compiler.emit(&prog) {
+                    Ok(output) => {
+                        let opt_info = if opt_stats.folds > 0 || opt_stats.dead_removed > 0
+                            || opt_stats.nops_removed > 0 || opt_stats.identities_removed > 0
+                        {
+                            format!(
+                                "\nOptimized: {} → {} ops (folded:{}, dead:{}, nop:{}, identity:{})",
+                                before_ops, prog.ops.len(),
+                                opt_stats.folds, opt_stats.dead_removed,
+                                opt_stats.nops_removed, opt_stats.identities_removed,
+                            )
+                        } else {
+                            String::new()
+                        };
+                        Response {
+                            text: format!(
+                                "Compiled to {} ({} bytes, {} ops):\n{}{}",
+                                target.name(),
+                                output.len(),
+                                prog.ops.len(),
+                                output,
+                                opt_info,
+                            ),
+                            tone: ResponseTone::Engaged,
+                            fx: self.learning.context().fx(),
+                            kind: ResponseKind::OlangResult,
+                        }
+                    }
+                    Err(e) => Response {
+                        text: format!("Compile error: {:?}", e),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
+                }
+            }
+
+            _ if cmd.starts_with("similar ") => {
+                // ○{similar fire water} — compare 2 concepts using SimilaritySkill
+                let args: alloc::vec::Vec<&str> = cmd[8..].split_whitespace().collect();
+                if args.len() < 2 {
+                    return Response {
+                        text: String::from("Cần 2 terms: ○{similar term1 term2}"),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+
+                let chain_a = self.registry.lookup_name(args[0])
+                    .and_then(|h| {
+                        let entry = self.registry.lookup_hash(h)?;
+                        Some(olang::encoder::encode_codepoint(entry.chain_hash as u32))
+                    })
+                    .unwrap_or_else(|| {
+                        // Fallback: encode as text
+                        let chains: alloc::vec::Vec<_> = args[0].chars()
+                            .map(|c| olang::encoder::encode_codepoint(c as u32))
+                            .filter(|ch| !ch.is_empty())
+                            .collect();
+                        if chains.is_empty() { olang::encoder::encode_codepoint('?' as u32) }
+                        else { olang::lca::lca_many(&chains) }
+                    });
+
+                let chain_b = self.registry.lookup_name(args[1])
+                    .and_then(|h| {
+                        let entry = self.registry.lookup_hash(h)?;
+                        Some(olang::encoder::encode_codepoint(entry.chain_hash as u32))
+                    })
+                    .unwrap_or_else(|| {
+                        let chains: alloc::vec::Vec<_> = args[1].chars()
+                            .map(|c| olang::encoder::encode_codepoint(c as u32))
+                            .filter(|ch| !ch.is_empty())
+                            .collect();
+                        if chains.is_empty() { olang::encoder::encode_codepoint('?' as u32) }
+                        else { olang::lca::lca_many(&chains) }
+                    });
+
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                ctx.push_input(chain_a);
+                ctx.push_input(chain_b);
+
+                let skill = SimilaritySkill;
+                let result = skill.execute(&mut ctx);
+
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, chain, .. } => {
+                        let sim = ctx.get("similarity").unwrap_or("?");
+                        let lca_hash = chain.chain_hash();
+                        let lca_label = self.registry.alias_for_hash(lca_hash)
+                            .unwrap_or("(LCA)");
+                        format!(
+                            "Similarity ○\n  {} ↔ {} = {}\n  LCA: {} ({:016X})\n  {}",
+                            args[0], args[1], sim, lca_label, lca_hash, note
+                        )
+                    }
+                    _ => format!("Không thể so sánh {} và {}.", args[0], args[1]),
+                };
+
+                Response {
+                    text,
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
                 }
             }
 
@@ -1790,6 +2400,29 @@ impl HomeRuntime {
                             "{}\n⊥ Mình nhận thấy có điều mâu thuẫn — bạn có muốn nói rõ hơn không?",
                             text
                         );
+                    }
+
+                    // Curiosity: high novelty → express interest
+                    if !text.is_empty() {
+                        match insight.curiosity_level.as_deref() {
+                            Some("extreme") => {
+                                text = format!("{}\nĐây là điều rất mới — mình muốn hiểu thêm.", text);
+                            }
+                            Some("high") => {
+                                text = format!("{}\nMình chưa gặp điều này trước đây.", text);
+                            }
+                            _ => {} // moderate/low → no comment
+                        }
+                    }
+
+                    // Reflection: knowledge quality warning
+                    if !text.is_empty() {
+                        if let Some("fragile") = insight.reflection_verdict.as_deref() {
+                            text = format!(
+                                "{}\n[Kiến thức còn mỏng — cần thêm dữ liệu]",
+                                text
+                            );
+                        }
                     }
                 }
 
@@ -2959,6 +3592,104 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
                 rhs,
             }
         }
+
+        OlangExpr::MolecularLiteral {
+            shape,
+            relation,
+            valence,
+            arousal,
+            time,
+        } => OlangIrExpr::MolecularLiteral {
+            shape,
+            relation,
+            valence,
+            arousal,
+            time,
+        },
+
+        OlangExpr::LetBinding { name, value } => OlangIrExpr::LetBinding {
+            name,
+            value: alloc::boxed::Box::new(olang_expr_to_ir(*value)),
+        },
+
+        OlangExpr::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => OlangIrExpr::IfElse {
+            condition: alloc::boxed::Box::new(olang_expr_to_ir(*condition)),
+            then_branch: then_body.into_iter().map(olang_expr_to_ir).collect(),
+            else_branch: else_body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::LoopBlock { count, body } => OlangIrExpr::LoopBlock {
+            count,
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::FnDef { name, body } => OlangIrExpr::FnDef {
+            name,
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::Spawn { body } => OlangIrExpr::Spawn {
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::Pipe(exprs) => {
+            OlangIrExpr::Pipe(exprs.into_iter().map(olang_expr_to_ir).collect())
+        }
+
+        OlangExpr::Use(module) => OlangIrExpr::Use(module),
+
+        OlangExpr::Emit(inner) => {
+            OlangIrExpr::EmitExpr(alloc::boxed::Box::new(olang_expr_to_ir(*inner)))
+        }
+
+        OlangExpr::Return(inner) => {
+            OlangIrExpr::ReturnExpr(alloc::boxed::Box::new(olang_expr_to_ir(*inner)))
+        }
+
+        OlangExpr::TryCatch { try_body, catch_body } => OlangIrExpr::TryCatch {
+            try_body: try_body.into_iter().map(olang_expr_to_ir).collect(),
+            catch_body: catch_body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::Match { subject, arms } => OlangIrExpr::Match {
+            subject: alloc::boxed::Box::new(olang_expr_to_ir(*subject)),
+            arms: arms
+                .into_iter()
+                .map(|(pat, body)| {
+                    (pat, body.into_iter().map(olang_expr_to_ir).collect())
+                })
+                .collect(),
+        },
+
+        OlangExpr::ForIn { var, start, end, body } => OlangIrExpr::ForIn {
+            var,
+            start,
+            end,
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::While { cond, body } => OlangIrExpr::While {
+            cond: alloc::boxed::Box::new(olang_expr_to_ir(*cond)),
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::Compare { lhs, op, rhs } => {
+            let builtin = match op {
+                CmpOp::Lt => "__cmp_lt",
+                CmpOp::Gt => "__cmp_gt",
+                CmpOp::Le => "__cmp_le",
+                CmpOp::Ge => "__cmp_ge",
+            };
+            OlangIrExpr::Compare {
+                lhs: alloc::boxed::Box::new(olang_expr_to_ir(*lhs)),
+                builtin: builtin.into(),
+                rhs: alloc::boxed::Box::new(olang_expr_to_ir(*rhs)),
+            }
+        },
     }
 }
 
@@ -2991,6 +3722,44 @@ fn relation_op_to_byte(op: RelationOp) -> u8 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Human-readable chain info: [mol_count] shape×rel V/A hash=0x... (U+XXXX)
+/// Classify chain by dominant molecule characteristics.
+/// Returns "SDF", "MATH", "EMOTICON", "Mixed", or combination.
+fn classify_chain_type(chain: &olang::molecular::MolecularChain) -> alloc::string::String {
+    use olang::molecular::ShapeBase;
+    if chain.is_empty() {
+        return String::from("Empty");
+    }
+    let (mut sdf, mut math, mut emo) = (0u32, 0u32, 0u32);
+    for mol in &chain.0 {
+        match mol.shape_base() {
+            ShapeBase::Sphere | ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Cone => sdf += 1,
+            ShapeBase::Torus | ShapeBase::Union | ShapeBase::Intersect | ShapeBase::Subtract => math += 1,
+        }
+        if !(80..=176).contains(&mol.emotion.valence) {
+            emo += 1;
+        }
+    }
+    let total = chain.len() as u32;
+    let parts: alloc::vec::Vec<&str> = [("SDF", sdf), ("MATH", math), ("EMOTICON", emo)]
+        .iter()
+        .filter(|(_, c)| *c * 2 >= total)
+        .map(|(name, _)| *name)
+        .collect();
+    if parts.is_empty() {
+        String::from("Mixed")
+    } else if parts.len() == 1 {
+        String::from(parts[0])
+    } else {
+        let mut s = String::from("Mixed(");
+        for (i, p) in parts.iter().enumerate() {
+            if i > 0 { s.push('+'); }
+            s.push_str(p);
+        }
+        s.push(')');
+        s
+    }
+}
+
 fn chain_info(chain: &olang::molecular::MolecularChain, cp: Option<u32>) -> alloc::string::String {
     if chain.is_empty() {
         return String::from("(empty)");
@@ -3369,6 +4138,36 @@ impl HomeRuntime {
             }
             if writer.write_count() > 0 {
                 self.pending_writes.extend_from_slice(writer.as_bytes());
+            }
+        }
+
+        // Auto-Generalize: extract IF-THEN rules when STM is rich enough
+        // Fibonacci threshold: run only when STM >= Fib[6]=13 observations
+        if self.learning.stm().len() >= 13 {
+            let emotion = self.learning.context().last_emotion();
+            let mut gen_ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+            for obs in self.learning.stm().all().iter().take(32) {
+                gen_ctx.push_input(obs.chain.clone());
+            }
+            let gen_skill = GeneralizationSkill;
+            if let agents::skill::SkillResult::Ok { chain, .. } = gen_skill.execute(&mut gen_ctx) {
+                let rule_count: usize = gen_ctx.get("rule_count")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                if rule_count > 0 {
+                    // Feed generalized chain back into Silk as a high-level concept
+                    let gen_hash = chain.chain_hash();
+                    let anchor_hash = self.learning.stm().all().first()
+                        .map(|o| o.chain.chain_hash())
+                        .unwrap_or(0);
+                    self.learning.graph_mut().co_activate(
+                        gen_hash,
+                        anchor_hash,
+                        emotion,
+                        0.5,
+                        ts,
+                    );
+                }
             }
         }
 

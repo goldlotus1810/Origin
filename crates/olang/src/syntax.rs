@@ -90,6 +90,73 @@ pub enum Stmt {
 
     /// Command with argument: `learn "text"`, `seed L0`
     CommandArg { name: String, arg: String },
+
+    /// `match expr { pattern => { body }, _ => { body } }`
+    Match {
+        subject: Expr,
+        arms: Vec<MatchArm>,
+    },
+
+    /// `try { body } catch { handler }`
+    TryCatch {
+        try_block: Vec<Stmt>,
+        catch_block: Vec<Stmt>,
+    },
+
+    /// `for var in start..end { body }`
+    ForIn {
+        var: String,
+        start: u32,
+        end: u32,
+        body: Vec<Stmt>,
+    },
+
+    /// `while cond { body }`
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
+}
+
+/// Match arm — pattern + body.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub struct MatchArm {
+    /// Pattern: Ident (type name), MolLiteral, or Wildcard ("_")
+    pub pattern: MatchPattern,
+    /// Body statements
+    pub body: Vec<Stmt>,
+}
+
+/// Match pattern.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub enum MatchPattern {
+    /// Match by type name: SDF, MATH, EMOTICON, MUSICAL, Mixed, Empty
+    TypeName(String),
+    /// Match by molecular literal: { S=1 R=6 }
+    MolLiteral {
+        shape: Option<u32>,
+        relation: Option<u32>,
+        valence: Option<u32>,
+        arousal: Option<u32>,
+        time: Option<u32>,
+    },
+    /// Wildcard: `_` — matches anything (default arm)
+    Wildcard,
+}
+
+/// Comparison operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    /// `<`
+    Lt,
+    /// `>`
+    Gt,
+    /// `<=`
+    Le,
+    /// `>=`
+    Ge,
 }
 
 /// Expression — mọi expression evaluate → MolecularChain.
@@ -149,6 +216,13 @@ pub enum Expr {
 
     /// `(expr)` — grouping
     Group(Box<Expr>),
+
+    /// `a < b`, `a > b`, `a <= b`, `a >= b` — comparison (returns 1.0 or 0.0)
+    Compare {
+        lhs: Box<Expr>,
+        op: CmpOp,
+        rhs: Box<Expr>,
+    },
 
     /// Molecular literal: `{ S=1 R=2 V=128 A=128 T=3 }`
     ///
@@ -236,6 +310,10 @@ impl<'a> Parser<'a> {
             Token::If => self.parse_if(),
             Token::Loop => self.parse_loop_kw(),
             Token::Fn => self.parse_fn(),
+            Token::Match => self.parse_match(),
+            Token::Try => self.parse_try_catch(),
+            Token::For => self.parse_for_in(),
+            Token::While => self.parse_while(),
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -331,6 +409,104 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         Ok(Stmt::FnDef { name, params, body })
+    }
+
+    /// `match expr { pattern => { body }, ... }`
+    fn parse_match(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'match'
+        let subject = self.parse_expr()?;
+        self.expect(&Token::LBrace)?;
+
+        let mut arms = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let pattern = self.parse_match_pattern()?;
+            self.expect(&Token::FatArrow)?;
+            let body = self.parse_block()?;
+            // Optional comma or semicolon separator
+            if self.check(&Token::Comma) || self.check(&Token::Semi) {
+                self.advance();
+            }
+            arms.push(MatchArm { pattern, body });
+        }
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::Match { subject, arms })
+    }
+
+    /// Parse match pattern: TypeName, MolLiteral, or Wildcard
+    fn parse_match_pattern(&mut self) -> Result<MatchPattern, ParseError> {
+        match self.peek() {
+            // _ → wildcard
+            Token::Ident(s) if s == "_" => {
+                self.advance();
+                Ok(MatchPattern::Wildcard)
+            }
+            // { S=1 R=2 ... } → molecular literal pattern
+            Token::LBrace => {
+                // Parse as mol literal using existing parse_mol_literal
+                let expr = self.try_parse_mol_literal()?;
+                match expr {
+                    Expr::MolLiteral { shape, relation, valence, arousal, time } => {
+                        Ok(MatchPattern::MolLiteral { shape, relation, valence, arousal, time })
+                    }
+                    _ => Err(ParseError::new("Expected molecular literal pattern")),
+                }
+            }
+            // Ident → type name (SDF, MATH, EMOTICON, etc.)
+            Token::Ident(_) => {
+                let name = self.expect_ident()?;
+                Ok(MatchPattern::TypeName(name))
+            }
+            _ => Err(ParseError::new("Expected match pattern (type name, { mol }, or _)")),
+        }
+    }
+
+    /// `try { body } catch { handler }`
+    fn parse_try_catch(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'try'
+        let try_block = self.parse_block()?;
+        self.expect(&Token::Catch)?;
+        let catch_block = self.parse_block()?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::TryCatch {
+            try_block,
+            catch_block,
+        })
+    }
+
+    /// `for` IDENT `in` INT `..` INT `{` stmts `}`
+    fn parse_for_in(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'for'
+        let var = self.expect_ident()?;
+        self.expect(&Token::In)?;
+        let start = self.expect_int()?;
+        self.expect(&Token::DotDot)?;
+        let end = self.expect_int()?;
+        let body = self.parse_block()?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::ForIn {
+            var,
+            start,
+            end,
+            body,
+        })
+    }
+
+    /// `while` expr `{` stmts `}`
+    fn parse_while(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'while'
+        let cond = self.parse_expr()?;
+        let body = self.parse_block()?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::While { cond, body })
     }
 
     /// command (STR)? ';'?
@@ -582,17 +758,40 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// compose = arith ('∘' arith)*
+    /// compose = compare ('∘' compare)*
     fn parse_compose_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_arith_expr()?;
+        let mut left = self.parse_compare_expr()?;
 
         while self.check_rel(RelOp::Compose) {
             self.advance();
-            let right = self.parse_arith_expr()?;
+            let right = self.parse_compare_expr()?;
             left = Expr::Compose(Box::new(left), Box::new(right));
         }
 
         Ok(left)
+    }
+
+    /// compare = arith (('<' | '>' | '<=' | '>=') arith)?
+    fn parse_compare_expr(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_arith_expr()?;
+        let cmp_op = match self.peek() {
+            Token::Lt => Some(CmpOp::Lt),
+            Token::Gt => Some(CmpOp::Gt),
+            Token::Le => Some(CmpOp::Le),
+            Token::Ge => Some(CmpOp::Ge),
+            _ => None,
+        };
+        if let Some(op) = cmp_op {
+            self.advance();
+            let right = self.parse_arith_expr()?;
+            Ok(Expr::Compare {
+                lhs: Box::new(left),
+                op,
+                rhs: Box::new(right),
+            })
+        } else {
+            Ok(left)
+        }
     }
 
     /// arith = primary ((ARITH_OP | PHYS_OP) primary)*
@@ -1390,5 +1589,170 @@ mod tests {
     fn parse_mol_literal_unknown_dim_errors() {
         let result = parse("{ X=1 }");
         assert!(result.is_err());
+    }
+
+    // ── Match expression ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_match_basic() {
+        let stmts = parse("match fire { SDF => { emit water; } _ => { stats; } }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Match { subject, arms } => {
+                assert_eq!(*subject, Expr::Ident("fire".into()));
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].pattern, MatchPattern::TypeName("SDF".into()));
+                assert_eq!(arms[1].pattern, MatchPattern::Wildcard);
+            }
+            _ => panic!("Expected Match statement"),
+        }
+    }
+
+    #[test]
+    fn parse_match_multiple_arms() {
+        let stmts = parse("match fire { SDF => { stats; } MATH => { dream; } EMOTICON => { fuse; } _ => { trace; } }").unwrap();
+        match &stmts[0] {
+            Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 4);
+                assert_eq!(arms[0].pattern, MatchPattern::TypeName("SDF".into()));
+                assert_eq!(arms[1].pattern, MatchPattern::TypeName("MATH".into()));
+                assert_eq!(arms[2].pattern, MatchPattern::TypeName("EMOTICON".into()));
+                assert_eq!(arms[3].pattern, MatchPattern::Wildcard);
+            }
+            _ => panic!("Expected Match"),
+        }
+    }
+
+    #[test]
+    fn parse_match_no_wildcard() {
+        let stmts = parse("match fire { SDF => { stats; } }").unwrap();
+        match &stmts[0] {
+            Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 1);
+            }
+            _ => panic!("Expected Match"),
+        }
+    }
+
+    // ── Try/Catch ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_try_catch_basic() {
+        let stmts = parse("try { emit fire; } catch { stats; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::TryCatch { try_block, catch_block } => {
+                assert!(!try_block.is_empty());
+                assert!(!catch_block.is_empty());
+            }
+            _ => panic!("Expected TryCatch"),
+        }
+    }
+
+    #[test]
+    fn parse_try_catch_nested() {
+        let stmts = parse("try { if fire { emit water; } } catch { dream; }").unwrap();
+        match &stmts[0] {
+            Stmt::TryCatch { try_block, .. } => {
+                assert!(matches!(&try_block[0], Stmt::If { .. }));
+            }
+            _ => panic!("Expected TryCatch"),
+        }
+    }
+
+    // ── For-In ────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_for_in_basic() {
+        let stmts = parse("for i in 0..5 { emit fire; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ForIn { var, start, end, body } => {
+                assert_eq!(var, "i");
+                assert_eq!(*start, 0);
+                assert_eq!(*end, 5);
+                assert_eq!(body.len(), 1);
+            }
+            _ => panic!("Expected ForIn"),
+        }
+    }
+
+    #[test]
+    fn parse_for_in_with_nested_body() {
+        let stmts = parse("for x in 1..10 { if fire { emit water; } }").unwrap();
+        match &stmts[0] {
+            Stmt::ForIn { var, start, end, body } => {
+                assert_eq!(var, "x");
+                assert_eq!(*start, 1);
+                assert_eq!(*end, 10);
+                assert!(matches!(&body[0], Stmt::If { .. }));
+            }
+            _ => panic!("Expected ForIn"),
+        }
+    }
+
+    #[test]
+    fn lex_for_in_tokens() {
+        use crate::alphabet::{Lexer, Token};
+        let tokens = Lexer::tokenize_all("for i in 0..5 { }");
+        assert_eq!(tokens[0], Token::For);
+        assert_eq!(tokens[1], Token::Ident("i".into()));
+        assert_eq!(tokens[2], Token::In);
+        assert_eq!(tokens[3], Token::Int(0));
+        assert_eq!(tokens[4], Token::DotDot);
+        assert_eq!(tokens[5], Token::Int(5));
+    }
+
+    #[test]
+    fn parse_while_basic() {
+        let stmts = parse("while x < 10 { emit x; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::While { cond, body } => {
+                // cond should be Compare(x < 10)
+                match cond {
+                    Expr::Compare { op, .. } => assert_eq!(*op, CmpOp::Lt),
+                    _ => panic!("Expected Compare, got {:?}", cond),
+                }
+                assert!(!body.is_empty());
+            }
+            _ => panic!("Expected While, got {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn parse_compare_lt() {
+        let stmts = parse("emit x < 10;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::Compare { op, .. } => assert_eq!(*op, CmpOp::Lt),
+                _ => panic!("Expected Compare, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn parse_compare_ge() {
+        let stmts = parse("emit x >= 5;").unwrap();
+        match &stmts[0] {
+            Stmt::Emit(expr) => match expr {
+                Expr::Compare { op, .. } => assert_eq!(*op, CmpOp::Ge),
+                _ => panic!("Expected Compare, got {:?}", expr),
+            },
+            _ => panic!("Expected Emit"),
+        }
+    }
+
+    #[test]
+    fn lex_comparison_tokens() {
+        use crate::alphabet::{Lexer, Token};
+        let tokens = Lexer::tokenize_all("x < 10");
+        assert!(tokens.contains(&Token::Lt));
+        let tokens2 = Lexer::tokenize_all("x >= 5");
+        assert!(tokens2.contains(&Token::Ge));
+        let tokens3 = Lexer::tokenize_all("x <= 3");
+        assert!(tokens3.contains(&Token::Le));
     }
 }

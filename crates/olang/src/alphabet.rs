@@ -317,6 +317,18 @@ pub enum Keyword {
     Loop,
     /// `emit` = ○
     Emit,
+    /// `match` — pattern matching
+    Match,
+    /// `try` — error handling
+    Try,
+    /// `catch` — error handler block
+    Catch,
+    /// `for` — for-in loop
+    For,
+    /// `in` — range iteration
+    In,
+    /// `while` — conditional loop
+    While,
 }
 
 /// Check xem string có phải keyword không.
@@ -328,6 +340,12 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "else" => Some(Keyword::Else),
         "loop" => Some(Keyword::Loop),
         "emit" => Some(Keyword::Emit),
+        "match" => Some(Keyword::Match),
+        "try" => Some(Keyword::Try),
+        "catch" => Some(Keyword::Catch),
+        "for" => Some(Keyword::For),
+        "in" => Some(Keyword::In),
+        "while" => Some(Keyword::While),
         _ => None,
     }
 }
@@ -428,6 +446,30 @@ pub enum Token {
     Wild,
     /// `|`
     Pipe,
+    /// `match`
+    Match,
+    /// `try`
+    Try,
+    /// `catch`
+    Catch,
+    /// `=>`
+    FatArrow,
+    /// `for`
+    For,
+    /// `in`
+    In,
+    /// `..` — range operator
+    DotDot,
+    /// `while`
+    While,
+    /// `<` — less than
+    Lt,
+    /// `>` — greater than
+    Gt,
+    /// `<=` — less than or equal
+    Le,
+    /// `>=` — greater than or equal
+    Ge,
 
     // ── End ──
     /// End of input
@@ -534,6 +576,11 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     return Token::Truth;
                 }
+                // => → FatArrow (match arm)
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::FatArrow;
+                }
                 return Token::Eq;
             }
             '?' => {
@@ -546,6 +593,30 @@ impl<'a> Lexer<'a> {
             }
             '"' => {
                 return self.lex_string();
+            }
+            '.' => {
+                self.chars.next();
+                if let Some(&(_, '.')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::DotDot;
+                }
+                return Token::Ident(".".into());
+            }
+            '<' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Le;
+                }
+                return Token::Lt;
+            }
+            '>' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Ge;
+                }
+                return Token::Gt;
             }
             _ => {}
         }
@@ -633,6 +704,12 @@ impl<'a> Lexer<'a> {
                 Keyword::Else => Token::Else,
                 Keyword::Loop => Token::Loop,
                 Keyword::Emit => Token::Emit,
+                Keyword::Match => Token::Match,
+                Keyword::Try => Token::Try,
+                Keyword::Catch => Token::Catch,
+                Keyword::For => Token::For,
+                Keyword::In => Token::In,
+                Keyword::While => Token::While,
             };
         }
 
