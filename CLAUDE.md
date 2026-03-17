@@ -2,6 +2,10 @@
 
 > **Đọc file này TRƯỚC KHI viết bất kỳ dòng code nào.**
 > Mọi AI (Claude, GPT, Copilot...) mở project này đều phải hiểu những gì dưới đây.
+>
+> **QUAN TRỌNG: Đọc `NEXT_PLAN.md` để biết trạng thái hiện tại và việc tiếp theo.**
+> Người dùng KHÔNG biết lập trình. AI tự quyết định kỹ thuật, chỉ hỏi về hướng đi.
+> Sau mỗi phiên: CẬP NHẬT `NEXT_PLAN.md` với những gì đã làm và chưa làm.
 
 ---
 

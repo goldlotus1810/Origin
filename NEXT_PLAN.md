@@ -1,6 +1,11 @@
-# HomeOS — Kế Hoạch Tiếp Theo
-**Ngày:** 2026-03-17
-**Checkpoint:** commit `86dff81` · branch `backup/full-seed-2026-03-17`
+# HomeOS — Nguồn Sự Thật Duy Nhất
+
+> **AI mới vào: ĐỌC FILE NÀY TRƯỚC TIÊN.**
+> Đây là file duy nhất phản ánh trạng thái thật của dự án.
+> Các file roadmap khác (docs/roadmap.md, HomeOS_Roadmap.md) là lịch sử — KHÔNG phải trạng thái hiện tại.
+
+**Cập nhật lần cuối:** 2026-03-17
+**Checkpoint an toàn:** commit `86dff81` · branch `backup/full-seed-2026-03-17`
 
 ---
 
@@ -8,11 +13,12 @@
 
 ```
 Score:    8.81/10 (A)
-Tests:    1,744 pass · 0 fail · 0 clippy warnings
+Tests:    1,753 pass · 0 fail · 0 clippy warnings
 Deps:     0 external (native SHA-256, Ed25519, AES-256-GCM, homemath)
 origin:   174 nodes (35 L0 + 139 domain) · 118 edges · 1181 aliases · 37KB
-Phases:   1-9 hoàn thành
-Docs:     đã đồng bộ với code thật (13 sai lệch đã sửa)
+Phases:   1-9 hoàn thành (xem HomeOS_Roadmap.md Section X cho lịch sử)
+Parser:   18/18 RelOps (hoàn thành)
+Dream:    Auto-trigger Fibonacci + STM cleanup + disk flush (hoàn thành)
 ```
 
 ### Điểm khôi phục nếu hỏng:
@@ -24,39 +30,42 @@ git checkout backup-2026-03-17-full-seed   # tag cũng trỏ cùng commit
 
 ---
 
-## Ưu tiên phát triển (theo thứ tự)
+## Đã hoàn thành (KHÔNG CẦN LÀM LẠI)
 
-### P1: Olang Parser — Thêm RelOps thiếu [CAO]
 ```
-Hiện tại: Parser hỗ trợ 10/18 RelOps
-Thiếu:    ⊥(Ortho) ∖(SetMinus) ↔(Bidir) ⟶(Flows) ⟳(Repeats) ↑(Resolves) ⚡(Trigger) ∥(Parallel)
+Foundation (Phase 1-9):
+  ✅ UCD Engine (5424 entries)
+  ✅ Molecule/Chain 5D encoding
+  ✅ LCA weighted + variance
+  ✅ Registry append-only + crash recovery
+  ✅ Silk Hebbian + φ⁻¹ decay
+  ✅ Emotion Pipeline 7 tầng
+  ✅ 7 Instinct Skills + 15 Domain Skills
+  ✅ ISL messaging (AES-256-GCM native)
+  ✅ HAL (x86/ARM/RISC-V/WASM)
+  ✅ VSDF (18 SDF + FFR Fibonacci)
+  ✅ Agent Hierarchy (AAM/Chief/Worker)
+  ✅ Compiler backends (C/Rust/WASM)
+  ✅ VM 31 opcodes (arithmetic, molecular literals)
+  ✅ Graph traversal (why/explain/query)
+  ✅ 246 domain nodes (math, physics, chemistry, biology, philosophy, algorithms)
+  ✅ Zero external dependencies
+  ✅ LeoAI tự lập trình (program/express/experiment)
 
-Files cần sửa:
-  crates/runtime/src/parser.rs   — thêm token recognition
-  crates/olang/src/syntax.rs     — thêm vào grammar
-  crates/olang/src/compiler.rs   — compile xuống Edge opcode
-
-Test: ○{fire ⊥ water} → tạo edge Orthogonal
+Phiên 2026-03-17 (hôm nay):
+  ✅ P1: Parser 18/18 RelOps — ⊥ ∖ ↔ ⟶ ⟳ ↑ ⚡ ∥ (commit 38e48df)
+  ✅ P2: Dream STM cleanup — promoted observations tự xóa khỏi STM
+  ✅ Dream pipeline đầy đủ: auto-trigger Fibonacci + disk flush + KnowTree L3
 ```
 
-### P2: Dream→KnowTree L3 Pipeline [CAO]
-```
-STM observations → Dream cluster → LCA → L3 node → KnowTree
-Fibonacci trigger: Fib[depth] co-activations để promote
+---
 
-Files:
-  crates/memory/src/dream.rs     — DreamCycle.run()
-  crates/olang/src/knowtree.rs   — store_concept()
-  crates/agents/src/leo.rs       — run_dream() integration
-  crates/runtime/src/origin.rs   — wire dream into main loop
+## Việc tiếp theo (theo thứ tự ưu tiên)
 
-Test: learn 10 câu về "lửa" → dream → L3 node "thermodynamics" tự sinh
-```
-
-### P3: Multilingual Seeding [TRUNG BÌNH]
+### 1. Multilingual Seeding [TRUNG BÌNH]
 ```
 Hiện tại: multilang.olang có sẵn (6057 bytes) nhưng chưa integrate
-Seed thêm aliases từ nhiều ngôn ngữ
+Seed thêm aliases từ nhiều ngôn ngữ (Pháp, Nhật, Hàn, Đức...)
 
 Files:
   tools/seeder/src/multilang.rs
@@ -65,7 +74,7 @@ Files:
 Test: ○{feu} → resolve đúng node 🔥 (tiếng Pháp)
 ```
 
-### P4: SkillProposal [TRUNG BÌNH]
+### 2. SkillProposal [TRUNG BÌNH]
 ```
 Docs mô tả nhưng code chưa implement
 DreamSkill detect pattern → SkillProposal → AAM approve → ComposedSkill
@@ -78,7 +87,7 @@ Files:
 Test: pattern lặp lại → LeoAI đề xuất Skill mới → AAM approve
 ```
 
-### P5: WASM Browser Demo [THẤP]
+### 3. WASM Browser Demo [THẤP]
 ```
 homeos-wasm đã có bindings nhưng chưa có demo page
 Tạo simple HTML page chạy HomeOS trong browser
@@ -90,40 +99,64 @@ Files:
 Test: mở browser → gõ ○{fire} → thấy kết quả
 ```
 
+### 4. Cải thiện code [THẤP — làm khi rảnh]
+```
+- Giảm unwrap() (hiện ~291, target <100)
+- Thêm tests cho tools (inspector, server, bench)
+- API documentation cho core crates
+```
+
 ---
 
 ## Quy trình mỗi phiên làm việc
 
 ```
 1. TRƯỚC KHI LÀM:
-   git log --oneline -3              # xác nhận đúng branch
-   cargo test --workspace            # confirm green
-   cargo run -p inspector -- origin.olang  # verify data
+   Đọc file NEXT_PLAN.md này         # biết đang ở đâu
+   git log --oneline -3               # xác nhận đúng branch
+   cargo test --workspace             # confirm green
 
 2. SAU KHI LÀM:
-   cargo test --workspace            # phải 0 fail
-   cargo clippy --workspace          # phải 0 warnings
-   cargo run -p inspector -- origin.olang  # verify intact
-   git add ... && git commit         # commit rõ ràng
-   git tag backup-YYYY-MM-DD-{desc}  # tag backup
-   git push                          # push lên remote
+   cargo test --workspace             # phải 0 fail
+   cargo clippy --workspace           # phải 0 warnings
+   CẬP NHẬT FILE NEXT_PLAN.md NÀY    # đánh dấu gì đã xong, gì tiếp theo
+   git add ... && git commit          # commit rõ ràng
+   git push                           # push lên remote
 
-3. NẾU HỎNG:
-   git checkout backup/full-seed-2026-03-17  # quay lại
-   cargo run -p seeder --bin seeder          # reseed L0 nếu cần
-   cargo run -p seeder --bin seed_domains    # reseed domains nếu cần
+3. NẾU PHIÊN KẾT THÚC ĐỘT NGỘT:
+   AI mới vào → đọc NEXT_PLAN.md → biết ngay trạng thái
+   git log --oneline -5               # xem commit cuối làm gì
+   cargo test --workspace             # code có xanh không
+   Nếu hỏng: git checkout backup/full-seed-2026-03-17
 ```
 
 ---
 
-## Ghi chú cho phiên sau
+## Ghi chú quan trọng
 
-- origin.olang PHẢI được commit sau mỗi seed/learn — nếu phiên kết thúc bất ngờ, Git giữ data
-- Backup branch + tag TRƯỚC KHI làm gì mới
-- Docs đã đồng bộ tại commit `659880f` — không cần cập nhật trừ khi thêm feature mới
-- LeoAI đã biết tự lập trình (program/express/experiment) — đây là feature mạnh, chưa khai thác hết
+- **NEXT_PLAN.md = nguồn sự thật duy nhất** — docs/roadmap.md và HomeOS_Roadmap.md là lịch sử
+- origin.olang PHẢI được commit sau mỗi thay đổi
 - 0 external deps — giữ nguyên, không thêm crate ngoài
+- LeoAI biết tự lập trình — feature mạnh, chưa khai thác hết
+- Người dùng KHÔNG biết lập trình — AI phải tự quyết định kỹ thuật, chỉ hỏi về hướng đi
 
 ---
 
-*HomeOS · 2026-03-17 · 1,744 tests · 174 nodes · ○(∅)==○*
+## Lịch sử phiên làm việc
+
+```
+2026-03-17 phiên 1:
+  - Đồng bộ docs (13 sai lệch sửa)
+  - Reseed origin.olang (35 → 174 nodes)
+  - Tạo backup branches + tags
+  - Score: 8.66 → 8.81
+
+2026-03-17 phiên 2:
+  - P1: Parser 18/18 RelOps (commit 38e48df)
+  - P2: Dream STM cleanup
+  - Tests: 1,744 → 1,753
+```
+
+---
+
+*HomeOS · 2026-03-17 · 1,753 tests · 174 nodes · ○(∅)==○*
