@@ -572,3 +572,41 @@ Nó tự nói lên giá trị của mình.
 ---
 
 *Append-only · 2026-03-15 · HomeOS Roadmap*
+
+---
+
+## X. CẬP NHẬT TIẾN ĐỘ — 2026-03-17
+
+```
+HOÀN THÀNH (tính đến 2026-03-17):
+  ✅ Phase 1: VM tính toán thật — ○{1 + 2} = 3
+     Commit: b75d1cf "Phase 1: VM arithmetic"
+  ✅ Phase 2: Duyệt đồ thị (why/explain/query)
+  ✅ Phase 3: Tri thức L1+ — 246 domain nodes, 6 domains
+  ✅ Phase 4: Toán ký hiệu kết nối VM
+  ✅ Phase 5: Điều phối Agent đầy đủ — MessageRouter
+  ✅ Phase 6-8: Perception, Programming, Build layers
+  ✅ Phase 9: Zero External Dependencies
+     — Native SHA-256 (9e9e22e)
+     — Native Ed25519 + SHA-512 (f76c204)
+     — Native AES-256-GCM (ccf14cd)
+     — 0 external deps (chỉ wasm-bindgen cho build tool)
+
+METRICS hiện tại:
+  1,744 tests · 0 clippy warnings · 0 external deps
+  Score: 8.81/10 (A)
+  Chi tiết: docs/REVIEW_2026_03_17.md
+
+TIẾP THEO:
+  Phase 10: Dream→KnowTree L3 pipeline + Fibonacci trigger
+  Phase 11: Olang Parser — thêm RelOps thiếu (⊥ ∖ ↔ etc.)
+  Phase 12: Data L2-Ln seeding
+  Phase 13: Hardware deployment (RPi, WASM browser)
+
+GHI CHÚ: chain_to_emoji() đã hoạt động (olang/startup.rs:834).
+  Không còn là TODO — đã wire vào runtime từ trước.
+
+GHI CHÚ:
+  origin.olang hiện có: 35 nodes L0, 10 edges, 116 aliases
+  Seeder hoạt động tốt. Inspector verify pass.
+```

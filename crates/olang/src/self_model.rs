@@ -12,13 +12,13 @@
 //!   Registry rỗng = hợp lệ. HomeOS nhìn vào rỗng → thấy ○ → sinh ra ○.
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
+use crate::encoder::encode_codepoint;
+use crate::lca::lca_many;
 use crate::molecular::MolecularChain;
 use crate::registry::Registry;
-use crate::lca::lca_many;
-use crate::encoder::encode_codepoint;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SelfSnapshot — ảnh chụp bản thân tại một thời điểm
@@ -29,29 +29,29 @@ use crate::encoder::encode_codepoint;
 #[derive(Debug, Clone)]
 pub struct SelfSnapshot {
     /// Tổng số nodes đã biết
-    pub node_count:      usize,
+    pub node_count: usize,
     /// Số QR nodes (đã chứng minh)
-    pub qr_count:        usize,
+    pub qr_count: usize,
     /// Số ĐN nodes (đang học)
-    pub dn_count:        usize,
+    pub dn_count: usize,
     /// Số aliases đã đăng ký
-    pub alias_count:     usize,
+    pub alias_count: usize,
     /// Distribution theo tầng: layer → count
-    pub layer_dist:      [usize; 16],
+    pub layer_dist: [usize; 16],
     /// Chain đại diện của toàn bộ hệ thống (LCA tất cả nodes)
-    pub self_chain:      MolecularChain,
+    pub self_chain: MolecularChain,
     /// Timestamp
-    pub timestamp:       i64,
+    pub timestamp: i64,
 }
 
 impl SelfSnapshot {
     /// Chụp ảnh bản thân từ registry.
     pub fn capture(registry: &Registry, ts: i64) -> Self {
-        let node_count  = registry.len();
+        let node_count = registry.len();
         let alias_count = registry.alias_count();
 
-        let mut qr_count  = 0usize;
-        let mut dn_count  = 0usize;
+        let mut qr_count = 0usize;
+        let mut dn_count = 0usize;
         let mut layer_dist = [0usize; 16];
 
         // Đếm QR vs ĐN theo tầng
@@ -59,7 +59,11 @@ impl SelfSnapshot {
             let entries = registry.entries_in_layer(layer);
             layer_dist[layer as usize] = entries.len();
             for e in &entries {
-                if e.is_qr { qr_count += 1; } else { dn_count += 1; }
+                if e.is_qr {
+                    qr_count += 1;
+                } else {
+                    dn_count += 1;
+                }
             }
         }
 
@@ -89,12 +93,21 @@ impl SelfSnapshot {
             lca_many(&rep_chains)
         };
 
-        Self { node_count, qr_count, dn_count, alias_count, layer_dist, self_chain, timestamp: ts }
+        Self {
+            node_count,
+            qr_count,
+            dn_count,
+            alias_count,
+            layer_dist,
+            self_chain,
+            timestamp: ts,
+        }
     }
 
     /// Tầng có nhiều nodes nhất.
     pub fn densest_layer(&self) -> u8 {
-        self.layer_dist.iter()
+        self.layer_dist
+            .iter()
             .enumerate()
             .max_by_key(|(_, &c)| c)
             .map(|(i, _)| i as u8)
@@ -103,7 +116,8 @@ impl SelfSnapshot {
 
     /// Tầng chưa có node nào (gap).
     pub fn empty_layers(&self) -> Vec<u8> {
-        self.layer_dist.iter()
+        self.layer_dist
+            .iter()
             .enumerate()
             .filter(|(_, &c)| c == 0)
             .map(|(i, _)| i as u8)
@@ -113,7 +127,9 @@ impl SelfSnapshot {
 
     /// Tỷ lệ QR / total.
     pub fn qr_ratio(&self) -> f32 {
-        if self.node_count == 0 { return 0.0; }
+        if self.node_count == 0 {
+            return 0.0;
+        }
         self.qr_count as f32 / self.node_count as f32
     }
 }
@@ -127,9 +143,9 @@ impl SelfSnapshot {
 #[derive(Debug, Clone)]
 pub struct Gap {
     /// Tầng bị thiếu
-    pub layer:       u8,
+    pub layer: u8,
     /// Loại khoảng trống
-    pub kind:        GapKind,
+    pub kind: GapKind,
     /// Đề xuất codepoint để fill
     pub suggested_cp: u32,
 }
@@ -151,8 +167,10 @@ pub fn detect_gaps(snapshot: &SelfSnapshot) -> Vec<Gap> {
 
     // Gap 1: Empty layers
     for layer in snapshot.empty_layers() {
-        if layer == 0 { continue; } // L0 có thể rỗng nếu chưa seed
-        // Đề xuất: dùng FFR để tìm codepoint cho tầng này
+        if layer == 0 {
+            continue;
+        } // L0 có thể rỗng nếu chưa seed
+          // Đề xuất: dùng FFR để tìm codepoint cho tầng này
         let suggested_cp = layer_to_suggested_cp(layer);
         gaps.push(Gap {
             layer,
@@ -165,8 +183,8 @@ pub fn detect_gaps(snapshot: &SelfSnapshot) -> Vec<Gap> {
     // Nếu ratio QR thấp và ĐN nhiều → cần thêm emotion nodes
     if snapshot.qr_ratio() < 0.3 && snapshot.dn_count > 5 {
         gaps.push(Gap {
-            layer:        snapshot.densest_layer(),
-            kind:         GapKind::MissingEmotionCluster,
+            layer: snapshot.densest_layer(),
+            kind: GapKind::MissingEmotionCluster,
             suggested_cp: 0x1F914, // 🤔 thinking — meta-cognition
         });
     }
@@ -196,11 +214,11 @@ fn layer_to_suggested_cp(layer: u8) -> u32 {
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct SpontaneousProposal {
-    pub chain:       MolecularChain,
-    pub layer:       u8,
-    pub reason:      SpontaneousReason,
-    pub confidence:  f32,
-    pub timestamp:   i64,
+    pub chain: MolecularChain,
+    pub layer: u8,
+    pub reason: SpontaneousReason,
+    pub confidence: f32,
+    pub timestamp: i64,
 }
 
 #[allow(missing_docs)]
@@ -218,9 +236,9 @@ pub enum SpontaneousReason {
 
 /// HomeOS tự tạo proposals từ gaps và self-model.
 pub fn spontaneous_proposals(
-    snapshot:  &SelfSnapshot,
-    gaps:      &[Gap],
-    ts:        i64,
+    snapshot: &SelfSnapshot,
+    gaps: &[Gap],
+    ts: i64,
 ) -> Vec<SpontaneousProposal> {
     let mut proposals = Vec::new();
 
@@ -231,10 +249,12 @@ pub fn spontaneous_proposals(
             if !chain.is_empty() {
                 proposals.push(SpontaneousProposal {
                     chain,
-                    layer:      gap.layer,
-                    reason:     SpontaneousReason::FillGap { gap_layer: gap.layer },
+                    layer: gap.layer,
+                    reason: SpontaneousReason::FillGap {
+                        gap_layer: gap.layer,
+                    },
                     confidence: 0.6,
-                    timestamp:  ts,
+                    timestamp: ts,
                 });
             }
         }
@@ -244,26 +264,26 @@ pub fn spontaneous_proposals(
     // HomeOS nhìn vào chính mình → thấy tọa độ → tạo node tại đó
     if snapshot.node_count > 0 && !snapshot.self_chain.is_empty() {
         proposals.push(SpontaneousProposal {
-            chain:      snapshot.self_chain.clone(),
-            layer:      snapshot.densest_layer().saturating_add(1),
-            reason:     SpontaneousReason::SelfReflection,
+            chain: snapshot.self_chain.clone(),
+            layer: snapshot.densest_layer().saturating_add(1),
+            reason: SpontaneousReason::SelfReflection,
             confidence: 0.5,
-            timestamp:  ts,
+            timestamp: ts,
         });
     }
 
     // Proposal 3: Fibonacci next
     // Dùng FFR để tìm node tiếp theo trong chuỗi Fibonacci
     let fib_idx = snapshot.node_count as u64 + 1;
-    let fib_cp  = fib_idx_to_cp(fib_idx);
+    let fib_cp = fib_idx_to_cp(fib_idx);
     let fib_chain = encode_codepoint(fib_cp);
     if !fib_chain.is_empty() {
         proposals.push(SpontaneousProposal {
-            chain:      fib_chain,
-            layer:      0,
-            reason:     SpontaneousReason::FibonacciNext { fib_index: fib_idx },
+            chain: fib_chain,
+            layer: 0,
+            reason: SpontaneousReason::FibonacciNext { fib_index: fib_idx },
             confidence: 0.4,
-            timestamp:  ts,
+            timestamp: ts,
         });
     }
 
@@ -272,9 +292,12 @@ pub fn spontaneous_proposals(
 
 fn fib_idx_to_cp(n: u64) -> u32 {
     // Dùng Fibonacci mod để map index → codepoint trong EMOTICON range
-    let mut a = 1u64; let mut b = 1u64;
+    let mut a = 1u64;
+    let mut b = 1u64;
     for _ in 2..=(n % 30 + 2) {
-        let c = a.wrapping_add(b); a = b; b = c;
+        let c = a.wrapping_add(b);
+        a = b;
+        b = c;
     }
     // Map vào emoji range 1F300..1F9FF
     let offset = b % 0x6FF;
@@ -293,11 +316,11 @@ fn fib_idx_to_cp(n: u64) -> u32 {
 #[derive(Debug)]
 pub struct SelfModel {
     /// Snapshots theo thời gian (append-only)
-    pub snapshots:   Vec<SelfSnapshot>,
+    pub snapshots: Vec<SelfSnapshot>,
     /// Proposals đã tạo ra
-    pub proposals:   Vec<SpontaneousProposal>,
+    pub proposals: Vec<SpontaneousProposal>,
     /// Gaps hiện tại
-    pub gaps:        Vec<Gap>,
+    pub gaps: Vec<Gap>,
 }
 
 #[allow(missing_docs)]
@@ -306,7 +329,7 @@ impl SelfModel {
         Self {
             snapshots: Vec::new(),
             proposals: Vec::new(),
-            gaps:      Vec::new(),
+            gaps: Vec::new(),
         }
     }
 
@@ -314,11 +337,11 @@ impl SelfModel {
     ///
     /// Gọi sau mỗi Dream cycle.
     pub fn update(&mut self, registry: &Registry, ts: i64) {
-        let snapshot  = SelfSnapshot::capture(registry, ts);
-        let gaps      = detect_gaps(&snapshot);
+        let snapshot = SelfSnapshot::capture(registry, ts);
+        let gaps = detect_gaps(&snapshot);
         let proposals = spontaneous_proposals(&snapshot, &gaps, ts);
 
-        self.gaps      = gaps;
+        self.gaps = gaps;
         self.proposals.extend(proposals);
         self.snapshots.push(snapshot);
     }
@@ -329,7 +352,9 @@ impl SelfModel {
     }
 
     /// Số lần self-reflect.
-    pub fn reflection_count(&self) -> usize { self.snapshots.len() }
+    pub fn reflection_count(&self) -> usize {
+        self.snapshots.len()
+    }
 
     /// Summary dạng text.
     pub fn summary(&self) -> String {
@@ -344,7 +369,9 @@ impl SelfModel {
              Gaps     : {}\n\
              Proposals: {}\n\
              Reflects : {}",
-            snap.node_count, snap.qr_count, snap.dn_count,
+            snap.node_count,
+            snap.qr_count,
+            snap.dn_count,
             snap.alias_count,
             snap.qr_ratio() * 100.0,
             self.gaps.len(),
@@ -354,7 +381,11 @@ impl SelfModel {
     }
 }
 
-impl Default for SelfModel { fn default() -> Self { Self::new() } }
+impl Default for SelfModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -365,7 +396,9 @@ mod tests {
     use super::*;
     use crate::startup::boot_empty;
 
-    fn skip() -> bool { ucd::table_len() == 0 }
+    fn skip() -> bool {
+        ucd::table_len() == 0
+    }
 
     // ── SelfSnapshot ─────────────────────────────────────────────────────────
 
@@ -374,19 +407,21 @@ mod tests {
         let registry = crate::registry::Registry::new();
         let snap = SelfSnapshot::capture(&registry, 1000);
         assert_eq!(snap.node_count, 0);
-        assert_eq!(snap.qr_count,   0);
+        assert_eq!(snap.qr_count, 0);
         assert_eq!(snap.alias_count, 0);
-        assert_eq!(snap.qr_ratio(),  0.0);
+        assert_eq!(snap.qr_ratio(), 0.0);
     }
 
     #[test]
     fn snapshot_after_boot() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
         let snap = SelfSnapshot::capture(&result.registry, 1000);
         // Boot seeds axioms → phải có ít nhất 1 node
         assert!(snap.node_count > 0, "Sau boot phải có nodes");
-        assert!(snap.qr_count > 0,   "Axioms phải là QR");
+        assert!(snap.qr_count > 0, "Axioms phải là QR");
         assert!(!snap.self_chain.is_empty(), "self_chain không rỗng");
     }
 
@@ -409,7 +444,9 @@ mod tests {
 
     #[test]
     fn snapshot_qr_ratio() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
         let snap = SelfSnapshot::capture(&result.registry, 1000);
         let ratio = snap.qr_ratio();
@@ -434,8 +471,11 @@ mod tests {
         let snap = SelfSnapshot::capture(&registry, 1000);
         let gaps = detect_gaps(&snap);
         for gap in &gaps {
-            assert!(gap.suggested_cp > 0x20,
-                "Gap suggested_cp phải là valid codepoint: 0x{:04X}", gap.suggested_cp);
+            assert!(
+                gap.suggested_cp > 0x20,
+                "Gap suggested_cp phải là valid codepoint: 0x{:04X}",
+                gap.suggested_cp
+            );
         }
     }
 
@@ -444,8 +484,8 @@ mod tests {
     #[test]
     fn spontaneous_empty_registry() {
         let registry = crate::registry::Registry::new();
-        let snap  = SelfSnapshot::capture(&registry, 1000);
-        let gaps  = detect_gaps(&snap);
+        let snap = SelfSnapshot::capture(&registry, 1000);
+        let gaps = detect_gaps(&snap);
         let props = spontaneous_proposals(&snap, &gaps, 1000);
         // Dù registry rỗng, Fibonacci proposal luôn được tạo
         assert!(!props.is_empty(), "Luôn có ít nhất 1 proposal");
@@ -454,26 +494,31 @@ mod tests {
     #[test]
     fn spontaneous_confidence_valid() {
         let registry = crate::registry::Registry::new();
-        let snap  = SelfSnapshot::capture(&registry, 1000);
-        let gaps  = detect_gaps(&snap);
+        let snap = SelfSnapshot::capture(&registry, 1000);
+        let gaps = detect_gaps(&snap);
         let props = spontaneous_proposals(&snap, &gaps, 1000);
         for p in &props {
-            assert!(p.confidence > 0.0 && p.confidence <= 1.0,
-                "Confidence ∈ (0,1]: {}", p.confidence);
+            assert!(
+                p.confidence > 0.0 && p.confidence <= 1.0,
+                "Confidence ∈ (0,1]: {}",
+                p.confidence
+            );
             assert!(!p.chain.is_empty(), "Proposal chain không rỗng");
         }
     }
 
     #[test]
     fn spontaneous_fibonacci_reason() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let registry = crate::registry::Registry::new();
-        let snap  = SelfSnapshot::capture(&registry, 1000);
-        let gaps  = detect_gaps(&snap);
+        let snap = SelfSnapshot::capture(&registry, 1000);
+        let gaps = detect_gaps(&snap);
         let props = spontaneous_proposals(&snap, &gaps, 1000);
-        let has_fib = props.iter().any(|p|
-            matches!(p.reason, SpontaneousReason::FibonacciNext { .. })
-        );
+        let has_fib = props
+            .iter()
+            .any(|p| matches!(p.reason, SpontaneousReason::FibonacciNext { .. }));
         assert!(has_fib, "Phải có FibonacciNext proposal");
     }
 
@@ -488,9 +533,11 @@ mod tests {
 
     #[test]
     fn self_model_update() {
-        if skip() { return; }
-        let mut model    = SelfModel::new();
-        let boot_result  = boot_empty();
+        if skip() {
+            return;
+        }
+        let mut model = SelfModel::new();
+        let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
         assert_eq!(model.reflection_count(), 1);
         assert!(model.current().is_some());
@@ -498,49 +545,63 @@ mod tests {
 
     #[test]
     fn self_model_accumulates() {
-        if skip() { return; }
-        let mut model   = SelfModel::new();
+        if skip() {
+            return;
+        }
+        let mut model = SelfModel::new();
         let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
         model.update(&boot_result.registry, 2000);
         model.update(&boot_result.registry, 3000);
-        assert_eq!(model.reflection_count(), 3,
-            "Snapshots append-only: 3 updates → 3 snapshots");
+        assert_eq!(
+            model.reflection_count(),
+            3,
+            "Snapshots append-only: 3 updates → 3 snapshots"
+        );
     }
 
     #[test]
     fn self_model_summary() {
-        if skip() { return; }
-        let mut model   = SelfModel::new();
+        if skip() {
+            return;
+        }
+        let mut model = SelfModel::new();
         let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
         let summary = model.summary();
         assert!(summary.contains("SelfModel"), "Summary phải có SelfModel");
-        assert!(summary.contains("Nodes"),     "Summary phải có Nodes");
-        assert!(summary.contains("QR"),        "Summary phải có QR");
+        assert!(summary.contains("Nodes"), "Summary phải có Nodes");
+        assert!(summary.contains("QR"), "Summary phải có QR");
     }
 
     #[test]
     fn self_model_proposals_grow() {
-        if skip() { return; }
-        let mut model   = SelfModel::new();
+        if skip() {
+            return;
+        }
+        let mut model = SelfModel::new();
         let boot_result = boot_empty();
         model.update(&boot_result.registry, 1000);
         let count1 = model.proposals.len();
         model.update(&boot_result.registry, 2000);
         let count2 = model.proposals.len();
-        assert!(count2 >= count1,
-            "Proposals chỉ tăng (append-only): {} ≥ {}", count2, count1);
+        assert!(
+            count2 >= count1,
+            "Proposals chỉ tăng (append-only): {} ≥ {}",
+            count2,
+            count1
+        );
     }
 
     #[test]
     fn self_reflection_creates_self_chain() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let result = boot_empty();
-        let snap   = SelfSnapshot::capture(&result.registry, 1000);
+        let snap = SelfSnapshot::capture(&result.registry, 1000);
         // self_chain phải là chain hợp lệ
-        assert!(!snap.self_chain.is_empty(),
-            "SelfChain không rỗng sau boot");
+        assert!(!snap.self_chain.is_empty(), "SelfChain không rỗng sau boot");
         // self_chain là LCA của layer reps → phải có molecule
         assert!(snap.self_chain.len() > 0);
     }

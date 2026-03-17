@@ -13,11 +13,9 @@
 //! Mỗi SDF primitive có ∇f riêng — O(1), không sample.
 //! ∇f → normal → diffuse shading → collision response → forces.
 
-extern crate alloc;
-use libm::sqrtf;
-use crate::sdf::{SdfKind, SdfParams, Vec3, sdf};
+use crate::sdf::{sdf, SdfKind, SdfParams, Vec3};
 use crate::vector::VectorField;
-use crate::spline::VectorSpline;
+use homemath::sqrtf;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gradient analytical — ∇f per primitive
@@ -30,23 +28,29 @@ use crate::spline::VectorSpline;
 pub fn gradient(kind: SdfKind, p: Vec3, params: &SdfParams) -> Vec3 {
     match kind {
         SdfKind::Sphere => grad_sphere(p),
-        SdfKind::Plane  => grad_plane(),
-        SdfKind::Box    => grad_box(p, params),
-        SdfKind::Capsule=> grad_capsule(p, params),
-        SdfKind::Torus  => grad_torus(p, params),
+        SdfKind::Plane => grad_plane(),
+        SdfKind::Box => grad_box(p, params),
+        SdfKind::Capsule => grad_capsule(p, params),
+        SdfKind::Torus => grad_torus(p, params),
         SdfKind::Cylinder => grad_cylinder(p, params),
-        _               => grad_numerical(kind, p, params),
+        _ => grad_numerical(kind, p, params),
     }
 }
 
 /// ∇sphere(P) = normalize(P)
 fn grad_sphere(p: Vec3) -> Vec3 {
     let len = p.len();
-    if len < 1e-6 { Vec3::new(0.0, 1.0, 0.0) } else { p.scale(1.0 / len) }
+    if len < 1e-6 {
+        Vec3::new(0.0, 1.0, 0.0)
+    } else {
+        p.scale(1.0 / len)
+    }
 }
 
 /// ∇plane(P) = (0, 1, 0) — phẳng, normal cố định
-fn grad_plane() -> Vec3 { Vec3::new(0.0, 1.0, 0.0) }
+fn grad_plane() -> Vec3 {
+    Vec3::new(0.0, 1.0, 0.0)
+}
 
 /// ∇box(P, b) — sign(P) × step(|P| > b)
 fn grad_box(p: Vec3, params: &SdfParams) -> Vec3 {
@@ -62,7 +66,7 @@ fn grad_box(p: Vec3, params: &SdfParams) -> Vec3 {
         let ox = qx.max(0.0);
         let oy = qy.max(0.0);
         let oz = qz.max(0.0);
-        let len = sqrtf(ox*ox + oy*oy + oz*oz).max(1e-6);
+        let len = sqrtf(ox * ox + oy * oy + oz * oz).max(1e-6);
         Vec3::new(
             p.x.signum() * ox / len,
             p.y.signum() * oy / len,
@@ -73,9 +77,13 @@ fn grad_box(p: Vec3, params: &SdfParams) -> Vec3 {
         let ax = qx.abs();
         let ay = qy.abs();
         let az = qz.abs();
-        if ax < ay && ax < az      { Vec3::new(p.x.signum(), 0.0, 0.0) }
-        else if ay < az             { Vec3::new(0.0, p.y.signum(), 0.0) }
-        else                        { Vec3::new(0.0, 0.0, p.z.signum()) }
+        if ax < ay && ax < az {
+            Vec3::new(p.x.signum(), 0.0, 0.0)
+        } else if ay < az {
+            Vec3::new(0.0, p.y.signum(), 0.0)
+        } else {
+            Vec3::new(0.0, 0.0, p.z.signum())
+        }
     }
 }
 
@@ -84,18 +92,22 @@ fn grad_capsule(p: Vec3, params: &SdfParams) -> Vec3 {
     let h = params.h;
     let clamped_y = p.y.clamp(0.0, h);
     let diff = Vec3::new(p.x, p.y - clamped_y, p.z);
-    let len  = diff.len();
-    if len < 1e-6 { Vec3::new(0.0, 1.0, 0.0) } else { diff.scale(1.0 / len) }
+    let len = diff.len();
+    if len < 1e-6 {
+        Vec3::new(0.0, 1.0, 0.0)
+    } else {
+        diff.scale(1.0 / len)
+    }
 }
 
 /// ∇torus(P, R, r) — analytical qua chain rule
 fn grad_torus(p: Vec3, params: &SdfParams) -> Vec3 {
-    let big_r  = params.r;
-    let small_r = params.r2;
-    let xz_len = sqrtf(p.x*p.x + p.z*p.z).max(1e-6);
+    let big_r = params.r;
+    let _small_r = params.r2;
+    let xz_len = sqrtf(p.x * p.x + p.z * p.z).max(1e-6);
     let qx = xz_len - big_r;
     let qy = p.y;
-    let q_len = sqrtf(qx*qx + qy*qy).max(1e-6);
+    let q_len = sqrtf(qx * qx + qy * qy).max(1e-6);
     // ∂f/∂x = (qx/q_len)·(x/xz_len), etc.
     Vec3::new(
         (qx / q_len) * (p.x / xz_len),
@@ -108,9 +120,9 @@ fn grad_torus(p: Vec3, params: &SdfParams) -> Vec3 {
 fn grad_cylinder(p: Vec3, params: &SdfParams) -> Vec3 {
     let r = params.r;
     let h = params.h;
-    let xz_len = sqrtf(p.x*p.x + p.z*p.z).max(1e-6);
+    let xz_len = sqrtf(p.x * p.x + p.z * p.z).max(1e-6);
     let d_radial = xz_len - r;
-    let d_cap    = p.y.abs() - h;
+    let d_cap = p.y.abs() - h;
     if d_radial > d_cap {
         Vec3::new(p.x / xz_len, 0.0, p.z / xz_len)
     } else {
@@ -128,8 +140,8 @@ fn grad_numerical(kind: SdfKind, p: Vec3, params: &SdfParams) -> Vec3 {
     let gx = sdf(kind, p.add(dx), params) - sdf(kind, p.sub(dx), params);
     let gy = sdf(kind, p.add(dy), params) - sdf(kind, p.sub(dy), params);
     let gz = sdf(kind, p.add(dz), params) - sdf(kind, p.sub(dz), params);
-    let len = sqrtf(gx*gx + gy*gy + gz*gz).max(1e-6);
-    Vec3::new(gx/len, gy/len, gz/len)
+    let len = sqrtf(gx * gx + gy * gy + gz * gz).max(1e-6);
+    Vec3::new(gx / len, gy / len, gz / len)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,15 +152,20 @@ fn grad_numerical(kind: SdfKind, p: Vec3, params: &SdfParams) -> Vec3 {
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct Particle {
-    pub pos:  Vec3,
-    pub vel:  Vec3,
+    pub pos: Vec3,
+    pub vel: Vec3,
     pub mass: f32,
     pub radius: f32,
 }
 
 impl Particle {
     pub fn new(pos: Vec3, mass: f32) -> Self {
-        Self { pos, vel: Vec3::new(0.0, 0.0, 0.0), mass, radius: 0.1 }
+        Self {
+            pos,
+            vel: Vec3::new(0.0, 0.0, 0.0),
+            mass,
+            radius: 0.1,
+        }
     }
 
     /// Integrate một timestep dt.
@@ -182,32 +199,32 @@ impl Particle {
 #[allow(missing_docs)]
 pub struct PhysicsWorld {
     /// SDF obstacle (kind + params)
-    pub obstacle_kind:   SdfKind,
+    pub obstacle_kind: SdfKind,
     pub obstacle_params: SdfParams,
 
     /// VectorFields tác động
-    pub gravity:  VectorField,
-    pub wind:     Option<VectorField>,
-    pub heat:     Option<VectorField>,
+    pub gravity: VectorField,
+    pub wind: Option<VectorField>,
+    pub heat: Option<VectorField>,
 
     /// Damping per step
-    pub damping:  f32,
+    pub damping: f32,
 
     /// Thời gian simulation (s)
-    pub time:     f32,
+    pub time: f32,
 }
 
 impl PhysicsWorld {
     /// Tạo world đơn giản với gravity + SDF sphere obstacle.
     pub fn simple(kind: SdfKind, params: SdfParams) -> Self {
         Self {
-            obstacle_kind:   kind,
+            obstacle_kind: kind,
             obstacle_params: params,
-            gravity:  VectorField::gravity(9.8),
-            wind:     None,
-            heat:     None,
-            damping:  0.98,
-            time:     0.0,
+            gravity: VectorField::gravity(9.8),
+            wind: None,
+            heat: None,
+            damping: 0.98,
+            time: 0.0,
         }
     }
 
@@ -254,7 +271,7 @@ impl PhysicsWorld {
                     p.pos.z + n.z * penetration,
                 );
                 // Reflect velocity theo normal (hệ số nảy 0.3)
-                let vdotn = p.vel.x*n.x + p.vel.y*n.y + p.vel.z*n.z;
+                let vdotn = p.vel.x * n.x + p.vel.y * n.y + p.vel.z * n.z;
                 if vdotn < 0.0 {
                     p.vel.x -= 2.0 * vdotn * n.x * 0.3;
                     p.vel.y -= 2.0 * vdotn * n.y * 0.3;
@@ -273,11 +290,15 @@ impl PhysicsWorld {
 ///
 /// `shade = ambient + max(0, dot(∇f, light)) × intensity`
 pub fn diffuse_shade(
-    kind: SdfKind, p: Vec3, params: &SdfParams,
-    light_dir: Vec3, ambient: f32, intensity: f32,
+    kind: SdfKind,
+    p: Vec3,
+    params: &SdfParams,
+    light_dir: Vec3,
+    ambient: f32,
+    intensity: f32,
 ) -> f32 {
     let n = gradient(kind, p, params);
-    let dot = (n.x*light_dir.x + n.y*light_dir.y + n.z*light_dir.z).max(0.0);
+    let dot = (n.x * light_dir.x + n.y * light_dir.y + n.z * light_dir.z).max(0.0);
     (ambient + dot * intensity).clamp(0.0, 1.0)
 }
 
@@ -290,11 +311,21 @@ mod tests {
     use super::*;
 
     fn sphere_params() -> SdfParams {
-        SdfParams { r: 1.0, h: 0.0, r2: 0.0, b: Vec3::new(1.0,1.0,1.0) }
+        SdfParams {
+            r: 1.0,
+            h: 0.0,
+            r2: 0.0,
+            b: Vec3::new(1.0, 1.0, 1.0),
+        }
     }
 
     fn box_params() -> SdfParams {
-        SdfParams { r: 0.5, h: 0.5, r2: 0.0, b: Vec3::new(1.0, 0.5, 0.5) }
+        SdfParams {
+            r: 0.5,
+            h: 0.5,
+            r2: 0.0,
+            b: Vec3::new(1.0, 0.5, 0.5),
+        }
     }
 
     // ── Gradient ──────────────────────────────────────────────────────────────
@@ -312,14 +343,18 @@ mod tests {
     fn sphere_gradient_normalized() {
         let p = Vec3::new(1.5, 0.8, 0.3);
         let g = gradient(SdfKind::Sphere, p, &sphere_params());
-        let len = sqrtf(g.x*g.x + g.y*g.y + g.z*g.z);
-        assert!((len - 1.0).abs() < 0.01, "Gradient phải normalized: {}", len);
+        let len = sqrtf(g.x * g.x + g.y * g.y + g.z * g.z);
+        assert!(
+            (len - 1.0).abs() < 0.01,
+            "Gradient phải normalized: {}",
+            len
+        );
     }
 
     #[test]
     fn plane_gradient_always_up() {
         // Plane gradient = (0,1,0) bất kể điểm nào
-        for p in [Vec3::new(0.0,2.0,0.0), Vec3::new(5.0,-1.0,3.0)] {
+        for p in [Vec3::new(0.0, 2.0, 0.0), Vec3::new(5.0, -1.0, 3.0)] {
             let g = gradient(SdfKind::Plane, p, &sphere_params());
             assert!((g.y - 1.0).abs() < 0.01, "Plane normal up: {}", g.y);
         }
@@ -335,24 +370,38 @@ mod tests {
 
     #[test]
     fn capsule_gradient_normalized() {
-        let p    = Vec3::new(1.5, 0.3, 0.0);
-        let params = SdfParams { r: 0.3, h: 1.0, r2: 0.0, b: Vec3::new(0.3,0.3,0.3) };
+        let p = Vec3::new(1.5, 0.3, 0.0);
+        let params = SdfParams {
+            r: 0.3,
+            h: 1.0,
+            r2: 0.0,
+            b: Vec3::new(0.3, 0.3, 0.3),
+        };
         let g = gradient(SdfKind::Capsule, p, &params);
-        let len = sqrtf(g.x*g.x + g.y*g.y + g.z*g.z);
-        assert!((len - 1.0).abs() < 0.01, "Capsule gradient normalized: {}", len);
+        let len = sqrtf(g.x * g.x + g.y * g.y + g.z * g.z);
+        assert!(
+            (len - 1.0).abs() < 0.01,
+            "Capsule gradient normalized: {}",
+            len
+        );
     }
 
     #[test]
     fn numerical_matches_analytical_sphere() {
         // Verify analytical ≈ numerical
         let p = Vec3::new(1.5, 0.8, 0.3);
-        let analytical  = grad_sphere(p);
-        let numerical   = grad_numerical(SdfKind::Sphere, p, &sphere_params());
+        let analytical = grad_sphere(p);
+        let numerical = grad_numerical(SdfKind::Sphere, p, &sphere_params());
         let dx = (analytical.x - numerical.x).abs();
         let dy = (analytical.y - numerical.y).abs();
         let dz = (analytical.z - numerical.z).abs();
-        assert!(dx < 0.01 && dy < 0.01 && dz < 0.01,
-            "Analytical vs numerical: d=({:.4},{:.4},{:.4})", dx, dy, dz);
+        assert!(
+            dx < 0.01 && dy < 0.01 && dz < 0.01,
+            "Analytical vs numerical: d=({:.4},{:.4},{:.4})",
+            dx,
+            dy,
+            dz
+        );
     }
 
     // ── Particle ──────────────────────────────────────────────────────────────
@@ -374,9 +423,7 @@ mod tests {
         let mut world = PhysicsWorld::simple(SdfKind::Sphere, params);
 
         // Particle falling from above sphere
-        let mut particles = alloc::vec![
-            Particle::new(Vec3::new(0.0, 3.0, 0.0), 1.0)
-        ];
+        let mut particles = alloc::vec![Particle::new(Vec3::new(0.0, 3.0, 0.0), 1.0)];
 
         // Simulate until hits sphere
         for _ in 0..200 {
@@ -384,8 +431,11 @@ mod tests {
         }
 
         // Particle should be above sphere surface (r=1 → y > 0.9)
-        assert!(particles[0].pos.y >= 0.9,
-            "Particle above sphere: y={}", particles[0].pos.y);
+        assert!(
+            particles[0].pos.y >= 0.9,
+            "Particle above sphere: y={}",
+            particles[0].pos.y
+        );
     }
 
     #[test]
@@ -416,7 +466,11 @@ mod tests {
         let light = Vec3::new(0.0, 1.0, 0.0);
         let shade = diffuse_shade(SdfKind::Sphere, p, &sphere_params(), light, 0.25, 0.75);
         // Normal points down, light points up → diffuse=0 → only ambient
-        assert!((shade - 0.25).abs() < 0.05, "Shadow = ambient only: {}", shade);
+        assert!(
+            (shade - 0.25).abs() < 0.05,
+            "Shadow = ambient only: {}",
+            shade
+        );
     }
 
     #[test]
@@ -431,11 +485,16 @@ mod tests {
 
     #[test]
     fn physics_world_step_moves_particle() {
-        let mut world = PhysicsWorld::simple(SdfKind::Plane,
-            SdfParams { r: 0.0, h: -3.0, r2: 0.0, b: Vec3::new(0.0,0.0,0.0) });
-        let mut particles = alloc::vec![
-            Particle::new(Vec3::new(0.0, 2.0, 0.0), 1.0)
-        ];
+        let mut world = PhysicsWorld::simple(
+            SdfKind::Plane,
+            SdfParams {
+                r: 0.0,
+                h: -3.0,
+                r2: 0.0,
+                b: Vec3::new(0.0, 0.0, 0.0),
+            },
+        );
+        let mut particles = alloc::vec![Particle::new(Vec3::new(0.0, 2.0, 0.0), 1.0)];
         let y0 = particles[0].pos.y;
         world.step(&mut particles, 0.1);
         // Gravity pulls down

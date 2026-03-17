@@ -9,6 +9,8 @@
 //!   const r  = os.process("○{lửa ∘ nước}");
 //!   console.log(r); // JSON response
 
+pub mod bridge;
+
 use wasm_bindgen::prelude::*;
 
 use runtime::origin::{HomeRuntime, Response, ResponseKind};
@@ -21,7 +23,7 @@ use silk::walk::ResponseTone;
 /// HomeOS instance trong browser.
 #[wasm_bindgen]
 pub struct HomeOSWasm {
-    rt:         HomeRuntime,
+    rt: HomeRuntime,
     turn_count: u64,
 }
 
@@ -35,7 +37,7 @@ impl HomeOSWasm {
         console_error_panic_hook::set_once();
 
         HomeOSWasm {
-            rt:         HomeRuntime::new(js_timestamp_u64()),
+            rt: HomeRuntime::new(js_timestamp_u64()),
             turn_count: 0,
         }
     }
@@ -44,7 +46,7 @@ impl HomeOSWasm {
     #[wasm_bindgen]
     pub fn new_with_file(bytes: &[u8]) -> HomeOSWasm {
         HomeOSWasm {
-            rt:         HomeRuntime::with_file(js_timestamp_u64(), Some(bytes)),
+            rt: HomeRuntime::with_file(js_timestamp_u64(), Some(bytes)),
             turn_count: 0,
         }
     }
@@ -94,17 +96,23 @@ impl HomeOSWasm {
     }
 }
 
+impl Default for HomeOSWasm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn response_to_json(r: &Response, turn: u64) -> String {
     let kind = match r.kind {
-        ResponseKind::Natural     => "natural",
+        ResponseKind::Natural => "natural",
         ResponseKind::OlangResult => "olang",
-        ResponseKind::Crisis      => "crisis",
-        ResponseKind::Blocked     => "blocked",
-        ResponseKind::System      => "system",
+        ResponseKind::Crisis => "crisis",
+        ResponseKind::Blocked => "blocked",
+        ResponseKind::System => "system",
     };
     let tone = tone_to_str(r.tone);
 
@@ -130,17 +138,21 @@ fn json_str(s: &str) -> String {
 
 fn tone_to_str(tone: ResponseTone) -> String {
     match tone {
-        ResponseTone::Supportive   => "supportive".into(),
-        ResponseTone::Pause        => "pause".into(),
-        ResponseTone::Reinforcing  => "reinforcing".into(),
-        ResponseTone::Celebratory  => "celebratory".into(),
-        ResponseTone::Gentle       => "gentle".into(),
-        ResponseTone::Engaged      => "engaged".into(),
+        ResponseTone::Supportive => "supportive".into(),
+        ResponseTone::Pause => "pause".into(),
+        ResponseTone::Reinforcing => "reinforcing".into(),
+        ResponseTone::Celebratory => "celebratory".into(),
+        ResponseTone::Gentle => "gentle".into(),
+        ResponseTone::Engaged => "engaged".into(),
     }
 }
 
-fn js_timestamp_u64() -> u64 { 0u64 }
-fn js_timestamp() -> i64 { 0i64 }
+fn js_timestamp_u64() -> u64 {
+    0u64
+}
+fn js_timestamp() -> i64 {
+    0i64
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JS glue — tạo global functions cho convenience
@@ -162,7 +174,8 @@ pub fn quick_encode(cp: u32) -> u32 {
 /// Version string.
 #[wasm_bindgen]
 pub fn version() -> String {
-    format!("HomeOS v{} · Unicode 18.0 · {} UCD entries",
+    format!(
+        "HomeOS v{} · Unicode 18.0 · {} UCD entries",
         env!("CARGO_PKG_VERSION"),
         ucd::table_len(),
     )
@@ -181,7 +194,7 @@ mod tests {
         let r = Response {
             text: "Tôi hiểu rồi.".into(),
             tone: ResponseTone::Engaged,
-            fx:   -0.15,
+            fx: -0.15,
             kind: ResponseKind::Natural,
         };
         let json = response_to_json(&r, 1);
@@ -204,9 +217,12 @@ mod tests {
     #[test]
     fn tone_to_str_all() {
         let tones = [
-            ResponseTone::Supportive, ResponseTone::Pause,
-            ResponseTone::Reinforcing, ResponseTone::Celebratory,
-            ResponseTone::Gentle, ResponseTone::Engaged,
+            ResponseTone::Supportive,
+            ResponseTone::Pause,
+            ResponseTone::Reinforcing,
+            ResponseTone::Celebratory,
+            ResponseTone::Gentle,
+            ResponseTone::Engaged,
         ];
         for tone in tones {
             let s = tone_to_str(tone);
@@ -217,13 +233,18 @@ mod tests {
     #[test]
     fn response_kinds_serialize() {
         let kinds = [
-            ResponseKind::Natural, ResponseKind::OlangResult,
-            ResponseKind::Crisis, ResponseKind::Blocked, ResponseKind::System,
+            ResponseKind::Natural,
+            ResponseKind::OlangResult,
+            ResponseKind::Crisis,
+            ResponseKind::Blocked,
+            ResponseKind::System,
         ];
         for kind in kinds {
             let r = Response {
-                text: "test".into(), tone: ResponseTone::Engaged,
-                fx: 0.0, kind,
+                text: "test".into(),
+                tone: ResponseTone::Engaged,
+                fx: 0.0,
+                kind,
             };
             let json = response_to_json(&r, 1);
             assert!(json.contains("\"kind\""));
@@ -241,11 +262,15 @@ mod tests {
 
     #[test]
     fn homeos_wasm_process_olang() {
-        if ucd::table_len() == 0 { return; }
+        if ucd::table_len() == 0 {
+            return;
+        }
         let mut os = HomeOSWasm::new();
         let r = os.process("○{stats}");
-        assert!(r.contains("\"kind\":\"system\""),
-            "○{{stats}} → system kind");
+        assert!(
+            r.contains("\"kind\":\"system\""),
+            "○{{stats}} → system kind"
+        );
     }
 
     #[test]
@@ -258,13 +283,14 @@ mod tests {
 
     #[test]
     fn ucd_len_nonzero() {
-        assert!(HomeOSWasm::ucd_len() > 0,
-            "UCD phải có entries sau build");
+        assert!(HomeOSWasm::ucd_len() > 0, "UCD phải có entries sau build");
     }
 
     #[test]
     fn encode_cp_fire() {
-        if ucd::table_len() == 0 { return; }
+        if ucd::table_len() == 0 {
+            return;
+        }
         let hash = HomeOSWasm::encode_cp(0x1F525); // 🔥
         assert!(hash > 0, "🔥 hash phải > 0: {}", hash);
     }
@@ -280,11 +306,15 @@ mod tests {
     fn json_crisis_response() {
         let mut os = HomeOSWasm::new();
         let r = os.process("tôi muốn chết");
-        assert!(r.contains("\"kind\":\"crisis\""),
-            "Crisis intent → crisis kind");
+        assert!(
+            r.contains("\"kind\":\"crisis\""),
+            "Crisis intent → crisis kind"
+        );
         // Crisis response phải có helpline
-        assert!(r.contains("1800") || r.contains("741741"),
-            "Crisis JSON phải có helpline");
+        assert!(
+            r.contains("1800") || r.contains("741741"),
+            "Crisis JSON phải có helpline"
+        );
     }
 
     #[test]
@@ -293,8 +323,7 @@ mod tests {
         for i in 1..=5u64 {
             let r = os.process("ok");
             let expected = format!("\"turn\":{}", i);
-            assert!(r.contains(&expected),
-                "Turn {} phải trong JSON: {}", i, r);
+            assert!(r.contains(&expected), "Turn {} phải trong JSON: {}", i, r);
         }
     }
 }

@@ -8,7 +8,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-std     = []
+std     = ["hal/std"]
 
 [dependencies]
 ucd     = { workspace = true }
@@ -16,5 +16,8 @@ olang   = { workspace = true }
 silk    = { workspace = true }
 context = { workspace = true }
 agents  = { workspace = true }
+isl     = { path = "../isl" }
 memory  = { workspace = true }
-libm    = { workspace = true }
+hal     = { workspace = true }
+vsdf    = { workspace = true }
+homemath = { workspace = true }

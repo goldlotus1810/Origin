@@ -21,13 +21,13 @@
 //! ```
 
 extern crate alloc;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use alloc::string::String;
 
 use crate::encoder::{encode_codepoint, encode_zwj_sequence};
-use crate::molecular::MolecularChain;
 use crate::lca::lca;
+use crate::molecular::MolecularChain;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SepKind — loại separator
@@ -86,29 +86,42 @@ pub fn parse_tokens(input: &str) -> Vec<SepToken> {
         let c = chars[i];
 
         // Space → skip (SEPARATE — tách segments, không tạo token)
-        if c == ' ' { i += 1; continue; }
+        if c == ' ' {
+            i += 1;
+            continue;
+        }
 
         // ZWJ standalone (không nên xuất hiện ở đây)
-        if c == '\u{200D}' { i += 1; continue; }
+        if c == '\u{200D}' {
+            i += 1;
+            continue;
+        }
 
         // Number literal: [0-9]+
         if c.is_ascii_digit() {
             let start = i;
-            while i < n && chars[i].is_ascii_digit() { i += 1; }
+            while i < n && chars[i].is_ascii_digit() {
+                i += 1;
+            }
             let s: String = chars[start..i].iter().collect();
             if let Ok(num) = s.parse::<i64>() {
                 // Check nếu tiếp theo là + → Operation
                 if i < n && chars[i] == '+' {
                     i += 1; // skip +
-                    // Parse right side
+                            // Parse right side
                     let right_start = i;
-                    while i < n && chars[i].is_ascii_digit() { i += 1; }
+                    while i < n && chars[i].is_ascii_digit() {
+                        i += 1;
+                    }
                     let rs: String = chars[right_start..i].iter().collect();
                     if let Ok(right) = rs.parse::<i64>() {
                         // Encode digits as ASCII codepoints
                         let lcp = 0x30 + (num.abs() % 10) as u32;
                         let rcp = 0x30 + (right.abs() % 10) as u32;
-                        tokens.push(SepToken::Operation { left: lcp, right: rcp });
+                        tokens.push(SepToken::Operation {
+                            left: lcp,
+                            right: rcp,
+                        });
                     } else {
                         tokens.push(SepToken::Number(num));
                     }
@@ -124,8 +137,11 @@ pub fn parse_tokens(input: &str) -> Vec<SepToken> {
             let start = i;
             while i < n {
                 let nc = chars[i];
-                if nc.is_ascii_alphanumeric() || nc == '_' || nc == '-' { i += 1; }
-                else { break; }
+                if nc.is_ascii_alphanumeric() || nc == '_' || nc == '-' {
+                    i += 1;
+                } else {
+                    break;
+                }
             }
             let word: String = chars[start..i].iter().collect();
             tokens.push(SepToken::Word(word));
@@ -153,20 +169,29 @@ pub fn parse_tokens(input: &str) -> Vec<SepToken> {
                 // Check nếu tiếp theo là + → Operation
                 if i < n && chars[i] == '+' {
                     i += 1; // skip +
-                    // Parse right side (emoji hoặc word)
+                            // Parse right side (emoji hoặc word)
                     if i < n && chars[i] as u32 > 0x20 {
                         let mut rseq = vec![chars[i] as u32];
                         i += 1;
                         // Check right side ZWJ
                         while i < n && chars[i] == '\u{200D}' {
                             i += 1;
-                            if i < n { rseq.push(chars[i] as u32); i += 1; }
+                            if i < n {
+                                rseq.push(chars[i] as u32);
+                                i += 1;
+                            }
                         }
                         if rseq.len() > 1 {
                             // Right side là ZWJ sequence — encode ZWJ, dùng first cp
-                            tokens.push(SepToken::Operation { left: cp, right: rseq[0] });
+                            tokens.push(SepToken::Operation {
+                                left: cp,
+                                right: rseq[0],
+                            });
                         } else {
-                            tokens.push(SepToken::Operation { left: cp, right: rseq[0] });
+                            tokens.push(SepToken::Operation {
+                                left: cp,
+                                right: rseq[0],
+                            });
                         }
                     } else {
                         tokens.push(SepToken::Single(cp));
@@ -199,7 +224,9 @@ pub fn token_to_chain(token: &SepToken) -> MolecularChain {
             // + → LCA (compose ngữ nghĩa)
             let a = encode_codepoint(*left);
             let b = encode_codepoint(*right);
-            if a.is_empty() || b.is_empty() { return MolecularChain::empty(); }
+            if a.is_empty() || b.is_empty() {
+                return MolecularChain::empty();
+            }
             lca(&a, &b)
         }
 
@@ -227,11 +254,14 @@ pub fn token_to_chain(token: &SepToken) -> MolecularChain {
 
         SepToken::Sequence(cps) => {
             // Sequence: LCA của tất cả
-            let chains: Vec<MolecularChain> = cps.iter()
+            let chains: Vec<MolecularChain> = cps
+                .iter()
                 .map(|&cp| encode_codepoint(cp))
                 .filter(|c| !c.is_empty())
                 .collect();
-            if chains.is_empty() { return MolecularChain::empty(); }
+            if chains.is_empty() {
+                return MolecularChain::empty();
+            }
             crate::lca::lca_many(&chains)
         }
     }
@@ -242,13 +272,11 @@ pub fn token_to_chain(token: &SepToken) -> MolecularChain {
 /// Xử lý đúng 4 separator:
 ///   ZWJ → 1 chain N molecules
 ///   +   → LCA của 2 chains
-///   space → sequence (nhiều chains riêng)
-///   none → juxtapose (nhiều chains riêng)
+///       space → sequence (nhiều chains riêng)
+///       none → juxtapose (nhiều chains riêng)
 pub fn parse_to_chains(input: &str) -> Vec<MolecularChain> {
     // Tách theo space trước (SEPARATE)
-    let segments: Vec<&str> = input.split(' ')
-        .filter(|s| !s.is_empty())
-        .collect();
+    let segments: Vec<&str> = input.split(' ').filter(|s| !s.is_empty()).collect();
 
     let mut result = Vec::new();
 
@@ -273,34 +301,42 @@ pub fn parse_to_chains(input: &str) -> Vec<MolecularChain> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{vec, format, string::ToString};
+    use alloc::format;
 
-    fn skip() -> bool { ucd::table_len() == 0 }
+    fn skip() -> bool {
+        ucd::table_len() == 0
+    }
 
     // ── ZWJ sequence ─────────────────────────────────────────────────────────
 
     #[test]
     fn zwj_family_is_one_chain() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // 👨‍👩‍👦 = U+1F468 ZWJ U+1F469 ZWJ U+1F466
         let s = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F466}";
         let tokens = parse_tokens(s);
         assert_eq!(tokens.len(), 1, "ZWJ sequence → 1 token");
-        assert!(matches!(&tokens[0], SepToken::ZwjSeq(seq) if seq.len() == 3),
-            "ZWjSeq với 3 codepoints");
+        assert!(
+            matches!(&tokens[0], SepToken::ZwjSeq(seq) if seq.len() == 3),
+            "ZWjSeq với 3 codepoints"
+        );
 
         let chain = token_to_chain(&tokens[0]);
         assert_eq!(chain.len(), 3, "3 molecules: 15 bytes");
         // Verify relation pattern: ∘ ∘ ∈
         use crate::molecular::RelationBase;
-        assert_eq!(chain.0[0].relation, RelationBase::Compose);
-        assert_eq!(chain.0[1].relation, RelationBase::Compose);
-        assert_eq!(chain.0[2].relation, RelationBase::Member);
+        assert_eq!(chain.0[0].relation_base(), RelationBase::Compose);
+        assert_eq!(chain.0[1].relation_base(), RelationBase::Compose);
+        assert_eq!(chain.0[2].relation_base(), RelationBase::Member);
     }
 
     #[test]
     fn zwj_couple_two_molecules() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // 👨‍👨 = U+1F468 ZWJ U+1F468
         let s = "\u{1F468}\u{200D}\u{1F468}";
         let tokens = parse_tokens(s);
@@ -308,15 +344,17 @@ mod tests {
         let chain = token_to_chain(&tokens[0]);
         assert_eq!(chain.len(), 2, "2 molecules cho couple");
         use crate::molecular::RelationBase;
-        assert_eq!(chain.0[0].relation, RelationBase::Compose); // ∘
-        assert_eq!(chain.0[1].relation, RelationBase::Member);  // ∈
+        assert_eq!(chain.0[0].relation_base(), RelationBase::Compose); // ∘
+        assert_eq!(chain.0[1].relation_base(), RelationBase::Member); // ∈
     }
 
     // ── Space separator ───────────────────────────────────────────────────────
 
     #[test]
     fn space_two_separate_nodes() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // 👨 👨 → 2 chains riêng
         let chains = parse_to_chains("\u{1F468} \u{1F468}");
         assert_eq!(chains.len(), 2, "space → 2 nodes riêng");
@@ -324,22 +362,31 @@ mod tests {
 
     #[test]
     fn fire_space_water_two_chains() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let chains = parse_to_chains("\u{1F525} \u{1F4A7}"); // 🔥 💧
         assert_eq!(chains.len(), 2, "🔥 💧 → 2 chains riêng");
         // Hai chains phải khác nhau
-        assert_ne!(chains[0].chain_hash(), chains[1].chain_hash(),
-            "🔥 và 💧 phải có hash khác nhau");
+        assert_ne!(
+            chains[0].chain_hash(),
+            chains[1].chain_hash(),
+            "🔥 và 💧 phải có hash khác nhau"
+        );
     }
 
     // ── Plus operator ─────────────────────────────────────────────────────────
 
     #[test]
     fn plus_gives_lca() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // 🔥+💧 → LCA → 1 chain
         let tokens = parse_tokens("\u{1F525}+\u{1F4A7}");
-        let has_op = tokens.iter().any(|t| matches!(t, SepToken::Operation { .. }));
+        let has_op = tokens
+            .iter()
+            .any(|t| matches!(t, SepToken::Operation { .. }));
         assert!(has_op, "+ → Operation token");
     }
 
@@ -347,7 +394,9 @@ mod tests {
 
     #[test]
     fn juxtapose_two_emojis_separate() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // 👨👨 (viết liền không có ZWJ) → 2 nodes riêng
         let chains = parse_to_chains("\u{1F468}\u{1F468}");
         // Juxtapose: mỗi emoji → chain riêng
@@ -366,9 +415,16 @@ mod tests {
     #[test]
     fn expression_1_plus_1() {
         let tokens = parse_tokens("1+1");
-        assert!(tokens.iter().any(|t|
-            matches!(t, SepToken::Operation { left: 0x31, right: 0x31 })
-        ), "1+1 → Operation(0x31, 0x31)");
+        assert!(
+            tokens.iter().any(|t| matches!(
+                t,
+                SepToken::Operation {
+                    left: 0x31,
+                    right: 0x31
+                }
+            )),
+            "1+1 → Operation(0x31, 0x31)"
+        );
     }
 
     #[test]
@@ -383,12 +439,16 @@ mod tests {
     #[test]
     fn word_token_fire() {
         let tokens = parse_tokens("fire");
-        assert!(tokens.iter().any(|t| matches!(t, SepToken::Word(w) if w == "fire")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, SepToken::Word(w) if w == "fire")));
     }
 
     #[test]
     fn word_to_chain_known() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         let token = SepToken::Word("fire".into());
         let chain = token_to_chain(&token);
         assert!(!chain.is_empty(), "'fire' → non-empty chain");
@@ -405,13 +465,15 @@ mod tests {
 
     #[test]
     fn zwj_vs_space_different_lengths() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // ZWJ → 1 chain, 2 mols
-        let zwj_chains   = parse_to_chains("\u{1F468}\u{200D}\u{1F469}");
+        let zwj_chains = parse_to_chains("\u{1F468}\u{200D}\u{1F469}");
         // Space → 2 chains, 1 mol each
         let space_chains = parse_to_chains("\u{1F468} \u{1F469}");
 
-        assert_eq!(zwj_chains.len(),   1, "ZWJ → 1 chain");
+        assert_eq!(zwj_chains.len(), 1, "ZWJ → 1 chain");
         assert_eq!(space_chains.len(), 2, "space → 2 chains");
         assert_eq!(zwj_chains[0].len(), 2, "ZWJ chain → 2 molecules");
         assert_eq!(space_chains[0].len(), 1, "space chain → 1 molecule");
@@ -419,7 +481,9 @@ mod tests {
 
     #[test]
     fn separator_table_correctness() {
-        if skip() { return; }
+        if skip() {
+            return;
+        }
         // Theo spec:
         // 👨‍👨 (ZWJ) = 1 cluster: couple → chain 2 mol ✓
         // 👨 👨 (space) = 2 nodes riêng → 2 chains ✓
@@ -428,11 +492,19 @@ mod tests {
 
         let cp = 0x1F468u32; // 👨
 
-        let zwj_result   = parse_to_chains(&format!("{}\u{200D}{}", char::from_u32(cp).unwrap(), char::from_u32(cp).unwrap()));
-        let space_result = parse_to_chains(&format!("{} {}", char::from_u32(cp).unwrap(), char::from_u32(cp).unwrap()));
+        let zwj_result = parse_to_chains(&format!(
+            "{}\u{200D}{}",
+            char::from_u32(cp).unwrap(),
+            char::from_u32(cp).unwrap()
+        ));
+        let space_result = parse_to_chains(&format!(
+            "{} {}",
+            char::from_u32(cp).unwrap(),
+            char::from_u32(cp).unwrap()
+        ));
 
         // ZWJ → 1 chain với 2 molecules
-        assert_eq!(zwj_result.len(),   1);
+        assert_eq!(zwj_result.len(), 1);
         assert_eq!(zwj_result[0].len(), 2);
 
         // Space → 2 chains với 1 molecule each

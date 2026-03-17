@@ -14,4 +14,4 @@ std     = []
 ucd   = { workspace = true }
 olang = { workspace = true }
 silk  = { workspace = true }
-libm  = { workspace = true }
+homemath = { workspace = true }

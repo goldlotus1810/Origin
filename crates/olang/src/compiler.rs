@@ -15,11 +15,11 @@
 
 #![allow(missing_docs)]
 extern crate alloc;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::format;
 
-use crate::ir::{Op, OlangProgram};
+use crate::ir::{OlangProgram, Op};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Target
@@ -36,10 +36,18 @@ pub enum Target {
 
 impl Target {
     pub fn file_ext(self) -> &'static str {
-        match self { Self::C => "c", Self::Rust => "rs", Self::Wasm => "wat" }
+        match self {
+            Self::C => "c",
+            Self::Rust => "rs",
+            Self::Wasm => "wat",
+        }
     }
     pub fn name(self) -> &'static str {
-        match self { Self::C => "C", Self::Rust => "Rust", Self::Wasm => "WASM (WAT)" }
+        match self {
+            Self::C => "C",
+            Self::Rust => "Rust",
+            Self::Wasm => "WASM (WAT)",
+        }
     }
 }
 
@@ -51,7 +59,7 @@ impl Target {
 #[allow(missing_docs)]
 pub struct CompileError {
     pub message: String,
-    pub op_idx:  usize,
+    pub op_idx: usize,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,12 +72,14 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(target: Target) -> Self { Self { target } }
+    pub fn new(target: Target) -> Self {
+        Self { target }
+    }
 
     /// Compile OlangProgram → source code.
     pub fn emit(&self, prog: &OlangProgram) -> Result<String, CompileError> {
         match self.target {
-            Target::C    => emit_c(prog),
+            Target::C => emit_c(prog),
             Target::Rust => emit_rust(prog),
             Target::Wasm => emit_wat(prog),
         }
@@ -122,37 +132,43 @@ fn emit_c(prog: &OlangProgram) -> Result<String, CompileError> {
 
 fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
     Ok(match op {
-        Op::Push(chain) =>
-            format!("push(&s, 0x{:016X}ULL); /* chain */", chain.chain_hash()),
-        Op::Load(name) =>
-            format!("push(&s, olang_load(\"{}\"));", escape(name)),
-        Op::Lca =>
-            "{ Chain b = pop(&s), a = pop(&s); push(&s, olang_lca(a, b)); }".into(),
-        Op::Edge(rel) =>
-            format!("{{ Chain b = pop(&s), a = pop(&s); olang_edge(a, b, 0x{:02X}); }}", rel),
-        Op::Query(rel) =>
-            format!("{{ Chain a = pop(&s); olang_query(a, 0x{:02X}); }}", rel),
-        Op::Emit =>
-            "olang_emit(pop(&s));".into(),
-        Op::Dup =>
-            "push(&s, peek(&s));".into(),
-        Op::Pop =>
-            "pop(&s);".into(),
-        Op::Swap =>
-            "{ Chain b = pop(&s), a = pop(&s); push(&s, b); push(&s, a); }".into(),
-        Op::Jmp(target) =>
-            format!("goto label_{};", target),
-        Op::Jz(target) =>
-            format!("if (pop(&s) == 0) goto label_{};", target),
-        Op::Loop(n) =>
-            format!("for (int _i=0; _i<{}; _i++) {{", n),
-        Op::Call(name) =>
-            format!("{}();", name.replace(' ', "_")),
-        Op::Ret  => "return;".into(),
+        Op::Push(chain) => format!("push(&s, 0x{:016X}ULL); /* chain */", chain.chain_hash()),
+        Op::Load(name) => format!("push(&s, olang_load(\"{}\"));", escape(name)),
+        Op::Lca => "{ Chain b = pop(&s), a = pop(&s); push(&s, olang_lca(a, b)); }".into(),
+        Op::Edge(rel) => format!(
+            "{{ Chain b = pop(&s), a = pop(&s); olang_edge(a, b, 0x{:02X}); }}",
+            rel
+        ),
+        Op::Query(rel) => format!("{{ Chain a = pop(&s); olang_query(a, 0x{:02X}); }}", rel),
+        Op::Emit => "olang_emit(pop(&s));".into(),
+        Op::Dup => "push(&s, peek(&s));".into(),
+        Op::Pop => "pop(&s);".into(),
+        Op::Swap => "{ Chain b = pop(&s), a = pop(&s); push(&s, b); push(&s, a); }".into(),
+        Op::Jmp(target) => format!("goto label_{};", target),
+        Op::Jz(target) => format!("if (pop(&s) == 0) goto label_{};", target),
+        Op::Loop(n) => format!("for (int _i=0; _i<{}; _i++) {{", n),
+        Op::Call(name) => format!("{}();", name.replace(' ', "_")),
+        Op::Ret => "return;".into(),
         Op::Halt => "return;".into(),
         Op::Dream => "/* dream */".into(),
         Op::Stats => "/* stats */".into(),
-        Op::Nop   => "".into(),
+        Op::Nop => "".into(),
+        Op::Store(name) => format!("olang_store(\"{}\", pop(&s));", escape(name)),
+        Op::LoadLocal(name) => format!("push(&s, olang_load_local(\"{}\"));", escape(name)),
+        Op::PushNum(n) => format!("push(&s, (Chain){:.17e});", n),
+        Op::Fuse => "/* QT2: FUSE — verify chain finite */ { Chain c = peek(&s); if (c == 0) pop(&s); }".into(),
+        Op::ScopeBegin => "{ /* scope begin */".into(),
+        Op::ScopeEnd => "} /* scope end */".into(),
+        Op::Trace => "/* trace */".into(),
+        Op::Inspect => "/* inspect */ printf(\"inspect: %p\\n\", peek(&s));".into(),
+        Op::Assert => "/* assert */ if (peek(&s) == 0) { fprintf(stderr, \"ASSERT FAILED\\n\"); }".into(),
+        Op::TypeOf => "/* typeof */".into(),
+        Op::Why => "/* why */ { pop(&s); } /* pop second, keep first */".into(),
+        Op::Explain => "/* explain */".into(),
+        Op::PushMol(s, r, v, a, t) => format!(
+            "push(&s, olang_mol(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}));",
+            s, r, v, a, t
+        ),
     })
 }
 
@@ -172,7 +188,7 @@ fn emit_rust(prog: &OlangProgram) -> Result<String, CompileError> {
     out.push_str("    fn olang_edge(a: u64, b: u64, rel: u8);\n");
     out.push_str("}\n\n");
 
-    let fn_name = prog.name.replace(' ', "_").replace('-', "_");
+    let fn_name = prog.name.replace([' ', '-'], "_");
     out.push_str(&format!("pub fn {}() {{\n", fn_name));
     out.push_str("    let mut stack: Vec<u64> = Vec::new();\n");
 
@@ -212,6 +228,17 @@ fn rust_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::Call(name) => format!("{}();", name.replace(' ', "_")),
         Op::Jmp(t) => format!("// jmp {}", t),
         Op::Jz(t)  => format!("// jz {} (runtime check needed)", t),
+        Op::Store(name) => format!("// store local: {}", name),
+        Op::LoadLocal(name) => format!("// load local: {}", name),
+        Op::PushNum(n) => format!("stack.push({:.17e}_f64);", n),
+        Op::Fuse => "// QT2: FUSE — verify chain finite (∞-1)".into(),
+        Op::ScopeBegin => "{ // scope begin".into(),
+        Op::ScopeEnd => "} // scope end".into(),
+        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => "// debug primitive (runtime only)".into(),
+        Op::PushMol(s, r, v, a, t) => format!(
+            "stack.push(Molecule::new(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}).into());",
+            s, r, v, a, t
+        ),
     })
 }
 
@@ -239,7 +266,7 @@ fn emit_wat(prog: &OlangProgram) -> Result<String, CompileError> {
     // String table
     let mut strings: Vec<String> = Vec::new();
     let mut string_offset = 256u32; // start after reserved area
-    let mut data_section  = String::new();
+    let mut data_section = String::new();
 
     // Pre-scan for Load ops to build string table
     for op in &prog.ops {
@@ -282,30 +309,39 @@ fn emit_wat(prog: &OlangProgram) -> Result<String, CompileError> {
 
 fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileError> {
     Ok(match op {
-        Op::Push(chain) =>
-            format!("i64.const 0x{:016X}", chain.chain_hash()),
+        Op::Push(chain) => format!("i64.const 0x{:016X}", chain.chain_hash()),
         Op::Load(name) => {
             let off = *str_offset;
             *str_offset += name.len() as u32 + 1;
             format!("i32.const {}  call $load", off)
         }
-        Op::Lca =>
-            "local.set $b  local.set $a  local.get $a  local.get $b  call $lca".into(),
-        Op::Edge(rel) =>
-            format!("local.set $b  local.set $a  local.get $a  local.get $b  i32.const {}  call $edge", rel),
-        Op::Query(rel) =>
-            format!("local.set $a  local.get $a  i32.const {}  call $query", rel),
-        Op::Emit =>
-            "call $emit".into(),
-        Op::Dup  => "local.tee $a  local.get $a".into(),
-        Op::Pop  => "drop".into(),
+        Op::Lca => "local.set $b  local.set $a  local.get $a  local.get $b  call $lca".into(),
+        Op::Edge(rel) => format!(
+            "local.set $b  local.set $a  local.get $a  local.get $b  i32.const {}  call $edge",
+            rel
+        ),
+        Op::Query(rel) => format!("local.set $a  local.get $a  i32.const {}  call $query", rel),
+        Op::Emit => "call $emit".into(),
+        Op::Dup => "local.tee $a  local.get $a".into(),
+        Op::Pop => "drop".into(),
         Op::Swap => "local.set $b  local.set $a  local.get $b  local.get $a".into(),
-        Op::Halt | Op::Ret  => "return".into(),
+        Op::Halt | Op::Ret => "return".into(),
         Op::Nop | Op::Dream | Op::Stats => ";; nop".into(),
         Op::Loop(n) => format!("block $blk  loop $loop  ;; {} iterations", n),
         Op::Call(name) => format!("call ${}", name.replace(' ', "_")),
-        Op::Jmp(t)  => format!(";; jmp {} (label needed)", t),
-        Op::Jz(t)   => format!("i64.eqz  br_if {};; jz", t),
+        Op::Jmp(t) => format!(";; jmp {} (label needed)", t),
+        Op::Jz(t) => format!("i64.eqz  br_if {};; jz", t),
+        Op::Store(_) => "local.set $local ;; store".into(),
+        Op::LoadLocal(_) => "local.get $local ;; load_local".into(),
+        Op::PushNum(n) => format!("f64.const {:.17e}", n),
+        Op::Fuse => ";; QT2: FUSE — verify chain finite".into(),
+        Op::ScopeBegin => "block $scope ;; scope begin".into(),
+        Op::ScopeEnd => "end ;; scope end".into(),
+        Op::Trace | Op::Inspect | Op::Assert | Op::TypeOf | Op::Why | Op::Explain => ";; debug primitive (runtime only)".into(),
+        Op::PushMol(s, r, v, a, t) => format!(
+            "i32.const 0x{:02X}{:02X}{:02X}{:02X}{:02X} ;; mol S={} R={} V={} A={} T={}",
+            s, r, v, a, t, s, r, v, a, t
+        ),
     })
 }
 
@@ -314,7 +350,9 @@ fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileE
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\0', "\\0")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\0', "\\0")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -324,8 +362,8 @@ fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{OlangProgram, OlangIrExpr, compile_expr};
     use crate::encoder::encode_codepoint;
+    use crate::ir::{compile_expr, OlangIrExpr, OlangProgram};
 
     fn simple_prog() -> OlangProgram {
         compile_expr(&OlangIrExpr::Query("fire".into()))
@@ -342,8 +380,8 @@ mod tests {
         let c = Compiler::new(Target::C);
         let src = c.emit(&simple_prog()).unwrap();
         assert!(src.contains("#include"), "C header");
-        assert!(src.contains("void "),    "C function");
-        assert!(src.contains("Stack"),    "Stack type");
+        assert!(src.contains("void "), "C function");
+        assert!(src.contains("Stack"), "Stack type");
     }
 
     #[test]
@@ -351,7 +389,7 @@ mod tests {
         let c = Compiler::new(Target::C);
         let src = c.emit(&simple_prog()).unwrap();
         assert!(src.contains("olang_load"), "Load extern call");
-        assert!(src.contains("fire"),       "Name preserved");
+        assert!(src.contains("fire"), "Name preserved");
     }
 
     #[test]
@@ -399,17 +437,17 @@ mod tests {
         let c = Compiler::new(Target::Wasm);
         let src = c.emit(&simple_prog()).unwrap();
         assert!(src.starts_with(";; generated"), "WAT header");
-        assert!(src.contains("(module"),   "module keyword");
-        assert!(src.contains("(import"),   "imports");
-        assert!(src.contains("(func"),     "function");
-        assert!(src.ends_with(")\n"),      "module close");
+        assert!(src.contains("(module"), "module keyword");
+        assert!(src.contains("(import"), "imports");
+        assert!(src.contains("(func"), "function");
+        assert!(src.ends_with(")\n"), "module close");
     }
 
     #[test]
     fn wat_imports_runtime() {
         let c = Compiler::new(Target::Wasm);
         let src = c.emit(&simple_prog()).unwrap();
-        assert!(src.contains("\"olang\" \"lca\""),  "lca import");
+        assert!(src.contains("\"olang\" \"lca\""), "lca import");
         assert!(src.contains("\"olang\" \"load\""), "load import");
         assert!(src.contains("\"olang\" \"emit\""), "emit import");
     }
@@ -428,7 +466,12 @@ mod tests {
         let prog = compose_prog();
         for target in [Target::C, Target::Rust, Target::Wasm] {
             let result = Compiler::new(target).emit(&prog);
-            assert!(result.is_ok(), "{} compilation failed: {:?}", target.name(), result.err());
+            assert!(
+                result.is_ok(),
+                "{} compilation failed: {:?}",
+                target.name(),
+                result.err()
+            );
             let src = result.unwrap();
             assert!(!src.is_empty(), "{} output rỗng", target.name());
         }
@@ -436,7 +479,7 @@ mod tests {
 
     #[test]
     fn target_file_extensions() {
-        assert_eq!(Target::C.file_ext(),    "c");
+        assert_eq!(Target::C.file_ext(), "c");
         assert_eq!(Target::Rust.file_ext(), "rs");
         assert_eq!(Target::Wasm.file_ext(), "wat");
     }
@@ -450,8 +493,12 @@ mod tests {
             Op::Load("test".into()),
             Op::Lca,
             Op::Emit,
-            Op::Dup, Op::Pop, Op::Swap,
-            Op::Ret, Op::Halt, Op::Nop,
+            Op::Dup,
+            Op::Pop,
+            Op::Swap,
+            Op::Ret,
+            Op::Halt,
+            Op::Nop,
         ];
         for op in ops_to_test {
             let result = c_op(op, 0);
@@ -462,7 +509,7 @@ mod tests {
     #[test]
     fn program_name_in_function() {
         let prog = simple_prog();
-        let src  = Compiler::new(Target::C).emit(&prog).unwrap();
+        let src = Compiler::new(Target::C).emit(&prog).unwrap();
         // Function name derived from program name
         assert!(src.contains("void "), "Function declaration");
     }

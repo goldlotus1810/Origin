@@ -13,4 +13,4 @@ std     = []
 [dependencies]
 ucd   = { workspace = true }
 olang = { workspace = true }
-libm = { workspace = true }
+homemath = { workspace = true }

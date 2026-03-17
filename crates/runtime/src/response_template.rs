@@ -10,11 +10,11 @@
 //! Caller điền vào. Nếu không điền → text vẫn có nghĩa.
 
 extern crate alloc;
-use alloc::string::{String, ToString};
 use alloc::format;
+use alloc::string::{String, ToString};
 
+use context::intent::{ClarifyKind, IntentAction};
 use silk::walk::ResponseTone;
-use context::intent::{IntentAction, ClarifyKind};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ResponseTemplate
@@ -24,12 +24,12 @@ use context::intent::{IntentAction, ClarifyKind};
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct ResponseParams {
-    pub tone:     ResponseTone,
-    pub action:   IntentAction,
-    pub valence:  f32,
-    pub fx:       f32,
+    pub tone: ResponseTone,
+    pub action: IntentAction,
+    pub valence: f32,
+    pub fx: f32,
     /// Context từ previous turn (optional)
-    pub context:  Option<String>,
+    pub context: Option<String>,
     /// Original response từ learning pipeline (optional)
     pub original: Option<String>,
 }
@@ -37,28 +37,39 @@ pub struct ResponseParams {
 /// Render response text từ params — không hardcode string trong caller.
 pub fn render(p: &ResponseParams) -> String {
     match &p.action {
+        IntentAction::CrisisOverride => crisis_text(),
 
-        IntentAction::CrisisOverride =>
-            crisis_text(),
+        IntentAction::SoftRefusal => soft_refusal_text(),
 
-        IntentAction::SoftRefusal =>
-            soft_refusal_text(),
+        IntentAction::AskContext { angry } => ask_context_text(*angry, p.valence),
 
-        IntentAction::AskContext { angry } =>
-            ask_context_text(*angry, p.valence),
-
-        IntentAction::EmpathizeFirst =>
-            empathize_text(p.tone, p.valence, p.original.as_deref()),
+        IntentAction::EmpathizeFirst => empathize_text(p.tone, p.valence, p.original.as_deref()),
 
         IntentAction::AddClarify { kind } => {
             let base = p.original.as_deref().unwrap_or("");
             let clarify = clarify_text(*kind, p.valence);
-            if base.is_empty() { clarify }
-            else { format!("{}\n\n{}", base, clarify) }
+            if base.is_empty() {
+                clarify
+            } else {
+                format!("{}\n\n{}", base, clarify)
+            }
         }
 
-        IntentAction::Proceed =>
-            proceed_text(p.tone, p.valence, p.original.as_deref()),
+        IntentAction::Proceed => proceed_text(p.tone, p.valence, p.original.as_deref()),
+
+        IntentAction::UserConfirm => confirm_text(p.valence),
+
+        IntentAction::UserDeny => deny_text(p.valence),
+
+        // ForceLearnQR and ConfirmLearnQR are handled directly in process_input
+        // before reaching render() — these arms are unreachable but required.
+        IntentAction::ForceLearnQR | IntentAction::ConfirmLearnQR => {
+            proceed_text(p.tone, p.valence, p.original.as_deref())
+        }
+
+        IntentAction::Observe => observe_text(p.valence, p.original.as_deref()),
+
+        IntentAction::SilentAck => silent_ack_text(p.valence),
     }
 }
 
@@ -77,7 +88,7 @@ pub fn crisis_text_with_region(lang: &str) -> String {
     let hotline = match lang {
         "vi" => "1800 599 920 (miễn phí, 24/7)",
         "en" => "988 Suicide & Crisis Lifeline (call or text 988)",
-        _    => "a local crisis helpline",
+        _ => "a local crisis helpline",
     };
     // Cấu trúc: thừa nhận → hỏi thẳng → hỗ trợ → nguồn lực
     // Không thêm thông tin gốc (QT9: không gây hại)
@@ -95,18 +106,21 @@ fn soft_refusal_text() -> String {
     // Cấu trúc: tôi không làm → lý do nguyên tắc → mời nói tiếp
     "Cái này mình không làm được — không phải vì quy tắc, \
      mà vì mình không muốn giúp ảnh hưởng xấu đến người khác. \
-     Bạn muốn nói về điều đang thúc đẩy bạn hỏi điều này không?".to_string()
+     Bạn muốn nói về điều đang thúc đẩy bạn hỏi điều này không?"
+        .to_string()
 }
 
 fn ask_context_text(angry: bool, cur_v: f32) -> String {
     if angry || cur_v < -0.50 {
         // Cảm xúc mạnh → đồng cảm trước
         "Mình thấy bạn đang có cảm xúc rất mạnh. \
-         Kể cho mình nghe chuyện gì đang xảy ra được không?".to_string()
+         Kể cho mình nghe chuyện gì đang xảy ra được không?"
+            .to_string()
     } else {
         // Không rõ context → hỏi neutral
         "Câu này mình cần hiểu rõ hơn. \
-         Bạn đang nghĩ đến tình huống nào cụ thể?".to_string()
+         Bạn đang nghĩ đến tình huống nào cụ thể?"
+            .to_string()
     }
 }
 
@@ -128,10 +142,12 @@ fn empathize_text(_tone: ResponseTone, cur_v: f32, original: Option<&str>) -> St
 
 fn clarify_text(kind: ClarifyKind, cur_v: f32) -> String {
     match kind {
-        ClarifyKind::WhatPurpose   => "Bạn đang tìm hiểu để làm gì — học, công việc, hay tò mò?".to_string(),
+        ClarifyKind::WhatPurpose => {
+            "Bạn đang tìm hiểu để làm gì — học, công việc, hay tò mò?".to_string()
+        }
         ClarifyKind::WhatDirection => "Bạn đang nghiên cứu theo hướng nào?".to_string(),
-        ClarifyKind::WhatContext   => "Bạn đang dùng trong tình huống cụ thể nào không?".to_string(),
-        ClarifyKind::CheckingIn    => {
+        ClarifyKind::WhatContext => "Bạn đang dùng trong tình huống cụ thể nào không?".to_string(),
+        ClarifyKind::CheckingIn => {
             if cur_v < -0.30 {
                 "Bạn đang ổn không?".to_string()
             } else {
@@ -145,7 +161,9 @@ fn proceed_text(tone: ResponseTone, cur_v: f32, original: Option<&str>) -> Strin
     // Nếu có original từ learning pipeline → dùng nó
     // Nếu không → dùng tone-based placeholder
     if let Some(s) = original {
-        if !s.is_empty() { return s.to_string(); }
+        if !s.is_empty() {
+            return s.to_string();
+        }
     }
     // Fallback theo tone — tối giản, không thừa
     tone_fallback(tone, cur_v)
@@ -155,14 +173,59 @@ fn proceed_text(tone: ResponseTone, cur_v: f32, original: Option<&str>) -> Strin
 /// Caller nên có original text; đây chỉ là safety net.
 pub fn tone_fallback(tone: ResponseTone, cur_v: f32) -> String {
     match tone {
-        ResponseTone::Supportive  => if cur_v < -0.40 { "Bạn muốn kể thêm không?".to_string() }
-                                     else { "Mình đang lắng nghe.".to_string() },
-        ResponseTone::Pause       => "Bạn có ổn không?".to_string(),
-        ResponseTone::Gentle      => "Cứ từ từ thôi.".to_string(),
+        ResponseTone::Supportive => {
+            if cur_v < -0.40 {
+                "Bạn muốn kể thêm không?".to_string()
+            } else {
+                "Mình đang lắng nghe.".to_string()
+            }
+        }
+        ResponseTone::Pause => "Bạn có ổn không?".to_string(),
+        ResponseTone::Gentle => "Cứ từ từ thôi.".to_string(),
         ResponseTone::Reinforcing => "Tốt đấy.".to_string(),
         ResponseTone::Celebratory => "Tuyệt!".to_string(),
-        ResponseTone::Engaged     => "Ừ.".to_string(),
+        ResponseTone::Engaged => "Ừ.".to_string(),
     }
+}
+
+/// Observe — im lặng thông minh.
+///
+/// Khi không đủ context để trả lời đầy đủ → ghi nhận nhẹ nhàng,
+/// không phán đoán, không hỏi dồn dập.
+///
+/// Nếu caller đã resolve được reference → dùng original.
+/// Nếu chưa → im lặng tối giản.
+fn observe_text(cur_v: f32, original: Option<&str>) -> String {
+    // Nếu có original (reference đã resolve) → dùng nó
+    if let Some(s) = original {
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    // Im lặng tối giản — đủ để user biết mình được lắng nghe
+    if cur_v < -0.40 {
+        "Mình đang nghe.".to_string()
+    } else {
+        // Gần neutral hoặc positive → im lặng hơn
+        String::new()
+    }
+}
+
+/// SilentAck — ghi nhận thán từ.
+///
+/// "Ah!", "ya..!", "ôi!" → chỉ cần acknowledge rất nhẹ.
+/// Trả về chuỗi rỗng = runtime sẽ hiểu là silence.
+fn silent_ack_text(_cur_v: f32) -> String {
+    // Thán từ → không cần response text. Runtime ghi nhận emotion.
+    String::new()
+}
+
+fn confirm_text(_cur_v: f32) -> String {
+    "Đã ghi nhận. Mình sẽ thực hiện.".to_string()
+}
+
+fn deny_text(_cur_v: f32) -> String {
+    "Đã ghi nhận. Mình sẽ không thực hiện.".to_string()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,12 +235,15 @@ pub fn tone_fallback(tone: ResponseTone, cur_v: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use context::intent::IntentEstimate;
 
     fn make_params(action: IntentAction, tone: ResponseTone, v: f32) -> ResponseParams {
         ResponseParams {
-            tone, action, valence: v, fx: v,
-            context: None, original: None,
+            tone,
+            action,
+            valence: v,
+            fx: v,
+            context: None,
+            original: None,
         }
     }
 
@@ -186,8 +252,11 @@ mod tests {
         let p = make_params(IntentAction::CrisisOverride, ResponseTone::Supportive, -0.8);
         let r = render(&p);
         // Phải có số liên lạc — đây là DATA check, không phải string check
-        assert!(r.contains("1800") || r.contains("988") || r.contains("helpline"),
-            "Crisis phải có contact info: {}", &r[..r.len().min(100)]);
+        assert!(
+            r.contains("1800") || r.contains("988") || r.contains("helpline"),
+            "Crisis phải có contact info: {}",
+            &r[..r.len().min(100)]
+        );
     }
 
     #[test]
@@ -225,7 +294,8 @@ mod tests {
         let p = ResponseParams {
             tone: ResponseTone::Engaged,
             action: IntentAction::Proceed,
-            valence: 0.2, fx: 0.1,
+            valence: 0.2,
+            fx: 0.1,
             context: None,
             original: Some("đây là câu trả lời thật".to_string()),
         };
@@ -248,9 +318,12 @@ mod tests {
     #[test]
     fn tone_fallback_all_tones() {
         let tones = [
-            ResponseTone::Supportive, ResponseTone::Pause,
-            ResponseTone::Gentle, ResponseTone::Reinforcing,
-            ResponseTone::Celebratory, ResponseTone::Engaged,
+            ResponseTone::Supportive,
+            ResponseTone::Pause,
+            ResponseTone::Gentle,
+            ResponseTone::Reinforcing,
+            ResponseTone::Celebratory,
+            ResponseTone::Engaged,
         ];
         for tone in tones {
             let r = tone_fallback(tone, -0.3);

@@ -3,8 +3,12 @@ name    = "isl"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+encrypt = []
+
 [dependencies]
-olang = { path = "../olang" }
+olang   = { path = "../olang" }
 
 [lib]
 name = "isl"

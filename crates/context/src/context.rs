@@ -10,7 +10,6 @@
 //! Cùng sự kiện, S khác → EmotionTag khác:
 //!   Trực tiếp trải qua (S=1.0) vs Xem phim (S=0.05)
 
-extern crate alloc;
 use silk::edge::EmotionTag;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,20 +34,20 @@ impl Role {
     /// Hệ số nhạy cảm theo vai trò.
     pub fn sensitivity(self) -> f32 {
         match self {
-            Role::FirstPerson  => 1.00,
+            Role::FirstPerson => 1.00,
             Role::SecondPerson => 0.75,
-            Role::ThirdPerson  => 0.55,
-            Role::Observer     => 0.30,
+            Role::ThirdPerson => 0.55,
+            Role::Observer => 0.30,
         }
     }
 
     /// String label.
     pub fn as_str(self) -> &'static str {
         match self {
-            Role::FirstPerson  => "first_person",
+            Role::FirstPerson => "first_person",
             Role::SecondPerson => "second_person",
-            Role::ThirdPerson  => "third_person",
-            Role::Observer     => "observer",
+            Role::ThirdPerson => "third_person",
+            Role::Observer => "observer",
         }
     }
 }
@@ -79,24 +78,24 @@ impl EmotionSource {
     /// Hệ số theo nguồn gốc.
     pub fn sensitivity(self) -> f32 {
         match self {
-            EmotionSource::RealNow   => 1.00,
-            EmotionSource::RealPast  => 0.80,
-            EmotionSource::Memory    => 0.70,
+            EmotionSource::RealNow => 1.00,
+            EmotionSource::RealPast => 0.80,
+            EmotionSource::Memory => 0.70,
             EmotionSource::RealOther => 0.60,
-            EmotionSource::Fiction   => 0.30,
-            EmotionSource::Music     => 0.25,
+            EmotionSource::Fiction => 0.30,
+            EmotionSource::Music => 0.25,
         }
     }
 
     /// String label.
     pub fn as_str(self) -> &'static str {
         match self {
-            EmotionSource::RealNow   => "real_now",
-            EmotionSource::RealPast  => "real_past",
+            EmotionSource::RealNow => "real_now",
+            EmotionSource::RealPast => "real_past",
             EmotionSource::RealOther => "real_other",
-            EmotionSource::Fiction   => "fiction",
-            EmotionSource::Music     => "music",
-            EmotionSource::Memory    => "memory",
+            EmotionSource::Fiction => "fiction",
+            EmotionSource::Music => "music",
+            EmotionSource::Memory => "memory",
         }
     }
 }
@@ -109,12 +108,12 @@ impl EmotionSource {
 #[allow(missing_docs)]
 #[derive(Debug, Clone, Copy)]
 pub struct EmotionContext {
-    pub role:     Role,
-    pub source:   EmotionSource,
+    pub role: Role,
+    pub source: EmotionSource,
     /// 0.0 (xa xưa) → 1.0 (vừa xảy ra)
-    pub recency:  f32,
+    pub recency: f32,
     /// Đang chia sẻ cùng người khác → cộng hưởng +15%
-    pub shared:   bool,
+    pub shared: bool,
     /// Biết trước sẽ xảy ra → giảm shock -20%
     pub expected: bool,
 }
@@ -122,28 +121,28 @@ pub struct EmotionContext {
 impl EmotionContext {
     /// Ngữ cảnh mặc định: đang nói về bản thân, sự việc vừa qua.
     pub const DEFAULT: Self = Self {
-        role:     Role::FirstPerson,
-        source:   EmotionSource::RealNow,
-        recency:  1.0,
-        shared:   false,
+        role: Role::FirstPerson,
+        source: EmotionSource::RealNow,
+        recency: 1.0,
+        shared: false,
         expected: false,
     };
 
     /// Xem phim / đọc sách.
     pub const FICTION: Self = Self {
-        role:     Role::Observer,
-        source:   EmotionSource::Fiction,
-        recency:  0.5,
-        shared:   false,
+        role: Role::Observer,
+        source: EmotionSource::Fiction,
+        recency: 0.5,
+        shared: false,
         expected: false,
     };
 
     /// Nghe nhạc.
     pub const MUSIC: Self = Self {
-        role:     Role::Observer,
-        source:   EmotionSource::Music,
-        recency:  1.0,
-        shared:   false,
+        role: Role::Observer,
+        source: EmotionSource::Music,
+        recency: 1.0,
+        shared: false,
         expected: false,
     };
 
@@ -154,8 +153,12 @@ impl EmotionContext {
     pub fn s(self) -> f32 {
         let mut s = self.role.sensitivity() * self.source.sensitivity();
         s *= 0.5 + 0.5 * self.recency.clamp(0.0, 1.0);
-        if self.shared   { s *= 1.15; }
-        if self.expected { s *= 0.80; }
+        if self.shared {
+            s *= 1.15;
+        }
+        if self.expected {
+            s *= 0.80;
+        }
         s.clamp(0.05, 1.0)
     }
 
@@ -187,13 +190,14 @@ impl EmotionContext {
         // Intensity scale theo S² — aesthetic floor cho Fiction/Music
         let floor = 0.15_f32 * raw.intensity;
         let mut intensity = (raw.intensity * s * s).max(0.0_f32);
-        if matches!(self.source, EmotionSource::Fiction | EmotionSource::Music) {
-            if intensity < floor { intensity = floor; }
+        if matches!(self.source, EmotionSource::Fiction | EmotionSource::Music) && intensity < floor
+        {
+            intensity = floor;
         }
 
         EmotionTag {
-            valence:   valence.clamp(-1.0, 1.0),
-            arousal:   arousal.clamp(0.0, 1.0),
+            valence: valence.clamp(-1.0, 1.0),
+            arousal: arousal.clamp(0.0, 1.0),
             dominance: dominance.clamp(0.0, 1.0),
             intensity: intensity.clamp(0.0, 1.0),
         }
@@ -209,16 +213,28 @@ mod tests {
     use super::*;
 
     fn sad() -> EmotionTag {
-        EmotionTag { valence: -0.7, arousal: 0.6, dominance: 0.3, intensity: 0.65 }
+        EmotionTag {
+            valence: -0.7,
+            arousal: 0.6,
+            dominance: 0.3,
+            intensity: 0.65,
+        }
     }
 
     #[test]
     fn first_person_real_now_full_intensity() {
         let ctx = EmotionContext::DEFAULT;
-        assert!((ctx.s() - 1.0).abs() < 0.01, "DEFAULT S phải ≈ 1.0: {}", ctx.s());
+        assert!(
+            (ctx.s() - 1.0).abs() < 0.01,
+            "DEFAULT S phải ≈ 1.0: {}",
+            ctx.s()
+        );
         let applied = ctx.apply(sad());
-        assert!((applied.valence - sad().valence).abs() < 0.01,
-            "FirstPerson/RealNow không scale valence: {}", applied.valence);
+        assert!(
+            (applied.valence - sad().valence).abs() < 0.01,
+            "FirstPerson/RealNow không scale valence: {}",
+            applied.valence
+        );
     }
 
     #[test]
@@ -228,8 +244,12 @@ mod tests {
         assert!(s < 0.3, "Fiction S phải < 0.3: {}", s);
 
         let applied = fiction.apply(sad());
-        assert!(applied.intensity < sad().intensity,
-            "Fiction phải giảm intensity: {} < {}", applied.intensity, sad().intensity);
+        assert!(
+            applied.intensity < sad().intensity,
+            "Fiction phải giảm intensity: {} < {}",
+            applied.intensity,
+            sad().intensity
+        );
         // aesthetic floor: intensity > 0
         assert!(applied.intensity > 0.0, "Fiction vẫn có aesthetic floor");
     }
@@ -240,45 +260,77 @@ mod tests {
         let applied = music.apply(sad());
         // floor = 0.15 * raw.intensity
         let floor = 0.15 * sad().intensity;
-        assert!(applied.intensity >= floor - 0.01,
-            "Music aesthetic floor: {} >= {}", applied.intensity, floor);
+        assert!(
+            applied.intensity >= floor - 0.01,
+            "Music aesthetic floor: {} >= {}",
+            applied.intensity,
+            floor
+        );
     }
 
     #[test]
     fn shared_boosts_s() {
         // Dùng ThirdPerson (S < 1.0) để shared có thể boost
         let normal = EmotionContext {
-            role: Role::ThirdPerson, source: EmotionSource::RealOther,
-            recency: 0.7, shared: false, expected: false,
+            role: Role::ThirdPerson,
+            source: EmotionSource::RealOther,
+            recency: 0.7,
+            shared: false,
+            expected: false,
         };
-        let shared = EmotionContext { shared: true, ..normal };
-        assert!(shared.s() > normal.s(),
-            "Shared S > normal S: {} > {}", shared.s(), normal.s());
+        let shared = EmotionContext {
+            shared: true,
+            ..normal
+        };
+        assert!(
+            shared.s() > normal.s(),
+            "Shared S > normal S: {} > {}",
+            shared.s(),
+            normal.s()
+        );
     }
 
     #[test]
     fn expected_dampens_s() {
-        let normal   = EmotionContext::DEFAULT;
-        let expected = EmotionContext { expected: true, ..EmotionContext::DEFAULT };
+        let normal = EmotionContext::DEFAULT;
+        let expected = EmotionContext {
+            expected: true,
+            ..EmotionContext::DEFAULT
+        };
         assert!(expected.s() < normal.s(), "Expected S < normal S");
     }
 
     #[test]
     fn recency_affects_s() {
-        let recent = EmotionContext { recency: 1.0, ..EmotionContext::DEFAULT };
-        let old    = EmotionContext { recency: 0.1, ..EmotionContext::DEFAULT };
-        assert!(recent.s() > old.s(), "Recent S > old S: {} > {}", recent.s(), old.s());
+        let recent = EmotionContext {
+            recency: 1.0,
+            ..EmotionContext::DEFAULT
+        };
+        let old = EmotionContext {
+            recency: 0.1,
+            ..EmotionContext::DEFAULT
+        };
+        assert!(
+            recent.s() > old.s(),
+            "Recent S > old S: {} > {}",
+            recent.s(),
+            old.s()
+        );
     }
 
     #[test]
     fn observer_dominance_higher() {
         let real = EmotionContext::DEFAULT;
-        let obs  = EmotionContext::FICTION;
-        let raw  = sad();
+        let obs = EmotionContext::FICTION;
+        let raw = sad();
         let d_real = real.apply(raw).dominance;
-        let d_obs  = obs.apply(raw).dominance;
-        assert!(d_obs >= d_real * 0.9, // Observer has more control
-            "Observer dominance {} vs real {}", d_obs, d_real);
+        let d_obs = obs.apply(raw).dominance;
+        assert!(
+            d_obs >= d_real * 0.9, // Observer has more control
+            "Observer dominance {} vs real {}",
+            d_obs,
+            d_real
+        );
     }
 
     #[test]
@@ -293,28 +345,36 @@ mod tests {
         let fiction = EmotionContext::FICTION;
 
         let raw = sad();
-        let i_first   = first.apply(raw).intensity;
-        let i_third   = third.apply(raw).intensity;
+        let i_first = first.apply(raw).intensity;
+        let i_third = third.apply(raw).intensity;
         let i_fiction = fiction.apply(raw).intensity;
 
         // Third và Fiction dùng S² → có thể rất gần nhau
         // Chỉ verify first > fiction (guaranteed)
-        assert!(i_first > i_fiction,
-            "First > Fiction: {} > {}", i_first, i_fiction);
+        assert!(
+            i_first > i_fiction,
+            "First > Fiction: {} > {}",
+            i_first,
+            i_fiction
+        );
         // Third phải nhỏ hơn First (S_third < S_first)
-        assert!(i_first >= i_third,
-            "First >= Third: {} >= {}", i_first, i_third);
+        assert!(
+            i_first >= i_third,
+            "First >= Third: {} >= {}",
+            i_first,
+            i_third
+        );
     }
 
     #[test]
     fn s_clamp_min() {
         // Extreme case: Observer + Music + very old + expected
         let ctx = EmotionContext {
-            role:     Role::Observer,
-            source:   EmotionSource::Music,
-            recency:  0.0,
+            role: Role::Observer,
+            source: EmotionSource::Music,
+            recency: 0.0,
             expected: true,
-            shared:   false,
+            shared: false,
         };
         assert!(ctx.s() >= 0.05, "S phải ≥ 0.05 (minimum): {}", ctx.s());
     }

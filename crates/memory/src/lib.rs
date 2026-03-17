@@ -8,5 +8,6 @@
 
 extern crate alloc;
 
+pub mod build;
 pub mod dream;
 pub mod proposal;

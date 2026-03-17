@@ -17,9 +17,7 @@
 
 extern crate alloc;
 
-use olang::molecular::{
-    MolecularChain, Molecule, ShapeBase, RelationBase, EmotionDim, TimeDim,
-};
+use olang::molecular::{EmotionDim, MolecularChain, Molecule};
 
 /// Fibonacci(n) mod 2^64 — dùng u64 để tránh overflow.
 pub fn fib64(n: u64) -> u64 {
@@ -42,12 +40,12 @@ pub fn fib64(n: u64) -> u64 {
 /// Một điểm trên xoắn ốc Fibonacci 5D.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FfrPoint {
-    pub index:    u64,
-    pub shape:    u8,    // 0..6
-    pub relation: u8,    // 0..7
-    pub valence:  u8,    // 0..255
-    pub arousal:  u8,    // 0..255
-    pub time:     u8,    // 0..4
+    pub index: u64,
+    pub shape: u8,    // 0..6
+    pub relation: u8, // 0..7
+    pub valence: u8,  // 0..255
+    pub arousal: u8,  // 0..255
+    pub time: u8,     // 0..4
 }
 
 impl FfrPoint {
@@ -60,31 +58,31 @@ impl FfrPoint {
         let f4 = fib64(n.wrapping_add(4));
 
         Self {
-            index:    n,
-            shape:    (f0 % 7) as u8,
+            index: n,
+            shape: (f0 % 7) as u8,
             relation: (f1 % 8) as u8,
-            valence:  (f2 % 256) as u8,
-            arousal:  (f3 % 256) as u8,
-            time:     (f4 % 5) as u8,
+            valence: (f2 % 256) as u8,
+            arousal: (f3 % 256) as u8,
+            time: (f4 % 5) as u8,
         }
     }
 
     /// Convert sang Molecule.
-    pub fn to_molecule(&self) -> Option<Molecule> {
-        let shape    = ShapeBase::from_byte(self.shape + 1)?; // +1: 0x01..0x07
-        let relation = RelationBase::from_byte(self.relation + 1)?; // +1: 0x01..0x08
-        let time     = TimeDim::from_byte(self.time + 1)?;    // +1: 0x01..0x05
-        Some(Molecule {
-            shape,
-            relation,
-            emotion: EmotionDim { valence: self.valence, arousal: self.arousal },
-            time,
-        })
+    pub fn to_molecule(&self) -> Molecule {
+        Molecule {
+            shape: self.shape + 1,       // +1: 0x01..0x07
+            relation: self.relation + 1, // +1: 0x01..0x08
+            emotion: EmotionDim {
+                valence: self.valence,
+                arousal: self.arousal,
+            },
+            time: self.time + 1, // +1: 0x01..0x05
+        }
     }
 
     /// Khoảng cách Fibonacci giữa 2 điểm (5D Manhattan trên index).
     pub fn fib_distance(a: u64, b: u64) -> u64 {
-        if a > b { a - b } else { b - a }
+        a.abs_diff(b)
     }
 }
 
@@ -93,9 +91,7 @@ pub fn ffr_chain(start: u64, n: usize) -> MolecularChain {
     let mut mols = alloc::vec::Vec::with_capacity(n);
     for i in 0..n as u64 {
         let pt = FfrPoint::at(start.wrapping_add(i));
-        if let Some(mol) = pt.to_molecule() {
-            mols.push(mol);
-        }
+        mols.push(pt.to_molecule());
     }
     MolecularChain(mols)
 }
@@ -105,8 +101,8 @@ pub fn ffr_chain(start: u64, n: usize) -> MolecularChain {
 /// Scan range [0..max_index] và tìm điểm có Molecule gần nhất.
 /// Trả về (best_index, similarity).
 pub fn ffr_nearest(target: &Molecule, max_index: u64) -> (u64, f32) {
-    let mut best_idx  = 0u64;
-    let mut best_sim  = -1.0f32;
+    let mut best_idx = 0u64;
+    let mut best_sim = -1.0f32;
 
     // Sample theo bước Fibonacci để efficient hơn linear scan
     let step = if max_index > 1000 { fib64(10) } else { 1 };
@@ -115,12 +111,11 @@ pub fn ffr_nearest(target: &Molecule, max_index: u64) -> (u64, f32) {
     let mut i = 0u64;
     while i < max_index {
         let pt = FfrPoint::at(i);
-        if let Some(mol) = pt.to_molecule() {
-            let sim = molecule_similarity(target, &mol);
-            if sim > best_sim {
-                best_sim = sim;
-                best_idx = i;
-            }
+        let mol = pt.to_molecule();
+        let sim = molecule_similarity(target, &mol);
+        if sim > best_sim {
+            best_sim = sim;
+            best_idx = i;
         }
         i = i.wrapping_add(step);
     }
@@ -131,11 +126,15 @@ pub fn ffr_nearest(target: &Molecule, max_index: u64) -> (u64, f32) {
 /// Similarity giữa 2 Molecules — dùng cho FFR nearest search.
 fn molecule_similarity(a: &Molecule, b: &Molecule) -> f32 {
     let shape_match = if a.shape == b.shape { 1.0f32 } else { 0.0 };
-    let rel_match   = if a.relation == b.relation { 1.0f32 } else { 0.0 };
+    let rel_match = if a.relation == b.relation {
+        1.0f32
+    } else {
+        0.0
+    };
 
     let dv = (a.emotion.valence as f32 - b.emotion.valence as f32) / 255.0;
     let da = (a.emotion.arousal as f32 - b.emotion.arousal as f32) / 255.0;
-    let emo_sim = 1.0 - libm::sqrtf(dv*dv + da*da) * 0.5;
+    let emo_sim = 1.0 - homemath::sqrtf(dv * dv + da * da) * 0.5;
 
     let time_match = if a.time == b.time { 1.0f32 } else { 0.5 };
 
@@ -149,7 +148,6 @@ fn molecule_similarity(a: &Molecule, b: &Molecule) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
 
     #[test]
     fn fib64_sequence() {
@@ -179,9 +177,9 @@ mod tests {
     fn ffr_point_bounded() {
         for n in [0u64, 1, 5, 10, 100, 1000] {
             let p = FfrPoint::at(n);
-            assert!(p.shape    < 7,   "shape in [0..6]");
-            assert!(p.relation < 8,   "relation in [0..7]");
-            assert!(p.time     < 5,   "time in [0..4]");
+            assert!(p.shape < 7, "shape in [0..6]");
+            assert!(p.relation < 8, "relation in [0..7]");
+            assert!(p.time < 5, "time in [0..4]");
         }
     }
 
@@ -190,7 +188,8 @@ mod tests {
         for n in [0u64, 1, 2, 5, 10, 50] {
             let p = FfrPoint::at(n);
             let mol = p.to_molecule();
-            assert!(mol.is_some(), "FFR[{}] phải tạo được Molecule", n);
+            // Molecule fields are raw u8 — always succeeds
+            assert!(mol.shape > 0, "FFR[{}] shape must be > 0", n);
         }
     }
 
@@ -226,7 +225,7 @@ mod tests {
     fn ffr_nearest_finds_close() {
         // Tạo molecule từ FFR point 10, tìm nearest
         let pt = FfrPoint::at(10);
-        let mol = pt.to_molecule().unwrap();
+        let mol = pt.to_molecule();
         let (best_idx, sim) = ffr_nearest(&mol, 50);
         assert!(sim > 0.5, "Nearest phải có sim > 0.5: {}", sim);
         assert!(best_idx < 50, "Trong range");
@@ -235,16 +234,24 @@ mod tests {
     #[test]
     fn ffr_coverage() {
         // 100 điểm đầu phải cover đủ shape/relation variants
-        let mut shapes    = [false; 7];
+        let mut shapes = [false; 7];
         let mut relations = [false; 8];
         for n in 0..100u64 {
             let p = FfrPoint::at(n);
-            shapes[p.shape as usize]    = true;
+            shapes[p.shape as usize] = true;
             relations[p.relation as usize] = true;
         }
-        let shapes_covered    = shapes.iter().filter(|&&v| v).count();
+        let shapes_covered = shapes.iter().filter(|&&v| v).count();
         let relations_covered = relations.iter().filter(|&&v| v).count();
-        assert!(shapes_covered    >= 5, "Ít nhất 5/7 shapes covered: {}", shapes_covered);
-        assert!(relations_covered >= 6, "Ít nhất 6/8 relations covered: {}", relations_covered);
+        assert!(
+            shapes_covered >= 5,
+            "Ít nhất 5/7 shapes covered: {}",
+            shapes_covered
+        );
+        assert!(
+            relations_covered >= 6,
+            "Ít nhất 6/8 relations covered: {}",
+            relations_covered
+        );
     }
 }

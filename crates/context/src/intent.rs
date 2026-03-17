@@ -13,10 +13,10 @@
 //! Response text thuộc về layer trên (runtime/response.rs).
 
 extern crate alloc;
-use alloc::vec::Vec;
-use alloc::string::{String, ToString};
-use alloc::format;
 use crate::emotion::IntentKind;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tuning constants — không magic, có tên rõ ràng
@@ -51,9 +51,13 @@ const SCORE_LEARN_BASE: f32 = 0.25;
 const SCORE_LEARN_KW: f32 = 0.30;
 /// Score khi match research/tech/creative/inform keyword.
 const SCORE_MEDIUM_KW: f32 = 0.40;
-const SCORE_HIGH_KW:   f32 = 0.50;
+const SCORE_HIGH_KW: f32 = 0.50;
 /// Score command.
 const SCORE_CMD_KW: f32 = 0.55;
+/// Score learn command — cao hơn thường vì user rõ ý định.
+const SCORE_LEARN_CMD_KW: f32 = 0.70;
+/// Score confirm knowledge.
+const SCORE_CONFIRM_KNOWLEDGE_KW: f32 = 0.65;
 
 /// Ngưỡng valence "rất buồn" → crisis amplifier.
 const V_CRISIS_LOW: f32 = -0.70;
@@ -72,81 +76,267 @@ const V_HEAL_SAD: f32 = -0.40;
 
 static KW_CRISIS: &[&str] = &[
     // VI
-    "tự tử","chết đi","không muốn sống","kết thúc tất cả",
-    "không ai nhớ mình","biến mất mãi mãi","không còn đau nữa",
-    "thuốc ngủ","nhảy xuống","treo cổ",
+    "tự tử",
+    "chết đi",
+    "không muốn sống",
+    "kết thúc tất cả",
+    "không ai nhớ mình",
+    "biến mất mãi mãi",
+    "không còn đau nữa",
+    "thuốc ngủ",
+    "nhảy xuống",
+    "treo cổ",
     // EN
-    "want to die","kill myself","end it all","suicide",
-    "no reason to live","end my life",
+    "want to die",
+    "kill myself",
+    "end it all",
+    "suicide",
+    "no reason to live",
+    "end my life",
 ];
 
 static KW_RISK: &[&str] = &[
     // VI
-    "làm hại","trả thù","cho nó một bài học",
-    "muốn nó biến mất","không ai phát hiện","xóa dấu vết",
+    "làm hại",
+    "trả thù",
+    "cho nó một bài học",
+    "muốn nó biến mất",
+    "không ai phát hiện",
+    "xóa dấu vết",
     // EN
-    "harm someone","get revenge","hurt them","without getting caught",
+    "harm someone",
+    "get revenge",
+    "hurt them",
+    "without getting caught",
 ];
 
 static KW_MANIPULATE: &[&str] = &[
     // VI
-    "làm người khác tin","thao túng","khiến người ta",
-    "viết tin giả","tạo thông tin sai","giả vờ là","đóng giả","lừa dối",
+    "làm người khác tin",
+    "thao túng",
+    "khiến người ta",
+    "viết tin giả",
+    "tạo thông tin sai",
+    "giả vờ là",
+    "đóng giả",
+    "lừa dối",
     // EN
-    "manipulate","fake news","make them believe",
-    "deceive","impersonate","spread misinformation",
+    "manipulate",
+    "fake news",
+    "make them believe",
+    "deceive",
+    "impersonate",
+    "spread misinformation",
 ];
 
 static KW_HEAL: &[&str] = &[
     // VI
-    "tôi buồn","tôi đau","không biết phải làm sao",
-    "cô đơn","mất mát","chia tay","thất bại",
-    "không ai hiểu","mệt mỏi quá",
+    "tôi buồn",
+    "tôi đau",
+    "không biết phải làm sao",
+    "cô đơn",
+    "mất mát",
+    "chia tay",
+    "thất bại",
+    "không ai hiểu",
+    "mệt mỏi quá",
     // EN
-    "i'm sad","i feel lost","heartbroken","lonely",
-    "don't know what to do","exhausted",
+    "i'm sad",
+    "i feel lost",
+    "heartbroken",
+    "lonely",
+    "don't know what to do",
+    "exhausted",
 ];
 
 static KW_LEARN: &[&str] = &[
     // VI
-    "là gì","thế nào","tại sao","vì sao","giải thích",
-    "cho tôi biết","nghĩa là gì","ví dụ","học cách",
+    "là gì",
+    "thế nào",
+    "tại sao",
+    "vì sao",
+    "giải thích",
+    "cho tôi biết",
+    "nghĩa là gì",
+    "ví dụ",
+    "học cách",
     // EN
-    "what is","why ","how does","explain","definition",
+    "what is",
+    "why ",
+    "how does",
+    "explain",
+    "definition",
 ];
 
 static KW_RESEARCH: &[&str] = &[
     // VI
-    "nghiên cứu","phân tích","so sánh","đánh giá",
-    "tổng hợp","dữ liệu","bằng chứng",
+    "nghiên cứu",
+    "phân tích",
+    "so sánh",
+    "đánh giá",
+    "tổng hợp",
+    "dữ liệu",
+    "bằng chứng",
     // EN
-    "research","analyze","compare","evaluate","evidence",
+    "research",
+    "analyze",
+    "compare",
+    "evaluate",
+    "evidence",
 ];
 
 static KW_TECHNICAL: &[&str] = &[
-    "code","api","function","implement","bug","error",
-    "compile","library","framework","algorithm","database","debug",
+    "code",
+    "api",
+    "function",
+    "implement",
+    "bug",
+    "error",
+    "compile",
+    "library",
+    "framework",
+    "algorithm",
+    "database",
+    "debug",
 ];
 
 static KW_CREATIVE: &[&str] = &[
     // VI
-    "viết truyện","sáng tác","kịch bản","nhân vật","tiểu thuyết","thơ",
+    "viết truyện",
+    "sáng tác",
+    "kịch bản",
+    "nhân vật",
+    "tiểu thuyết",
+    "thơ",
     // EN
-    "write a story","fiction","poem","screenplay","creative writing",
+    "write a story",
+    "fiction",
+    "poem",
+    "screenplay",
+    "creative writing",
 ];
 
 static KW_INFORM: &[&str] = &[
     // VI
-    "bài báo","viết bài","báo cáo","thuyết trình",
+    "bài báo",
+    "viết bài",
+    "báo cáo",
+    "thuyết trình",
     // EN
-    "write an article","report","presentation","blog post",
+    "write an article",
+    "report",
+    "presentation",
+    "blog post",
 ];
 
 static KW_COMMAND: &[&str] = &[
     // VI
-    "tắt đèn","bật đèn","mở đèn","điều chỉnh","đặt nhiệt độ",
+    "tắt đèn",
+    "bật đèn",
+    "mở đèn",
+    "điều chỉnh",
+    "đặt nhiệt độ",
     // EN
-    "turn off","turn on","set temperature","play music",
+    "turn off",
+    "turn on",
+    "set temperature",
+    "play music",
+];
+
+/// Keywords cho lệnh học trực tiếp — user muốn HomeOS ghi nhớ vĩnh viễn (QR).
+static KW_LEARN_COMMAND: &[&str] = &[
+    // VI
+    "hãy học",
+    "ghi nhớ",
+    "nhớ rằng",
+    "nhớ điều này",
+    "học điều này",
+    "ghi lại",
+    "lưu lại",
+    "hãy nhớ",
+    "ghi vào qr",
+    // EN
+    "remember this",
+    "learn this",
+    "memorize",
+    "store this",
+    "save this fact",
+    "remember that",
+];
+
+/// Keywords cho xác nhận kiến thức — "cái này đúng" → promote QR.
+static KW_CONFIRM_KNOWLEDGE: &[&str] = &[
+    // VI
+    "cái này đúng",
+    "điều này đúng",
+    "đúng rồi đấy",
+    "chính xác",
+    "đúng vậy",
+    "đúng thế",
+    "kiến thức này đúng",
+    "thông tin đúng",
+    // EN
+    "that's correct",
+    "this is right",
+    "that's right",
+    "correct",
+    "exactly right",
+    "confirmed",
+];
+
+static KW_CONFIRM: &[&str] = &[
+    // VI
+    "đồng ý",
+    "có",
+    "ừ",
+    "ok",
+    "được",
+    "vâng",
+    "chấp nhận",
+    "duyệt",
+    "đúng rồi",
+    "phê duyệt",
+    "cho phép",
+    // EN
+    "yes",
+    "yeah",
+    "yep",
+    "sure",
+    "approve",
+    "accept",
+    "confirm",
+    "agreed",
+    "go ahead",
+    "do it",
+    "ok",
+    "okay",
+];
+
+static KW_DENY: &[&str] = &[
+    // VI
+    "không",
+    "từ chối",
+    "không đồng ý",
+    "hủy",
+    "không cho",
+    "thôi",
+    "đừng",
+    "không được",
+    "bỏ qua",
+    "skip",
+    "bỏ",
+    // EN
+    "no",
+    "nope",
+    "deny",
+    "reject",
+    "cancel",
+    "refuse",
+    "don't",
+    "stop",
+    "skip",
+    "decline",
+    "never",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,21 +347,27 @@ static KW_COMMAND: &[&str] = &[
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct IntentEstimate {
-    pub primary:      IntentKind,
-    pub confidence:   f32,
-    pub signals:      Vec<String>, // lý do (debug)
+    pub primary: IntentKind,
+    pub confidence: f32,
+    pub signals: Vec<String>, // lý do (debug)
     pub need_clarify: bool,
     pub clarify_kind: Option<ClarifyKind>,
+    /// Input là thán từ ngắn (Ah!, ya!, ôi!...) — cần listening mode
+    pub is_exclamation: bool,
+    /// Input chứa đại từ chưa rõ (bà ấy, anh ta, nó...) — cần reference resolution
+    pub has_unresolved_ref: bool,
+    /// Input là cảm xúc thoáng qua, không rõ intent (chán, mệt, buồn...)
+    pub is_vague_emotion: bool,
 }
 
 /// Loại câu hỏi cần làm rõ — caller quyết định text cụ thể.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ClarifyKind {
-    WhatPurpose,    // "dùng để làm gì?"
-    WhatDirection,  // "hướng nào?"
-    WhatContext,    // "tình huống cụ thể?"
-    CheckingIn,     // "bạn đang ổn không?"
+    WhatPurpose,   // "dùng để làm gì?"
+    WhatDirection, // "hướng nào?"
+    WhatContext,   // "tình huống cụ thể?"
+    CheckingIn,    // "bạn đang ổn không?"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +376,7 @@ pub enum ClarifyKind {
 
 #[derive(Default, Clone)]
 struct Bucket {
-    score:   f32,
+    score: f32,
     reasons: Vec<String>,
 }
 
@@ -200,28 +396,35 @@ impl Bucket {
 /// `cur_v` = valence hiện tại từ ConversationCurve (0.0 nếu không có).
 /// `cur_a` = arousal (0.5 mặc định).
 pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
-    let lo    = text.to_lowercase();
+    let lo = text.to_lowercase();
     let words = lo.split_whitespace().count();
 
-    let mut buckets: [(IntentKind, Bucket); 12] = [
-        (IntentKind::Learn,      Bucket::default()),
-        (IntentKind::Inform,     Bucket::default()),
-        (IntentKind::Research,   Bucket::default()),
-        (IntentKind::Heal,       Bucket::default()),
-        (IntentKind::Technical,  Bucket::default()),
-        (IntentKind::Creative,   Bucket::default()),
-        (IntentKind::Explore,    Bucket::default()),
+    let mut buckets: [(IntentKind, Bucket); 16] = [
+        (IntentKind::Learn, Bucket::default()),
+        (IntentKind::Inform, Bucket::default()),
+        (IntentKind::Research, Bucket::default()),
+        (IntentKind::Heal, Bucket::default()),
+        (IntentKind::Technical, Bucket::default()),
+        (IntentKind::Creative, Bucket::default()),
+        (IntentKind::Explore, Bucket::default()),
         (IntentKind::Manipulate, Bucket::default()),
-        (IntentKind::Risk,       Bucket::default()),
-        (IntentKind::Crisis,     Bucket::default()),
-        (IntentKind::Command,    Bucket::default()),
-        (IntentKind::Chat,       Bucket::default()),
+        (IntentKind::Risk, Bucket::default()),
+        (IntentKind::Crisis, Bucket::default()),
+        (IntentKind::Command, Bucket::default()),
+        (IntentKind::Chat, Bucket::default()),
+        (IntentKind::Confirm, Bucket::default()),
+        (IntentKind::Deny, Bucket::default()),
+        (IntentKind::LearnCommand, Bucket::default()),
+        (IntentKind::ConfirmKnowledge, Bucket::default()),
     ];
 
     macro_rules! add {
         ($kind:expr, $score:expr, $reason:expr) => {
             for (k, b) in buckets.iter_mut() {
-                if *k == $kind { b.add($score, $reason); break; }
+                if *k == $kind {
+                    b.add($score, $reason);
+                    break;
+                }
             }
         };
     }
@@ -230,16 +433,127 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
     add!(IntentKind::Learn, SCORE_LEARN_BASE, "baseline");
 
     // Scan từng keyword table
-    for kw in KW_CRISIS    { if lo.contains(kw) { add!(IntentKind::Crisis,     SCORE_CRISIS_KW,  &format!("kw:{}", kw)); } }
-    for kw in KW_RISK      { if lo.contains(kw) { add!(IntentKind::Risk,       SCORE_RISK_KW,    &format!("kw:{}", kw)); } }
-    for kw in KW_MANIPULATE{ if lo.contains(kw) { add!(IntentKind::Manipulate, SCORE_MANIP_KW,   &format!("kw:{}", kw)); } }
-    for kw in KW_HEAL      { if lo.contains(kw) { add!(IntentKind::Heal,       SCORE_HEAL_KW,    &format!("kw:{}", kw)); } }
-    for kw in KW_LEARN     { if lo.contains(kw) { add!(IntentKind::Learn,      SCORE_LEARN_KW,   &format!("kw:{}", kw)); } }
-    for kw in KW_RESEARCH  { if lo.contains(kw) { add!(IntentKind::Research,   SCORE_MEDIUM_KW,  &format!("kw:{}", kw)); } }
-    for kw in KW_TECHNICAL { if lo.contains(kw) { add!(IntentKind::Technical,  SCORE_HIGH_KW,    &format!("kw:{}", kw)); } }
-    for kw in KW_CREATIVE  { if lo.contains(kw) { add!(IntentKind::Creative,   SCORE_MEDIUM_KW,  &format!("kw:{}", kw)); } }
-    for kw in KW_INFORM    { if lo.contains(kw) { add!(IntentKind::Inform,     SCORE_MEDIUM_KW,  &format!("kw:{}", kw)); } }
-    for kw in KW_COMMAND   { if lo.contains(kw) { add!(IntentKind::Command,    SCORE_CMD_KW,     &format!("kw:{}", kw)); } }
+    for kw in KW_CRISIS {
+        if lo.contains(kw) {
+            add!(IntentKind::Crisis, SCORE_CRISIS_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_RISK {
+        if lo.contains(kw) {
+            add!(IntentKind::Risk, SCORE_RISK_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_MANIPULATE {
+        if lo.contains(kw) {
+            add!(
+                IntentKind::Manipulate,
+                SCORE_MANIP_KW,
+                &format!("kw:{}", kw)
+            );
+        }
+    }
+    for kw in KW_HEAL {
+        if lo.contains(kw) {
+            add!(IntentKind::Heal, SCORE_HEAL_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_LEARN {
+        if lo.contains(kw) {
+            add!(IntentKind::Learn, SCORE_LEARN_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_RESEARCH {
+        if lo.contains(kw) {
+            add!(IntentKind::Research, SCORE_MEDIUM_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_TECHNICAL {
+        if lo.contains(kw) {
+            add!(IntentKind::Technical, SCORE_HIGH_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_CREATIVE {
+        if lo.contains(kw) {
+            add!(IntentKind::Creative, SCORE_MEDIUM_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_INFORM {
+        if lo.contains(kw) {
+            add!(IntentKind::Inform, SCORE_MEDIUM_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_COMMAND {
+        if lo.contains(kw) {
+            add!(IntentKind::Command, SCORE_CMD_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_CONFIRM {
+        if lo.contains(kw) {
+            add!(IntentKind::Confirm, SCORE_CMD_KW, &format!("kw:{}", kw));
+        }
+    }
+    for kw in KW_DENY {
+        if lo.contains(kw) {
+            add!(IntentKind::Deny, SCORE_CMD_KW, &format!("kw:{}", kw));
+        }
+    }
+    // LearnCommand — "hãy học", "ghi nhớ", "nhớ rằng"
+    for kw in KW_LEARN_COMMAND {
+        if lo.contains(kw) {
+            add!(
+                IntentKind::LearnCommand,
+                SCORE_LEARN_CMD_KW,
+                &format!("kw:{}", kw)
+            );
+        }
+    }
+    // ConfirmKnowledge — "cái này đúng", "chính xác"
+    for kw in KW_CONFIRM_KNOWLEDGE {
+        if lo.contains(kw) {
+            add!(
+                IntentKind::ConfirmKnowledge,
+                SCORE_CONFIRM_KNOWLEDGE_KW,
+                &format!("kw:{}", kw)
+            );
+        }
+    }
+
+    // ── Listening signals ─────────────────────────────────────────────────────
+
+    // Exclamation detection: rất ngắn + có dấu ! hoặc thán từ
+    let is_exclamation = words <= 2
+        && (lo.contains('!')
+            || matches!(
+                lo.trim_matches(|c: char| !c.is_alphanumeric()),
+                "ah" | "ôi" | "ya" | "ui" | "ơi" | "trời" | "ối"
+                | "hả" | "huh" | "oh" | "wow" | "ooh" | "uh"
+                | "chà" | "ồ" | "á" | "ơ" | "ê" | "hé"
+            ));
+
+    // Unresolved reference: chứa đại từ chỉ người thứ 3 không rõ
+    let has_unresolved_ref = lo.contains("bà ấy")
+        || lo.contains("ông ấy")
+        || lo.contains("anh ấy")
+        || lo.contains("chị ấy")
+        || lo.contains("cô ấy")
+        || lo.contains("nó ")
+        || lo.contains("người đó")
+        || lo.contains("họ ")
+        || lo.contains("she ")
+        || lo.contains("he ")
+        || lo.contains("they ")
+        || lo.contains("that person");
+
+    // Vague emotion: cảm xúc thoáng qua không có hành động cụ thể
+    let vague_emotion_kws = [
+        "chán", "mệt", "buồn", "bored", "tired", "meh", "ugh",
+        "chán quá", "mệt quá", "chán ghê", "không vui",
+    ];
+    let is_vague_emotion = words <= 5
+        && vague_emotion_kws.iter().any(|kw| lo.contains(kw))
+        && !lo.contains("vì")
+        && !lo.contains("tại")
+        && !lo.contains("because");
 
     // Emotional amplifiers — dùng cur_v/cur_a từ ConversationCurve
     // Không hardcode "buồn" vào đây — dùng đường cong số
@@ -254,35 +568,49 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
     }
 
     // Tìm winner
-    let (best_kind, best_bucket) = buckets.iter()
-        .max_by(|a, b| a.1.score.partial_cmp(&b.1.score).unwrap())
+    let (best_kind, best_bucket) = buckets
+        .iter()
+        .max_by(|a, b| a.1.score.total_cmp(&b.1.score))
         .map(|(k, b)| (*k, b.clone()))
         .unwrap();
 
     let confidence = best_bucket.score.clamp(MIN_CONF, MAX_CONF);
 
     // NeedClarify: chỉ khi không nhạy cảm, confidence thấp, câu ngắn
-    let need_clarify   = !best_kind.is_sensitive() && confidence < CLARIFY_THRESHOLD && words <= SHORT_SENTENCE;
-    let clarify_kind   = if need_clarify { Some(clarify_kind_for(best_kind, cur_v)) } else { None };
+    let need_clarify =
+        !best_kind.is_sensitive() && confidence < CLARIFY_THRESHOLD && words <= SHORT_SENTENCE;
+    let clarify_kind = if need_clarify {
+        Some(clarify_kind_for(best_kind, cur_v))
+    } else {
+        None
+    };
 
     IntentEstimate {
-        primary:      best_kind,
+        primary: best_kind,
         confidence,
-        signals:      best_bucket.reasons,
+        signals: best_bucket.reasons,
         need_clarify,
         clarify_kind,
+        is_exclamation,
+        has_unresolved_ref,
+        is_vague_emotion,
     }
 }
 
 /// Loại câu clarify phù hợp — caller quyết định text.
 fn clarify_kind_for(kind: IntentKind, cur_v: f32) -> ClarifyKind {
     match kind {
-        IntentKind::Learn     => ClarifyKind::WhatPurpose,
-        IntentKind::Research  => ClarifyKind::WhatDirection,
+        IntentKind::Learn => ClarifyKind::WhatPurpose,
+        IntentKind::Research => ClarifyKind::WhatDirection,
         IntentKind::Technical => ClarifyKind::WhatContext,
-        IntentKind::Creative  => ClarifyKind::WhatContext,
-        _ => if cur_v < V_HEAL_SAD { ClarifyKind::CheckingIn }
-             else { ClarifyKind::WhatContext }
+        IntentKind::Creative => ClarifyKind::WhatContext,
+        _ => {
+            if cur_v < V_HEAL_SAD {
+                ClarifyKind::CheckingIn
+            } else {
+                ClarifyKind::WhatContext
+            }
+        }
     }
 }
 
@@ -307,27 +635,91 @@ pub enum IntentAction {
     CrisisOverride,
     /// Thêm câu hỏi làm rõ
     AddClarify { kind: ClarifyKind },
+    /// User xác nhận — gửi confirm signal tới UserAuthority
+    UserConfirm,
+    /// User từ chối — gửi deny signal tới UserAuthority
+    UserDeny,
+    /// User ra lệnh học → ghi nội dung vào QR (bỏ qua Dream cycle)
+    ForceLearnQR,
+    /// User xác nhận kiến thức → promote last learned item lên QR
+    ConfirmLearnQR,
+    /// Im lặng quan sát — chưa đủ ngữ cảnh để trả lời.
+    /// Ghi nhận input, đợi thêm thông tin.
+    Observe,
+    /// Ghi nhận nhẹ — phát hiện cảm xúc nhưng không cần response đầy đủ.
+    /// Ví dụ: "Ah!", "ya..!", thán từ đơn.
+    SilentAck,
 }
 
 /// Quyết định hành động từ IntentEstimate + emotional state.
+///
+/// Ưu tiên: Crisis > Risk > Manipulate > Heal > Listening signals > Clarify > Proceed
+///
+/// Listening signals (mới):
+///   - Exclamation + không crisis → SilentAck (ghi nhận, đợi)
+///   - Unresolved ref + không crisis/heal → Observe (cần context để phản hồi)
+///   - Vague emotion + không rõ intent → Observe (đợi thêm)
 pub fn decide_action(est: &IntentEstimate, cur_v: f32) -> IntentAction {
+    // Sensitive intents luôn được xử lý trước — không bao giờ silent
     match est.primary {
-        IntentKind::Crisis     => IntentAction::CrisisOverride,
-        IntentKind::Risk       => IntentAction::AskContext { angry: cur_v < V_RISK_ANGRY },
-        IntentKind::Manipulate => IntentAction::SoftRefusal,
-        IntentKind::Heal       => IntentAction::EmpathizeFirst,
-        _ => if est.need_clarify {
-            IntentAction::AddClarify { kind: est.clarify_kind.unwrap_or(ClarifyKind::WhatContext) }
-        } else {
-            IntentAction::Proceed
+        IntentKind::Crisis => return IntentAction::CrisisOverride,
+        IntentKind::Risk => {
+            return IntentAction::AskContext {
+                angry: cur_v < V_RISK_ANGRY,
+            }
         }
+        IntentKind::Manipulate => return IntentAction::SoftRefusal,
+        _ => {}
+    }
+
+    // Heal vẫn ưu tiên — nhưng nếu vague emotion → Observe thay vì Empathize
+    if est.primary == IntentKind::Heal {
+        if est.is_vague_emotion && est.confidence < CLARIFY_THRESHOLD {
+            // "Hôm nay thật chán!!!" → chưa rõ cần gì → observe
+            return IntentAction::Observe;
+        }
+        return IntentAction::EmpathizeFirst;
+    }
+
+    // User commands
+    match est.primary {
+        IntentKind::Confirm => return IntentAction::UserConfirm,
+        IntentKind::Deny => return IntentAction::UserDeny,
+        IntentKind::LearnCommand => return IntentAction::ForceLearnQR,
+        IntentKind::ConfirmKnowledge => return IntentAction::ConfirmLearnQR,
+        _ => {}
+    }
+
+    // ── Listening signals — im lặng thông minh ───────────────────────────────
+
+    // Thán từ đơn: "Ah!", "ya!" → ghi nhận, đợi
+    if est.is_exclamation {
+        return IntentAction::SilentAck;
+    }
+
+    // Đại từ chưa rõ: "Bà ấy mới mất" → cần resolve trước khi trả lời
+    if est.has_unresolved_ref {
+        return IntentAction::Observe;
+    }
+
+    // Cảm xúc mơ hồ: "chán quá" → đợi thêm context
+    if est.is_vague_emotion {
+        return IntentAction::Observe;
+    }
+
+    // ── Normal flow ──────────────────────────────────────────────────────────
+    if est.need_clarify {
+        IntentAction::AddClarify {
+            kind: est.clarify_kind.unwrap_or(ClarifyKind::WhatContext),
+        }
+    } else {
+        IntentAction::Proceed
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests — test logic, không test strings
 // ─────────────────────────────────────────────────────────────────────────────
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Crisis text — đặt ở đây để gate.rs (agents) có thể dùng
@@ -390,7 +782,12 @@ mod tests {
     fn crisis_mood_amplifier() {
         // curV < -0.70 && curA < 0.35 → rút lui → Crisis
         let e = estimate_intent("tôi mệt lắm", V_CRISIS_LOW - 0.05, A_CRISIS_QUIET - 0.05);
-        assert_eq!(e.primary, IntentKind::Crisis, "Mood amplifier: {:?}", e.primary);
+        assert_eq!(
+            e.primary,
+            IntentKind::Crisis,
+            "Mood amplifier: {:?}",
+            e.primary
+        );
     }
 
     #[test]
@@ -470,14 +867,19 @@ mod tests {
     #[test]
     fn action_risk_ask_context() {
         let e = estimate_intent("làm hại ai đó", 0.0, 0.5);
-        assert!(matches!(decide_action(&e, -0.3), IntentAction::AskContext { .. }));
+        assert!(matches!(
+            decide_action(&e, -0.3),
+            IntentAction::AskContext { .. }
+        ));
     }
 
     #[test]
     fn action_risk_angry_flagged() {
         let e = estimate_intent("muốn trả thù", V_RISK_ANGRY - 0.05, A_RISK_HIGH + 0.05);
-        assert_eq!(decide_action(&e, V_RISK_ANGRY - 0.05),
-            IntentAction::AskContext { angry: true });
+        assert_eq!(
+            decide_action(&e, V_RISK_ANGRY - 0.05),
+            IntentAction::AskContext { angry: true }
+        );
     }
 
     #[test]
@@ -496,5 +898,105 @@ mod tests {
     fn action_learn_proceeds() {
         let e = estimate_intent("photosynthesis là gì? explain chi tiết", 0.2, 0.45);
         assert_eq!(decide_action(&e, 0.2), IntentAction::Proceed);
+    }
+
+    // ── Confirm / Deny ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn confirm_detected_vi() {
+        let e = estimate_intent("đồng ý", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::Confirm);
+    }
+
+    #[test]
+    fn confirm_detected_en() {
+        let e = estimate_intent("yes, go ahead", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::Confirm);
+    }
+
+    #[test]
+    fn deny_detected_vi() {
+        let e = estimate_intent("không, từ chối", 0.0, 0.5);
+        assert_eq!(e.primary, IntentKind::Deny);
+    }
+
+    #[test]
+    fn deny_detected_en() {
+        let e = estimate_intent("no, reject that", 0.0, 0.5);
+        assert_eq!(e.primary, IntentKind::Deny);
+    }
+
+    #[test]
+    fn action_confirm() {
+        let e = estimate_intent("đồng ý cho phép", 0.3, 0.5);
+        assert_eq!(decide_action(&e, 0.3), IntentAction::UserConfirm);
+    }
+
+    #[test]
+    fn action_deny() {
+        let e = estimate_intent("không đồng ý, từ chối", 0.0, 0.5);
+        assert_eq!(decide_action(&e, 0.0), IntentAction::UserDeny);
+    }
+
+    #[test]
+    fn crisis_overrides_confirm() {
+        // Crisis keywords + confirm → crisis wins (priority via mood amplifier)
+        let e = estimate_intent("tôi không muốn sống nữa, kết thúc tất cả", -0.8, 0.3);
+        assert_eq!(e.primary, IntentKind::Crisis, "Crisis overrides everything");
+    }
+
+    // ── LearnCommand / ConfirmKnowledge ──────────────────────────────────────
+
+    #[test]
+    fn learn_command_vi() {
+        let e = estimate_intent("hãy học điều này đi", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::LearnCommand);
+    }
+
+    #[test]
+    fn learn_command_ghi_nho() {
+        let e = estimate_intent("ghi nhớ thông tin về Scarlett", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::LearnCommand);
+    }
+
+    #[test]
+    fn learn_command_en() {
+        let e = estimate_intent("remember this fact please", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::LearnCommand);
+    }
+
+    #[test]
+    fn learn_command_action() {
+        let e = estimate_intent("hãy học cái này", 0.3, 0.5);
+        assert_eq!(decide_action(&e, 0.3), IntentAction::ForceLearnQR);
+    }
+
+    #[test]
+    fn confirm_knowledge_vi() {
+        let e = estimate_intent("cái này đúng rồi", 0.3, 0.5);
+        assert_eq!(
+            e.primary,
+            IntentKind::ConfirmKnowledge,
+            "actual: {:?}",
+            e.primary
+        );
+    }
+
+    #[test]
+    fn confirm_knowledge_chinh_xac() {
+        let e = estimate_intent("thông tin chính xác lắm", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::ConfirmKnowledge);
+    }
+
+    #[test]
+    fn confirm_knowledge_en() {
+        let e = estimate_intent("that's correct information", 0.3, 0.5);
+        assert_eq!(e.primary, IntentKind::ConfirmKnowledge);
+    }
+
+    #[test]
+    fn confirm_knowledge_action() {
+        let e = estimate_intent("điều này đúng rồi", 0.3, 0.5);
+        assert_eq!(decide_action(&e, 0.3), IntentAction::ConfirmLearnQR);
     }
 }

@@ -20,10 +20,18 @@
 //! HALT               → dừng
 //! DREAM              → trigger dream cycle
 //! STATS              → emit system stats
+//! PUSH_NUM f64       → push numeric chain (4-molecule encoding)
+//! FUSE               → pop 1, check chain for infinite loops (QT2: ∞-1)
+//! TRACE              → toggle execution tracing
+//! INSPECT            → pop 1, emit chain structure info
+//! ASSERT             → pop 1, error if empty
+//! TYPEOF             → pop 1, emit type classification
+//! WHY                → pop 2, explain connection between chains
+//! EXPLAIN            → pop 1, trace chain's origin
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
 
@@ -70,81 +78,155 @@ pub enum Op {
     Stats,
     /// No-op
     Nop,
+    /// Pop top, store vào biến cục bộ (cho `let` binding)
+    Store(String),
+    /// Push biến cục bộ lên stack
+    LoadLocal(String),
+    /// Push numeric literal → encode as 4-molecule chain
+    PushNum(f64),
+    /// QT2: FUSE — pop 1 chain, kiểm tra không có vòng lặp vô hạn trong DNA.
+    /// Nếu chain tham chiếu chính nó (cycle) → push empty chain (∞ = sai).
+    /// Nếu chain hữu hạn → push lại chain (∞-1 = đúng).
+    Fuse,
+
+    /// Push new scope frame (for blocks: fn body, if branches, loops)
+    ScopeBegin,
+    /// Pop scope frame, discarding locals defined in this scope
+    ScopeEnd,
+
+    // ── Reasoning & Debug primitives ────────────────────────────────────────
+    /// Trace: bật/tắt execution tracing (mỗi bước emit TraceStep event)
+    Trace,
+    /// Inspect: pop 1 chain, emit InspectChain event (hiển thị cấu trúc bên trong)
+    Inspect,
+    /// Assert: pop 1 chain, nếu empty → emit AssertFailed event
+    Assert,
+    /// TypeOf: pop 1 chain, emit TypeInfo event (phân loại: SDF/MATH/EMOTICON/MUSICAL/Mixed)
+    TypeOf,
+    /// Why: pop 2 chains, tìm đường kết nối giữa chúng (qua Silk)
+    Why,
+    /// Explain: pop 1 chain, truy ngược nguồn gốc (tại sao chain này tồn tại)
+    Explain,
+
+    /// Push 1-molecule chain from explicit dimension values.
+    /// `{ S=1 R=2 V=128 A=128 T=3 }` → MolecularChain with 1 Molecule.
+    /// Used by LeoAI to express knowledge as Olang code.
+    PushMol(u8, u8, u8, u8, u8),
 }
 
 impl Op {
     /// Tên opcode (cho debugging).
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Push(_)  => "PUSH",
-            Self::Load(_)  => "LOAD",
-            Self::Lca      => "LCA",
-            Self::Edge(_)  => "EDGE",
+            Self::Push(_) => "PUSH",
+            Self::Load(_) => "LOAD",
+            Self::Lca => "LCA",
+            Self::Edge(_) => "EDGE",
             Self::Query(_) => "QUERY",
-            Self::Emit     => "EMIT",
-            Self::Call(_)  => "CALL",
-            Self::Ret      => "RET",
-            Self::Jmp(_)   => "JMP",
-            Self::Jz(_)    => "JZ",
-            Self::Dup      => "DUP",
-            Self::Pop      => "POP",
-            Self::Swap     => "SWAP",
-            Self::Loop(_)  => "LOOP",
-            Self::Halt     => "HALT",
-            Self::Dream    => "DREAM",
-            Self::Stats    => "STATS",
-            Self::Nop      => "NOP",
+            Self::Emit => "EMIT",
+            Self::Call(_) => "CALL",
+            Self::Ret => "RET",
+            Self::Jmp(_) => "JMP",
+            Self::Jz(_) => "JZ",
+            Self::Dup => "DUP",
+            Self::Pop => "POP",
+            Self::Swap => "SWAP",
+            Self::Loop(_) => "LOOP",
+            Self::Halt => "HALT",
+            Self::Dream => "DREAM",
+            Self::Stats => "STATS",
+            Self::Nop => "NOP",
+            Self::Store(_) => "STORE",
+            Self::LoadLocal(_) => "LOAD_LOCAL",
+            Self::PushNum(_) => "PUSH_NUM",
+            Self::Fuse => "FUSE",
+            Self::ScopeBegin => "SCOPE_BEGIN",
+            Self::ScopeEnd => "SCOPE_END",
+            Self::Trace => "TRACE",
+            Self::Inspect => "INSPECT",
+            Self::Assert => "ASSERT",
+            Self::TypeOf => "TYPEOF",
+            Self::Why => "WHY",
+            Self::Explain => "EXPLAIN",
+            Self::PushMol(..) => "PUSH_MOL",
         }
     }
 
     /// Serialize → bytes (compact).
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
-            Self::Nop      => alloc::vec![0x00],
-            Self::Lca      => alloc::vec![0x01],
-            Self::Emit     => alloc::vec![0x02],
-            Self::Ret      => alloc::vec![0x03],
-            Self::Dup      => alloc::vec![0x04],
-            Self::Pop      => alloc::vec![0x05],
-            Self::Swap     => alloc::vec![0x06],
-            Self::Halt     => alloc::vec![0x07],
-            Self::Dream    => alloc::vec![0x08],
-            Self::Stats    => alloc::vec![0x09],
-            Self::Edge(r)  => alloc::vec![0x10, *r],
+            Self::Nop => alloc::vec![0x00],
+            Self::Lca => alloc::vec![0x01],
+            Self::Emit => alloc::vec![0x02],
+            Self::Ret => alloc::vec![0x03],
+            Self::Dup => alloc::vec![0x04],
+            Self::Pop => alloc::vec![0x05],
+            Self::Swap => alloc::vec![0x06],
+            Self::Halt => alloc::vec![0x07],
+            Self::Dream => alloc::vec![0x08],
+            Self::Stats => alloc::vec![0x09],
+            Self::Edge(r) => alloc::vec![0x10, *r],
             Self::Query(r) => alloc::vec![0x11, *r],
-            Self::Loop(n)  => {
+            Self::Loop(n) => {
                 let mut b = alloc::vec![0x20];
                 b.extend_from_slice(&n.to_le_bytes());
                 b
             }
-            Self::Jmp(i)   => {
+            Self::Jmp(i) => {
                 let mut b = alloc::vec![0x21];
                 b.extend_from_slice(&(*i as u32).to_le_bytes());
                 b
             }
-            Self::Jz(i)    => {
+            Self::Jz(i) => {
                 let mut b = alloc::vec![0x22];
                 b.extend_from_slice(&(*i as u32).to_le_bytes());
                 b
             }
-            Self::Push(c)  => {
-                let cb = c.to_bytes();
+            Self::Push(c) => {
+                let cb = c.to_tagged_bytes();
                 let mut b = alloc::vec![0x30, cb.len() as u8];
                 b.extend_from_slice(&cb);
                 b
             }
-            Self::Load(s)  => {
+            Self::Load(s) => {
                 let sb = s.as_bytes();
                 let mut b = alloc::vec![0x31, sb.len() as u8];
                 b.extend_from_slice(sb);
                 b
             }
-            Self::Call(s)  => {
+            Self::Call(s) => {
                 let sb = s.as_bytes();
                 let mut b = alloc::vec![0x32, sb.len() as u8];
                 b.extend_from_slice(sb);
                 b
             }
+            Self::Store(s) => {
+                let sb = s.as_bytes();
+                let mut b = alloc::vec![0x33, sb.len() as u8];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::LoadLocal(s) => {
+                let sb = s.as_bytes();
+                let mut b = alloc::vec![0x34, sb.len() as u8];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::PushNum(n) => {
+                let mut b = alloc::vec![0x35];
+                b.extend_from_slice(&n.to_le_bytes());
+                b
+            }
+            Self::Fuse => alloc::vec![0x0A],
+            Self::ScopeBegin => alloc::vec![0x13],
+            Self::ScopeEnd => alloc::vec![0x14],
+            Self::Trace => alloc::vec![0x0B],
+            Self::Inspect => alloc::vec![0x0C],
+            Self::Assert => alloc::vec![0x0D],
+            Self::TypeOf => alloc::vec![0x0E],
+            Self::Why => alloc::vec![0x0F],
+            Self::Explain => alloc::vec![0x12],
+            Self::PushMol(s, r, v, a, t) => alloc::vec![0x36, *s, *r, *v, *a, *t],
         }
     }
 }
@@ -157,14 +239,17 @@ impl Op {
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
 pub struct OlangProgram {
-    pub ops:  Vec<Op>,
+    pub ops: Vec<Op>,
     pub name: String,
 }
 
 #[allow(missing_docs)]
 impl OlangProgram {
     pub fn new(name: &str) -> Self {
-        Self { ops: Vec::new(), name: name.into() }
+        Self {
+            ops: Vec::new(),
+            name: name.into(),
+        }
     }
 
     pub fn push_op(&mut self, op: Op) -> &mut Self {
@@ -172,8 +257,12 @@ impl OlangProgram {
         self
     }
 
-    pub fn len(&self) -> usize { self.ops.len() }
-    pub fn is_empty(&self) -> bool { self.ops.is_empty() }
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
 
     /// Serialize toàn bộ program → bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -203,15 +292,30 @@ pub enum OlangIrExpr {
     /// ○{🔥 ∘ 💧} — compose (LCA)
     Compose(String, String),
     /// ○{🔥 ∈ ?} — relation query
-    Relation { subject: String, rel: u8, object: Option<String> },
+    Relation {
+        subject: String,
+        rel: u8,
+        object: Option<String>,
+    },
     /// Direct chain push (e.g. ZWJ sequence already encoded)
     Push(crate::molecular::MolecularChain),
     /// ZWJ sequence: preserve original codepoints for display
-    ZwjDisplay { original: alloc::string::String, chain: crate::molecular::MolecularChain },
+    ZwjDisplay {
+        original: alloc::string::String,
+        chain: crate::molecular::MolecularChain,
+    },
     /// ○{dream} — system command
     Command(String),
     /// Pipeline
     Pipeline(Vec<OlangIrExpr>),
+    /// ○{1 + 2} — arithmetic (QT3: giả thuyết)
+    /// Compiles to: PushNum(lhs), PushNum(rhs), Call("__hyp_<op>")
+    Arithmetic {
+        lhs: f64,
+        /// "__hyp_add", "__hyp_sub", "__hyp_mul", "__hyp_div"
+        builtin: String,
+        rhs: f64,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -226,7 +330,11 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             prog.push_op(Op::Lca);
         }
 
-        OlangIrExpr::Relation { subject, rel, object } => {
+        OlangIrExpr::Relation {
+            subject,
+            rel,
+            object,
+        } => {
             prog.push_op(Op::Load(subject.clone()));
             if let Some(obj) = object {
                 prog.push_op(Op::Load(obj.clone()));
@@ -243,18 +351,28 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             prog.push_op(Op::Push(chain.clone()));
         }
 
-        OlangIrExpr::Command(cmd) => {
-            match cmd.as_str() {
-                "dream" => { prog.push_op(Op::Dream); }
-                "stats" => { prog.push_op(Op::Stats); }
-                _       => { prog.push_op(Op::Nop);   }
+        OlangIrExpr::Command(cmd) => match cmd.as_str() {
+            "dream" => {
+                prog.push_op(Op::Dream);
             }
-        }
+            "stats" => {
+                prog.push_op(Op::Stats);
+            }
+            _ => {
+                prog.push_op(Op::Nop);
+            }
+        },
 
         OlangIrExpr::Pipeline(exprs) => {
             for e in exprs {
                 emit_expr(e, prog);
             }
+        }
+
+        OlangIrExpr::Arithmetic { lhs, builtin, rhs } => {
+            prog.push_op(Op::PushNum(*lhs));
+            prog.push_op(Op::PushNum(*rhs));
+            prog.push_op(Op::Call(builtin.clone()));
         }
     }
 }
@@ -328,10 +446,10 @@ mod tests {
     fn program_push_ops() {
         let mut p = OlangProgram::new("test");
         p.push_op(Op::Load("fire".into()))
-         .push_op(Op::Load("water".into()))
-         .push_op(Op::Lca)
-         .push_op(Op::Emit)
-         .push_op(Op::Halt);
+            .push_op(Op::Load("water".into()))
+            .push_op(Op::Lca)
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
         assert_eq!(p.len(), 5);
     }
 
@@ -387,11 +505,33 @@ mod tests {
     fn all_opcodes_serialize() {
         // Verify tất cả opcodes serialize không panic
         let ops = alloc::vec![
-            Op::Nop, Op::Lca, Op::Emit, Op::Ret, Op::Dup,
-            Op::Pop, Op::Swap, Op::Halt, Op::Dream, Op::Stats,
-            Op::Edge(0x01), Op::Query(0x06),
-            Op::Loop(3), Op::Jmp(0), Op::Jz(0),
-            Op::Load("x".into()), Op::Call("f".into()),
+            Op::Nop,
+            Op::Lca,
+            Op::Emit,
+            Op::Ret,
+            Op::Dup,
+            Op::Pop,
+            Op::Swap,
+            Op::Halt,
+            Op::Dream,
+            Op::Stats,
+            Op::Edge(0x01),
+            Op::Query(0x06),
+            Op::Loop(3),
+            Op::Jmp(0),
+            Op::Jz(0),
+            Op::Load("x".into()),
+            Op::Call("f".into()),
+            Op::Store("v".into()),
+            Op::LoadLocal("v".into()),
+            Op::PushNum(3.14),
+            Op::Fuse,
+            Op::Trace,
+            Op::Inspect,
+            Op::Assert,
+            Op::TypeOf,
+            Op::Why,
+            Op::Explain,
         ];
         for op in &ops {
             let b = op.to_bytes();

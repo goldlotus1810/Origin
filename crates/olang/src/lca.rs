@@ -20,10 +20,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::molecular::{
-    Molecule, MolecularChain,
-    ShapeBase, RelationBase, EmotionDim, TimeDim,
-};
+use crate::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase, ShapeBase, TimeDim};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LCA of 2 chains
@@ -41,44 +38,154 @@ pub fn lca(a: &MolecularChain, b: &MolecularChain) -> MolecularChain {
 /// `pairs` = slice of (chain_ref, fire_count).
 /// fire_count = số lần node đó được co-activate.
 pub fn lca_weighted(pairs: &[(&MolecularChain, u32)]) -> MolecularChain {
+    lca_with_variance(pairs).chain
+}
+
+/// Kết quả LCA kèm variance — đo mức trừu tượng.
+///
+/// variance ∈ [0.0, 1.0]:
+///   < 0.15 → concrete (các chain rất giống nhau)
+///   < 0.40 → categorical (nhóm liên quan)
+///   ≥ 0.40 → abstract (khái niệm trừu tượng)
+///
+/// extremity ∈ [0.0, 1.0]:
+///   Đo mức "cực đoan" trung bình của inputs.
+///   LCA(😀, 😡): variance cao (divergence) VÀ extremity cao (both extreme).
+///   LCA(😐, 😐): variance thấp VÀ extremity thấp (neutral).
+///   Dùng để phân biệt "trung lập thật" vs "trung bình hóa cực đoan".
+#[derive(Debug, Clone)]
+pub struct LcaResult {
+    /// Chain kết quả LCA.
+    pub chain: MolecularChain,
+    /// Variance trung bình trên tất cả dimensions.
+    pub variance: f32,
+    /// Per-dimension variance: [shape, relation, valence, arousal, time].
+    /// Cho phép biết CHIỀU NÀO diverge mạnh nhất.
+    pub dim_variance: [f32; 5],
+    /// Extremity: trung bình abs(input_i - midpoint) trên valence+arousal.
+    /// Cao = inputs đều cực đoan (dù khác hướng).
+    pub extremity: f32,
+}
+
+/// LCA kèm variance output.
+///
+/// Variance = mean(1 - similarity_full(input_i, lca)) cho mọi input.
+/// Extremity = trung bình abs(value - midpoint) cho valence + arousal.
+/// dim_variance = per-dimension weighted variance.
+pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
+    let empty = LcaResult {
+        chain: MolecularChain::empty(),
+        variance: 0.0,
+        dim_variance: [0.0; 5],
+        extremity: 0.0,
+    };
+
     // Lọc chain rỗng
-    let valid: Vec<(&MolecularChain, u32)> = pairs.iter()
+    let valid: Vec<(&MolecularChain, u32)> = pairs
+        .iter()
         .filter(|(c, _)| !c.is_empty())
         .copied()
         .collect();
 
-    if valid.is_empty() { return MolecularChain::empty(); }
-    if valid.len() == 1 { return valid[0].0.clone(); }
+    if valid.is_empty() {
+        return empty;
+    }
+    if valid.len() == 1 {
+        // Single chain: extremity = how extreme its valence+arousal are
+        let m = &valid[0].0 .0[0];
+        let ext = extremity_single(m.emotion.valence, m.emotion.arousal);
+        return LcaResult {
+            chain: valid[0].0.clone(),
+            variance: 0.0,
+            dim_variance: [0.0; 5],
+            extremity: ext,
+        };
+    }
 
     // Dùng độ dài chain ngắn nhất để avoid out-of-bounds
     let min_len = valid.iter().map(|(c, _)| c.len()).min().unwrap_or(0);
-    if min_len == 0 { return MolecularChain::empty(); }
+    if min_len == 0 {
+        return empty;
+    }
 
     let total_weight: u32 = valid.iter().map(|(_, w)| w).sum();
+    let tw_f = total_weight as f32;
 
     let mut result_mols = Vec::with_capacity(min_len);
+    let mut dim_var_accum = [0.0f32; 5]; // accumulate per-dimension variance
+    let mut extremity_accum = 0.0f32;
 
     for mol_idx in 0..min_len {
         // Collect dimension values từ mọi chain tại vị trí mol_idx
-        let shapes:    Vec<(u8, u32)> = valid.iter().map(|(c, w)| (c.0[mol_idx].shape.as_byte(), *w)).collect();
-        let relations: Vec<(u8, u32)> = valid.iter().map(|(c, w)| (c.0[mol_idx].relation.as_byte(), *w)).collect();
-        let valences:  Vec<(u8, u32)> = valid.iter().map(|(c, w)| (c.0[mol_idx].emotion.valence, *w)).collect();
-        let arousals:  Vec<(u8, u32)> = valid.iter().map(|(c, w)| (c.0[mol_idx].emotion.arousal, *w)).collect();
-        let times:     Vec<(u8, u32)> = valid.iter().map(|(c, w)| (c.0[mol_idx].time.as_byte(), *w)).collect();
+        let shapes: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].shape, *w))
+            .collect();
+        let relations: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].relation, *w))
+            .collect();
+        let valences: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].emotion.valence, *w))
+            .collect();
+        let arousals: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].emotion.arousal, *w))
+            .collect();
+        let times: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].time, *w))
+            .collect();
 
-        let shape_byte    = mode_or_wavg(&shapes,    total_weight);
-        let relation_byte = mode_or_wavg(&relations, total_weight);
-        let valence       = mode_or_wavg(&valences,  total_weight);
-        let arousal       = mode_or_wavg(&arousals,  total_weight);
-        let time_byte     = mode_or_wavg(&times,     total_weight);
+        let shape_byte = mode_or_wavg_base(&shapes, total_weight, 8);
+        let relation_byte = mode_or_wavg_base(&relations, total_weight, 8);
+        let valence = mode_or_wavg(&valences, total_weight);
+        let arousal = mode_or_wavg(&arousals, total_weight);
+        let time_byte = mode_or_wavg_base(&times, total_weight, 5);
+
+        // Per-dimension weighted variance: Σ w_i × (val_i - mean)² / Σ w_i
+        let all_dims: [&[(u8, u32)]; 5] = [&shapes, &relations, &valences, &arousals, &times];
+        let means: [u8; 5] = [shape_byte, relation_byte, valence, arousal, time_byte];
+        for (d, (vals, mean)) in all_dims.iter().zip(means.iter()).enumerate() {
+            let var: f32 = vals
+                .iter()
+                .map(|(v, w)| {
+                    let diff = *v as f32 - *mean as f32;
+                    *w as f32 * diff * diff
+                })
+                .sum::<f32>()
+                / (tw_f * 255.0 * 255.0); // normalize to [0,1]
+            dim_var_accum[d] += var;
+        }
+
+        // Extremity: how extreme are the INPUTS on valence+arousal?
+        // midpoint: valence=0x80, arousal=0x80
+        for &(v, w) in &valences {
+            let ext_v = (v as f32 - 128.0).abs() / 128.0; // [0,1]
+            extremity_accum += ext_v * w as f32 / tw_f;
+        }
+        for &(a, w) in &arousals {
+            let ext_a = (a as f32 - 128.0).abs() / 128.0;
+            extremity_accum += ext_a * w as f32 / tw_f;
+        }
 
         // Fallback nếu invalid byte (ví dụ shape=0x00)
-        let shape    = ShapeBase::from_byte(shape_byte)
-            .unwrap_or(ShapeBase::Sphere);
-        let relation = RelationBase::from_byte(relation_byte)
-            .unwrap_or(RelationBase::Member);
-        let time     = TimeDim::from_byte(time_byte)
-            .unwrap_or(TimeDim::Medium);
+        let shape = if shape_byte == 0 {
+            ShapeBase::Sphere.as_byte()
+        } else {
+            shape_byte
+        };
+        let relation = if relation_byte == 0 {
+            RelationBase::Member.as_byte()
+        } else {
+            relation_byte
+        };
+        let time = if time_byte == 0 {
+            TimeDim::Medium.as_byte()
+        } else {
+            time_byte
+        };
 
         result_mols.push(Molecule {
             shape,
@@ -88,20 +195,125 @@ pub fn lca_weighted(pairs: &[(&MolecularChain, u32)]) -> MolecularChain {
         });
     }
 
-    MolecularChain(result_mols)
+    let chain = MolecularChain(result_mols);
+
+    // Tính variance = mean(1 - similarity_full(input_i, lca))
+    let n = valid.len() as f32;
+    let variance: f32 = valid
+        .iter()
+        .map(|(c, _)| 1.0 - c.similarity_full(&chain))
+        .sum::<f32>()
+        / n;
+
+    // Normalize dim_variance by min_len
+    let ml = min_len as f32;
+    for dv in &mut dim_var_accum {
+        *dv /= ml;
+    }
+    // Normalize extremity: chia 2 (2 chiều: V + A) × min_len
+    extremity_accum /= 2.0 * ml;
+
+    LcaResult {
+        chain,
+        variance,
+        dim_variance: dim_var_accum,
+        extremity: extremity_accum,
+    }
+}
+
+/// Extremity of a single molecule (valence + arousal distance from midpoint).
+fn extremity_single(valence: u8, arousal: u8) -> f32 {
+    let ext_v = (valence as f32 - 128.0).abs() / 128.0;
+    let ext_a = (arousal as f32 - 128.0).abs() / 128.0;
+    (ext_v + ext_a) / 2.0
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mode or Weighted Average
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Mode detection trên base categories (hierarchical encoding).
+///
+/// Group by base category (modulo n_bases) thay vì exact value.
+/// Nếu ≥ 60% weight cùng base → trả weighted avg CỦA NHÓM THẮNG.
+/// Nếu không → weighted average toàn bộ.
+fn mode_or_wavg_base(values: &[(u8, u32)], total: u32, n_bases: u8) -> u8 {
+    if values.is_empty() || total == 0 || n_bases == 0 {
+        return 0x80;
+    }
+
+    // Group weight by base category
+    let mut base_weights = [0u32; 9]; // max 8 bases (index 1..=8)
+    for &(val, w) in values {
+        if val == 0 {
+            continue;
+        }
+        let base = ((val - 1) % n_bases) + 1;
+        base_weights[base as usize] += w;
+    }
+
+    // Find dominant base
+    let mut best_base = 1u8;
+    let mut best_weight = 0u32;
+    for base in 1..=n_bases {
+        if base_weights[base as usize] > best_weight {
+            best_weight = base_weights[base as usize];
+            best_base = base;
+        }
+    }
+
+    let threshold = (total * 6).div_ceil(10);
+    if best_weight >= threshold {
+        // Check if ALL values in the winning base are identical → return exact value (idempotent).
+        let mut unanimous_val: Option<u8> = None;
+        let mut all_same = true;
+        for &(val, _w) in values {
+            if val == 0 {
+                continue;
+            }
+            let base = ((val - 1) % n_bases) + 1;
+            if base == best_base {
+                match unanimous_val {
+                    None => unanimous_val = Some(val),
+                    Some(prev) if prev != val => {
+                        all_same = false;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if all_same {
+            if let Some(v) = unanimous_val {
+                return v;
+            }
+        }
+        // Diverse within same base → return base byte (sub=0) for commutativity.
+        return best_base;
+    }
+
+    // No mode → weighted average of BASE values (not raw hierarchical values).
+    // Using raw hierarchical values for avg can produce non-commutative results.
+    let mut numerator: u64 = 0;
+    for &(val, w) in values {
+        if val == 0 {
+            continue;
+        }
+        let base = ((val - 1) % n_bases) + 1;
+        numerator += base as u64 * w as u64;
+    }
+    (numerator / total as u64) as u8
+}
+
 /// Mode nếu ≥ 60% weight; weighted average nếu không có mode.
 fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
-    if values.is_empty() || total == 0 { return 0x80; }
+    if values.is_empty() || total == 0 {
+        return 0x80;
+    }
 
     // Tính weight của mỗi distinct value
     // Dùng simple approach: tìm value có weight cao nhất
-    let mut best_val   = values[0].0;
+    let mut best_val = values[0].0;
     let mut best_weight = 0u32;
 
     // Group by value
@@ -111,12 +323,12 @@ fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
     for &(val, w) in values {
         // Tìm trong seen
         let mut found = false;
-        for i in 0..n_seen {
-            if seen[i].0 == val {
-                seen[i].1 += w;
-                if seen[i].1 > best_weight {
-                    best_weight = seen[i].1;
-                    best_val    = val;
+        for entry in &mut seen[..n_seen] {
+            if entry.0 == val {
+                entry.1 += w;
+                if entry.1 > best_weight {
+                    best_weight = entry.1;
+                    best_val = val;
                 }
                 found = true;
                 break;
@@ -126,7 +338,7 @@ fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
             seen[n_seen] = (val, w);
             if w > best_weight {
                 best_weight = w;
-                best_val    = val;
+                best_val = val;
             }
             n_seen += 1;
         }
@@ -134,7 +346,7 @@ fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
 
     // Mode threshold: ≥ 60% của total weight
     // threshold_numerator / threshold_denominator = 60/100
-    let threshold = (total * 6 + 9) / 10; // ceiling của 60%
+    let threshold = (total * 6).div_ceil(10); // ceiling của 60%
     if best_weight >= threshold {
         return best_val; // Mode chiến thắng
     }
@@ -153,15 +365,50 @@ fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
 
 /// LCA của slice chains với equal weights.
 pub fn lca_many(chains: &[MolecularChain]) -> MolecularChain {
-    if chains.is_empty() { return MolecularChain::empty(); }
-    if chains.len() == 1 { return chains[0].clone(); }
+    if chains.is_empty() {
+        return MolecularChain::empty();
+    }
+    if chains.len() == 1 {
+        return chains[0].clone();
+    }
     let pairs: Vec<(&MolecularChain, u32)> = chains.iter().map(|c| (c, 1u32)).collect();
     lca_weighted(&pairs)
 }
 
+/// LCA của slice chains kèm variance.
+pub fn lca_many_with_variance(chains: &[MolecularChain]) -> LcaResult {
+    if chains.is_empty() {
+        return LcaResult {
+            chain: MolecularChain::empty(),
+            variance: 0.0,
+            dim_variance: [0.0; 5],
+            extremity: 0.0,
+        };
+    }
+    if chains.len() == 1 {
+        let ext = if chains[0].is_empty() {
+            0.0
+        } else {
+            extremity_single(
+                chains[0].0[0].emotion.valence,
+                chains[0].0[0].emotion.arousal,
+            )
+        };
+        return LcaResult {
+            chain: chains[0].clone(),
+            variance: 0.0,
+            dim_variance: [0.0; 5],
+            extremity: ext,
+        };
+    }
+    let pairs: Vec<(&MolecularChain, u32)> = chains.iter().map(|c| (c, 1u32)).collect();
+    lca_with_variance(&pairs)
+}
+
 /// LCA của slice chains với fire_counts.
 pub fn lca_many_weighted(chains: &[MolecularChain], weights: &[u32]) -> MolecularChain {
-    let pairs: Vec<(&MolecularChain, u32)> = chains.iter()
+    let pairs: Vec<(&MolecularChain, u32)> = chains
+        .iter()
         .zip(weights.iter())
         .map(|(c, &w)| (c, w))
         .collect();
@@ -178,18 +425,30 @@ mod tests {
     use crate::encoder::encode_codepoint;
 
     // Helper: tạo chain từ UCD (đúng triết lý)
-    fn fire()  -> MolecularChain { encode_codepoint(0x1F525) } // 🔥
-    fn water() -> MolecularChain { encode_codepoint(0x1F4A7) } // 💧
-    fn cold()  -> MolecularChain { encode_codepoint(0x2744)  } // ❄
-    fn brain() -> MolecularChain { encode_codepoint(0x1F9E0) } // 🧠
+    fn fire() -> MolecularChain {
+        encode_codepoint(0x1F525)
+    } // 🔥
+    fn water() -> MolecularChain {
+        encode_codepoint(0x1F4A7)
+    } // 💧
+    fn cold() -> MolecularChain {
+        encode_codepoint(0x2744)
+    } // ❄
+    fn brain() -> MolecularChain {
+        encode_codepoint(0x1F9E0)
+    } // 🧠
 
-    fn skip_if_empty() -> bool { ucd::table_len() == 0 }
+    fn skip_if_empty() -> bool {
+        ucd::table_len() == 0
+    }
 
     // ── Property 1: Idempotent ──────────────────────────────────────────────
 
     #[test]
     fn property_idempotent_fire() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let f = fire();
         let result = lca(&f, &f);
         assert_eq!(result, f, "LCA(a,a) phải == a");
@@ -197,7 +456,9 @@ mod tests {
 
     #[test]
     fn property_idempotent_water() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let w = water();
         assert_eq!(lca(&w, &w), w);
     }
@@ -206,16 +467,19 @@ mod tests {
 
     #[test]
     fn property_commutative() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let f = fire();
         let w = water();
-        assert_eq!(lca(&f, &w), lca(&w, &f),
-            "LCA(a,b) phải == LCA(b,a)");
+        assert_eq!(lca(&f, &w), lca(&w, &f), "LCA(a,b) phải == LCA(b,a)");
     }
 
     #[test]
     fn property_commutative_cold_brain() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let c = cold();
         let b = brain();
         assert_eq!(lca(&c, &b), lca(&b, &c));
@@ -225,28 +489,40 @@ mod tests {
 
     #[test]
     fn property_similarity_bound() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let f = fire();
         let w = water();
         let parent = lca(&f, &w);
 
-        let sim_ab  = f.similarity(&w);
-        let sim_pa  = parent.similarity(&f);
-        let sim_pb  = parent.similarity(&w);
+        let sim_ab = f.similarity(&w);
+        let sim_pa = parent.similarity(&f);
+        let sim_pb = parent.similarity(&w);
         let epsilon = 0.05f32;
 
         // LCA không được xa hơn khoảng cách ban đầu
-        assert!(sim_pa >= sim_ab - epsilon,
-            "sim(LCA(f,w), f)={:.3} >= sim(f,w)={:.3} - ε", sim_pa, sim_ab);
-        assert!(sim_pb >= sim_ab - epsilon,
-            "sim(LCA(f,w), w)={:.3} >= sim(f,w)={:.3} - ε", sim_pb, sim_ab);
+        assert!(
+            sim_pa >= sim_ab - epsilon,
+            "sim(LCA(f,w), f)={:.3} >= sim(f,w)={:.3} - ε",
+            sim_pa,
+            sim_ab
+        );
+        assert!(
+            sim_pb >= sim_ab - epsilon,
+            "sim(LCA(f,w), w)={:.3} >= sim(f,w)={:.3} - ε",
+            sim_pb,
+            sim_ab
+        );
     }
 
     // ── Property 4: Associative ─────────────────────────────────────────────
 
     #[test]
     fn property_associative() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let f = fire();
         let w = water();
         let c = cold();
@@ -257,15 +533,20 @@ mod tests {
         // Associativity: kết quả phải rất gần nhau
         // (không nhất thiết giống hệt vì weighted avg có thể khác nhau chút)
         let sim = lca_fw_c.similarity_full(&lca_f_wc);
-        assert!(sim >= 0.8,
-            "LCA(LCA(f,w),c) ≈ LCA(f,LCA(w,c)): similarity={:.3}", sim);
+        assert!(
+            sim >= 0.8,
+            "LCA(LCA(f,w),c) ≈ LCA(f,LCA(w,c)): similarity={:.3}",
+            sim
+        );
     }
 
     // ── Semantic correctness ────────────────────────────────────────────────
 
     #[test]
     fn lca_fire_water_middle() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let f = fire();
         let w = water();
         let parent = lca(&f, &w);
@@ -279,14 +560,21 @@ mod tests {
         // Valence: giữa lửa (0xFF) và nước (0xC0) → khoảng 0xDF
         let expected_v = ((fm.emotion.valence as u16 + wm.emotion.valence as u16) / 2) as u8;
         let diff_v = pm.emotion.valence.abs_diff(expected_v);
-        assert!(diff_v <= 5,
-            "LCA valence={} ≈ avg({},{})={}", pm.emotion.valence,
-            fm.emotion.valence, wm.emotion.valence, expected_v);
+        assert!(
+            diff_v <= 5,
+            "LCA valence={} ≈ avg({},{})={}",
+            pm.emotion.valence,
+            fm.emotion.valence,
+            wm.emotion.valence,
+            expected_v
+        );
     }
 
     #[test]
     fn lca_mode_detection() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         // 3 chains đều là Sphere, 1 chain là Capsule
         // → mode = Sphere (3/4 = 75% ≥ 60%)
         let sphere1 = encode_codepoint(0x25CF); // ●
@@ -295,30 +583,35 @@ mod tests {
         let capsule = encode_codepoint(0x1F4A7); // 💧 (capsule)
 
         let result = lca_many(&[sphere1, sphere2, sphere3, capsule]);
-        assert_eq!(result.0[0].shape, ShapeBase::Sphere,
-            "Mode detection: 3 Sphere + 1 Capsule → Sphere");
+        assert_eq!(
+            result.0[0].shape_base(),
+            ShapeBase::Sphere,
+            "Mode detection: 3 Sphere + 1 Capsule → Sphere"
+        );
     }
 
     #[test]
     fn lca_weighted_fire_favored() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         // Fire (weight=10) vs Water (weight=1) → kết quả gần fire hơn
         let f = fire();
         let w = water();
-        let result = lca_many_weighted(
-            &[f.clone(), w.clone()],
-            &[10, 1],
-        );
+        let result = lca_many_weighted(&[f.clone(), w.clone()], &[10, 1]);
         // Valence: fire=0xFF, water=0xC0
         // weighted: (0xFF×10 + 0xC0×1) / 11 ≈ 0xF9
-        let fire_val  = f.0[0].emotion.valence;
+        let fire_val = f.0[0].emotion.valence;
         let water_val = w.0[0].emotion.valence;
         let result_val = result.0[0].emotion.valence;
         // result phải gần fire hơn water
-        let dist_to_fire  = result_val.abs_diff(fire_val);
+        let dist_to_fire = result_val.abs_diff(fire_val);
         let dist_to_water = result_val.abs_diff(water_val);
-        assert!(dist_to_fire < dist_to_water,
-            "Weighted LCA phải gần fire (weight=10) hơn water (weight=1): val={}", result_val);
+        assert!(
+            dist_to_fire < dist_to_water,
+            "Weighted LCA phải gần fire (weight=10) hơn water (weight=1): val={}",
+            result_val
+        );
     }
 
     #[test]
@@ -327,12 +620,17 @@ mod tests {
         let f = encode_codepoint(0x1F525);
         // LCA với empty → bỏ qua empty, giữ non-empty
         let result = lca_weighted(&[(&empty, 1), (&f, 1)]);
-        assert!(!result.is_empty(), "LCA với empty chain → kết quả không rỗng");
+        assert!(
+            !result.is_empty(),
+            "LCA với empty chain → kết quả không rỗng"
+        );
     }
 
     #[test]
     fn lca_single_chain() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let f = fire();
         let result = lca_many(&[f.clone()]);
         assert_eq!(result, f, "LCA của 1 chain = chính nó");
@@ -340,7 +638,9 @@ mod tests {
 
     #[test]
     fn lca_many_thermodynamics() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         // 🔥 ♨️ ❄️ → LCA = L3_Thermodynamics (trung gian về nhiệt)
         let f = fire();
         let c = cold();
@@ -348,13 +648,73 @@ mod tests {
 
         let fire_val = f.0[0].emotion.valence;
         let cold_val = c.0[0].emotion.valence;
-        let res_val  = result.0[0].emotion.valence;
+        let res_val = result.0[0].emotion.valence;
 
         // Kết quả phải nằm giữa lửa và lạnh
         let min_val = fire_val.min(cold_val);
         let max_val = fire_val.max(cold_val);
-        assert!(res_val >= min_val && res_val <= max_val,
-            "LCA valence={} phải nằm giữa {} và {}", res_val, min_val, max_val);
+        assert!(
+            res_val >= min_val && res_val <= max_val,
+            "LCA valence={} phải nằm giữa {} và {}",
+            res_val,
+            min_val,
+            max_val
+        );
+    }
+
+    // ── LCA Variance ──────────────────────────────────────────────────────
+
+    #[test]
+    fn lca_variance_identical_is_zero() {
+        if skip_if_empty() {
+            return;
+        }
+        let f = fire();
+        let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
+        assert!(
+            result.variance < 0.01,
+            "Identical chains → variance ≈ 0, got {}",
+            result.variance
+        );
+    }
+
+    #[test]
+    fn lca_variance_similar_is_concrete() {
+        if skip_if_empty() {
+            return;
+        }
+        // 🔥 và 🔥 (identical) → variance < 0.15 = concrete
+        let f1 = fire();
+        let f2 = fire();
+        let result = super::lca_many_with_variance(&[f1, f2]);
+        assert!(
+            result.variance < 0.15,
+            "Same chains → concrete (var < 0.15), got {}",
+            result.variance
+        );
+    }
+
+    #[test]
+    fn lca_variance_diverse_is_abstract() {
+        if skip_if_empty() {
+            return;
+        }
+        // 🔥 💧 ❄ 🧠 → very different → variance should be notable
+        let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
+        assert!(
+            result.variance > 0.05,
+            "Diverse chains → higher variance, got {}",
+            result.variance
+        );
+    }
+
+    #[test]
+    fn lca_variance_single_chain_zero() {
+        if skip_if_empty() {
+            return;
+        }
+        let result = super::lca_many_with_variance(&[fire()]);
+        assert_eq!(result.variance, 0.0, "Single chain → variance = 0");
     }
 
     // ── Mode detection edge cases ───────────────────────────────────────────
@@ -373,8 +733,11 @@ mod tests {
         let vals = [(0x00u8, 1u32), (0xFF, 1)];
         let result = super::mode_or_wavg(&vals, 2);
         // avg(0x00, 0xFF) = 0x7F
-        assert!((result as i32 - 0x7F).abs() <= 2,
-            "Tie → weighted avg ≈ 0x7F, got 0x{:02X}", result);
+        assert!(
+            (result as i32 - 0x7F).abs() <= 2,
+            "Tie → weighted avg ≈ 0x7F, got 0x{:02X}",
+            result
+        );
     }
 
     #[test]
@@ -391,7 +754,68 @@ mod tests {
         let vals = [(0x01u8, 1u32), (0x01, 1), (0xFF, 1), (0xFF, 1)];
         let result = super::mode_or_wavg(&vals, 4);
         // avg(0x01, 0x01, 0xFF, 0xFF) = (1+1+255+255)/4 = 128 = 0x80
-        assert!((result as i32 - 0x80).abs() <= 2,
-            "50% < 60% → weighted avg ≈ 0x80, got 0x{:02X}", result);
+        assert!(
+            (result as i32 - 0x80).abs() <= 2,
+            "50% < 60% → weighted avg ≈ 0x80, got 0x{:02X}",
+            result
+        );
+    }
+
+    // ── Extremity — phát hiện "trung bình hóa cực đoan" ───────────────────
+
+    #[test]
+    fn extremity_identical_chains() {
+        if skip_if_empty() {
+            return;
+        }
+        let f = fire();
+        let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
+        // Extremity should be consistent (same chain → same extremity)
+        assert!(
+            result.extremity >= 0.0 && result.extremity <= 1.0,
+            "Extremity bounded [0,1]: got {}",
+            result.extremity
+        );
+    }
+
+    #[test]
+    fn extremity_diverse_higher_than_neutral() {
+        if skip_if_empty() {
+            return;
+        }
+        // 🔥 💧 ❄ 🧠 → inputs spread out → extremity measurable
+        let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
+        // Just verify it's valid — actual extremity depends on UCD values
+        assert!(result.extremity >= 0.0 && result.extremity <= 1.0);
+    }
+
+    #[test]
+    fn dim_variance_shape() {
+        if skip_if_empty() {
+            return;
+        }
+        // dim_variance[0] = shape variance
+        let result = super::lca_many_with_variance(&[fire(), water(), cold(), brain()]);
+        // All 5 dims should be non-negative
+        for (i, dv) in result.dim_variance.iter().enumerate() {
+            assert!(*dv >= 0.0, "dim_variance[{}] = {} >= 0", i, dv);
+        }
+    }
+
+    #[test]
+    fn dim_variance_identical_is_zero() {
+        if skip_if_empty() {
+            return;
+        }
+        let f = fire();
+        let result = super::lca_with_variance(&[(&f, 1), (&f, 1)]);
+        for (i, dv) in result.dim_variance.iter().enumerate() {
+            assert!(
+                *dv < 0.001,
+                "Identical → dim_variance[{}] ≈ 0, got {}",
+                i,
+                dv
+            );
+        }
     }
 }

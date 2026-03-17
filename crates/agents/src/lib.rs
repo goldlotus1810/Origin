@@ -1,6 +1,11 @@
-//! # agents — ContentEncoder · LearningLoop · BookReader · SecurityGate
+//! # agents — ContentEncoder · LearningLoop · SecurityGate · LeoAI · Chief · Worker · Skill
 //!
-//! Bản năng L0: kích hoạt tự động khi có bất kỳ input nào.
+//! L0 instincts + Agent hierarchy:
+//!   AAM [tier 0] — stateless (trong memory crate)
+//!   LeoAI · Chief [tier 1] — orchestrators
+//!   Worker [tier 2] — HomeOS thu nhỏ tại thiết bị
+//!   Skill — stateless functions (QT4: 1 Skill = 1 trách nhiệm)
+//!
 //! Mọi input → MolecularChain — cùng 1 format.
 
 #![no_std]
@@ -8,10 +13,13 @@
 
 extern crate alloc;
 
-pub mod encoder;
-pub mod learning;
 pub mod book;
-pub mod gate;
-pub mod worker;
 pub mod chief;
+pub mod domain_skills;
+pub mod encoder;
+pub mod gate;
+pub mod instinct;
+pub mod learning;
 pub mod leo;
+pub mod skill;
+pub mod worker;

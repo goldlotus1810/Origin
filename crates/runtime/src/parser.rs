@@ -19,8 +19,8 @@
 //!   ○{stats}           → System command
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OlangToken
@@ -42,18 +42,28 @@ pub enum OlangToken {
 }
 
 /// Relation operator trong ○{}.
+/// 18 RelOps: 10 gốc + 8 mở rộng (Phase 11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelationOp {
-    Member,     // ∈ U+2208
-    Subset,     // ⊂ U+2282
-    Equiv,      // ≡ U+2261
-    Compose,    // ∘ U+2218
-    Causes,     // → U+2192
-    Similar,    // ≈ U+2248
-    DerivedFrom,// ← U+2190
-    Context,    // ∂ U+2202 (dùng cho "bank ∂ finance")
-    Contains,   // ∪ U+222A
-    Intersects, // ∩ U+2229
+    Member,      // ∈ U+2208
+    Subset,      // ⊂ U+2282
+    Equiv,       // ≡ U+2261
+    Compose,     // ∘ U+2218
+    Causes,      // → U+2192
+    Similar,     // ≈ U+2248
+    DerivedFrom, // ← U+2190
+    Context,     // ∂ U+2202 (dùng cho "bank ∂ finance")
+    Contains,    // ∪ U+222A
+    Intersects,  // ∩ U+2229
+    // Phase 11: 8 RelOps mở rộng
+    Orthogonal,  // ⊥ U+22A5 — vuông góc / độc lập
+    SetMinus,    // ∖ U+2216 — loại trừ tập hợp
+    Bidir,       // ↔ U+2194 — quan hệ hai chiều
+    Flows,       // ⟶ U+27F6 — dòng chảy / pipeline
+    Repeats,     // ⟳ U+27F3 — lặp lại / chu kỳ
+    Resolves,    // ↑ U+2191 — giải quyết / nâng cấp
+    Trigger,     // ⚡ U+26A1 — kích hoạt
+    Parallel,    // ∥ U+2225 — song song / đồng thời
 }
 
 impl RelationOp {
@@ -69,22 +79,38 @@ impl RelationOp {
             '∂' => Some(Self::Context),
             '∪' => Some(Self::Contains),
             '∩' => Some(Self::Intersects),
-            _   => None,
+            '⊥' => Some(Self::Orthogonal),
+            '∖' => Some(Self::SetMinus),
+            '↔' => Some(Self::Bidir),
+            '⟶' => Some(Self::Flows),
+            '⟳' => Some(Self::Repeats),
+            '↑' => Some(Self::Resolves),
+            '⚡' => Some(Self::Trigger),
+            '∥' => Some(Self::Parallel),
+            _ => None,
         }
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Member      => "∈",
-            Self::Subset      => "⊂",
-            Self::Equiv       => "≡",
-            Self::Compose     => "∘",
-            Self::Causes      => "→",
-            Self::Similar     => "≈",
+            Self::Member => "∈",
+            Self::Subset => "⊂",
+            Self::Equiv => "≡",
+            Self::Compose => "∘",
+            Self::Causes => "→",
+            Self::Similar => "≈",
             Self::DerivedFrom => "←",
-            Self::Context     => "∂",
-            Self::Contains    => "∪",
-            Self::Intersects  => "∩",
+            Self::Context => "∂",
+            Self::Contains => "∪",
+            Self::Intersects => "∩",
+            Self::Orthogonal => "⊥",
+            Self::SetMinus => "∖",
+            Self::Bidir => "↔",
+            Self::Flows => "⟶",
+            Self::Repeats => "⟳",
+            Self::Resolves => "↑",
+            Self::Trigger => "⚡",
+            Self::Parallel => "∥",
         }
     }
 }
@@ -93,6 +119,19 @@ impl RelationOp {
 // OlangExpr — parsed expression
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Arithmetic operator trong ○{}.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithOp {
+    /// + addition (QT3: giả thuyết)
+    Add,
+    /// - subtraction (QT3: giả thuyết)
+    Sub,
+    /// × multiplication (QT3: giả thuyết)
+    Mul,
+    /// ÷ division (QT3: giả thuyết)
+    Div,
+}
+
 /// Một expression đã parse từ ○{...}.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OlangExpr {
@@ -100,10 +139,10 @@ pub enum OlangExpr {
     Query(String),
     /// ○{🔥 ∈ ?} — relation query
     RelationQuery {
-        subject:  String,
+        subject: String,
         relation: RelationOp,
         /// None = wildcard ?
-        object:   Option<String>,
+        object: Option<String>,
     },
     /// ○{🔥 ∘ 💧} — compose
     Compose { a: String, b: String },
@@ -113,6 +152,12 @@ pub enum OlangExpr {
     Command(String),
     /// ○{○{🔥} ∈ ?} — pipeline
     Pipeline(Vec<OlangExpr>),
+    /// ○{1 + 2} — arithmetic (QT3: giả thuyết)
+    Arithmetic {
+        lhs: f64,
+        op: ArithOp,
+        rhs: f64,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,7 +183,9 @@ pub enum ParseResult {
 pub struct OlangParser;
 
 impl OlangParser {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// Parse text → ParseResult.
     ///
@@ -151,7 +198,7 @@ impl OlangParser {
         if let Some(inner) = extract_olang(trimmed) {
             match self.parse_expr(inner.trim()) {
                 Ok(expr) => ParseResult::OlangExpr(expr),
-                Err(e)   => ParseResult::Error(e),
+                Err(e) => ParseResult::Error(e),
             }
         } else {
             ParseResult::Natural(trimmed.to_string())
@@ -185,7 +232,12 @@ impl OlangParser {
             return Ok(OlangExpr::Query(trimmed.to_string()));
         }
 
-        // + operator without relation ops → route to separator parser
+        // Arithmetic: detect numeric expressions like "1 + 2", "3.5 × 4", "10 - 3", "8 ÷ 2"
+        if let Some(arith) = try_parse_arithmetic(trimmed) {
+            return Ok(arith);
+        }
+
+        // + operator with non-numeric operands → Compose (e.g. 🔥 + 💧)
         if trimmed.contains('+') && !trimmed.chars().any(|c| RelationOp::from_char(c).is_some()) {
             return Ok(OlangExpr::Compose {
                 a: trimmed.split('+').next().unwrap_or("").trim().to_string(),
@@ -198,44 +250,48 @@ impl OlangParser {
 
         match tokens.as_slice() {
             // ○{node} — simple query
-            [OlangToken::Node(name)] => {
-                Ok(OlangExpr::Query(name.clone()))
-            }
+            [OlangToken::Node(name)] => Ok(OlangExpr::Query(name.clone())),
 
             // ○{node ∘ node} — compose
             [OlangToken::Node(a), OlangToken::Relation(RelationOp::Compose), OlangToken::Node(b)] => {
-                Ok(OlangExpr::Compose { a: a.clone(), b: b.clone() })
+                Ok(OlangExpr::Compose {
+                    a: a.clone(),
+                    b: b.clone(),
+                })
             }
 
             // ○{node ∂ context} — context query
             [OlangToken::Node(term), OlangToken::Relation(RelationOp::Context), OlangToken::Node(ctx)] => {
-                Ok(OlangExpr::ContextQuery { term: term.clone(), context: ctx.clone() })
+                Ok(OlangExpr::ContextQuery {
+                    term: term.clone(),
+                    context: ctx.clone(),
+                })
             }
 
             // ○{node rel ?} — relation query with wildcard
             [OlangToken::Node(subj), OlangToken::Relation(rel), OlangToken::Wildcard] => {
                 Ok(OlangExpr::RelationQuery {
-                    subject:  subj.clone(),
+                    subject: subj.clone(),
                     relation: *rel,
-                    object:   None,
+                    object: None,
                 })
             }
 
             // ○{? rel node} — reverse query
             [OlangToken::Wildcard, OlangToken::Relation(rel), OlangToken::Node(obj)] => {
                 Ok(OlangExpr::RelationQuery {
-                    subject:  "?".to_string(),
+                    subject: "?".to_string(),
                     relation: *rel,
-                    object:   Some(obj.clone()),
+                    object: Some(obj.clone()),
                 })
             }
 
             // ○{node rel node} — binary relation
             [OlangToken::Node(subj), OlangToken::Relation(rel), OlangToken::Node(obj)] => {
                 Ok(OlangExpr::RelationQuery {
-                    subject:  subj.clone(),
+                    subject: subj.clone(),
                     relation: *rel,
-                    object:   Some(obj.clone()),
+                    object: Some(obj.clone()),
                 })
             }
 
@@ -246,7 +302,9 @@ impl OlangParser {
 }
 
 impl Default for OlangParser {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,16 +317,20 @@ pub fn extract_olang(s: &str) -> Option<&str> {
     // ○ = U+25CB = 3 bytes UTF-8: 0xE2 0x97 0x8B
     let mut chars = s.char_indices();
     let (_, first) = chars.next()?;
-    if first != '○' { return None; }
+    if first != '○' {
+        return None;
+    }
 
     let (next_pos, next) = chars.next()?;
-    if next != '{' { return None; }
+    if next != '{' {
+        return None;
+    }
 
     let start = next_pos + '{'.len_utf8();
 
     // Tìm closing } (handle nested)
     let mut depth = 1usize;
-    let mut end   = start;
+    let mut end = start;
     for (i, c) in s[start..].char_indices() {
         match c {
             '{' => depth += 1,
@@ -282,7 +344,9 @@ pub fn extract_olang(s: &str) -> Option<&str> {
             _ => {}
         }
     }
-    if depth != 0 { return None; } // Không đóng
+    if depth != 0 {
+        return None;
+    } // Không đóng
 
     Some(&s[start..end])
 }
@@ -333,11 +397,127 @@ fn token_from_str(s: &str) -> OlangToken {
     OlangToken::Node(s.to_string())
 }
 
+/// Try to parse arithmetic expression: "1 + 2", "3.14 × 2", "10 - 3", "8 ÷ 2"
+/// Returns None if not a valid arithmetic expression (falls through to Compose/Query).
+fn try_parse_arithmetic(s: &str) -> Option<OlangExpr> {
+    // Find arithmetic operator (scan left to right, last +/- wins for precedence,
+    // but we keep it simple: single operator between two numbers)
+    let ops: &[(char, ArithOp)] = &[
+        ('+', ArithOp::Add),
+        ('-', ArithOp::Sub),
+        ('×', ArithOp::Mul),
+        ('÷', ArithOp::Div),
+        ('*', ArithOp::Mul),
+        ('/', ArithOp::Div),
+    ];
+
+    for &(op_char, ref op) in ops {
+        // Split on operator — find it (skip if it's a negative sign at start)
+        if let Some(pos) = find_arith_op(s, op_char) {
+            let lhs_str = s[..pos].trim();
+            let rhs_str = s[pos + op_char.len_utf8()..].trim();
+
+            if let (Ok(lhs), Ok(rhs)) = (parse_number(lhs_str), parse_number(rhs_str)) {
+                return Some(OlangExpr::Arithmetic {
+                    lhs,
+                    op: *op,
+                    rhs,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Find arithmetic operator position, skipping leading negative sign.
+fn find_arith_op(s: &str, op: char) -> Option<usize> {
+    let mut chars = s.char_indices().peekable();
+    // Skip leading whitespace and optional leading minus (negative number)
+    while let Some(&(_, c)) = chars.peek() {
+        if c.is_whitespace() {
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    // Skip leading minus (negative number, not subtraction)
+    if let Some(&(_, '-')) = chars.peek() {
+        chars.next();
+        // Skip digits/dots after minus
+        while let Some(&(_, c)) = chars.peek() {
+            if c.is_ascii_digit() || c == '.' {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    } else {
+        // Skip digits/dots of first number
+        while let Some(&(_, c)) = chars.peek() {
+            if c.is_ascii_digit() || c == '.' {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    }
+    // Now look for the operator
+    for (i, c) in chars {
+        if c == op {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Parse number string, supporting integers and decimals.
+fn parse_number(s: &str) -> Result<f64, ()> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err(());
+    }
+    // Only allow valid numeric characters
+    let valid = trimmed.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-');
+    if !valid {
+        return Err(());
+    }
+    trimmed.parse::<f64>().map_err(|_| ())
+}
+
 fn is_command(s: &str) -> bool {
-    matches!(s,
-        "dream" | "stats" | "seed L0" | "seed" |
-        "shutdown" | "reboot" | "status" | "help"
-    )
+    matches!(
+        s,
+        "dream"
+            | "stats"
+            | "health"
+            | "seed L0"
+            | "seed"
+            | "shutdown"
+            | "reboot"
+            | "status"
+            | "help"
+    ) || is_math_command(s)
+        || is_constant_command(s)
+        || is_leo_command(s)
+}
+
+/// Check if input is a LeoAI programming command.
+fn is_leo_command(s: &str) -> bool {
+    s.starts_with("leo ") || s.starts_with("program ") || s.starts_with("run ")
+}
+
+/// Check if input is a math command (prefix-based).
+fn is_math_command(s: &str) -> bool {
+    let prefixes = [
+        "solve ", "giai ", "derive ", "derivative ", "dao-ham ", "d/dx ",
+        "integrate ", "integral ", "tich-phan ", "simplify ", "eval ",
+    ];
+    prefixes.iter().any(|p| s.starts_with(p))
+}
+
+/// Check if input is a constant/fibonacci command.
+fn is_constant_command(s: &str) -> bool {
+    s.starts_with("const ") || s.starts_with("hang-so ") || s.starts_with("fib ") || s.starts_with("fibonacci ")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -348,7 +528,9 @@ fn is_command(s: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn parser() -> OlangParser { OlangParser::new() }
+    fn parser() -> OlangParser {
+        OlangParser::new()
+    }
 
     // ── Natural text ─────────────────────────────────────────────────────────
 
@@ -369,9 +551,9 @@ mod tests {
     #[test]
     fn extract_olang_basic() {
         assert_eq!(extract_olang("○{hello}"), Some("hello"));
-        assert_eq!(extract_olang("○{🔥}"),    Some("🔥"));
-        assert_eq!(extract_olang("hello"),     None);
-        assert_eq!(extract_olang("○ hello"),   None);
+        assert_eq!(extract_olang("○{🔥}"), Some("🔥"));
+        assert_eq!(extract_olang("hello"), None);
+        assert_eq!(extract_olang("○ hello"), None);
     }
 
     #[test]
@@ -389,13 +571,19 @@ mod tests {
     #[test]
     fn parse_simple_query() {
         let r = parser().parse("○{🔥}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::Query("🔥".to_string())));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Query("🔥".to_string()))
+        );
     }
 
     #[test]
     fn parse_word_query() {
         let r = parser().parse("○{lửa}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::Query("lửa".to_string())));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Query("lửa".to_string()))
+        );
     }
 
     // ── Relation queries ──────────────────────────────────────────────────────
@@ -403,31 +591,40 @@ mod tests {
     #[test]
     fn parse_relation_member() {
         let r = parser().parse("○{🔥 ∈ ?}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::RelationQuery {
-            subject:  "🔥".to_string(),
-            relation: RelationOp::Member,
-            object:   None,
-        }));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Member,
+                object: None,
+            })
+        );
     }
 
     #[test]
     fn parse_reverse_query() {
         let r = parser().parse("○{? → 💧}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::RelationQuery {
-            subject:  "?".to_string(),
-            relation: RelationOp::Causes,
-            object:   Some("💧".to_string()),
-        }));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "?".to_string(),
+                relation: RelationOp::Causes,
+                object: Some("💧".to_string()),
+            })
+        );
     }
 
     #[test]
     fn parse_similarity_query() {
         let r = parser().parse("○{🔥 ≈ ?}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::RelationQuery {
-            subject:  "🔥".to_string(),
-            relation: RelationOp::Similar,
-            object:   None,
-        }));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Similar,
+                object: None,
+            })
+        );
     }
 
     // ── Compose ───────────────────────────────────────────────────────────────
@@ -435,10 +632,13 @@ mod tests {
     #[test]
     fn parse_compose() {
         let r = parser().parse("○{🔥 ∘ 💧}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::Compose {
-            a: "🔥".to_string(),
-            b: "💧".to_string(),
-        }));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Compose {
+                a: "🔥".to_string(),
+                b: "💧".to_string(),
+            })
+        );
     }
 
     // ── Context query ─────────────────────────────────────────────────────────
@@ -446,10 +646,13 @@ mod tests {
     #[test]
     fn parse_context_query() {
         let r = parser().parse("○{bank ∂ finance}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::ContextQuery {
-            term:    "bank".to_string(),
-            context: "finance".to_string(),
-        }));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::ContextQuery {
+                term: "bank".to_string(),
+                context: "finance".to_string(),
+            })
+        );
     }
 
     // ── Commands ──────────────────────────────────────────────────────────────
@@ -457,13 +660,19 @@ mod tests {
     #[test]
     fn parse_dream_command() {
         let r = parser().parse("○{dream}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::Command("dream".to_string())));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("dream".to_string()))
+        );
     }
 
     #[test]
     fn parse_stats_command() {
         let r = parser().parse("○{stats}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::Command("stats".to_string())));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("stats".to_string()))
+        );
     }
 
     // ── Tiếng Việt ────────────────────────────────────────────────────────────
@@ -471,10 +680,13 @@ mod tests {
     #[test]
     fn parse_vietnamese_query() {
         let r = parser().parse("○{lửa ∘ nước}");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::Compose {
-            a: "lửa".to_string(),
-            b: "nước".to_string(),
-        }));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Compose {
+                a: "lửa".to_string(),
+                b: "nước".to_string(),
+            })
+        );
     }
 
     #[test]
@@ -496,7 +708,10 @@ mod tests {
     #[test]
     fn parse_whitespace_trimmed() {
         let r = parser().parse("  ○{  🔥  }  ");
-        assert_eq!(r, ParseResult::OlangExpr(OlangExpr::Query("🔥".to_string())));
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Query("🔥".to_string()))
+        );
     }
 
     #[test]
@@ -504,5 +719,316 @@ mod tests {
         // ○ standalone = SDF Torus node trong text bình thường
         let r = parser().parse("○ là hình tròn");
         assert!(matches!(r, ParseResult::Natural(_)));
+    }
+
+    // ── Math commands ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_solve_command() {
+        let r = parser().parse("○{solve \"2x + 3 = 7\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("solve \"2x + 3 = 7\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_derive_command() {
+        let r = parser().parse("○{derive \"x^2 + 3x\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("derive \"x^2 + 3x\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_integrate_command() {
+        let r = parser().parse("○{integrate \"2x\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("integrate \"2x\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_simplify_command() {
+        let r = parser().parse("○{simplify \"2x + 3x\"}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("simplify \"2x + 3x\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_eval_command() {
+        let r = parser().parse("○{eval \"x^2 + 1\" x=3}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("eval \"x^2 + 1\" x=3".to_string()))
+        );
+    }
+
+    // ── Constant commands ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_const_command() {
+        let r = parser().parse("○{const pi}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("const pi".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_const_all_command() {
+        let r = parser().parse("○{const all}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+    }
+
+    #[test]
+    fn parse_fib_command() {
+        let r = parser().parse("○{fib 10}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Command("fib 10".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_fib_ratio_command() {
+        let r = parser().parse("○{fib ratio 20}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+    }
+
+    // ── Arithmetic ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_arithmetic_add() {
+        let r = parser().parse("○{1 + 2}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 1.0,
+                op: ArithOp::Add,
+                rhs: 2.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_sub() {
+        let r = parser().parse("○{10 - 3}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 10.0,
+                op: ArithOp::Sub,
+                rhs: 3.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_mul() {
+        let r = parser().parse("○{6 × 7}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 6.0,
+                op: ArithOp::Mul,
+                rhs: 7.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_div() {
+        let r = parser().parse("○{8 ÷ 2}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 8.0,
+                op: ArithOp::Div,
+                rhs: 2.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_mul_ascii() {
+        let r = parser().parse("○{3 * 4}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 3.0,
+                op: ArithOp::Mul,
+                rhs: 4.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_div_ascii() {
+        let r = parser().parse("○{10 / 5}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 10.0,
+                op: ArithOp::Div,
+                rhs: 5.0,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_arithmetic_decimal() {
+        let r = parser().parse("○{3.14 + 2.86}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::Arithmetic {
+                lhs: 3.14,
+                op: ArithOp::Add,
+                rhs: 2.86,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_non_numeric_plus_is_compose() {
+        // Non-numeric operands → Compose (emoji + emoji)
+        let r = parser().parse("○{🔥 + 💧}");
+        // Should NOT be Arithmetic since 🔥 is not a number
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Compose { .. })));
+    }
+
+    #[test]
+    fn parse_vietnamese_math_commands() {
+        let r = parser().parse("○{giai \"x + 5 = 10\"}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+
+        let r = parser().parse("○{dao-ham \"x^2\"}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+
+        let r = parser().parse("○{tich-phan \"3x^2\"}");
+        assert!(matches!(r, ParseResult::OlangExpr(OlangExpr::Command(_))));
+    }
+
+    // ── Phase 11: New RelOps ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_orthogonal() {
+        let r = parser().parse("○{🔥 ⊥ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Orthogonal,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_setminus() {
+        let r = parser().parse("○{🔥 ∖ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::SetMinus,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_bidir() {
+        let r = parser().parse("○{🔥 ↔ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Bidir,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_flows() {
+        let r = parser().parse("○{🔥 ⟶ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Flows,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_repeats() {
+        let r = parser().parse("○{🔥 ⟳ ?}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Repeats,
+                object: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_resolves() {
+        let r = parser().parse("○{🔥 ↑ ?}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Resolves,
+                object: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_trigger() {
+        let r = parser().parse("○{🔥 ⚡ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Trigger,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_parallel() {
+        let r = parser().parse("○{🔥 ∥ 💧}");
+        assert_eq!(
+            r,
+            ParseResult::OlangExpr(OlangExpr::RelationQuery {
+                subject: "🔥".to_string(),
+                relation: RelationOp::Parallel,
+                object: Some("💧".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn relop_roundtrip_all_18() {
+        let chars = [
+            '∈', '⊂', '≡', '∘', '→', '≈', '←', '∂', '∪', '∩',
+            '⊥', '∖', '↔', '⟶', '⟳', '↑', '⚡', '∥',
+        ];
+        for c in chars {
+            let op = RelationOp::from_char(c).unwrap_or_else(|| panic!("from_char failed for {c}"));
+            let s = op.as_str();
+            assert_eq!(s.chars().next().unwrap(), c, "roundtrip failed for {c}");
+        }
     }
 }

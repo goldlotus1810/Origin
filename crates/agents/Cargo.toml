@@ -16,4 +16,5 @@ ucd     = { workspace = true }
 olang   = { workspace = true }
 silk    = { workspace = true }
 context = { workspace = true }
-libm    = { workspace = true }
+hal     = { workspace = true }
+homemath = { workspace = true }

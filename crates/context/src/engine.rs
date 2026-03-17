@@ -16,11 +16,9 @@ use alloc::vec::Vec;
 use silk::edge::EmotionTag;
 use silk::walk::ResponseTone;
 
-use crate::emotion::{
-    IntentKind, IntentModifier, blend_with_audio, sentence_base_affect,
-};
-use crate::phrase::PhraseDict;
 use crate::curve::ConversationCurve;
+use crate::emotion::{blend_with_audio, sentence_base_affect, IntentKind, IntentModifier};
+use crate::phrase::PhraseDict;
 use crate::snapshot::{ContextSnapshot, RawInput};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,15 +29,15 @@ use crate::snapshot::{ContextSnapshot, RawInput};
 #[derive(Debug, Clone)]
 pub struct ActivationResult {
     /// f(x) sau khi ingest turn này
-    pub fx:       f32,
+    pub fx: f32,
     /// Tone phản hồi khuyến nghị
-    pub tone:     ResponseTone,
+    pub tone: ResponseTone,
     /// EmotionTag của turn này
-    pub affect:   EmotionTag,
+    pub affect: EmotionTag,
     /// Intent
-    pub intent:   IntentKind,
+    pub intent: IntentKind,
     /// Turn index
-    pub turn:     u32,
+    pub turn: u32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,9 +49,9 @@ pub struct ActivationResult {
 /// Một engine per session (per user).
 pub struct ContextEngine {
     /// Phrase parser
-    dict:      PhraseDict,
+    dict: PhraseDict,
     /// ConversationCurve theo dõi f(x)
-    curve:     ConversationCurve,
+    curve: ConversationCurve,
     /// Tất cả snapshots của session
     snapshots: Vec<ContextSnapshot>,
     /// Session ID
@@ -64,9 +62,9 @@ impl ContextEngine {
     /// Tạo engine mới cho session.
     pub fn new(session_id: u64) -> Self {
         Self {
-            dict:       PhraseDict::new(),
-            curve:      ConversationCurve::new(),
-            snapshots:  Vec::new(),
+            dict: PhraseDict::new(),
+            curve: ConversationCurve::new(),
+            snapshots: Vec::new(),
             session_id,
         }
     }
@@ -85,9 +83,7 @@ impl ContextEngine {
         };
 
         // phrase_hashes
-        let phrase_hashes: Vec<u64> = phrase_matches.iter()
-            .filter_map(|m| m.chain_hash)
-            .collect();
+        let phrase_hashes: Vec<u64> = phrase_matches.iter().filter_map(|m| m.chain_hash).collect();
 
         // ── 2. Compute EmotionTag ────────────────────────────────────────────
         // Base affect từ phrases
@@ -104,7 +100,11 @@ impl ContextEngine {
         // Cross-modal fusion nếu có audio
         let affect = if let (Some(pitch), Some(energy)) = (raw.audio_pitch, raw.audio_energy) {
             // Audio valence từ pitch và energy
-            let audio_valence = if pitch < 150.0 { -0.4 } else { energy * 0.3 - 0.1 };
+            let audio_valence = if pitch < 150.0 {
+                -0.4
+            } else {
+                energy * 0.3 - 0.1
+            };
             blend_with_audio(base_affect, audio_valence, energy, pitch)
         } else {
             base_affect
@@ -112,23 +112,23 @@ impl ContextEngine {
 
         // ── 3. Detect intent + modifier ──────────────────────────────────────
         let text_str = raw.text.as_ref().map(|s| s.as_ref()).unwrap_or("");
-        let intent   = IntentKind::detect(text_str);
+        let intent = IntentKind::detect(text_str);
         let modifier = IntentModifier::detect(text_str);
-        let affect   = modifier.apply(affect);
+        let affect = modifier.apply(affect);
 
         // ── 4. Build ContextSnapshot ─────────────────────────────────────────
         let snap = ContextSnapshot {
             turn_index,
-            raw_text:     raw.text.clone(),
+            raw_text: raw.text.clone(),
             phrase_hashes,
             affect,
             intent,
             modifier,
-            modality:     raw.modality,
-            audio_pitch:  raw.audio_pitch,
+            modality: raw.modality,
+            audio_pitch: raw.audio_pitch,
             audio_energy: raw.audio_energy,
-            timestamp:    raw.timestamp,
-            session_id:   self.session_id,
+            timestamp: raw.timestamp,
+            session_id: self.session_id,
         };
 
         // ── 5. Push vào ConversationCurve ────────────────────────────────────
@@ -140,24 +140,32 @@ impl ContextEngine {
         // ── 7. Trả về kết quả ───────────────────────────────────────────────
         ActivationResult {
             fx,
-            tone:   self.curve.tone(),
+            tone: self.curve.tone(),
             affect,
             intent,
-            turn:   turn_index,
+            turn: turn_index,
         }
     }
 
     /// f(x) hiện tại.
-    pub fn fx(&self) -> f32 { self.curve.fx() }
+    pub fn fx(&self) -> f32 {
+        self.curve.fx()
+    }
 
     /// Số turns.
-    pub fn turn_count(&self) -> usize { self.snapshots.len() }
+    pub fn turn_count(&self) -> usize {
+        self.snapshots.len()
+    }
 
     /// Tone hiện tại.
-    pub fn tone(&self) -> ResponseTone { self.curve.tone() }
+    pub fn tone(&self) -> ResponseTone {
+        self.curve.tone()
+    }
 
     /// Valence hiện tại.
-    pub fn current_v(&self) -> f32 { self.curve.current_v() }
+    pub fn current_v(&self) -> f32 {
+        self.curve.current_v()
+    }
 
     /// EmotionTag từ ConversationCurve hiện tại.
     /// Dùng để feed vào Silk khi VM events xảy ra.
@@ -171,10 +179,14 @@ impl ContextEngine {
     }
 
     /// ConversationCurve (read-only).
-    pub fn curve(&self) -> &ConversationCurve { &self.curve }
+    pub fn curve(&self) -> &ConversationCurve {
+        &self.curve
+    }
 
     /// Snapshots (read-only).
-    pub fn snapshots(&self) -> &[ContextSnapshot] { &self.snapshots }
+    pub fn snapshots(&self) -> &[ContextSnapshot] {
+        &self.snapshots
+    }
 
     /// Cập nhật f_dn từ ĐN node mới (gọi khi Memory tạo node).
     pub fn update_dn(&mut self, dn_valence: f32) {
@@ -190,7 +202,9 @@ impl ContextEngine {
 mod tests {
     use super::*;
 
-    fn engine() -> ContextEngine { ContextEngine::new(0xDEAD_BEEF) }
+    fn engine() -> ContextEngine {
+        ContextEngine::new(0xDEAD_BEEF)
+    }
 
     #[test]
     fn activate_single_turn() {
@@ -204,8 +218,7 @@ mod tests {
     fn activate_crisis_detected() {
         let mut e = engine();
         let r = e.on_activate(RawInput::text("tôi muốn chết", 1000));
-        assert_eq!(r.intent, IntentKind::Crisis,
-            "Crisis phải detect được");
+        assert_eq!(r.intent, IntentKind::Crisis, "Crisis phải detect được");
     }
 
     #[test]
@@ -219,8 +232,11 @@ mod tests {
     fn activate_sad_text_negative_affect() {
         let mut e = engine();
         let r = e.on_activate(RawInput::text("tôi buồn quá hôm nay", 1000));
-        assert!(r.affect.valence < 0.0,
-            "Câu buồn → affect âm: {}", r.affect.valence);
+        assert!(
+            r.affect.valence < 0.0,
+            "Câu buồn → affect âm: {}",
+            r.affect.valence
+        );
     }
 
     #[test]
@@ -243,8 +259,12 @@ mod tests {
 
         // Curve đang giảm → Supportive
         assert!(
-            matches!(r.tone, ResponseTone::Supportive | ResponseTone::Gentle | ResponseTone::Pause),
-            "Curve giảm → Supportive/Gentle/Pause, got {:?}", r.tone
+            matches!(
+                r.tone,
+                ResponseTone::Supportive | ResponseTone::Gentle | ResponseTone::Pause
+            ),
+            "Curve giảm → Supportive/Gentle/Pause, got {:?}",
+            r.tone
         );
     }
 
@@ -255,8 +275,11 @@ mod tests {
         let raw = RawInput::text_with_audio("bình thường thôi", 120.0, 0.2, 1000);
         let r = e.on_activate(raw);
         // Pitch 120Hz rất thấp → audio override → V âm
-        assert!(r.affect.valence < 0.1,
-            "Pitch thấp → audio override: val={}", r.affect.valence);
+        assert!(
+            r.affect.valence < 0.1,
+            "Pitch thấp → audio override: val={}",
+            r.affect.valence
+        );
     }
 
     #[test]
@@ -268,8 +291,12 @@ mod tests {
         // → f(x) ≈ 0.6 × f_conv
         let f_conv = e.curve().fx_conv;
         let expected = 0.6 * f_conv;
-        assert!((fx - expected).abs() < 0.01,
-            "f(x) = 0.6×f_conv: {} ≈ {}", fx, expected);
+        assert!(
+            (fx - expected).abs() < 0.01,
+            "f(x) = 0.6×f_conv: {} ≈ {}",
+            fx,
+            expected
+        );
     }
 
     #[test]
@@ -279,8 +306,12 @@ mod tests {
         let fx_before = e.fx();
         e.update_dn(-0.8); // ĐN âm
         let fx_after = e.fx();
-        assert!(fx_after < fx_before,
-            "ĐN âm → f(x) giảm: {} < {}", fx_after, fx_before);
+        assert!(
+            fx_after < fx_before,
+            "ĐN âm → f(x) giảm: {} < {}",
+            fx_after,
+            fx_before
+        );
     }
 
     #[test]

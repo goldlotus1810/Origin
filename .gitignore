@@ -1,6 +1,7 @@
 /target/
-origin.olang
+# origin.olang runtime files (rebuild-able, not tracked)
 origin.olang.log
 origin.olang.weights
 origin.olang.registry
 Cargo.lock
+tools/server/origin.olang

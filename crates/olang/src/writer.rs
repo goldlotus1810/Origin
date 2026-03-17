@@ -15,8 +15,16 @@
 //!   0x01 = NodeRecord
 //!   0x02 = EdgeRecord
 //!   0x03 = AliasRecord
+//!   0x04 = AmendRecord
+//!   0x05 = NodeKindRecord
 //!
-//! NodeRecord:
+//! NodeRecord (v0.05 — tagged molecule encoding):
+//!   [0x01][mol_count: u8][tagged_chain_bytes...][layer: u8]
+//!   [is_qr: u8][timestamp: 8 bytes i64]
+//!   Mỗi molecule: [mask: u8][present_values: 0-5B]
+//!   Total: 1 + 1 + Σ(1 + popcount(mask)) + 1 + 1 + 8 bytes
+//!
+//! NodeRecord (v0.03-v0.04 legacy — fixed 5-byte molecules):
 //!   [0x01][chain_len: u8][chain: N×5 bytes][layer: u8]
 //!   [is_qr: u8][timestamp: 8 bytes i64]
 //!   Total: 1 + 1 + N×5 + 1 + 1 + 8 = 12 + N×5 bytes
@@ -44,16 +52,35 @@ use crate::molecular::MolecularChain;
 /// Magic bytes: "○LNG" = 0xE2 0x97 0x8B 0x4C (○ = U+25CB)
 pub const MAGIC: [u8; 4] = [0xE2, 0x97, 0x8B, 0x4C];
 
-/// Version hiện tại
-pub const VERSION: u8 = 0x03;
+/// Version hiện tại — v0.05 (tagged molecule encoding)
+pub const VERSION: u8 = 0x05;
+/// Version trước — v0.04 (thêm RT_AMEND, vẫn đọc được)
+pub const VERSION_V04: u8 = 0x04;
+/// Version trước — v0.03 (vẫn đọc được)
+pub const VERSION_V03: u8 = 0x03;
 
 /// Record type bytes
 /// Record type: Node
-pub const RT_NODE:  u8 = 0x01;
+pub const RT_NODE: u8 = 0x01;
 /// Record type: Edge
-pub const RT_EDGE:  u8 = 0x02;
+pub const RT_EDGE: u8 = 0x02;
 /// Record type: Alias
 pub const RT_ALIAS: u8 = 0x03;
+/// Record type: Amendment — supersede a previous record (append-only rollback)
+///
+/// Format: [0x04][target_offset: 8][reason_len: u8][reason: N][timestamp: 8]
+/// Total: 1 + 8 + 1 + N + 8 = 18 + N bytes
+///
+/// QT8 compliant: không xóa record cũ — chỉ đánh dấu "đã thay thế".
+pub const RT_AMEND: u8 = 0x04;
+/// Record type: NodeKind — gán NodeKind cho một node đã có trong sổ cái.
+///
+/// Format: [0x05][chain_hash: 8][kind: u8][timestamp: 8]
+/// Total: 1 + 8 + 1 + 8 = 18 bytes
+///
+/// Cho phép origin.olang lưu trữ NodeKind (Skill/Agent/Program/Sensor/...)
+/// → L0 đọc file → biết mình có gì → cuốn sổ cái đầy đủ.
+pub const RT_NODE_KIND: u8 = 0x05;
 
 /// Header size: MAGIC(4) + VERSION(1) + CREATED(8) = 13 bytes
 pub const HEADER_SIZE: usize = 13;
@@ -68,7 +95,7 @@ pub const HEADER_SIZE: usize = 13;
 /// Trong production: flush to disk sau mỗi write (QT8).
 #[allow(missing_docs)]
 pub struct OlangWriter {
-    buf:        Vec<u8>,
+    buf: Vec<u8>,
     write_count: u64,
 }
 
@@ -76,7 +103,7 @@ impl OlangWriter {
     /// Tạo writer mới với header.
     pub fn new(created_at: i64) -> Self {
         let mut w = Self {
-            buf:         Vec::new(),
+            buf: Vec::new(),
             write_count: 0,
         };
         w.write_header(created_at);
@@ -86,7 +113,15 @@ impl OlangWriter {
     /// Tạo writer từ existing bytes (append mode).
     pub fn from_existing(existing: Vec<u8>) -> Self {
         Self {
-            buf:         existing,
+            buf: existing,
+            write_count: 0,
+        }
+    }
+
+    /// Tạo writer rỗng KHÔNG có header — dùng khi append vào file đã có header.
+    pub fn new_append() -> Self {
+        Self {
+            buf: Vec::new(),
             write_count: 0,
         }
     }
@@ -97,28 +132,27 @@ impl OlangWriter {
         self.buf.extend_from_slice(&created_at.to_le_bytes());
     }
 
-    /// Ghi NodeRecord.
+    /// Ghi NodeRecord (v0.05 tagged format).
     ///
+    /// Mỗi molecule ghi `[mask][present_values]` thay vì cố định 5 bytes.
     /// Returns offset của record trong file.
     pub fn append_node(
         &mut self,
-        chain:      &MolecularChain,
-        layer:      u8,
-        is_qr:      bool,
-        timestamp:  i64,
+        chain: &MolecularChain,
+        layer: u8,
+        is_qr: bool,
+        timestamp: i64,
     ) -> Result<u64, WriteError> {
-        let chain_bytes = chain.to_bytes();
-        let chain_len = chain_bytes.len() / 5; // số molecules
-
-        if chain_len > 255 {
+        if chain.len() > 255 {
             return Err(WriteError::ChainTooLong);
         }
 
         let offset = self.buf.len() as u64;
 
         self.buf.push(RT_NODE);
-        self.buf.push(chain_len as u8);
-        self.buf.extend_from_slice(&chain_bytes);
+        // Ghi tagged chain: [mol_count][mol_1_tagged]...[mol_N_tagged]
+        let tagged = chain.to_tagged_bytes();
+        self.buf.extend_from_slice(&tagged);
         self.buf.push(layer);
         self.buf.push(if is_qr { 0x01 } else { 0x00 });
         self.buf.extend_from_slice(&timestamp.to_le_bytes());
@@ -130,10 +164,10 @@ impl OlangWriter {
     /// Ghi EdgeRecord.
     pub fn append_edge(
         &mut self,
-        from_hash:  u64,
-        to_hash:    u64,
-        edge_type:  u8,
-        timestamp:  i64,
+        from_hash: u64,
+        to_hash: u64,
+        edge_type: u8,
+        timestamp: i64,
     ) -> u64 {
         let offset = self.buf.len() as u64;
 
@@ -150,9 +184,9 @@ impl OlangWriter {
     /// Ghi AliasRecord.
     pub fn append_alias(
         &mut self,
-        name:       &str,
+        name: &str,
         chain_hash: u64,
-        timestamp:  i64,
+        timestamp: i64,
     ) -> Result<u64, WriteError> {
         let name_bytes = name.as_bytes();
         if name_bytes.len() > 255 {
@@ -171,17 +205,74 @@ impl OlangWriter {
         Ok(offset)
     }
 
+    /// Ghi AmendRecord — append-only rollback.
+    ///
+    /// Supersede một record cũ tại `target_offset` với lý do.
+    /// QT8: record cũ VẪN CÒN trong file — chỉ bị đánh dấu amended.
+    pub fn append_amend(
+        &mut self,
+        target_offset: u64,
+        reason: &str,
+        timestamp: i64,
+    ) -> Result<u64, WriteError> {
+        let reason_bytes = reason.as_bytes();
+        if reason_bytes.len() > 255 {
+            return Err(WriteError::NameTooLong);
+        }
+
+        let offset = self.buf.len() as u64;
+
+        self.buf.push(RT_AMEND);
+        self.buf.extend_from_slice(&target_offset.to_le_bytes());
+        self.buf.push(reason_bytes.len() as u8);
+        self.buf.extend_from_slice(reason_bytes);
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+
+        self.write_count += 1;
+        Ok(offset)
+    }
+
+    /// Ghi NodeKindRecord — gán NodeKind cho một chain_hash.
+    ///
+    /// Ghi SAU append_node() (QT8: node phải tồn tại trước).
+    /// Cho phép origin.olang trở thành cuốn sổ cái đầy đủ:
+    /// L0 đọc file → thấy node + kind → biết mình có Skill/Agent/Program/Sensor gì.
+    pub fn append_node_kind(
+        &mut self,
+        chain_hash: u64,
+        kind: u8,
+        timestamp: i64,
+    ) -> u64 {
+        let offset = self.buf.len() as u64;
+
+        self.buf.push(RT_NODE_KIND);
+        self.buf.extend_from_slice(&chain_hash.to_le_bytes());
+        self.buf.push(kind);
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+
+        self.write_count += 1;
+        offset
+    }
+
     /// Raw bytes của file (để flush to disk hoặc test).
-    pub fn as_bytes(&self) -> &[u8] { &self.buf }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buf
+    }
 
     /// Kích thước file hiện tại.
-    pub fn size(&self) -> usize { self.buf.len() }
+    pub fn size(&self) -> usize {
+        self.buf.len()
+    }
 
     /// Số records đã ghi.
-    pub fn write_count(&self) -> u64 { self.write_count }
+    pub fn write_count(&self) -> u64 {
+        self.write_count
+    }
 
     /// Consume writer → bytes
-    pub fn into_bytes(self) -> Vec<u8> { self.buf }
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.buf
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,17 +294,23 @@ pub enum WriteError {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::String;
     use super::*;
     use crate::encoder::encode_codepoint;
+    use alloc::string::String;
 
-    fn skip_if_empty() -> bool { ucd::table_len() == 0 }
+    fn skip_if_empty() -> bool {
+        ucd::table_len() == 0
+    }
 
     #[test]
     fn writer_header() {
         let w = OlangWriter::new(1000);
         let bytes = w.as_bytes();
-        assert!(bytes.len() >= HEADER_SIZE, "Header phải có ít nhất {} bytes", HEADER_SIZE);
+        assert!(
+            bytes.len() >= HEADER_SIZE,
+            "Header phải có ít nhất {} bytes",
+            HEADER_SIZE
+        );
         assert_eq!(&bytes[0..4], &MAGIC, "Magic bytes đúng");
         assert_eq!(bytes[4], VERSION, "Version đúng");
         // CREATED = bytes[5..13] = 1000i64 LE
@@ -223,29 +320,41 @@ mod tests {
 
     #[test]
     fn write_node() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let mut w = OlangWriter::new(0);
         let chain = encode_codepoint(0x1F525); // 🔥
         let before = w.size();
         let offset = w.append_node(&chain, 0, false, 1000).unwrap();
 
         assert_eq!(offset, before as u64, "Offset phải là vị trí trước khi ghi");
-        // NodeRecord: 1 + 1 + 1×5 + 1 + 1 + 8 = 17 bytes
-        assert_eq!(w.size() - before, 17, "NodeRecord size = 17 bytes cho 1-mol chain");
+        // NodeRecord v0.05: 1(type) + tagged_chain_bytes + 1(layer) + 1(is_qr) + 8(ts)
+        // tagged_chain = 1(mol_count) + mol_tagged_size
+        let expected = 1 + chain.tagged_byte_size() + 1 + 1 + 8;
+        assert_eq!(
+            w.size() - before,
+            expected,
+            "NodeRecord size = {} bytes cho 1-mol chain (tagged)",
+            expected,
+        );
         assert_eq!(w.write_count(), 1);
     }
 
     #[test]
     fn write_node_qr() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let mut w = OlangWriter::new(0);
         let chain = encode_codepoint(0x1F525);
         w.append_node(&chain, 0, true, 1000).unwrap();
 
         // Verify QR flag
         let bytes = w.as_bytes();
-        // QR byte: offset = HEADER_SIZE + 1(type) + 1(len) + 5(chain) + 1(layer) = HEADER_SIZE + 8
-        let qr_pos = HEADER_SIZE + 1 + 1 + 5 + 1;
+        // QR byte: offset = HEADER_SIZE + 1(type) + tagged_chain_size + 1(layer)
+        let tagged_size = chain.tagged_byte_size();
+        let qr_pos = HEADER_SIZE + 1 + tagged_size + 1;
         assert_eq!(bytes[qr_pos], 0x01, "QR flag = 0x01");
     }
 
@@ -284,7 +393,9 @@ mod tests {
 
     #[test]
     fn write_sequence_offsets() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let mut w = OlangWriter::new(0);
 
         let c1 = encode_codepoint(0x1F525);
@@ -299,11 +410,13 @@ mod tests {
 
     #[test]
     fn write_mixed_records() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let mut w = OlangWriter::new(0);
 
         let chain = encode_codepoint(0x1F525);
-        let hash  = chain.chain_hash();
+        let hash = chain.chain_hash();
 
         w.append_node(&chain, 0, false, 1000).unwrap();
         w.append_alias("fire", hash, 1001).unwrap();
@@ -319,7 +432,7 @@ mod tests {
         let mut prev_size = w.size();
 
         for i in 0u64..5 {
-            w.append_edge(i, i+1, 0x01, i as i64);
+            w.append_edge(i, i + 1, 0x01, i as i64);
             assert!(w.size() > prev_size, "File chỉ tăng, không giảm");
             prev_size = w.size();
         }

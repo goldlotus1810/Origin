@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 build   = "build.rs"
 
+[features]
+default = ["reverse-index"]
+## Reverse index (HASH_TO_CP + bucket_cps).
+## Thêm ~40KB static data. Tắt trên embedded (ESP32/MCU) để tiết kiệm SRAM.
+reverse-index = []
+
 [lib]
 name = "ucd"
 path = "src/lib.rs"

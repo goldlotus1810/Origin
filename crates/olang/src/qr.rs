@@ -13,16 +13,15 @@
 //!   QR_B (mới) được tạo với SupersedesQR edge đến QR_A.
 //!   Query QR_A → nhận QR_B + ghi chú "deprecated".
 //!
-//! ## Wire format QR record:
-//!   [chain_bytes: N×5][chain_hash: 8][timestamp: 8][signature: 64] = N×5 + 80 bytes
+//! ## Wire format QR record (v0.05 — tagged):
+//!   [chain_tagged_bytes][chain_hash: 8][timestamp: 8][signature: 64]
+//!   chain_tagged_bytes = [mol_count: u8][mol_1_tagged]...[mol_N_tagged]
 
 extern crate alloc;
 use alloc::vec::Vec;
 
-use ed25519_dalek::{
-    Signature, Signer, SigningKey, Verifier, VerifyingKey,
-};
-use sha2::{Sha256, Digest};
+use crate::sha256::Sha256;
+use crate::ed25519::{SigningKey, VerifyingKey, Signature};
 
 use crate::molecular::MolecularChain;
 
@@ -36,9 +35,9 @@ use crate::molecular::MolecularChain;
 #[derive(Debug, Clone)]
 pub struct QRRecord {
     /// Chain của node
-    pub chain:     MolecularChain,
+    pub chain: MolecularChain,
     /// FNV-1a hash của chain
-    pub hash:      u64,
+    pub hash: u64,
     /// Timestamp khi QR được approve (nanoseconds)
     pub timestamp: i64,
     /// ED25519 signature của message
@@ -51,47 +50,63 @@ impl QRRecord {
     /// message = SHA256(chain_bytes || hash_le8 || ts_le8)
     pub fn message_bytes(chain: &MolecularChain, hash: u64, timestamp: i64) -> [u8; 32] {
         let mut hasher = Sha256::new();
-        hasher.update(&chain.to_bytes());
-        hasher.update(&hash.to_le_bytes());
-        hasher.update(&timestamp.to_le_bytes());
+        hasher.update(chain.to_bytes());
+        hasher.update(hash.to_le_bytes());
+        hasher.update(timestamp.to_le_bytes());
         let result = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&result);
         out
     }
 
-    /// Serialize → bytes để ghi vào file.
+    /// Serialize → bytes để ghi vào file (v0.05 tagged format).
     ///
-    /// Format: [chain_len: u8][chain: N×5][hash: 8][ts: 8][sig: 64]
+    /// Format: [tagged_chain_bytes][hash: 8][ts: 8][sig: 64]
+    /// tagged_chain_bytes = [mol_count: u8][mol_1_tagged]...[mol_N_tagged]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let chain_bytes = self.chain.to_bytes();
-        let mut out = Vec::with_capacity(1 + chain_bytes.len() + 8 + 8 + 64);
-        out.push((chain_bytes.len() / 5) as u8);
-        out.extend_from_slice(&chain_bytes);
+        let chain_tagged = self.chain.to_tagged_bytes();
+        let mut out = Vec::with_capacity(chain_tagged.len() + 8 + 8 + 64);
+        out.extend_from_slice(&chain_tagged);
         out.extend_from_slice(&self.hash.to_le_bytes());
         out.extend_from_slice(&self.timestamp.to_le_bytes());
         out.extend_from_slice(&self.signature);
         out
     }
 
-    /// Deserialize từ bytes.
+    /// Deserialize từ bytes (v0.05 tagged format).
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 1 + 5 + 8 + 8 + 64 { return None; }
+        // Minimum: 1 (mol_count=0) + 8 + 8 + 64 = 81 bytes
+        if data.len() < 1 + 8 + 8 + 64 {
+            return None;
+        }
 
-        let chain_len = data[0] as usize;
-        let chain_bytes_len = chain_len * 5;
-        let needed = 1 + chain_bytes_len + 8 + 8 + 64;
-        if data.len() < needed { return None; }
+        let chain = MolecularChain::from_tagged_bytes(data)?;
+        let chain_tagged_len = chain.tagged_byte_size();
 
-        let chain = MolecularChain::from_bytes(&data[1..1+chain_bytes_len])?;
-        let mut pos = 1 + chain_bytes_len;
+        let mut pos = chain_tagged_len;
+        if pos + 8 + 8 + 64 > data.len() {
+            return None;
+        }
 
-        let hash = u64::from_le_bytes(data[pos..pos+8].try_into().unwrap()); pos += 8;
-        let ts   = i64::from_le_bytes(data[pos..pos+8].try_into().unwrap()); pos += 8;
+        let hash = u64::from_le_bytes([
+            data[pos], data[pos+1], data[pos+2], data[pos+3],
+            data[pos+4], data[pos+5], data[pos+6], data[pos+7],
+        ]);
+        pos += 8;
+        let ts = u64::from_le_bytes([
+            data[pos], data[pos+1], data[pos+2], data[pos+3],
+            data[pos+4], data[pos+5], data[pos+6], data[pos+7],
+        ]) as i64;
+        pos += 8;
         let mut sig = [0u8; 64];
-        sig.copy_from_slice(&data[pos..pos+64]);
+        sig.copy_from_slice(&data[pos..pos + 64]);
 
-        Some(Self { chain, hash, timestamp: ts, signature: sig })
+        Some(Self {
+            chain,
+            hash,
+            timestamp: ts,
+            signature: sig,
+        })
     }
 }
 
@@ -110,7 +125,9 @@ pub struct QRSigner {
 impl QRSigner {
     /// Tạo từ 32-byte seed.
     pub fn from_seed(seed: &[u8; 32]) -> Self {
-        Self { signing_key: SigningKey::from_bytes(seed) }
+        Self {
+            signing_key: SigningKey::from_bytes(seed),
+        }
     }
 
     /// Verifying key (public) — dùng để verify signature.
@@ -122,7 +139,7 @@ impl QRSigner {
     ///
     /// Đây là bước AAM approve một node thành QR.
     pub fn sign_qr(&self, chain: &MolecularChain, timestamp: i64) -> QRRecord {
-        let hash    = chain.chain_hash();
+        let hash = chain.chain_hash();
         let message = QRRecord::message_bytes(chain, hash, timestamp);
         let sig: Signature = self.signing_key.sign(&message);
         QRRecord {
@@ -142,9 +159,7 @@ impl QRSigner {
 /// Verify QRRecord với public key.
 pub fn verify_qr(record: &QRRecord, verifying_key: &VerifyingKey) -> bool {
     let message = QRRecord::message_bytes(&record.chain, record.hash, record.timestamp);
-    let sig = match Signature::from_bytes(&record.signature) {
-        sig => sig,
-    };
+    let sig = Signature::from_bytes(&record.signature);
     verifying_key.verify(&message, &sig).is_ok()
 }
 
@@ -160,11 +175,11 @@ pub fn verify_qr(record: &QRRecord, verifying_key: &VerifyingKey) -> bool {
 #[derive(Debug, Clone)]
 pub struct QRSupersessionRecord {
     /// Hash của QR cũ (deprecated)
-    pub old_hash:  u64,
+    pub old_hash: u64,
     /// Hash của QR mới (đúng hơn)
-    pub new_hash:  u64,
+    pub new_hash: u64,
     /// Lý do supersede (ngắn gọn)
-    pub reason:    [u8; 32],
+    pub reason: [u8; 32],
     /// Timestamp
     pub timestamp: i64,
     /// ED25519 signature của (old_hash || new_hash || reason || timestamp)
@@ -175,10 +190,10 @@ impl QRSupersessionRecord {
     /// Message bytes để sign.
     pub fn message_bytes(old: u64, new: u64, reason: &[u8; 32], ts: i64) -> [u8; 32] {
         let mut hasher = Sha256::new();
-        hasher.update(&old.to_le_bytes());
-        hasher.update(&new.to_le_bytes());
+        hasher.update(old.to_le_bytes());
+        hasher.update(new.to_le_bytes());
         hasher.update(reason.as_slice());
-        hasher.update(&ts.to_le_bytes());
+        hasher.update(ts.to_le_bytes());
         let result = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&result);
@@ -200,14 +215,26 @@ impl QRSupersessionRecord {
 
     /// Deserialize từ 120 bytes.
     pub fn from_bytes(data: &[u8; 120]) -> Self {
-        let old = u64::from_le_bytes(data[0..8].try_into().unwrap());
-        let new = u64::from_le_bytes(data[8..16].try_into().unwrap());
+        let old = u64::from_le_bytes([
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+        ]);
+        let new = u64::from_le_bytes([
+            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+        ]);
         let mut reason = [0u8; 32];
         reason.copy_from_slice(&data[16..48]);
-        let ts  = i64::from_le_bytes(data[48..56].try_into().unwrap());
+        let ts = u64::from_le_bytes([
+            data[48], data[49], data[50], data[51], data[52], data[53], data[54], data[55],
+        ]) as i64;
         let mut sig = [0u8; 64];
         sig.copy_from_slice(&data[56..120]);
-        Self { old_hash: old, new_hash: new, reason, timestamp: ts, signature: sig }
+        Self {
+            old_hash: old,
+            new_hash: new,
+            reason,
+            timestamp: ts,
+            signature: sig,
+        }
     }
 }
 
@@ -218,9 +245,9 @@ impl QRSigner {
     /// QR_old vẫn tồn tại — chỉ thêm record mới (QT8).
     pub fn supersede(
         &self,
-        old_hash:  u64,
-        new_hash:  u64,
-        reason:    &[u8; 32],
+        old_hash: u64,
+        new_hash: u64,
+        reason: &[u8; 32],
         timestamp: i64,
     ) -> QRSupersessionRecord {
         let message = QRSupersessionRecord::message_bytes(old_hash, new_hash, reason, timestamp);
@@ -238,7 +265,10 @@ impl QRSigner {
 /// Verify supersession record.
 pub fn verify_supersession(record: &QRSupersessionRecord, vk: &VerifyingKey) -> bool {
     let message = QRSupersessionRecord::message_bytes(
-        record.old_hash, record.new_hash, &record.reason, record.timestamp,
+        record.old_hash,
+        record.new_hash,
+        &record.reason,
+        record.timestamp,
     );
     let sig = Signature::from_bytes(&record.signature);
     vk.verify(&message, &sig).is_ok()
@@ -253,7 +283,9 @@ mod tests {
     use super::*;
     use crate::encoder::encode_codepoint;
 
-    fn skip_if_empty() -> bool { ucd::table_len() == 0 }
+    fn skip_if_empty() -> bool {
+        ucd::table_len() == 0
+    }
 
     /// Test signing key từ seed cố định.
     fn test_signer() -> QRSigner {
@@ -265,9 +297,11 @@ mod tests {
 
     #[test]
     fn sign_and_verify_fire() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525); // 🔥
+        let chain = encode_codepoint(0x1F525); // 🔥
         let record = signer.sign_qr(&chain, 1000);
 
         assert_eq!(record.chain, chain);
@@ -277,118 +311,144 @@ mod tests {
 
     #[test]
     fn sign_and_verify_water() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F4A7); // 💧
+        let chain = encode_codepoint(0x1F4A7); // 💧
         let record = signer.sign_qr(&chain, 2000);
         assert!(signer.verify(&record));
     }
 
     #[test]
     fn tamper_chain_fails_verify() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let mut record = signer.sign_qr(&chain, 1000);
 
         // Tamper: thay chain bằng chain khác
         record.chain = encode_codepoint(0x1F4A7); // 💧 thay vì 🔥
-        assert!(!signer.verify(&record),
-            "Tampered chain phải fail verify");
+        assert!(!signer.verify(&record), "Tampered chain phải fail verify");
     }
 
     #[test]
     fn tamper_timestamp_fails_verify() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let mut record = signer.sign_qr(&chain, 1000);
 
         // Tamper: thay timestamp
         record.timestamp = 9999;
-        assert!(!signer.verify(&record),
-            "Tampered timestamp phải fail verify");
+        assert!(
+            !signer.verify(&record),
+            "Tampered timestamp phải fail verify"
+        );
     }
 
     #[test]
     fn tamper_signature_fails_verify() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let mut record = signer.sign_qr(&chain, 1000);
 
         // Tamper: flip 1 bit trong signature
         record.signature[0] ^= 0x01;
-        assert!(!signer.verify(&record),
-            "Tampered signature phải fail verify");
+        assert!(
+            !signer.verify(&record),
+            "Tampered signature phải fail verify"
+        );
     }
 
     #[test]
     fn wrong_key_fails_verify() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer1 = test_signer();
         let signer2 = QRSigner::from_seed(&[0xFF; 32]); // key khác
 
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let record = signer1.sign_qr(&chain, 1000);
 
         // Verify với key khác → fail
-        assert!(!verify_qr(&record, &signer2.verifying_key()),
-            "Sai key phải fail verify");
+        assert!(
+            !verify_qr(&record, &signer2.verifying_key()),
+            "Sai key phải fail verify"
+        );
     }
 
     #[test]
     fn signature_deterministic() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         // ED25519 deterministic: cùng input → cùng signature
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let r1 = signer.sign_qr(&chain, 1000);
         let r2 = signer.sign_qr(&chain, 1000);
-        assert_eq!(r1.signature, r2.signature,
-            "ED25519 phải deterministic");
+        assert_eq!(r1.signature, r2.signature, "ED25519 phải deterministic");
     }
 
     #[test]
     fn different_timestamps_different_signatures() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let r1 = signer.sign_qr(&chain, 1000);
         let r2 = signer.sign_qr(&chain, 2000); // khác timestamp
-        assert_ne!(r1.signature, r2.signature,
-            "Khác timestamp → khác signature");
+        assert_ne!(
+            r1.signature, r2.signature,
+            "Khác timestamp → khác signature"
+        );
     }
 
     // ── QRRecord serialization ───────────────────────────────────────────────
 
     #[test]
     fn qr_record_roundtrip() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let record = signer.sign_qr(&chain, 1000);
 
-        let bytes   = record.to_bytes();
+        let bytes = record.to_bytes();
         let decoded = QRRecord::from_bytes(&bytes).expect("parse QRRecord");
 
-        assert_eq!(decoded.chain,     record.chain);
-        assert_eq!(decoded.hash,      record.hash);
+        assert_eq!(decoded.chain, record.chain);
+        assert_eq!(decoded.hash, record.hash);
         assert_eq!(decoded.timestamp, record.timestamp);
         assert_eq!(decoded.signature, record.signature);
     }
 
     #[test]
     fn qr_record_too_short() {
-        assert!(QRRecord::from_bytes(&[0u8; 10]).is_none(),
-            "Too short → None");
+        assert!(
+            QRRecord::from_bytes(&[0u8; 10]).is_none(),
+            "Too short → None"
+        );
     }
 
     // ── QR Supersession ─────────────────────────────────────────────────────
 
     #[test]
     fn supersede_and_verify() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB); // ○ (giả sử QR cũ)
         let chain_new = encode_codepoint(0x25CF); // ● (QR mới đúng hơn)
@@ -399,21 +459,23 @@ mod tests {
         let mut reason = [0u8; 32];
         reason[..7].copy_from_slice(b"updated");
 
-        let supersession = signer.supersede(
-            old_record.hash, new_record.hash, &reason, 3000,
-        );
+        let supersession = signer.supersede(old_record.hash, new_record.hash, &reason, 3000);
 
         assert_eq!(supersession.old_hash, old_record.hash);
         assert_eq!(supersession.new_hash, new_record.hash);
-        assert!(verify_supersession(&supersession, &signer.verifying_key()),
-            "Supersession phải valid");
+        assert!(
+            verify_supersession(&supersession, &signer.verifying_key()),
+            "Supersession phải valid"
+        );
     }
 
     #[test]
     fn supersession_old_still_valid() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         // QR_old vẫn valid sau khi bị supersede (QT8)
-        let signer    = test_signer();
+        let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB);
         let chain_new = encode_codepoint(0x25CF);
 
@@ -421,40 +483,45 @@ mod tests {
         let new_record = signer.sign_qr(&chain_new, 2000);
 
         let reason = [0u8; 32];
-        let _supersession = signer.supersede(
-            old_record.hash, new_record.hash, &reason, 3000,
-        );
+        let _supersession = signer.supersede(old_record.hash, new_record.hash, &reason, 3000);
 
         // QR_old vẫn verify được (vẫn tồn tại trong sổ cái)
-        assert!(signer.verify(&old_record),
-            "QR_old vẫn valid sau supersession (QT8 — không xóa)");
-        assert!(signer.verify(&new_record),
-            "QR_new phải valid");
+        assert!(
+            signer.verify(&old_record),
+            "QR_old vẫn valid sau supersession (QT8 — không xóa)"
+        );
+        assert!(signer.verify(&new_record), "QR_new phải valid");
     }
 
     #[test]
     fn supersession_tamper_fails() {
-        if skip_if_empty() { return; }
-        let signer    = test_signer();
+        if skip_if_empty() {
+            return;
+        }
+        let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB);
         let chain_new = encode_codepoint(0x25CF);
 
         let old_rec = signer.sign_qr(&chain_old, 1000);
         let new_rec = signer.sign_qr(&chain_new, 2000);
-        let reason  = [0u8; 32];
+        let reason = [0u8; 32];
 
         let mut ss = signer.supersede(old_rec.hash, new_rec.hash, &reason, 3000);
 
         // Tamper: thay new_hash
         ss.new_hash = 0xDEAD_BEEF;
-        assert!(!verify_supersession(&ss, &signer.verifying_key()),
-            "Tampered supersession phải fail");
+        assert!(
+            !verify_supersession(&ss, &signer.verifying_key()),
+            "Tampered supersession phải fail"
+        );
     }
 
     #[test]
     fn supersession_roundtrip() {
-        if skip_if_empty() { return; }
-        let signer    = test_signer();
+        if skip_if_empty() {
+            return;
+        }
+        let signer = test_signer();
         let chain_old = encode_codepoint(0x25CB);
         let chain_new = encode_codepoint(0x25CF);
 
@@ -464,37 +531,46 @@ mod tests {
         let mut reason = [0u8; 32];
         reason[..6].copy_from_slice(b"better");
 
-        let ss    = signer.supersede(old_rec.hash, new_rec.hash, &reason, 3000);
+        let ss = signer.supersede(old_rec.hash, new_rec.hash, &reason, 3000);
         let bytes = ss.to_bytes();
         let decoded = QRSupersessionRecord::from_bytes(&bytes);
 
-        assert_eq!(decoded.old_hash,  ss.old_hash);
-        assert_eq!(decoded.new_hash,  ss.new_hash);
-        assert_eq!(decoded.reason,    ss.reason);
+        assert_eq!(decoded.old_hash, ss.old_hash);
+        assert_eq!(decoded.new_hash, ss.new_hash);
+        assert_eq!(decoded.reason, ss.reason);
         assert_eq!(decoded.timestamp, ss.timestamp);
         assert_eq!(decoded.signature, ss.signature);
 
         // Verify sau roundtrip vẫn pass
-        assert!(verify_supersession(&decoded, &signer.verifying_key()),
-            "Supersession verify sau roundtrip");
+        assert!(
+            verify_supersession(&decoded, &signer.verifying_key()),
+            "Supersession verify sau roundtrip"
+        );
     }
 
     // ── Chain hash integrity ─────────────────────────────────────────────────
 
     #[test]
     fn qr_hash_matches_chain_hash() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
-        let chain  = encode_codepoint(0x1F525);
+        let chain = encode_codepoint(0x1F525);
         let record = signer.sign_qr(&chain, 1000);
 
-        assert_eq!(record.hash, chain.chain_hash(),
-            "QR hash phải khớp chain hash");
+        assert_eq!(
+            record.hash,
+            chain.chain_hash(),
+            "QR hash phải khớp chain hash"
+        );
     }
 
     #[test]
     fn sign_all_ucd_entries_sample() {
-        if skip_if_empty() { return; }
+        if skip_if_empty() {
+            return;
+        }
         let signer = test_signer();
         let sample_cps = [
             0x1F525u32, // 🔥
@@ -507,10 +583,13 @@ mod tests {
         ];
 
         for cp in sample_cps {
-            let chain  = encode_codepoint(cp);
+            let chain = encode_codepoint(cp);
             let record = signer.sign_qr(&chain, cp as i64);
-            assert!(signer.verify(&record),
-                "QR sign/verify phải pass cho cp=0x{:05X}", cp);
+            assert!(
+                signer.verify(&record),
+                "QR sign/verify phải pass cho cp=0x{:05X}",
+                cp
+            );
         }
     }
 }
