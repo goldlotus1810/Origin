@@ -14,7 +14,7 @@
 ```
 Tests:    1,774 pass · 0 fail · 0 clippy warnings
 Deps:     0 external runtime (native SHA-256, Ed25519, AES-256-GCM, homemath)
-origin:   313 nodes (35 L0 + 278 domain) · 236 edges · 2246 aliases · 72KB
+origin:   338 nodes (35 L0 + 278 domain + 25 multilang) · 236 edges · 2703 aliases · 84KB
 ```
 
 ### HOẠT ĐỘNG:
@@ -42,6 +42,7 @@ origin:   313 nodes (35 L0 + 278 domain) · 236 edges · 2246 aliases · 72KB
 ✅ Phase 3: Domain Knowledge — 313 nodes seeded (6 domains)
 ✅ SkillProposal — ComposedSkill + SkillPattern + SkillPatternStore + wired vào LeoAI
 ✅ Unwrap reduction: 50 → 27 production unwraps (partial_cmp→total_cmp, try_into→array)
+✅ Multilingual Seeding: 25 nodes, 432 aliases (7 languages) integrated vào origin.olang
 ```
 
 ---
@@ -137,9 +138,8 @@ docs/ chỉ giữ: olang_guide.md
 ## Tiếp theo (ưu tiên)
 
 ```
-1. [TRUNG BÌNH] Multilingual Seeding — multilang.olang integrate
-2. [THẤP]       WASM Browser Demo
-3. [THẤP]       API documentation cho core crates
+1. [THẤP]       WASM Browser Demo
+2. [THẤP]       API documentation cho core crates
 ```
 
 ---
@@ -165,7 +165,7 @@ E: Đồng bộ docs, reseed origin.olang
 F: P1 RelOps 18/18, Dream STM cleanup
 G: Verify Phase 2-5 thực trạng, cập nhật NEXT_PLAN
 H: Dọn docs → old/, Phase 5+4+3 HOÀN THÀNH, 1759 tests
-I: SkillProposal + unwrap reduction (50→27), 1774 tests
+I: SkillProposal + unwrap reduction (50→27) + Multilingual Seeding, 1774 tests
 ```
 
 ---
@@ -179,4 +179,4 @@ Chỉ giữ: CLAUDE.md, NEXT_PLAN.md, README.md, docs/olang_guide.md
 
 ---
 
-*HomeOS · 2026-03-17 · 1,774 tests · 313 nodes · ○(∅)==○*
+*HomeOS · 2026-03-17 · 1,774 tests · 338 nodes · ○(∅)==○*

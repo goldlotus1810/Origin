@@ -318,11 +318,196 @@ static SENTIMENT_NODES: &[(&str, u32, &[&str])] = &[
     ),
 ];
 
+/// Basic concept nodes — common cross-language concepts mapped to Unicode codepoints.
+static CONCEPT_NODES: &[(&str, u32, &[&str])] = &[
+    (
+        "water",
+        0x1F4A7, // 💧
+        &[
+            "nước", "nước uống",
+            "water", "aqua",
+            "eau", "l'eau",
+            "Wasser",
+            "水", "みず",
+            "agua",
+        ],
+    ),
+    (
+        "fire",
+        0x1F525, // 🔥
+        &[
+            "lửa", "ngọn lửa",
+            "fire", "flame", "blaze",
+            "feu", "flamme",
+            "Feuer", "Flamme",
+            "火", "炎",
+            "fuego", "llama",
+        ],
+    ),
+    (
+        "sun",
+        0x2600, // ☀
+        &[
+            "mặt trời", "nắng", "ánh sáng",
+            "sun", "sunlight", "sunshine",
+            "soleil", "lumière",
+            "Sonne", "Sonnenlicht",
+            "太陽", "日", "たいよう",
+            "sol", "luz solar",
+        ],
+    ),
+    (
+        "moon",
+        0x1F319, // 🌙
+        &[
+            "trăng", "mặt trăng", "ánh trăng",
+            "moon", "moonlight", "lunar",
+            "lune", "clair de lune",
+            "Mond", "Mondlicht",
+            "月", "つき",
+            "luna", "luz de luna",
+        ],
+    ),
+    (
+        "earth",
+        0x1F30D, // 🌍
+        &[
+            "trái đất", "địa cầu", "đất",
+            "earth", "world", "globe",
+            "terre", "monde",
+            "Erde", "Welt",
+            "地球", "世界", "ちきゅう",
+            "tierra", "mundo",
+        ],
+    ),
+    (
+        "wind",
+        0x1F4A8, // 💨
+        &[
+            "gió", "cơn gió",
+            "wind", "breeze", "gust",
+            "vent", "brise",
+            "Wind", "Brise",
+            "風", "かぜ",
+            "viento", "brisa",
+        ],
+    ),
+    (
+        "tree",
+        0x1F333, // 🌳
+        &[
+            "cây", "cây cối",
+            "tree", "plant",
+            "arbre", "plante",
+            "Baum", "Pflanze",
+            "木", "樹", "き",
+            "árbol", "planta",
+        ],
+    ),
+    (
+        "mountain",
+        0x26F0, // ⛰
+        &[
+            "núi", "ngọn núi",
+            "mountain", "hill", "peak",
+            "montagne", "colline",
+            "Berg", "Gipfel",
+            "山", "やま",
+            "montaña", "cerro",
+        ],
+    ),
+    (
+        "ocean",
+        0x1F30A, // 🌊
+        &[
+            "biển", "đại dương", "sóng",
+            "ocean", "sea", "wave",
+            "océan", "mer", "vague",
+            "Ozean", "Meer", "Welle",
+            "海", "波", "うみ",
+            "océano", "mar", "ola",
+        ],
+    ),
+    (
+        "star",
+        0x2B50, // ⭐ (shared with "excellent" — same node, different aliases)
+        &[
+            "ngôi sao", "sao",
+            "star", "stellar",
+            "étoile", "stellaire",
+            "Stern", "stellar",
+            "星", "ほし",
+            "estrella", "estelar",
+        ],
+    ),
+    (
+        "heart",
+        0x2764, // ❤ (shared with "love" — same node, different aliases)
+        &[
+            "trái tim", "tim",
+            "heart",
+            "cœur",
+            "Herz",
+            "心", "こころ",
+            "corazón",
+        ],
+    ),
+    (
+        "home",
+        0x1F3E0, // 🏠
+        &[
+            "nhà", "căn nhà", "gia đình",
+            "home", "house", "family",
+            "maison", "foyer", "famille",
+            "Haus", "Heim", "Familie",
+            "家", "いえ", "家族",
+            "casa", "hogar", "familia",
+        ],
+    ),
+    (
+        "food",
+        0x1F35E, // 🍞
+        &[
+            "thức ăn", "đồ ăn", "thực phẩm",
+            "food", "meal", "nourishment",
+            "nourriture", "repas", "aliment",
+            "Essen", "Nahrung", "Mahlzeit",
+            "食べ物", "食事", "たべもの",
+            "comida", "alimento",
+        ],
+    ),
+    (
+        "music",
+        0x1F3B5, // 🎵
+        &[
+            "nhạc", "âm nhạc", "bài hát",
+            "music", "song", "melody",
+            "musique", "chanson", "mélodie",
+            "Musik", "Lied", "Melodie",
+            "音楽", "歌", "おんがく",
+            "música", "canción", "melodía",
+        ],
+    ),
+    (
+        "time",
+        0x23F0, // ⏰
+        &[
+            "thời gian", "giờ",
+            "time", "hour", "moment",
+            "temps", "heure", "moment",
+            "Zeit", "Stunde", "Moment",
+            "時間", "時", "じかん",
+            "tiempo", "hora", "momento",
+        ],
+    ),
+];
+
 fn main() {
     println!("[multilang] Cross-Language Alias Seeder");
     println!(
-        "[multilang] {} semantic nodes → multilingual aliases",
-        SENTIMENT_NODES.len()
+        "[multilang] {} sentiment + {} concept nodes → multilingual aliases",
+        SENTIMENT_NODES.len(),
+        CONCEPT_NODES.len(),
     );
 
     if ucd::table_len() == 0 {
@@ -334,14 +519,32 @@ fn main() {
     let seed = [0x42u8; 32];
     let signer = QRSigner::from_seed(&seed);
 
-    let mut writer = OlangWriter::new(ts);
+    // Append to existing origin.olang
+    let mut writer = if let Ok(existing) = fs::read("origin.olang") {
+        println!(
+            "[multilang] Loading existing origin.olang ({} bytes)",
+            existing.len()
+        );
+        OlangWriter::from_existing(existing)
+    } else {
+        println!("[multilang] No existing file — creating new origin.olang");
+        OlangWriter::new(ts)
+    };
+
     let mut registry = Registry::new();
-    let mut log = EventLog::new(String::from("multilang.olang.log"));
+    let mut log = EventLog::new(String::from("origin.olang.log"));
 
     let mut node_count = 0usize;
     let mut alias_count = 0usize;
 
-    for &(name, emoji_cp, aliases) in SENTIMENT_NODES {
+    // Seed both sentiment and concept nodes
+    let all_nodes: Vec<(&str, u32, &[&str])> = SENTIMENT_NODES
+        .iter()
+        .chain(CONCEPT_NODES.iter())
+        .copied()
+        .collect();
+
+    for &(name, emoji_cp, aliases) in &all_nodes {
         // Node = encode từ emoji đại diện (QR — bất biến)
         let chain = encode_codepoint(emoji_cp);
         let hash = chain.chain_hash();
@@ -395,9 +598,9 @@ fn main() {
     println!("[multilang] Registry: {}", registry.len());
     println!("[multilang] File    : {} bytes", writer.size());
 
-    // Ghi file
+    // Ghi file — append vào origin.olang
     let bytes = writer.as_bytes().to_vec();
-    fs::write("multilang.olang", &bytes).expect("write multilang.olang");
+    fs::write("origin.olang", &bytes).expect("write origin.olang");
 
     // Verify
     let reader = olang::reader::OlangReader::new(&bytes).expect("parse");
@@ -408,5 +611,5 @@ fn main() {
         parsed.alias_count()
     );
     println!("[multilang] Done ✓");
-    println!("[multilang] ○ vui ≡ happy ≡ heureux ≡ glücklich ≡ 快乐");
+    println!("[multilang] ○ vui ≡ happy ≡ heureux ≡ glücklich ≡ 快乐 ≡ 嬉しい");
 }
