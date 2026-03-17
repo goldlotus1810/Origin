@@ -247,9 +247,16 @@ impl OlangVM {
         let mut call_depth = 0u32;
         // Loop stack: (jump_back_pc, remaining_iterations)
         let mut loop_stack: Vec<(usize, u32)> = Vec::new();
+        // Try/catch stack: catch handler PC targets
+        let mut try_stack: Vec<usize> = Vec::new();
 
         while pc < prog.ops.len() {
             if steps >= self.max_steps {
+                // If in try block, jump to catch instead of halting
+                if let Some(catch_pc) = try_stack.pop() {
+                    pc = catch_pc;
+                    continue;
+                }
                 events.push(VmEvent::Error(VmError::MaxStepsExceeded));
                 break;
             }
@@ -652,8 +659,96 @@ impl OlangVM {
                     let _ = stack.push(chain);
                 }
 
+                Op::TryBegin(catch_target) => {
+                    // Push catch handler PC onto try stack
+                    try_stack.push(*catch_target);
+                }
+
+                Op::CatchEnd => {
+                    // End of catch block — pop try entry if still present
+                    // (already popped if error occurred and caught)
+                }
+
                 Op::Halt => {
                     break;
+                }
+            }
+        }
+
+        // Check: if we broke due to error and have a try handler, resume there
+        if !try_stack.is_empty() {
+            // Check if last event was an error
+            let has_error = events.iter().rev().any(|e| matches!(e, VmEvent::Error(_)));
+            if has_error {
+                if let Some(catch_pc) = try_stack.pop() {
+                    // Remove the error event (caught)
+                    if let Some(pos) = events.iter().rposition(|e| matches!(e, VmEvent::Error(_))) {
+                        events.remove(pos);
+                    }
+                    // Resume at catch handler — re-enter execution loop
+                    pc = catch_pc;
+                    let mut remaining_steps = self.max_steps.saturating_sub(steps);
+                    while pc < prog.ops.len() && remaining_steps > 0 {
+                        remaining_steps -= 1;
+                        steps += 1;
+                        let op = &prog.ops[pc];
+                        pc += 1;
+                        match op {
+                            Op::Halt | Op::CatchEnd => break,
+                            Op::Emit => {
+                                if let Ok(c) = stack.pop() {
+                                    events.push(VmEvent::Output(c));
+                                }
+                            }
+                            Op::Dream => events.push(VmEvent::TriggerDream),
+                            Op::Stats => events.push(VmEvent::RequestStats),
+                            Op::Load(name) => events.push(VmEvent::LookupAlias(name.clone())),
+                            Op::PushNum(n) => {
+                                let _ = stack.push(MolecularChain::from_number(*n));
+                            }
+                            Op::Push(chain) => {
+                                let _ = stack.push(chain.clone());
+                            }
+                            Op::PushMol(s, r, v, a, t) => {
+                                let mol = Molecule {
+                                    shape: *s,
+                                    relation: *r,
+                                    emotion: EmotionDim { valence: *v, arousal: *a },
+                                    time: *t,
+                                };
+                                let chain = MolecularChain(alloc::vec![mol]);
+                                let _ = stack.push(chain);
+                            }
+                            Op::Dup => {
+                                if let Some(top) = stack.data.last() {
+                                    let c = top.clone();
+                                    let _ = stack.push(c);
+                                }
+                            }
+                            Op::Store(name) => {
+                                if let Ok(c) = stack.pop() {
+                                    if let Some(scope) = scopes.last_mut() {
+                                        if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
+                                            entry.1 = c;
+                                        } else {
+                                            scope.push((name.clone(), c));
+                                        }
+                                    }
+                                }
+                            }
+                            Op::LoadLocal(name) => {
+                                for scope in scopes.iter().rev() {
+                                    if let Some((_, c)) = scope.iter().find(|(n, _)| n == name) {
+                                        let _ = stack.push(c.clone());
+                                        break;
+                                    }
+                                }
+                            }
+                            Op::Nop | Op::ScopeBegin | Op::ScopeEnd => {}
+                            Op::Pop => { let _ = stack.pop(); }
+                            _ => {} // other ops skipped in catch recovery
+                        }
+                    }
                 }
             }
         }
@@ -1597,5 +1692,48 @@ mod tests {
         let result = vm().execute(&prog);
         assert!(!result.has_error());
         assert!(result.outputs()[0].is_empty(), "Different mol should not match");
+    }
+
+    #[test]
+    fn try_catch_no_error() {
+        // try { emit 42 } catch { emit 99 }
+        // No error → should output 42, not 99
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::TryBegin(5))  // catch at position 5
+            .push_op(Op::PushNum(42.0))
+            .push_op(Op::Emit)
+            .push_op(Op::Jmp(7))        // skip catch
+            .push_op(Op::CatchEnd)       // 4 (should not execute)
+            .push_op(Op::PushNum(99.0))  // 5: catch body
+            .push_op(Op::Emit)           // 6
+            .push_op(Op::Halt);          // 7
+        let result = vm().execute(&prog);
+        assert!(!result.has_error());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let n = outputs[0].to_number().unwrap();
+        assert!((n - 42.0).abs() < f64::EPSILON, "Should output 42, got {}", n);
+    }
+
+    #[test]
+    fn try_catch_with_error_recovery() {
+        // try { pop (underflow!) } catch { emit 99 }
+        // Error in try → should recover and emit from catch
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::TryBegin(4))  // catch at position 4
+            .push_op(Op::Pop)           // underflow! → error
+            .push_op(Op::Jmp(7))        // skip catch
+            .push_op(Op::Halt)          // 3 (fallthrough guard)
+            .push_op(Op::PushNum(99.0)) // 4: catch body
+            .push_op(Op::Emit)          // 5
+            .push_op(Op::CatchEnd)      // 6
+            .push_op(Op::Halt);         // 7
+        let result = vm().execute(&prog);
+        // Error should be caught — no errors in result
+        assert!(!result.has_error(), "Error should be caught: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1, "Should have catch output");
+        let n = outputs[0].to_number().unwrap();
+        assert!((n - 99.0).abs() < f64::EPSILON, "Catch should output 99, got {}", n);
     }
 }

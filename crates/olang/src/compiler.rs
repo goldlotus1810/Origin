@@ -169,6 +169,8 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
             "push(&s, olang_mol(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}));",
             s, r, v, a, t
         ),
+        Op::TryBegin(target) => format!("/* try: on error goto label_{} */", target),
+        Op::CatchEnd => "/* catch end */".into(),
     })
 }
 
@@ -239,6 +241,8 @@ fn rust_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
             "stack.push(Molecule::new(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}).into());",
             s, r, v, a, t
         ),
+        Op::TryBegin(_) => "// try block begin".into(),
+        Op::CatchEnd => "// catch block end".into(),
     })
 }
 
@@ -342,6 +346,8 @@ fn wat_op(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, CompileE
             "i32.const 0x{:02X}{:02X}{:02X}{:02X}{:02X} ;; mol S={} R={} V={} A={} T={}",
             s, r, v, a, t, s, r, v, a, t
         ),
+        Op::TryBegin(_) => ";; try block begin".into(),
+        Op::CatchEnd => ";; catch block end".into(),
     })
 }
 

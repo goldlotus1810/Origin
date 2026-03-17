@@ -233,6 +233,19 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // Commands with args are always valid
         }
 
+        Stmt::TryCatch { try_block, catch_block } => {
+            scope.enter();
+            for s in try_block {
+                validate_stmt(s, scope, errors);
+            }
+            scope.exit();
+            scope.enter();
+            for s in catch_block {
+                validate_stmt(s, scope, errors);
+            }
+            scope.exit();
+        }
+
         Stmt::Match { subject, arms } => {
             validate_expr(subject, scope, errors);
             let mut has_wildcard = false;
@@ -409,9 +422,8 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
             ChainKind::Void
         }
         Stmt::Expr(expr) => infer_expr_kind(expr),
-        Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. } | Stmt::Match { .. } => {
-            ChainKind::Void
-        }
+        Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. }
+        | Stmt::Match { .. } | Stmt::TryCatch { .. } => ChainKind::Void,
     }
 }
 
@@ -611,6 +623,43 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 }
                 _ => ctx.emit(Op::Call(name.clone())),
             }
+        }
+
+        Stmt::TryCatch { try_block, catch_block } => {
+            // try { body } catch { handler }
+            // → TryBegin(catch_pc), [try_body], Jmp(end), [catch_body], CatchEnd
+            let try_begin_pos = ctx.current_pos();
+            ctx.emit(Op::TryBegin(0)); // placeholder for catch target
+
+            // Try block
+            let saved = ctx.locals.len();
+            for s in try_block {
+                lower_stmt(s, ctx);
+            }
+            ctx.locals.truncate(saved);
+
+            // Jump past catch on success
+            let jmp_pos = ctx.current_pos();
+            ctx.emit(Op::Jmp(0)); // placeholder for end
+
+            // Catch block starts here
+            let catch_start = ctx.current_pos();
+            ctx.patch_jump(try_begin_pos, catch_start);
+            // Patch TryBegin target
+            if let Op::TryBegin(ref mut t) = ctx.prog.ops[try_begin_pos] {
+                *t = catch_start;
+            }
+
+            let saved2 = ctx.locals.len();
+            for s in catch_block {
+                lower_stmt(s, ctx);
+            }
+            ctx.locals.truncate(saved2);
+            ctx.emit(Op::CatchEnd);
+
+            // End: patch success jump
+            let end = ctx.current_pos();
+            ctx.patch_jump(jmp_pos, end);
         }
 
         Stmt::Match { subject, arms } => {
@@ -1392,6 +1441,30 @@ mod tests {
     #[test]
     fn infer_match_is_void() {
         let stmts = parse("match fire { SDF => { stats; } }").unwrap();
+        assert_eq!(infer_stmt_kind(&stmts[0]), ChainKind::Void);
+    }
+
+    // ── TryCatch ────────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_try_catch_basic() {
+        let stmts = parse("try { emit fire; } catch { stats; }").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Basic try/catch should be valid: {:?}", errors);
+    }
+
+    #[test]
+    fn lower_try_catch_has_opcodes() {
+        let stmts = parse("try { emit fire; } catch { stats; }").unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::TryBegin(_))));
+        assert!(prog.ops.contains(&Op::CatchEnd));
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jmp(_))), "Should have Jmp to skip catch on success");
+    }
+
+    #[test]
+    fn infer_try_catch_is_void() {
+        let stmts = parse("try { emit fire; } catch { dream; }").unwrap();
         assert_eq!(infer_stmt_kind(&stmts[0]), ChainKind::Void);
     }
 }

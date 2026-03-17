@@ -3650,6 +3650,11 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
             OlangIrExpr::ReturnExpr(alloc::boxed::Box::new(olang_expr_to_ir(*inner)))
         }
 
+        OlangExpr::TryCatch { try_body, catch_body } => OlangIrExpr::TryCatch {
+            try_body: try_body.into_iter().map(olang_expr_to_ir).collect(),
+            catch_body: catch_body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
         OlangExpr::Match { subject, arms } => OlangIrExpr::Match {
             subject: alloc::boxed::Box::new(olang_expr_to_ir(*subject)),
             arms: arms

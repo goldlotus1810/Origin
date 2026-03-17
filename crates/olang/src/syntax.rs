@@ -96,6 +96,12 @@ pub enum Stmt {
         subject: Expr,
         arms: Vec<MatchArm>,
     },
+
+    /// `try { body } catch { handler }`
+    TryCatch {
+        try_block: Vec<Stmt>,
+        catch_block: Vec<Stmt>,
+    },
 }
 
 /// Match arm — pattern + body.
@@ -271,6 +277,7 @@ impl<'a> Parser<'a> {
             Token::Loop => self.parse_loop_kw(),
             Token::Fn => self.parse_fn(),
             Token::Match => self.parse_match(),
+            Token::Try => self.parse_try_catch(),
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -418,6 +425,21 @@ impl<'a> Parser<'a> {
             }
             _ => Err(ParseError::new("Expected match pattern (type name, { mol }, or _)")),
         }
+    }
+
+    /// `try { body } catch { handler }`
+    fn parse_try_catch(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'try'
+        let try_block = self.parse_block()?;
+        self.expect(&Token::Catch)?;
+        let catch_block = self.parse_block()?;
+        if self.check(&Token::Semi) {
+            self.advance();
+        }
+        Ok(Stmt::TryCatch {
+            try_block,
+            catch_block,
+        })
     }
 
     /// command (STR)? ';'?
@@ -1519,6 +1541,32 @@ mod tests {
                 assert_eq!(arms.len(), 1);
             }
             _ => panic!("Expected Match"),
+        }
+    }
+
+    // ── Try/Catch ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_try_catch_basic() {
+        let stmts = parse("try { emit fire; } catch { stats; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::TryCatch { try_block, catch_block } => {
+                assert!(!try_block.is_empty());
+                assert!(!catch_block.is_empty());
+            }
+            _ => panic!("Expected TryCatch"),
+        }
+    }
+
+    #[test]
+    fn parse_try_catch_nested() {
+        let stmts = parse("try { if fire { emit water; } } catch { dream; }").unwrap();
+        match &stmts[0] {
+            Stmt::TryCatch { try_block, .. } => {
+                assert!(matches!(&try_block[0], Stmt::If { .. }));
+            }
+            _ => panic!("Expected TryCatch"),
         }
     }
 }

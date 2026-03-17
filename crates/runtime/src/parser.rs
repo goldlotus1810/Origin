@@ -204,6 +204,11 @@ pub enum OlangExpr {
         subject: alloc::boxed::Box<OlangExpr>,
         arms: Vec<(String, Vec<OlangExpr>)>, // (pattern_name, body)
     },
+    /// ○{try { risky } catch { fallback }} — error handling
+    TryCatch {
+        try_body: Vec<OlangExpr>,
+        catch_body: Vec<OlangExpr>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,6 +326,11 @@ impl OlangParser {
         // Match (pattern matching): match <expr> { <arm> => { <body> } ... }
         if let Some(match_expr) = self.try_parse_match(trimmed) {
             return Ok(match_expr);
+        }
+
+        // Try/catch (error handling): try { body } catch { handler }
+        if let Some(try_expr) = self.try_parse_try_catch(trimmed) {
+            return Ok(try_expr);
         }
 
         // Use (Python-style import): use <skill>
@@ -603,6 +613,37 @@ impl OlangParser {
         Some(OlangExpr::Match {
             subject: alloc::boxed::Box::new(subject),
             arms,
+        })
+    }
+
+    /// Try to parse try/catch: "try { risky } catch { fallback }"
+    fn try_parse_try_catch(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("try ") && !trimmed.starts_with("try{") {
+            return None;
+        }
+        let rest = if let Some(r) = trimmed.strip_prefix("try ") {
+            r.trim()
+        } else if let Some(r) = trimmed.strip_prefix("try") {
+            r
+        } else {
+            return None;
+        };
+        let try_open = rest.find('{')?;
+        let try_close = find_matching_brace(rest, try_open)?;
+        let try_str = rest[try_open + 1..try_close].trim();
+        let try_body = self.parse_block(try_str);
+
+        let after_try = rest[try_close + 1..].trim();
+        let catch_rest = after_try.strip_prefix("catch")?.trim();
+        let catch_open = catch_rest.find('{')?;
+        let catch_close = find_matching_brace(catch_rest, catch_open)?;
+        let catch_str = catch_rest[catch_open + 1..catch_close].trim();
+        let catch_body = self.parse_block(catch_str);
+
+        Some(OlangExpr::TryCatch {
+            try_body,
+            catch_body,
         })
     }
 

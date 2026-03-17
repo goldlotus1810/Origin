@@ -319,6 +319,10 @@ pub enum Keyword {
     Emit,
     /// `match` — pattern matching
     Match,
+    /// `try` — error handling
+    Try,
+    /// `catch` — error handler block
+    Catch,
 }
 
 /// Check xem string có phải keyword không.
@@ -331,6 +335,8 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "loop" => Some(Keyword::Loop),
         "emit" => Some(Keyword::Emit),
         "match" => Some(Keyword::Match),
+        "try" => Some(Keyword::Try),
+        "catch" => Some(Keyword::Catch),
         _ => None,
     }
 }
@@ -433,6 +439,10 @@ pub enum Token {
     Pipe,
     /// `match`
     Match,
+    /// `try`
+    Try,
+    /// `catch`
+    Catch,
     /// `=>`
     FatArrow,
 
@@ -646,6 +656,8 @@ impl<'a> Lexer<'a> {
                 Keyword::Loop => Token::Loop,
                 Keyword::Emit => Token::Emit,
                 Keyword::Match => Token::Match,
+                Keyword::Try => Token::Try,
+                Keyword::Catch => Token::Catch,
             };
         }
 

@@ -112,6 +112,11 @@ pub enum Op {
     /// `{ S=1 R=2 V=128 A=128 T=3 }` → MolecularChain with 1 Molecule.
     /// Used by LeoAI to express knowledge as Olang code.
     PushMol(u8, u8, u8, u8, u8),
+    /// Try: begin error-catching block. If any VmError occurs before
+    /// the matching CatchEnd, jump to the catch handler instead of halting.
+    TryBegin(usize),
+    /// CatchEnd: end of catch handler, marks the resume point after try/catch.
+    CatchEnd,
 }
 
 impl Op {
@@ -149,6 +154,8 @@ impl Op {
             Self::Why => "WHY",
             Self::Explain => "EXPLAIN",
             Self::PushMol(..) => "PUSH_MOL",
+            Self::TryBegin(_) => "TRY_BEGIN",
+            Self::CatchEnd => "CATCH_END",
         }
     }
 
@@ -227,6 +234,12 @@ impl Op {
             Self::Why => alloc::vec![0x0F],
             Self::Explain => alloc::vec![0x12],
             Self::PushMol(s, r, v, a, t) => alloc::vec![0x36, *s, *r, *v, *a, *t],
+            Self::TryBegin(target) => {
+                let mut b = alloc::vec![0x37];
+                b.extend_from_slice(&(*target as u32).to_le_bytes());
+                b
+            }
+            Self::CatchEnd => alloc::vec![0x38],
         }
     }
 }
@@ -362,6 +375,11 @@ pub enum OlangIrExpr {
         subject: alloc::boxed::Box<OlangIrExpr>,
         /// (pattern_name, body) — pattern is type name or "_" for wildcard
         arms: Vec<(String, Vec<OlangIrExpr>)>,
+    },
+    /// try { body } catch { handler } — error recovery
+    TryCatch {
+        try_body: Vec<OlangIrExpr>,
+        catch_body: Vec<OlangIrExpr>,
     },
 }
 
@@ -597,6 +615,35 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             for jmp_pos in end_jumps {
                 prog.ops[jmp_pos] = Op::Jmp(end);
             }
+        }
+
+        OlangIrExpr::TryCatch { try_body, catch_body } => {
+            // TryBegin(catch_pc), [try_body], Jmp(end), [catch_body], CatchEnd
+            let try_begin_idx = prog.ops.len();
+            prog.push_op(Op::TryBegin(0)); // placeholder
+
+            prog.push_op(Op::ScopeBegin);
+            for e in try_body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+
+            let jmp_idx = prog.ops.len();
+            prog.push_op(Op::Jmp(0)); // skip catch on success
+
+            // Catch block
+            let catch_start = prog.ops.len();
+            prog.ops[try_begin_idx] = Op::TryBegin(catch_start);
+
+            prog.push_op(Op::ScopeBegin);
+            for e in catch_body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+            prog.push_op(Op::CatchEnd);
+
+            let end = prog.ops.len();
+            prog.ops[jmp_idx] = Op::Jmp(end);
         }
     }
 }
