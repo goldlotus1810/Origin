@@ -279,6 +279,14 @@ impl Registry {
             .map(|i| self.names[i].1)
     }
 
+    /// Reverse lookup: hash → first alias name (nếu có).
+    pub fn lookup_name_by_hash(&self, chain_hash: u64) -> Option<String> {
+        self.names
+            .iter()
+            .find(|(_, h)| *h == chain_hash)
+            .map(|(name, _)| name.clone())
+    }
+
     /// Đại diện của tầng Lx (NodeLx).
     pub fn layer_rep(&self, layer: u8) -> Option<u64> {
         if layer < 16 {

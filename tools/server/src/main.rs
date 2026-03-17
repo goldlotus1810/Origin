@@ -102,6 +102,24 @@ fn main() {
         rt.worker_count(),
     );
 
+    // QT8: Flush boot pending_writes → origin.olang TRƯỚC khi chạy
+    // Đảm bảo mọi seed/agent records có trong file
+    flush_pending(&mut rt);
+
+    // L0 Integrity Check — phát hiện node RAM-only chưa ghi file
+    let file_bytes_after = std::fs::read(OLANG_FILE).ok();
+    let violations = rt.integrity_check(
+        file_bytes_after.as_deref(),
+    );
+    if violations.is_empty() {
+        println!("[setup] QT8 integrity: OK — all nodes in origin.olang");
+    } else {
+        eprintln!("[setup] QT8 integrity: {} violations", violations.len());
+        for v in &violations {
+            eprintln!("  {}", v);
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // Phase 5: RUN — REPL loop
     // ══════════════════════════════════════════════════════════════════════════
@@ -245,7 +263,8 @@ mod tests {
     fn runtime_boots_from_nothing() {
         let rt = HomeRuntime::new(12345);
         assert_eq!(rt.turn_count(), 0);
-        assert!(!rt.has_pending_writes());
+        // QT8: fresh boot has seed writes for origin.olang
+        assert!(rt.has_pending_writes());
     }
 
     #[test]
@@ -283,10 +302,14 @@ mod tests {
     #[test]
     fn runtime_drain_pending_writes() {
         let mut rt = HomeRuntime::new(44444);
-        // Initially no pending writes
-        assert!(!rt.has_pending_writes());
+        // QT8: fresh boot has seed writes → drain them
+        assert!(rt.has_pending_writes());
         let drained = rt.drain_pending_writes();
-        assert!(drained.is_empty());
+        assert!(!drained.is_empty());
+        // After drain → empty
+        assert!(!rt.has_pending_writes());
+        let drained2 = rt.drain_pending_writes();
+        assert!(drained2.is_empty());
     }
 
     #[test]

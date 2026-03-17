@@ -4,3 +4,4 @@ origin.olang.log
 origin.olang.weights
 origin.olang.registry
 Cargo.lock
+tools/server/origin.olang

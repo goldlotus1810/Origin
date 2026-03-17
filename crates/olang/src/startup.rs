@@ -49,6 +49,11 @@ pub struct BootResult {
     pub manifest: SystemManifest,
     /// Silk edges đã load từ file — restore vào SilkGraph.
     pub edges: Vec<BootEdge>,
+    /// QT8: bytes cần ghi vào origin.olang — axioms/L1 chưa có trong file.
+    /// Caller (HomeRuntime) phải flush ra disk TRƯỚC khi dùng.
+    pub pending_writes: Vec<u8>,
+    /// Số seed nodes đã ghi bổ sung (QT8).
+    pub seeds_written: usize,
 }
 
 /// Stage boot đã đạt được.
@@ -79,7 +84,10 @@ impl BootResult {
 /// Nếu bytes = None hoặc rỗng → boot từ hư không (○(∅)==○).
 /// Nếu bytes có data → rebuild Registry từ file.
 pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
+    use crate::writer::OlangWriter;
+
     let mut errors = Vec::new();
+    let mut pending_writes = Vec::new();
 
     // Stage 0: Raw — không làm gì
     // Stage 1: Self Init — ○(∅)==○
@@ -105,19 +113,25 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
 
     // Stage 4: Load từ file
     let mut edges = Vec::new();
-    if let Some(bytes) = file_bytes {
+    let file_had_data = if let Some(bytes) = file_bytes {
         if !bytes.is_empty() {
             match load_from_bytes(bytes, &mut registry) {
                 Ok(loaded_edges) => {
                     edges = loaded_edges;
                     stage = BootStage::Loaded;
+                    true
                 }
                 Err(e) => {
                     errors.push(alloc::format!("Load error: {:?}", e));
+                    false
                 }
             }
+        } else {
+            false
         }
-    }
+    } else {
+        false
+    };
 
     // Stage 5 + 6: Verify ○(x)==x
     if stage >= BootStage::UcdReady {
@@ -130,6 +144,27 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
             }
         }
     }
+
+    // ── QT8: ghi file TRƯỚC — đảm bảo mọi thứ trong Registry đều có trong origin.olang ──
+    // Nếu file rỗng/không có → ghi toàn bộ L0+L1 axioms ra pending_writes
+    // Nếu file đã có data → kiểm tra L1 thiếu gì → ghi bổ sung
+    let seeds_written = if ucd::table_len() > 0 {
+        let mut writer = if file_had_data {
+            OlangWriter::new_append()
+        } else {
+            OlangWriter::new(0)
+        };
+
+        let count = write_missing_seeds(&registry, file_bytes, &mut writer);
+
+        if writer.write_count() > 0 {
+            pending_writes = writer.into_bytes();
+        }
+
+        count
+    } else {
+        0
+    };
 
     let node_count = registry.len();
     let alias_count = registry.alias_count();
@@ -145,6 +180,8 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         errors,
         manifest,
         edges,
+        pending_writes,
+        seeds_written,
     }
 }
 
@@ -354,6 +391,79 @@ pub fn seed_l1_system(registry: &mut Registry) {
         }
         offset += 1;
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QT8: Write missing seeds to origin.olang
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// L0 axiom codepoints — phải luôn có trong origin.olang.
+static L0_AXIOM_CPS: &[(u32, &str)] = &[
+    (0x25CB, "○"),     // origin
+    (0x2205, "∅"),     // empty
+    (0x2218, "∘"),     // compose
+    (0x2208, "∈"),     // instance
+];
+
+/// Kiểm tra và ghi L0+L1 seeds thiếu vào writer.
+///
+/// QT8: mọi node trong Registry PHẢI có trong origin.olang.
+/// Hàm này so sánh file content (nếu có) với bảng seed →
+/// ghi bổ sung những gì thiếu.
+///
+/// Returns: số node đã ghi bổ sung.
+fn write_missing_seeds(
+    _registry: &crate::registry::Registry,
+    file_bytes: Option<&[u8]>,
+    writer: &mut crate::writer::OlangWriter,
+) -> usize {
+    use crate::registry::NodeKind;
+
+    // Parse file để biết hash nào đã có
+    let mut existing_hashes: alloc::collections::BTreeSet<u64> =
+        alloc::collections::BTreeSet::new();
+
+    if let Some(bytes) = file_bytes {
+        if let Ok(reader) = OlangReader::new(bytes) {
+            if let Ok(parsed) = reader.parse_all() {
+                for node in &parsed.nodes {
+                    existing_hashes.insert(node.chain.chain_hash());
+                }
+            }
+        }
+    }
+
+    let ts = 0i64;
+    let mut written = 0usize;
+
+    // L0 axioms
+    for &(cp, alias) in L0_AXIOM_CPS {
+        let chain = encode_codepoint(cp);
+        let hash = chain.chain_hash();
+        if !existing_hashes.contains(&hash) {
+            let _ = writer.append_node(&chain, 0, true, ts);
+            let _ = writer.append_alias(alias, hash, ts);
+            written += 1;
+        }
+    }
+
+    // L1 system seed
+    for entry in L1_SYSTEM_SEED {
+        let chain = encode_codepoint(entry.codepoint);
+        let hash = chain.chain_hash();
+        if !existing_hashes.contains(&hash) {
+            let _ = writer.append_node(&chain, 1, true, ts);
+            let kind = NodeKind::from_byte(entry.kind).unwrap_or(NodeKind::Knowledge);
+            writer.append_node_kind(hash, kind as u8, ts);
+            let _ = writer.append_alias(entry.name, hash, ts);
+            for &a in entry.aliases {
+                let _ = writer.append_alias(a, hash, ts);
+            }
+            written += 1;
+        }
+    }
+
+    written
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -164,6 +164,9 @@ impl HomeRuntime {
     }
 
     /// Boot với file bytes — load registry + Silk edges từ origin.olang.
+    ///
+    /// QT8: mọi thứ tạo ra → ghi pending_writes TRƯỚC → caller flush ra disk.
+    /// QT9: mọi node → phải đăng ký Registry.
     pub fn with_file(session_id: u64, file_bytes: Option<&[u8]>) -> Self {
         let boot_result = boot(file_bytes);
         let mut learning = LearningLoop::new(session_id);
@@ -178,6 +181,17 @@ impl HomeRuntime {
             );
         }
 
+        // QT8: nhận pending_writes từ boot (L0+L1 seeds chưa có trong file)
+        let mut pending_writes = boot_result.pending_writes;
+
+        // QT8+QT9: Ghi system agents vào origin.olang nếu chưa có
+        // Chiefs, LeoAI → phải có trong file để L0 biết hệ thống đang chạy gì
+        let agent_writes = Self::write_agent_records(
+            &boot_result.registry,
+            file_bytes,
+        );
+        pending_writes.extend_from_slice(&agent_writes);
+
         Self {
             learning,
             parser: OlangParser::new(),
@@ -188,7 +202,7 @@ impl HomeRuntime {
             uptime_ns: 0,
             turn_count: 0,
             last_dream_turn: 0,
-            pending_writes: alloc::vec::Vec::new(),
+            pending_writes,
             knowtree: KnowTree::for_pc(),
             recent_texts: alloc::vec::Vec::new(),
             dream_fib_index: 4, // Fib[4]=5: first dream after 5 turns
@@ -219,6 +233,107 @@ impl HomeRuntime {
             Chief::new(isl::address::ISLAddress::new(1, 2, 0, 0), aam, leo_addr, ChiefKind::Vision),
             Chief::new(isl::address::ISLAddress::new(1, 3, 0, 0), aam, leo_addr, ChiefKind::Network),
         ]
+    }
+
+    /// QT8+QT9: Ghi agent records (Chiefs, LeoAI) vào origin.olang nếu chưa có.
+    ///
+    /// Agents đã được đăng ký trong L1_SYSTEM_SEED (startup.rs) với các codepoints:
+    ///   ♔ 0x2654 = AAM, ♕ 0x2655 = LeoAI, ♖ 0x2656 = HomeChief, etc.
+    /// Hàm này kiểm tra xem các agent session records (kích hoạt runtime) đã có chưa.
+    /// Nếu chưa → ghi edge records liên kết agent → session.
+    fn write_agent_records(
+        _registry: &olang::registry::Registry,
+        _file_bytes: Option<&[u8]>,
+    ) -> alloc::vec::Vec<u8> {
+        use olang::writer::OlangWriter;
+
+        // Agent codepoints đã được ghi bởi write_missing_seeds (L1_SYSTEM_SEED).
+        // Ở đây ta ghi EDGE records: agent → origin (∈ relation) để đánh dấu
+        // "agent này đang hoạt động trong hệ thống".
+
+        // Parse file để kiểm tra edge đã tồn tại chưa
+        let mut existing_edges: alloc::collections::BTreeSet<(u64, u64)> =
+            alloc::collections::BTreeSet::new();
+
+        if let Some(bytes) = _file_bytes {
+            if let Ok(reader) = olang::reader::OlangReader::new(bytes) {
+                if let Ok(parsed) = reader.parse_all() {
+                    for edge in &parsed.edges {
+                        existing_edges.insert((edge.from_hash, edge.to_hash));
+                    }
+                }
+            }
+        }
+
+        let mut writer = OlangWriter::new_append();
+        let ts = 0i64;
+
+        // Origin node hash — anchor point
+        let origin_hash = olang::encoder::encode_codepoint(0x25CB).chain_hash();
+
+        // Active agent codepoints → ghi edge: agent ∈ origin
+        let active_agents: &[(u32, &str)] = &[
+            (0x2654, "agent:aam"),
+            (0x2655, "agent:leo"),
+            (0x2656, "agent:chief:home"),
+            (0x2657, "agent:chief:vision"),
+            (0x2658, "agent:chief:network"),
+        ];
+
+        for &(cp, _name) in active_agents {
+            let agent_hash = olang::encoder::encode_codepoint(cp).chain_hash();
+            if !existing_edges.contains(&(agent_hash, origin_hash)) {
+                // Edge: agent ∈ origin (relation = Member = 0x01)
+                writer.append_edge(agent_hash, origin_hash, 0x01, ts);
+            }
+        }
+
+        if writer.write_count() > 0 {
+            writer.into_bytes()
+        } else {
+            alloc::vec::Vec::new()
+        }
+    }
+
+    /// L0 Integrity Check — kiểm tra mọi node trong Registry đều có trong origin.olang.
+    ///
+    /// QT8: Phát hiện node đang hoạt động mà chưa được ghi file.
+    /// Returns: danh sách hash + alias của node vi phạm (RAM-only).
+    pub fn integrity_check(&self, file_bytes: Option<&[u8]>) -> alloc::vec::Vec<String> {
+        let mut violations = alloc::vec::Vec::new();
+
+        // Parse file → collect hashes
+        let mut file_hashes: alloc::collections::BTreeSet<u64> =
+            alloc::collections::BTreeSet::new();
+
+        if let Some(bytes) = file_bytes {
+            if let Ok(reader) = olang::reader::OlangReader::new(bytes) {
+                if let Ok(parsed) = reader.parse_all() {
+                    for node in &parsed.nodes {
+                        file_hashes.insert(node.chain.chain_hash());
+                    }
+                }
+            }
+        }
+
+        // So sánh Registry vs file
+        for layer in 0u8..16 {
+            for entry in self.registry.entries_in_layer(layer) {
+                if !file_hashes.contains(&entry.chain_hash) {
+                    // Node trong Registry nhưng KHÔNG trong file → vi phạm QT8
+                    let alias = self
+                        .registry
+                        .lookup_name_by_hash(entry.chain_hash)
+                        .unwrap_or_else(|| alloc::format!("0x{:016X}", entry.chain_hash));
+                    violations.push(alloc::format!(
+                        "[QT8] L{} {} — in RAM, not in origin.olang",
+                        layer, alias
+                    ));
+                }
+            }
+        }
+
+        violations
     }
 
     /// Xử lý một text input — entry point cho text.
@@ -1357,7 +1472,26 @@ impl HomeRuntime {
                         if evo_result.valid {
                             let evolved_hash = evolved_chain.chain_hash();
 
-                            // Tạo body cho evolved node
+                            // QT8: GHI FILE TRƯỚC — evolved node phải có trong origin.olang
+                            {
+                                use olang::writer::OlangWriter;
+                                let mut evo_writer = OlangWriter::new_append();
+                                let _ = evo_writer.append_node(&evolved_chain, 2, false, ts);
+                                // Edge: source → evolved (DerivedFrom = 0x05)
+                                evo_writer.append_edge(
+                                    cand.source_hash,
+                                    evolved_hash,
+                                    0x05, // DerivedFrom
+                                    ts,
+                                );
+                                self.pending_writes
+                                    .extend_from_slice(evo_writer.as_bytes());
+                            }
+
+                            // QT9: Registry SAU khi đã ghi file
+                            self.registry.insert(&evolved_chain, 2, 0, ts, false);
+
+                            // Tạo body cho evolved node (RAM cache — sau file)
                             if let Some(evolved_mol) = evolved_chain.first() {
                                 if self.body_store.get(evolved_hash).is_none() {
                                     let body = body_from_molecule(
@@ -1373,7 +1507,6 @@ impl HomeRuntime {
                             }
 
                             // Silk edge: source → evolved (DerivedFrom)
-                            // "loài mới" derived from "loài gốc"
                             let evo_emotion = emotion; // inherit emotion context
                             self.learning.graph_mut().co_activate(
                                 cand.source_hash,
@@ -3391,10 +3524,14 @@ mod persist_tests {
     }
 
     #[test]
-    fn pending_writes_empty_initially() {
+    fn pending_writes_has_seed_on_fresh_boot() {
         let rt = HomeRuntime::new(0xDEAD);
-        assert!(!rt.has_pending_writes());
-        assert_eq!(rt.pending_bytes(), 0);
+        // QT8: fresh boot (no file) → pending_writes chứa L0+L1 seed nodes
+        // phải ghi ra origin.olang trước khi dùng
+        assert!(
+            rt.has_pending_writes(),
+            "Fresh boot phải có seed writes cho origin.olang"
+        );
     }
 
     #[test]
@@ -3745,6 +3882,8 @@ mod integration_tests {
             return;
         }
         let mut rt = HomeRuntime::new(0xF001);
+        // Drain boot seed writes (QT8)
+        let _ = rt.drain_pending_writes();
         // Teach something first
         rt.process_text("Scarlett O'Hara là nhân vật chính", 1000);
         assert!(!rt.has_pending_writes(), "Normal text không ghi pending");
