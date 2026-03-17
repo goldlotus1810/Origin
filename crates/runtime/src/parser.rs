@@ -873,7 +873,13 @@ fn is_command(s: &str) -> bool {
         s,
         "dream"
             | "stats"
+            | "ram"
             | "health"
+            | "memory"
+            | "nho"
+            | "cluster"
+            | "generalize"
+            | "rules"
             | "seed L0"
             | "seed"
             | "shutdown"
@@ -881,6 +887,7 @@ fn is_command(s: &str) -> bool {
             | "status"
             | "help"
     ) || s.starts_with("compile ")
+        || s.starts_with("similar ")
         || is_math_command(s)
         || is_constant_command(s)
         || is_leo_command(s)
