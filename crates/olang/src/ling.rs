@@ -465,7 +465,6 @@ fn sub_valence(tokens: &[&str], fallback: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
 
     fn parser() -> LingParser {
         LingParser::new()

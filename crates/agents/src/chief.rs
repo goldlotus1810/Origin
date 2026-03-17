@@ -620,7 +620,7 @@ mod tests {
         let target = worker_addr(1);
         // AAM gửi command đến Chief (simulate)
         let aam_cmd = ISLMessage::actuator(aam(), chief(), 0x01, 0x00);
-        let aam_frame = ISLFrame::bare(aam_cmd);
+        let _aam_frame = ISLFrame::bare(aam_cmd);
 
         // Chief nhận rồi forward xuống Worker
         // (trong thực tế Chief parse cmd và gọi forward_command)

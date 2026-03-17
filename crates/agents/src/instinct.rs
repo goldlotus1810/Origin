@@ -854,7 +854,7 @@ mod tests {
         let mut c = ctx();
         c.push_input(chain_happy());
         c.push_input(chain_angry());
-        let r = skill.execute(&mut c);
+        let _r = skill.execute(&mut c);
         // 😀 vs 😡 — extreme valence opposition
         let score: f32 = c.get("contradiction_score").unwrap().parse().unwrap();
         assert!(

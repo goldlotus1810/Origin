@@ -372,7 +372,6 @@ fn sentence_level_emotion(lower: &str) -> EmotionTag {
 mod tests {
     use super::*;
     use alloc::string::ToString;
-    use alloc::vec;
 
     fn reader() -> BookReader {
         BookReader::new()

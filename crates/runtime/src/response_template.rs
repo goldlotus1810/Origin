@@ -235,7 +235,6 @@ fn deny_text(_cur_v: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use context::intent::IntentEstimate;
 
     fn make_params(action: IntentAction, tone: ResponseTone, v: f32) -> ResponseParams {
         ResponseParams {

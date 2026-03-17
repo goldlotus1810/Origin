@@ -357,7 +357,6 @@ mod tests {
     use crate::encoder::encode_codepoint;
     use crate::writer::OlangWriter;
     use alloc::format;
-    use alloc::vec;
 
     fn skip() -> bool {
         ucd::table_len() == 0

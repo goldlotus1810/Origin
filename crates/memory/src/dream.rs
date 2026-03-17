@@ -354,9 +354,7 @@ mod tests {
     fn make_stm_unique(emotions: &[(f32, f32, u32)]) -> ShortTermMemory {
         // emotions = (valence, arousal, fire_count)
         // Tạo chains từ codepoints có V/A khác nhau
-        use olang::molecular::{
-            EmotionDim, MolecularChain, Molecule, RelationBase, ShapeBase, TimeDim,
-        };
+        use olang::molecular::EmotionDim;
         let mut stm = ShortTermMemory::new(512);
         let cps = [
             0x1F525u32, 0x1F4A7, 0x2744, 0x1F9E0, 0x25CF, 0x2208, 0x2192, 0x26A0,

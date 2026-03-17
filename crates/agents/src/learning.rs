@@ -477,7 +477,6 @@ mod tests {
     use super::*;
     use crate::encoder::{SensorKind, SystemEvent};
     use alloc::string::ToString;
-    use alloc::vec;
 
     fn loop_() -> LearningLoop {
         LearningLoop::new(0x1234)
@@ -895,7 +894,6 @@ mod word_level_tests {
 #[cfg(test)]
 mod evolution_tests {
     use super::*;
-    use alloc::string::ToString;
     use olang::molecular::{EmotionDim, Molecule, MolecularChain};
 
     /// Tạo chain từ 1 molecule — CHỈ trong tests.

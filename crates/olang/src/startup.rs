@@ -1298,7 +1298,6 @@ mod tests {
     #[test]
     fn l1_seed_kind_summary() {
         if skip() { return; }
-        use crate::registry::NodeKind;
         let mut r = Registry::new();
         seed_l1_system(&mut r);
         let summary = r.kind_summary();

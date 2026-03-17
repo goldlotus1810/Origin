@@ -301,7 +301,7 @@ pub fn parse_to_chains(input: &str) -> Vec<MolecularChain> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{format, string::ToString, vec};
+    use alloc::format;
 
     fn skip() -> bool {
         ucd::table_len() == 0

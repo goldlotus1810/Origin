@@ -530,7 +530,7 @@ mod tests {
         }
         let mut r = Registry::new();
         let chain = encode_codepoint(0x1F525); // 🔥
-        let hash = r.insert(&chain, 0, 0, 1000, false);
+        let _hash = r.insert(&chain, 0, 0, 1000, false);
 
         // NodeL0 phải được set sau khi insert node L0 đầu tiên
         let rep = r.layer_rep(0);

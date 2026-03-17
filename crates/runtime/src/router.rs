@@ -464,7 +464,7 @@ mod tests {
         let worker_addr = ISLAddress::new(0, 0, 0, 10);
 
         let mut leo = LeoAI::new(leo_addr, aam);
-        let mut worker = Worker::new(worker_addr, chief_addr, WorkerKind::Actuator);
+        let worker = Worker::new(worker_addr, chief_addr, WorkerKind::Actuator);
 
         let mut chief = Chief::new(chief_addr, aam, leo_addr, ChiefKind::Home);
         chief.register_worker(worker_addr, WorkerKind::Actuator as u8, 0);

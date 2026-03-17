@@ -653,7 +653,6 @@ fn text_emotion(text: &str) -> EmotionTag {
 mod tests {
     use super::*;
     use alloc::string::ToString;
-    use alloc::vec;
 
     fn enc() -> ContentEncoder {
         ContentEncoder::new()
