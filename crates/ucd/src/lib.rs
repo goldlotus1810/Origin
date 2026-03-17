@@ -123,6 +123,15 @@ pub fn table_len() -> usize {
     UCD_TABLE.len()
 }
 
+/// Toàn bộ UCD_TABLE — dùng cho L0 full seeding.
+///
+/// Trả về slice tĩnh chứa ~5400 entries, sorted by codepoint.
+/// Mỗi entry = 1 nguyên tố trong bảng tuần hoàn của HomeOS.
+#[inline]
+pub fn table() -> &'static [UcdEntry] {
+    UCD_TABLE
+}
+
 /// Kiểm tra codepoint có phải SDF primitive không.
 #[inline]
 pub fn is_sdf_primitive(cp: u32) -> bool {

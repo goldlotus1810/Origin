@@ -1,8 +1,10 @@
-//! # seeder — Seed L0 từ UCD
+//! # seeder — Seed L0 toàn bộ từ UCD
 //!
-//! Tạo origin.olang với L0 nodes từ Unicode 18.0.
-//! KHÔNG có presets. KHÔNG có ISL hardcode.
-//! Mọi chain từ encode_codepoint(cp).
+//! Tạo origin.olang với ~5400 L0 nodes từ Unicode 18.0.
+//! KHÔNG hardcode. Mọi chain từ encode_codepoint(cp).
+//!
+//! Bảng tuần hoàn hoàn chỉnh: mọi hình dạng (SDF), mọi quan hệ (MATH),
+//! mọi cảm xúc (EMOTICON), mọi nhịp thời gian (MUSICAL).
 
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,47 +13,8 @@ use olang::encoder::encode_codepoint;
 use olang::log::{EventLog, LogEvent};
 use olang::qr::QRSigner;
 use olang::registry::Registry;
+use olang::startup::L0_NATURAL_ALIASES;
 use olang::writer::OlangWriter;
-
-/// L0 Seed Map: (tên, codepoint, aliases)
-/// Chain KHÔNG hardcode — đến từ encode_codepoint(cp).
-static L0_NODES: &[(&str, u32, &[&str])] = &[
-    ("fire", 0x1F525, &["lua", "lửa", "fire", "feu"]),
-    ("light", 0x1F4A1, &["anh-sang", "light"]),
-    ("spark", 0x2728, &["tia-lua", "spark"]),
-    ("bolt", 0x26A1, &["set", "lightning"]),
-    ("water", 0x1F4A7, &["nuoc", "nước", "water", "eau"]),
-    ("earth", 0x1F30D, &["dat", "earth"]),
-    ("wind", 0x1F32C, &["gio", "wind"]),
-    ("sound", 0x1F50A, &["am-thanh", "sound"]),
-    ("cold", 0x2744, &["lanh", "cold"]),
-    ("warm", 0x1F31E, &["am", "warm"]),
-    ("sun", 0x2600, &["mat-troi", "sun"]),
-    ("pain", 0x1F915, &["dau", "pain"]),
-    ("joy", 0x1F60C, &["vui", "joy"]),
-    ("hunger", 0x1F374, &["doi", "hunger"]),
-    ("fatigue", 0x1F634, &["met", "tired"]),
-    ("danger", 0x26A0, &["nguy-hiem", "danger"]),
-    ("dark", 0x1F311, &["toi", "dark"]),
-    ("alert", 0x1F6A8, &["canh-bao", "alert"]),
-    ("shelter", 0x1F3E0, &["nha", "shelter", "home"]),
-    ("house", 0x1F3E1, &["nha-o", "house"]),
-    ("nature", 0x1F333, &["thien-nhien", "nature"]),
-    ("ocean", 0x1F30A, &["bien", "ocean", "sea"]),
-    ("mind", 0x1F9E0, &["tam-tri", "tâm trí", "mind", "brain"]),
-    ("person", 0x1F464, &["nguoi", "person"]),
-    ("eye", 0x1F441, &["mat", "eye"]),
-    ("heart", 0x2764, &["tim", "trái tim", "heart"]),
-    ("yes", 0x2705, &["co", "yes", "true"]),
-    ("no", 0x274C, &["khong", "no", "false"]),
-    ("now", 0x23F0, &["bay-gio", "now"]),
-    ("all", 0x267E, &["tat-ca", "all"]),
-    ("move", 0x1F3C3, &["di-chuyen", "move"]),
-    ("stop", 0x1F6D1, &["dung", "stop"]),
-    ("open", 0x1F513, &["mo", "open"]),
-    ("close", 0x1F512, &["dong", "close"]),
-    ("origin", 0x25CB, &["nguon-goc", "origin"]),
-];
 
 fn now_ns() -> i64 {
     SystemTime::now()
@@ -61,14 +24,16 @@ fn now_ns() -> i64 {
 }
 
 fn main() {
-    println!("[seeder] HomeOS Origin Seeder");
-    println!("[seeder] Unicode 18.0 — {} L0 nodes", L0_NODES.len());
+    println!("[seeder] HomeOS Origin Seeder — Full L0");
+    println!("[seeder] Unicode 18.0 — bảng tuần hoàn hoàn chỉnh");
 
     if ucd::table_len() == 0 {
         eprintln!("[seeder] ERROR: UCD table empty");
         std::process::exit(1);
     }
-    println!("[seeder] UCD: {} entries", ucd::table_len());
+
+    let table = ucd::table();
+    println!("[seeder] UCD: {} entries (5 nhóm × 5 chiều)", table.len());
 
     let ts = now_ns();
     let seed = [0x42u8; 32];
@@ -81,37 +46,46 @@ fn main() {
     let mut count = 0usize;
     let mut failed = 0usize;
 
-    for &(name, cp, aliases) in L0_NODES {
-        let chain = encode_codepoint(cp);
+    // ── Phase 1: Seed toàn bộ UCD entries → L0 ──────────────────────────────
+    println!();
+    println!("[seeder] Phase 1: Seeding {} L0 atoms...", table.len());
+
+    // Group counters
+    let mut sdf_count = 0usize;
+    let mut math_count = 0usize;
+    let mut emo_count = 0usize;
+    let mut mus_count = 0usize;
+
+    for entry in table {
+        let chain = encode_codepoint(entry.cp);
         let hash = chain.chain_hash();
         let qr = signer.sign_qr(&chain, ts);
 
         if !signer.verify(&qr) {
-            eprintln!("[seeder] WARN: verify failed: {}", name);
+            eprintln!("[seeder] WARN: verify failed: U+{:05X}", entry.cp);
             failed += 1;
             continue;
         }
 
-        // QT8: file TRUOC
+        // QT9: file TRƯỚC
         let offset = match writer.append_node(&chain, 0, true, ts) {
             Ok(o) => o,
             Err(e) => {
-                eprintln!("[seeder] write error {}: {:?}", name, e);
+                eprintln!("[seeder] write error U+{:05X}: {:?}", entry.cp, e);
                 failed += 1;
                 continue;
             }
         };
         let _ = writer.append_alias(&format!("_qr_{:016X}", hash), hash, ts);
 
+        // Unicode NAME = primary alias (QT②)
+        let _ = writer.append_alias(entry.name, hash, ts);
+
         // Registry SAU
         registry.insert(&chain, 0, offset, ts, true);
-        registry.register_alias(name, hash);
-        for &alias in aliases {
-            registry.register_alias(alias, hash);
-            let _ = writer.append_alias(alias, hash, ts);
-        }
+        registry.register_alias(entry.name, hash);
 
-        // Log CUOI CUNG
+        // Log
         log.append(LogEvent::NodeCreated {
             chain_hash: hash,
             layer: 0,
@@ -119,17 +93,90 @@ fn main() {
             timestamp: ts,
         });
 
-        let uname = ucd::lookup(cp).map(|e| e.name).unwrap_or("?");
-        println!("[seeder] ✓ {} (U+{:05X} {})", name, cp, uname);
+        // Count by group
+        match entry.group {
+            0x01 => sdf_count += 1,
+            0x02 => math_count += 1,
+            0x03 => emo_count += 1,
+            0x04 => mus_count += 1,
+            _ => {}
+        }
+
         count += 1;
     }
 
+    println!("[seeder]   SDF (Shape)    : {} atoms", sdf_count);
+    println!("[seeder]   MATH (Relation): {} atoms", math_count);
+    println!("[seeder]   EMOTICON (V+A) : {} atoms", emo_count);
+    println!("[seeder]   MUSICAL (Time) : {} atoms", mus_count);
+
+    // ── Phase 2: Natural language aliases ────────────────────────────────────
     println!();
-    println!("[seeder] Nodes   : {}", count);
-    println!("[seeder] Failed  : {}", failed);
-    println!("[seeder] Registry: {}", registry.len());
-    println!("[seeder] Aliases : {}", registry.alias_count());
-    println!("[seeder] File    : {} bytes", writer.size());
+    println!("[seeder] Phase 2: Natural aliases...");
+
+    let mut alias_count = 0usize;
+    for &(alias, cp) in L0_NATURAL_ALIASES {
+        let chain = encode_codepoint(cp);
+        let hash = chain.chain_hash();
+        // Chỉ ghi alias nếu node tồn tại
+        if registry.lookup_hash(hash).is_some() {
+            let _ = writer.append_alias(alias, hash, ts);
+            registry.register_alias(alias, hash);
+            alias_count += 1;
+        }
+    }
+    println!("[seeder]   {} natural aliases added", alias_count);
+
+    // ── Phase 3: L1 System DNA (Skills, Agents, VM ops) ─────────────────────
+    println!();
+    println!("[seeder] Phase 3: L1 System DNA...");
+
+    let mut l1_count = 0usize;
+    for entry in olang::startup::L1_SYSTEM_SEED {
+        let chain = encode_codepoint(entry.codepoint);
+        let hash = chain.chain_hash();
+        let qr = signer.sign_qr(&chain, ts);
+
+        if !signer.verify(&qr) {
+            failed += 1;
+            continue;
+        }
+
+        let offset = match writer.append_node(&chain, 1, true, ts) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("[seeder] L1 write error {}: {:?}", entry.name, e);
+                failed += 1;
+                continue;
+            }
+        };
+
+        let kind = olang::registry::NodeKind::from_byte(entry.kind)
+            .unwrap_or(olang::registry::NodeKind::Knowledge);
+        writer.append_node_kind(hash, kind as u8, ts);
+        let _ = writer.append_alias(entry.name, hash, ts);
+
+        registry.insert(&chain, 1, offset, ts, true);
+        registry.register_alias(entry.name, hash);
+        for &a in entry.aliases {
+            let _ = writer.append_alias(a, hash, ts);
+            registry.register_alias(a, hash);
+        }
+
+        l1_count += 1;
+    }
+    println!("[seeder]   {} L1 system nodes", l1_count);
+
+    // ── Summary ──────────────────────────────────────────────────────────────
+    println!();
+    println!("[seeder] ═══════════════════════════════════════════");
+    println!("[seeder] L0 Atoms   : {}", count);
+    println!("[seeder] L1 DNA     : {}", l1_count);
+    println!("[seeder] Aliases    : {}", registry.alias_count());
+    println!("[seeder] Failed     : {}", failed);
+    println!("[seeder] Registry   : {} entries", registry.len());
+    println!("[seeder] File       : {} bytes", writer.size());
+    println!("[seeder] ═══════════════════════════════════════════");
 
     if failed > 0 {
         eprintln!("[seeder] ERRORS — abort");
@@ -150,5 +197,5 @@ fn main() {
         parsed.alias_count()
     );
 
-    println!("[seeder] Done ✓  ○(empty)==○");
+    println!("[seeder] Done ✓  ○(∅)==○ — bảng tuần hoàn hoàn chỉnh");
 }
