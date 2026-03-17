@@ -18,6 +18,59 @@ use crate::molecular::{EmotionDim, Molecule, MolecularChain};
 // VmEvent — side effects VM muốn thực hiện
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Extract readable text from a string-encoded MolecularChain.
+/// String chains use shape=0x02, relation=0x01, with each byte stored in valence.
+/// Returns None if the chain doesn't look like a string encoding.
+pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
+    if chain.is_empty() {
+        return Some(String::new());
+    }
+    // Check if it looks like a string chain (all shape=0x02, relation=0x01)
+    let is_string = chain.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01);
+    if is_string {
+        let s: String = chain.0.iter()
+            .map(|m| m.emotion.valence as char)
+            .collect();
+        Some(s)
+    } else {
+        None
+    }
+}
+
+/// Encode a string as a MolecularChain (each byte → 1 molecule).
+/// Inverse of chain_to_string.
+pub fn string_to_chain(s: &str) -> MolecularChain {
+    let mols: Vec<Molecule> = s.bytes().map(|b| Molecule {
+        shape: 0x02,
+        relation: 0x01,
+        emotion: EmotionDim { valence: b, arousal: 0 },
+        time: 0x01,
+    }).collect();
+    MolecularChain(mols)
+}
+
+/// Format a chain for human-readable display.
+/// Tries string decoding first, then number, then raw molecule info.
+pub fn format_chain_display(chain: &MolecularChain) -> String {
+    if chain.is_empty() {
+        return "(empty)".into();
+    }
+    // Try string
+    if let Some(s) = chain_to_string(chain) {
+        return s;
+    }
+    // Try number
+    if let Some(n) = chain.to_number() {
+        return if n == (n as i64 as f64) {
+            alloc::format!("{}", n as i64)
+        } else {
+            alloc::format!("{}", n)
+        };
+    }
+    // Fallback: molecule count + hash
+    alloc::format!("[chain: {} molecules, hash={:#x}]", chain.len(), chain.chain_hash())
+}
+
 /// Event từ VM → caller xử lý.
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
@@ -800,6 +853,13 @@ impl OlangVM {
                             // Print: emit top of stack as output (same as Emit but via call)
                             let val = vm_pop!(stack, events);
                             events.push(VmEvent::Output(val));
+                        }
+                        "__println" => {
+                            // Print with newline: emit value + newline as string chain
+                            let val = vm_pop!(stack, events);
+                            let text = format_chain_display(&val);
+                            let with_nl = alloc::format!("{}\n", text);
+                            events.push(VmEvent::Output(string_to_chain(&with_nl)));
                         }
                         "__hyp_mod" => {
                             let b = vm_pop!(stack, events);

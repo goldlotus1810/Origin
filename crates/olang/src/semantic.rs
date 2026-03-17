@@ -646,6 +646,12 @@ struct LowerCtx {
     break_jumps: Vec<Vec<usize>>,
     /// Continue targets: Jmp placeholders to patch to ScopeEnd
     continue_jumps: Vec<Vec<usize>>,
+    /// Unique call site counter — prevents param name clashes when
+    /// the same function is called multiple times in one expression
+    call_id: u32,
+    /// Depth of function inlining — when > 0, `return` should not emit Op::Ret
+    /// but instead just leave the value on stack (since function is inlined)
+    inline_depth: u32,
 }
 
 impl LowerCtx {
@@ -656,7 +662,15 @@ impl LowerCtx {
             fns: Vec::new(),
             break_jumps: Vec::new(),
             continue_jumps: Vec::new(),
+            call_id: 0,
+            inline_depth: 0,
         }
+    }
+
+    fn next_call_id(&mut self) -> u32 {
+        let id = self.call_id;
+        self.call_id += 1;
+        id
     }
 
     fn is_local(&self, name: &str) -> bool {
@@ -997,11 +1011,21 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         }
 
         Stmt::Return(expr) => {
-            if let Some(e) = expr {
-                lower_expr(e, ctx);
-                ctx.emit(Op::Emit); // return value = emit it
+            if ctx.inline_depth > 0 {
+                // Inside inlined function: just leave value on stack (no Ret)
+                if let Some(e) = expr {
+                    lower_expr(e, ctx);
+                    // Value stays on stack as function's return value
+                }
+                // No Op::Ret — inlined functions continue after the call site
+            } else {
+                // Top-level return
+                if let Some(e) = expr {
+                    lower_expr(e, ctx);
+                    ctx.emit(Op::Emit); // return value = emit it
+                }
+                ctx.emit(Op::Ret);
             }
-            ctx.emit(Op::Ret);
         }
 
         Stmt::Continue => {
@@ -1250,6 +1274,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "to_string" => Some("__to_string"),
                 "to_number" => Some("__to_number"),
                 "print" => Some("__print"),
+                "println" => Some("__println"),
                 "abs" => Some("__hyp_abs"),
                 "min" => Some("__hyp_min"),
                 "max" => Some("__hyp_max"),
@@ -1322,20 +1347,67 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             } else
             // Check if it's a user-defined function
             if let Some(fn_def) = ctx.lookup_fn(name) {
-                // Inline the function: bind args to params
+                // Inline the function with unique param names per call site
+                // to prevent clashes when the same function is called multiple times
+                let call_id = ctx.next_call_id();
                 let saved = ctx.locals.len();
 
-                // Evaluate args and store as locals
-                for (param, arg) in fn_def.params.iter().zip(args.iter()) {
+                // Generate unique param names: __p{call_id}_{param}
+                let unique_params: Vec<String> = fn_def.params.iter()
+                    .map(|p| alloc::format!("__p{}_{}", call_id, p))
+                    .collect();
+
+                // Evaluate args and store with unique names
+                for (unique_name, arg) in unique_params.iter().zip(args.iter()) {
                     lower_expr(arg, ctx);
-                    ctx.emit(Op::Store(param.clone()));
-                    ctx.locals.push(param.clone());
+                    ctx.emit(Op::Store(unique_name.clone()));
+                    ctx.locals.push(unique_name.clone());
                 }
 
-                // Lower function body
-                for s in &fn_def.body {
-                    lower_stmt(s, ctx);
+                // Also register original param names as aliases to unique names
+                // so the function body can use them
+                for (orig, unique_name) in fn_def.params.iter().zip(unique_params.iter()) {
+                    ctx.emit(Op::LoadLocal(unique_name.clone()));
+                    ctx.emit(Op::Store(orig.clone()));
+                    ctx.locals.push(orig.clone());
                 }
+
+                // Lower function body (inside inline context)
+                ctx.inline_depth += 1;
+
+                // Lower all statements except the last one normally
+                let body_len = fn_def.body.len();
+                if body_len > 1 {
+                    for s in &fn_def.body[..body_len - 1] {
+                        lower_stmt(s, ctx);
+                    }
+                }
+
+                // Handle last statement specially: if it's an expression,
+                // don't Pop the result — it becomes the function's return value
+                if let Some(last) = fn_def.body.last() {
+                    match last {
+                        Stmt::Expr(expr) => {
+                            // Lower expression without Pop — value stays on stack
+                            lower_expr(expr, ctx);
+                        }
+                        Stmt::Return(Some(expr)) => {
+                            // Return value stays on stack
+                            lower_expr(expr, ctx);
+                        }
+                        _ => {
+                            // Other statements (emit, let, etc.) — lower normally
+                            // and push empty as dummy return value
+                            lower_stmt(last, ctx);
+                            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                        }
+                    }
+                } else {
+                    // Empty function body — push empty
+                    ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                }
+
+                ctx.inline_depth -= 1;
 
                 ctx.locals.truncate(saved);
             } else {
@@ -1457,8 +1529,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Str(s) => {
-            // String literal → Load as registry alias
-            ctx.emit(Op::Load(s.clone()));
+            // String literal → push as chain value (each byte → 1 molecule)
+            ctx.emit(Op::Push(string_to_key_chain(s)));
         }
 
         Expr::Group(inner) => {
@@ -1554,15 +1626,38 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     if let Some(b) = builtin {
                         ctx.emit(Op::Call(b.into()));
                     } else if let Some(fn_def) = ctx.lookup_fn(name) {
-                        // Inline: bind left (on stack) as first param
+                        // Inline: bind left (on stack) as first param with unique name
+                        let call_id = ctx.next_call_id();
                         let saved = ctx.locals.len();
                         if let Some(first_param) = fn_def.params.first() {
+                            let unique_name = alloc::format!("__p{}_{}", call_id, first_param);
+                            ctx.emit(Op::Store(unique_name.clone()));
+                            ctx.locals.push(unique_name.clone());
+                            ctx.emit(Op::LoadLocal(unique_name));
                             ctx.emit(Op::Store(first_param.clone()));
                             ctx.locals.push(first_param.clone());
                         }
-                        for s in &fn_def.body {
-                            lower_stmt(s, ctx);
+                        ctx.inline_depth += 1;
+                        // Handle last statement as return value
+                        let body_len = fn_def.body.len();
+                        if body_len > 1 {
+                            for s in &fn_def.body[..body_len - 1] {
+                                lower_stmt(s, ctx);
+                            }
                         }
+                        if let Some(last) = fn_def.body.last() {
+                            match last {
+                                Stmt::Expr(expr) => lower_expr(expr, ctx),
+                                Stmt::Return(Some(expr)) => lower_expr(expr, ctx),
+                                _ => {
+                                    lower_stmt(last, ctx);
+                                    ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                                }
+                            }
+                        } else {
+                            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                        }
+                        ctx.inline_depth -= 1;
                         ctx.locals.truncate(saved);
                     } else {
                         ctx.emit(Op::Call(name.clone()));
@@ -1841,7 +1936,9 @@ mod tests {
     fn lower_string_literal() {
         let stmts = parse("emit \"hello\";").unwrap();
         let prog = lower(&stmts);
-        assert!(prog.ops.contains(&Op::Load("hello".into())));
+        // String literals are now pushed as chain values (not loaded as aliases)
+        let has_push = prog.ops.iter().any(|op| matches!(op, Op::Push(_)));
+        assert!(has_push, "String literal should produce Push(chain)");
         assert!(prog.ops.contains(&Op::Emit));
     }
 
@@ -2300,19 +2397,24 @@ mod tests {
 
     #[test]
     fn lower_return_value() {
+        // Inlined function: return 42 leaves value on stack (no Op::Ret)
         let stmts = parse("fn foo() { return 42; } emit foo();").unwrap();
         let prog = lower(&stmts);
-        let has_ret = prog.ops.iter().any(|op| matches!(op, Op::Ret));
-        assert!(has_ret, "return should produce Ret opcode");
+        let has_pushnum = prog.ops.iter().any(|op| matches!(op, Op::PushNum(n) if *n == 42.0));
+        assert!(has_pushnum, "return 42 should produce PushNum(42)");
+        assert!(prog.ops.contains(&Op::Emit), "should emit the return value");
     }
 
     #[test]
     fn lower_return_bare() {
-        // Functions are inlined at call site, so we need a call to produce Ret
-        let stmts = parse("fn foo() { return; } emit foo();").unwrap();
+        // Inlined function with bare return: no value left on stack
+        let stmts = parse("fn foo() { return; } foo();").unwrap();
         let prog = lower(&stmts);
-        let has_ret = prog.ops.iter().any(|op| matches!(op, Op::Ret));
-        assert!(has_ret, "bare return should produce Ret opcode");
+        // Bare return in inlined context pushes empty chain as dummy
+        let has_push_empty = prog.ops.iter().any(|op| {
+            matches!(op, Op::Push(c) if c.is_empty())
+        });
+        assert!(has_push_empty, "bare return in inline should push empty");
     }
 
     // ── End-to-End (parse → lower → VM execute) ─────────────────────────────
@@ -3072,5 +3174,340 @@ mod tests {
             });
             assert!(has_builtin, "Builtin '{}' should map to __* call", name);
         }
+    }
+
+    // ── Phase 6: Real Usable Programs ───────────────────────────────────────
+
+    #[test]
+    fn e2e_string_value_as_chain() {
+        // String literals are now actual chain values (not registry lookups)
+        let stmts = parse(r#"emit "hello";"#).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let text = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(text, Some("hello".into()));
+    }
+
+    #[test]
+    fn e2e_string_concat_works() {
+        let stmts = parse(r#"let a = "hello"; let b = " world"; emit concat(a, b);"#).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let text = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(text, Some("hello world".into()));
+    }
+
+    #[test]
+    fn e2e_string_len() {
+        let stmts = parse(r#"emit str_len("test");"#).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let n = outputs[0].to_number().unwrap();
+        assert!((n - 4.0).abs() < f64::EPSILON, "str_len('test')=4, got {}", n);
+    }
+
+    #[test]
+    fn e2e_function_returns_value() {
+        // fn with return expression — should leave value on stack
+        let stmts = parse("fn square(x) { return x * x; } emit square(7);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 49.0).abs() < f64::EPSILON, "square(7)=49, got {}", v);
+    }
+
+    #[test]
+    fn e2e_function_implicit_return() {
+        // Last expression in function body = implicit return value
+        let stmts = parse("fn add(a, b) { a + b } emit add(3, 4);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 7.0).abs() < f64::EPSILON, "add(3,4)=7, got {}", v);
+    }
+
+    #[test]
+    fn e2e_multiple_function_calls_no_clash() {
+        // Same function called twice in one expression — param names should not clash
+        let stmts = parse("fn double(n) { return n * 2; } emit double(3) + double(4);").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "should have output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 14.0).abs() < f64::EPSILON, "double(3)+double(4)=14, got {}", v);
+    }
+
+    #[test]
+    fn e2e_function_call_as_statement() {
+        // Calling function as statement (not in emit) should not crash
+        let stmts = parse("fn greet() { emit 42; } greet();").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn e2e_real_program_fizzbuzz() {
+        // FizzBuzz — a real program users would actually write
+        let src = r#"
+            let i = 1;
+            while i < 16 {
+                if mod(i, 15) == 0 {
+                    emit "FizzBuzz";
+                } else {
+                    if mod(i, 3) == 0 {
+                        emit "Fizz";
+                    } else {
+                        if mod(i, 5) == 0 {
+                            emit "Buzz";
+                        } else {
+                            emit i;
+                        }
+                    }
+                }
+                i = i + 1;
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        // FizzBuzz 1-15: 1,2,Fizz,4,Buzz,Fizz,7,8,Fizz,Buzz,11,Fizz,13,14,FizzBuzz = 15 outputs
+        assert_eq!(outputs.len(), 15, "FizzBuzz should produce 15 outputs, got {}", outputs.len());
+        // Check specific values
+        let v1 = outputs[0].to_number().unwrap();
+        assert!((v1 - 1.0).abs() < f64::EPSILON, "first output should be 1");
+        let fizz = crate::vm::chain_to_string(&outputs[2]);
+        assert_eq!(fizz, Some("Fizz".into()), "3rd output should be Fizz");
+        let buzz = crate::vm::chain_to_string(&outputs[4]);
+        assert_eq!(buzz, Some("Buzz".into()), "5th output should be Buzz");
+        let fizzbuzz = crate::vm::chain_to_string(&outputs[14]);
+        assert_eq!(fizzbuzz, Some("FizzBuzz".into()), "15th output should be FizzBuzz");
+    }
+
+    #[test]
+    fn e2e_real_program_sum_array() {
+        // Sum all elements of an array — common real-world pattern
+        let src = r#"
+            let arr = [10, 20, 30, 40, 50];
+            let total = 0;
+            for i in 0..5 {
+                total = total + arr[i];
+            }
+            emit total;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1);
+        let total = outputs.last().unwrap().to_number().unwrap();
+        assert!((total - 150.0).abs() < f64::EPSILON, "sum should be 150, got {}", total);
+    }
+
+    #[test]
+    fn e2e_real_program_dict_lookup() {
+        // Dictionary field access — real-world usage
+        let src = r#"
+            let user = {name: "Leo", age: 3, level: 1};
+            emit user.name;
+            emit user.age;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2, "should have 2 outputs, got {}", outputs.len());
+        let name = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(name, Some("Leo".into()));
+        let age = outputs[1].to_number().unwrap();
+        assert!((age - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn e2e_chain_to_string_roundtrip() {
+        // Verify string→chain→string roundtrip
+        let original = "Hello, World! 123";
+        let chain = crate::vm::string_to_chain(original);
+        let recovered = crate::vm::chain_to_string(&chain);
+        assert_eq!(recovered, Some(original.into()));
+    }
+
+    #[test]
+    fn e2e_format_chain_display_number() {
+        let chain = crate::molecular::MolecularChain::from_number(42.0);
+        let display = crate::vm::format_chain_display(&chain);
+        assert_eq!(display, "42");
+    }
+
+    #[test]
+    fn e2e_format_chain_display_string() {
+        let chain = crate::vm::string_to_chain("hello");
+        let display = crate::vm::format_chain_display(&chain);
+        assert_eq!(display, "hello");
+    }
+
+    #[test]
+    fn e2e_format_chain_display_empty() {
+        let chain = crate::molecular::MolecularChain::empty();
+        let display = crate::vm::format_chain_display(&chain);
+        assert_eq!(display, "(empty)");
+    }
+
+    #[test]
+    fn e2e_emit_number_directly() {
+        // Direct emit of a number — the simplest real program
+        let stmts = parse("emit 42;").unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn e2e_real_program_nested_functions() {
+        // Functions calling other functions — real-world pattern
+        let src = r#"
+            fn square(x) { return x * x; }
+            fn sum_of_squares(a, b) { return square(a) + square(b); }
+            emit sum_of_squares(3, 4);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 25.0).abs() < f64::EPSILON, "3^2 + 4^2 = 25, got {}", v);
+    }
+
+    #[test]
+    fn e2e_real_program_string_processing() {
+        // String processing — real-world pattern
+        let src = r#"
+            let greeting = "hello world";
+            emit str_upper(greeting);
+            emit str_contains(greeting, "world");
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 2, "should have 2 outputs, got {}", outputs.len());
+        let upper = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(upper, Some("HELLO WORLD".into()));
+        // str_contains returns non-empty chain (truthy) when found
+        assert!(!outputs[1].is_empty(), "str_contains should return truthy for match");
+    }
+
+    #[test]
+    fn e2e_real_program_for_each() {
+        // for-each iteration over array
+        let src = r#"
+            let arr = [10, 20, 30];
+            let sum = 0;
+            for x in arr {
+                sum = sum + x;
+            }
+            emit sum;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "validation errors: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1);
+        let sum = outputs.last().unwrap().to_number().unwrap();
+        assert!((sum - 60.0).abs() < f64::EPSILON, "sum should be 60, got {}", sum);
+    }
+
+    #[test]
+    fn e2e_real_program_try_catch() {
+        // Error handling — real-world pattern
+        let src = r#"
+            try {
+                emit 1 / 0;
+            } catch {
+                emit 999;
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        // Division by zero should be caught
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "catch should produce output");
+        let v = outputs.last().unwrap().to_number().unwrap();
+        assert!((v - 999.0).abs() < f64::EPSILON, "catch block should emit 999");
+    }
+
+    #[test]
+    fn e2e_real_program_match() {
+        // Pattern matching with wildcard — real-world pattern
+        let src = r#"
+            let x = 42;
+            match x {
+                _ => { emit x; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 1, "wildcard match should produce output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
     }
 }

@@ -408,10 +408,14 @@ impl HomeRuntime {
         for event in &result.events {
             match event {
                 VmEvent::Output(chain) => {
-                    // Output chain → STM
+                    // Output chain → STM + display
                     if !chain.is_empty() {
+                        // Check if string chain first (shape=0x02, relation=0x01)
+                        if let Some(text) = olang::vm::chain_to_string(chain) {
+                            output_text.push_str(&text);
+                        }
                         // Check if numeric result
-                        if let Some(num) = chain.to_number() {
+                        else if let Some(num) = chain.to_number() {
                             // Display number cleanly
                             if (num - homemath::round(num)).abs() < 1e-10 && num.abs() < 1e15 {
                                 output_text.push_str(&format!("= {} ", homemath::round(num) as i64));
@@ -625,6 +629,113 @@ impl HomeRuntime {
             format!("○ ({} steps)", result.steps)
         } else {
             format!("○ {}", output_text.trim())
+        };
+
+        Response {
+            text,
+            tone: ResponseTone::Engaged,
+            fx: self.learning.context().fx(),
+            kind: ResponseKind::OlangResult,
+        }
+    }
+
+    // ── Full Olang program execution ───────────────────────────────────────
+
+    /// Execute a full Olang program (multi-statement source code).
+    ///
+    /// Unlike process_text (which handles ○{} single expressions),
+    /// this parses and runs a complete Olang program with functions,
+    /// control flow, variables, etc.
+    pub fn run_program(&mut self, source: &str, ts: i64) -> Response {
+        // Parse full Olang syntax
+        let stmts = match syntax::parse(source) {
+            Ok(stmts) => stmts,
+            Err(e) => {
+                return Response {
+                    text: format!("Parse error: {:?}", e),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::Blocked,
+                };
+            }
+        };
+
+        // Validate
+        let errors = semantic::validate(&stmts);
+        if !errors.is_empty() {
+            let msgs: alloc::vec::Vec<String> = errors.iter()
+                .map(|e| e.message.clone())
+                .collect();
+            return Response {
+                text: format!("Validation errors:\n{}", msgs.join("\n")),
+                tone: ResponseTone::Engaged,
+                fx: 0.0,
+                kind: ResponseKind::Blocked,
+            };
+        }
+
+        // Lower to IR
+        let prog = semantic::lower(&stmts);
+
+        // Optimize
+        let mut prog = prog;
+        optimize::optimize(&mut prog, OptLevel::O1);
+
+        // Execute
+        let vm = OlangVM::new();
+        let result = vm.execute(&prog);
+
+        // Collect output
+        let mut output_text = String::new();
+        let cur_emotion = self.learning.context().last_emotion();
+
+        for event in &result.events {
+            match event {
+                VmEvent::Output(chain) => {
+                    if !chain.is_empty() {
+                        if let Some(text) = olang::vm::chain_to_string(chain) {
+                            output_text.push_str(&text);
+                        } else if let Some(num) = chain.to_number() {
+                            if (num - homemath::round(num)).abs() < 1e-10 && num.abs() < 1e15 {
+                                output_text.push_str(&format!("{}", homemath::round(num) as i64));
+                            } else {
+                                output_text.push_str(&format!("{}", num));
+                            }
+                        } else {
+                            output_text.push_str(&olang::vm::format_chain_display(chain));
+                        }
+                    }
+                }
+                VmEvent::LookupAlias(alias) => {
+                    let cp_from_cache = self.alias_to_cp.get(alias.as_str()).copied();
+                    let (chain, cp_opt) = if let Some(cp) = cp_from_cache {
+                        (olang::encoder::encode_codepoint(cp), Some(cp))
+                    } else {
+                        resolve_with_cp(alias, &self.registry)
+                    };
+                    if !chain.is_empty() {
+                        self.learning.stm_mut().push(chain.clone(), cur_emotion, ts);
+                    }
+                }
+                VmEvent::Error(e) => {
+                    output_text.push_str(&format!("[error: {}] ", e));
+                }
+                VmEvent::TriggerDream => {
+                    let resp = self.handle_command("dream", ts);
+                    output_text.push_str(&resp.text);
+                }
+                VmEvent::RequestStats => {
+                    let resp = self.handle_command("stats", ts);
+                    output_text.push_str(&resp.text);
+                }
+                _ => {} // Other events handled silently
+            }
+        }
+
+        let text = if output_text.is_empty() {
+            format!("○ done ({} steps)", result.steps)
+        } else {
+            output_text
         };
 
         Response {
@@ -5783,5 +5894,48 @@ mod leo_programming_tests {
         rt.process_text("○{derive \"x^2 + 3x\"}", 1000);
         let stm_after = rt.stm_len();
         assert!(stm_after > stm_before, "Derive result should enter STM");
+    }
+
+    // ── run_program tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn run_program_simple_emit() {
+        let mut rt = HomeRuntime::new(0xC001);
+        let resp = rt.run_program("emit 42;", 1000);
+        assert_eq!(resp.kind, ResponseKind::OlangResult);
+        assert!(resp.text.contains("42"), "output should contain 42, got: {}", resp.text);
+    }
+
+    #[test]
+    fn run_program_string_output() {
+        let mut rt = HomeRuntime::new(0xC002);
+        let resp = rt.run_program(r#"emit "hello world";"#, 1000);
+        assert_eq!(resp.kind, ResponseKind::OlangResult);
+        assert!(resp.text.contains("hello world"), "output should contain 'hello world', got: {}", resp.text);
+    }
+
+    #[test]
+    fn run_program_function_and_loop() {
+        let mut rt = HomeRuntime::new(0xC003);
+        let src = r#"
+            fn double(x) { return x * 2; }
+            let sum = 0;
+            for i in 0..5 {
+                sum = sum + double(i);
+            }
+            emit sum;
+        "#;
+        let resp = rt.run_program(src, 1000);
+        assert_eq!(resp.kind, ResponseKind::OlangResult);
+        // double(0)+double(1)+double(2)+double(3)+double(4) = 0+2+4+6+8 = 20
+        assert!(resp.text.contains("20"), "sum should be 20, got: {}", resp.text);
+    }
+
+    #[test]
+    fn run_program_parse_error() {
+        let mut rt = HomeRuntime::new(0xC004);
+        let resp = rt.run_program("let x = ;", 1000);
+        assert_eq!(resp.kind, ResponseKind::Blocked);
+        assert!(resp.text.contains("error"), "should report parse error: {}", resp.text);
     }
 }
