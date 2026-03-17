@@ -1383,6 +1383,26 @@ mod tests {
         assert!(l.stm_len() > stm_before, "STM should grow after programming");
     }
 
+    #[test]
+    fn program_verify_known_hash() {
+        let mut l = leo();
+        l.ingest(report(-0.5, 1), 1000);
+        let hash = l.learning.stm().top_n(1)[0].chain.chain_hash();
+        let result = l.program_verify("lửa", hash, 2000);
+        // Should successfully verify (express_truth + emit)
+        assert!(!result.has_error(), "Verify known hash should not error: {:?}", result.errors);
+        assert!(result.steps > 0, "Should have executed VM steps");
+    }
+
+    #[test]
+    fn program_verify_unknown_hash() {
+        let mut l = leo();
+        let result = l.program_verify("nothing", 0xDEAD, 1000);
+        // Should return error — hash not in STM
+        assert!(result.has_error(), "Unknown hash should produce error");
+        assert!(result.errors[0].contains("Unknown hash"), "Error should mention unknown hash");
+    }
+
     // ── SkillPattern → AAM integration tests ────────────────────────────────
 
     #[test]

@@ -3262,6 +3262,42 @@ mod stm_verification_tests {
             "Code input phải tạo STM observation"
         );
     }
+
+    /// Universal pipeline: Image input qua process_image().
+    #[test]
+    fn universal_image_creates_stm() {
+        if ucd::table_len() == 0 {
+            return;
+        }
+        let mut rt = rt();
+
+        let r = rt.process_image(0.5, 0.7, 0.8, 0.1, None, 1000);
+        assert_eq!(r.kind, ResponseKind::Natural);
+        assert!(
+            rt.learning.stm().len() > 0,
+            "Image input phải tạo STM observation"
+        );
+    }
+
+    /// Universal pipeline: process_input() trực tiếp với System event.
+    #[test]
+    fn process_input_system_event() {
+        if ucd::table_len() == 0 {
+            return;
+        }
+        let mut rt = rt();
+
+        let input = ContentInput::System {
+            event: agents::encoder::SystemEvent::Boot,
+            timestamp: 1000,
+        };
+        let r = rt.process_input(input, 1000);
+        assert_eq!(r.kind, ResponseKind::Natural);
+        assert!(
+            rt.learning.stm().len() > 0,
+            "System event phải tạo STM observation"
+        );
+    }
 }
 
 #[cfg(test)]

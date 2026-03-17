@@ -12,7 +12,7 @@
 ## Trạng thái thật (verify bằng code)
 
 ```
-Tests:    1,780 pass · 0 fail · 0 clippy warnings
+Tests:    1,784 pass · 0 fail · 0 clippy warnings
 Deps:     0 external runtime (native SHA-256, Ed25519, AES-256-GCM, homemath)
 origin:   338 nodes (35 L0 + 278 domain + 25 multilang) · 236 edges · 2703 aliases · 84KB
 ```
@@ -83,6 +83,23 @@ Files đã sửa:
 
 Files đã sửa:
   crates/agents/src/learning.rs — 2 new tests
+```
+
+### Test coverage gaps + warning cleanup ✅
+```
+4 tests mới lấp khoảng trống coverage:
+  program_verify_known_hash — verify truth assertion cho hash đã biết
+  program_verify_unknown_hash — verify hash chưa tồn tại → error
+  universal_image_creates_stm — process_image() → STM observation
+  process_input_system_event — process_input() trực tiếp với System event
+
+Dọn warnings: 14 files, xóa unused imports + prefix unused vars
+0 warnings sau khi dọn (trước đó 13 warnings)
+
+Files đã sửa:
+  crates/agents/src/leo.rs — 2 tests mới (program_verify)
+  crates/runtime/src/origin.rs — 2 tests mới (image + system event)
+  14 files — unused import/variable cleanup
 ```
 
 ---
@@ -207,7 +224,7 @@ F: P1 RelOps 18/18, Dream STM cleanup
 G: Verify Phase 2-5 thực trạng, cập nhật NEXT_PLAN
 H: Dọn docs → old/, Phase 5+4+3 HOÀN THÀNH, 1759 tests
 I: SkillProposal + unwrap reduction (50→27) + Multilingual Seeding, 1774 tests
-J: SkillPattern → AAM pipeline fix + Audio co-activation tests, 1780 tests
+J: SkillPattern → AAM pipeline + test coverage gaps + warning cleanup, 1784 tests
 ```
 
 ---
@@ -221,4 +238,4 @@ Chỉ giữ: CLAUDE.md, NEXT_PLAN.md, README.md, docs/olang_guide.md
 
 ---
 
-*HomeOS · 2026-03-17 · 1,780 tests · 338 nodes · ○(∅)==○*
+*HomeOS · 2026-03-17 · 1,784 tests · 338 nodes · ○(∅)==○*
