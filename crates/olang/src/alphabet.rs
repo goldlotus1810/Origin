@@ -506,6 +506,8 @@ pub enum Token {
     Dot,
     /// `:`
     Colon,
+    /// `|>` — pipe operator (Julia-style: output feeds into next)
+    PipeArrow,
 
     // ── End ──
     /// End of input
@@ -645,6 +647,10 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     return Token::Or;
                 }
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::PipeArrow;
+                }
                 return Token::Pipe;
             }
             '&' => {
@@ -714,11 +720,39 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(&(_, c)) = self.chars.peek() {
-            if c.is_whitespace() {
-                self.chars.next();
-            } else {
-                break;
+        loop {
+            match self.chars.peek() {
+                Some(&(_, c)) if c.is_whitespace() => {
+                    self.chars.next();
+                }
+                // // line comment
+                Some(&(pos, '/')) => {
+                    let next_pos = pos + 1;
+                    // Peek two chars ahead manually
+                    let src_bytes = self.src.as_bytes();
+                    if next_pos < src_bytes.len() && src_bytes[next_pos] == b'/' {
+                        // Line comment: skip until newline
+                        self.chars.next(); // consume first /
+                        self.chars.next(); // consume second /
+                        while let Some(&(_, c)) = self.chars.peek() {
+                            if c == '\n' { break; }
+                            self.chars.next();
+                        }
+                    } else if next_pos < src_bytes.len() && src_bytes[next_pos] == b'*' {
+                        // Block comment: skip until */
+                        self.chars.next(); // consume /
+                        self.chars.next(); // consume *
+                        let mut prev = ' ';
+                        while let Some(&(_, c)) = self.chars.peek() {
+                            self.chars.next();
+                            if prev == '*' && c == '/' { break; }
+                            prev = c;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
             }
         }
     }

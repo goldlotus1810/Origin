@@ -255,6 +255,16 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.exit();
         }
 
+        Stmt::ForEach { var, iter, body } => {
+            validate_expr(iter, scope, errors);
+            scope.enter();
+            scope.locals.push(var.clone());
+            for s in body {
+                validate_stmt(s, scope, errors);
+            }
+            scope.exit();
+        }
+
         Stmt::Break | Stmt::Continue => {
             // Valid only inside loops — structural check, no scope impact
         }
@@ -433,6 +443,20 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             validate_expr(object, scope, errors);
         }
 
+        Expr::Pipe(left, right) => {
+            validate_expr(left, scope, errors);
+            validate_expr(right, scope, errors);
+        }
+
+        Expr::Lambda { params, body } => {
+            scope.enter();
+            for p in params {
+                scope.define_local(p);
+            }
+            validate_expr(body, scope, errors);
+            scope.exit();
+        }
+
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
             // Validate dimension values are in valid byte range (0-255)
             for (name, val) in [("S", shape), ("R", relation), ("V", valence), ("A", arousal), ("T", time)] {
@@ -499,6 +523,8 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::Index { .. } => ChainKind::Unknown,
         Expr::Dict(_) => ChainKind::Unknown,
         Expr::FieldAccess { .. } => ChainKind::Unknown,
+        Expr::Pipe(_, right) => infer_expr_kind(right),
+        Expr::Lambda { .. } => ChainKind::Unknown,
         Expr::MolLiteral { shape, valence, .. } => {
             // Heuristic: check shape and valence to classify
             match shape {
@@ -522,6 +548,7 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         Stmt::Expr(expr) => infer_expr_kind(expr),
         Stmt::If { .. } | Stmt::Loop { .. } | Stmt::FnDef { .. }
         | Stmt::Match { .. } | Stmt::TryCatch { .. } | Stmt::ForIn { .. }
+        | Stmt::ForEach { .. }
         | Stmt::While { .. }
         | Stmt::Break | Stmt::Continue
         | Stmt::Assign { .. }
@@ -796,6 +823,76 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 }
             }
             ctx.emit(Op::Pop);
+        }
+
+        Stmt::ForEach { var, iter, body } => {
+            // for var in arr { body }
+            // Strategy: store arr as local, get len, iterate with index counter
+            // Stack: only idx on stack during loop; arr and len in locals
+            lower_expr(iter, ctx);
+            // Store arr as local
+            ctx.emit(Op::Dup);                   // dup for len
+            ctx.emit(Op::Call("__array_len".into()));
+            ctx.emit(Op::Store("__foreach_len".into()));
+            ctx.locals.push("__foreach_len".into());
+            ctx.emit(Op::Store("__foreach_arr".into()));
+            ctx.locals.push("__foreach_arr".into());
+            // Push index counter = 0
+            ctx.emit(Op::PushNum(0.0));
+            ctx.emit(Op::Loop(1024));            // QT2: capped
+            ctx.emit(Op::ScopeBegin);
+            // Check idx >= len → break
+            ctx.emit(Op::Dup);                   // [..., idx, idx]
+            ctx.emit(Op::LoadLocal("__foreach_len".into()));
+            ctx.emit(Op::Call("__cmp_ge".into())); // idx >= len → truthy
+            let jz_pos = ctx.current_pos();
+            ctx.emit(Op::Jz(0));                 // if falsy (idx < len) → continue
+            ctx.emit(Op::Pop);                   // pop cmp result (truthy)
+            let break_jmp = ctx.current_pos();
+            ctx.emit(Op::Jmp(0));                // break out
+
+            let cont_target = ctx.current_pos();
+            ctx.patch_jump(jz_pos, cont_target);
+            ctx.emit(Op::Pop);                   // pop cmp result (falsy)
+
+            // Get element: arr[idx] → store as var
+            ctx.emit(Op::Dup);                   // [..., idx, idx]
+            ctx.emit(Op::LoadLocal("__foreach_arr".into())); // [..., idx, idx, arr]
+            ctx.emit(Op::Swap);                  // [..., idx, arr, idx]
+            ctx.emit(Op::Call("__array_get".into())); // [..., idx, elem]
+            ctx.emit(Op::Store(var.clone()));
+            ctx.locals.push(var.clone());
+
+            // Body
+            ctx.break_jumps.push(Vec::new());
+            ctx.continue_jumps.push(Vec::new());
+            let saved = ctx.locals.len();
+            for s in body {
+                lower_stmt(s, ctx);
+            }
+            ctx.locals.truncate(saved);
+
+            // Patch continue → increment
+            let inc_pos = ctx.current_pos();
+            if let Some(conts) = ctx.continue_jumps.pop() {
+                for cp in conts {
+                    ctx.patch_jump(cp, inc_pos);
+                }
+            }
+
+            // Increment index
+            ctx.emit(Op::PushNum(1.0));
+            ctx.emit(Op::Call("__hyp_add".into()));
+            ctx.emit(Op::ScopeEnd);
+
+            let end_pos = ctx.current_pos();
+            ctx.patch_jump(break_jmp, end_pos);
+            if let Some(breaks) = ctx.break_jumps.pop() {
+                for bp in breaks {
+                    ctx.patch_jump(bp, end_pos);
+                }
+            }
+            ctx.emit(Op::Pop); // pop idx
         }
 
         Stmt::Break => {
@@ -1077,6 +1174,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "get" => Some("__dict_get"),
                 "set" => Some("__dict_set"),
                 "keys" => Some("__dict_keys"),
+                "str_len" => Some("__str_len"),
+                "str_concat" => Some("__str_concat"),
+                "to_string" => Some("__to_string"),
+                "to_number" => Some("__to_number"),
+                "print" => Some("__print"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -1276,6 +1378,84 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             lower_expr(object, ctx);
             ctx.emit(Op::Push(string_to_key_chain(field)));
             ctx.emit(Op::Call("__dict_get".into()));
+        }
+
+        Expr::Pipe(left, right) => {
+            // a |> f → evaluate a, then pass as first argument to f
+            // If right is Call: inject left as first arg
+            // If right is Ident: Call(ident, [left_result])
+            lower_expr(left, ctx);
+            match right.as_ref() {
+                Expr::Call { name, args } => {
+                    // left result is already on stack as first arg
+                    for arg in args {
+                        lower_expr(arg, ctx);
+                    }
+                    // Check builtins
+                    let builtin = match name.as_str() {
+                        "len" => Some("__array_len"),
+                        "push" => Some("__array_push"),
+                        "concat" => Some("__concat"),
+                        "head" => Some("__head"),
+                        "tail" => Some("__tail"),
+                        "get" => Some("__dict_get"),
+                        "set" => Some("__dict_set"),
+                        "keys" => Some("__dict_keys"),
+                        _ => None,
+                    };
+                    ctx.emit(Op::Call(builtin.unwrap_or(name.as_str()).into()));
+                }
+                Expr::Ident(name) => {
+                    // left already on stack, call function with it
+                    let builtin = match name.as_str() {
+                        "len" => Some("__array_len"),
+                        "push" => Some("__array_push"),
+                        "concat" => Some("__concat"),
+                        "head" => Some("__head"),
+                        "tail" => Some("__tail"),
+                        "keys" => Some("__dict_keys"),
+                        _ => None,
+                    };
+                    if let Some(b) = builtin {
+                        ctx.emit(Op::Call(b.into()));
+                    } else if let Some(fn_def) = ctx.lookup_fn(name) {
+                        // Inline: bind left (on stack) as first param
+                        let saved = ctx.locals.len();
+                        if let Some(first_param) = fn_def.params.first() {
+                            ctx.emit(Op::Store(first_param.clone()));
+                            ctx.locals.push(first_param.clone());
+                        }
+                        for s in &fn_def.body {
+                            lower_stmt(s, ctx);
+                        }
+                        ctx.locals.truncate(saved);
+                    } else {
+                        ctx.emit(Op::Call(name.clone()));
+                    }
+                }
+                _ => {
+                    // Fallback: evaluate right, treat as function call
+                    lower_expr(right, ctx);
+                    ctx.emit(Op::Call("__pipe_apply".into()));
+                }
+            }
+        }
+
+        Expr::Lambda { params, body } => {
+            // Lambda: |x, y| expr
+            // In stack-based VM without closures, we inline the lambda
+            // The lambda value itself just pushes an empty marker;
+            // actual inlining happens when lambda is used via pipe or call
+            // For now: just lower the body (params should be bound by caller)
+            // This handles the case where lambda appears in a pipe: a |> |x| x + 1
+            // The pipe lowering already put 'a' on stack, we store it as param
+            let saved = ctx.locals.len();
+            for p in params {
+                ctx.emit(Op::Store(p.clone()));
+                ctx.locals.push(p.clone());
+            }
+            lower_expr(body, ctx);
+            ctx.locals.truncate(saved);
         }
 
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {

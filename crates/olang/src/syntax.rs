@@ -103,11 +103,18 @@ pub enum Stmt {
         catch_block: Vec<Stmt>,
     },
 
-    /// `for var in start..end { body }`
+    /// `for var in start..end { body }` — range iteration
     ForIn {
         var: String,
         start: u32,
         end: u32,
+        body: Vec<Stmt>,
+    },
+
+    /// `for var in expr { body }` — iterate over array/collection
+    ForEach {
+        var: String,
+        iter: Expr,
         body: Vec<Stmt>,
     },
 
@@ -277,6 +284,12 @@ pub enum Expr {
 
     /// Field access: `obj.field`
     FieldAccess { object: Box<Expr>, field: String },
+
+    /// Pipe: `a |> f` — pass left as argument to right
+    Pipe(Box<Expr>, Box<Expr>),
+
+    /// Lambda: `|x, y| expr`
+    Lambda { params: Vec<String>, body: Box<Expr> },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -566,24 +579,32 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `for` IDENT `in` INT `..` INT `{` stmts `}`
+    /// `for` IDENT `in` (INT `..` INT | expr) `{` stmts `}`
     fn parse_for_in(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'for'
         let var = self.expect_ident()?;
         self.expect(&Token::In)?;
-        let start = self.expect_int()?;
-        self.expect(&Token::DotDot)?;
-        let end = self.expect_int()?;
-        let body = self.parse_block()?;
-        if self.check(&Token::Semi) {
-            self.advance();
+
+        // Try range: INT .. INT
+        if let Token::Int(start) = self.peek() {
+            let saved = self.pos;
+            self.advance(); // consume start
+            if self.check(&Token::DotDot) {
+                self.advance(); // consume ..
+                let end = self.expect_int()?;
+                let body = self.parse_block()?;
+                if self.check(&Token::Semi) { self.advance(); }
+                return Ok(Stmt::ForIn { var, start, end, body });
+            }
+            // Not a range — backtrack and parse as expression
+            self.pos = saved;
         }
-        Ok(Stmt::ForIn {
-            var,
-            start,
-            end,
-            body,
-        })
+
+        // For-each: for var in expr { body }
+        let iter = self.parse_expr()?;
+        let body = self.parse_block()?;
+        if self.check(&Token::Semi) { self.advance(); }
+        Ok(Stmt::ForEach { var, iter, body })
     }
 
     /// `while` expr `{` stmts `}`
@@ -799,9 +820,21 @@ impl<'a> Parser<'a> {
 
     // ── Expression parsing (precedence: primary → arith → compose → rel) ──
 
-    /// expr = rel_chain
+    /// expr = pipe_chain
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_rel_chain()
+        self.parse_pipe_chain()
+    }
+
+    /// pipe_chain = rel_chain ('|>' rel_chain)*
+    fn parse_pipe_chain(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_rel_chain()?;
+        while self.check(&Token::PipeArrow) {
+            self.advance();
+            let right = self.parse_rel_chain()?;
+            // a |> f  →  f(a)  — pipe left as first arg to right (must be Call)
+            left = Expr::Pipe(Box::new(left), Box::new(right));
+        }
+        Ok(left)
     }
 
     /// rel_chain = truth (REL_OP (truth | '?'))*
@@ -1041,6 +1074,22 @@ impl<'a> Parser<'a> {
                 Expr::Array(elements)
             }
 
+            // Lambda: |x, y| expr
+            Token::Pipe => {
+                self.advance(); // consume |
+                let mut params = Vec::new();
+                if !self.check(&Token::Pipe) {
+                    params.push(self.expect_ident()?);
+                    while self.check(&Token::Comma) {
+                        self.advance();
+                        params.push(self.expect_ident()?);
+                    }
+                }
+                self.expect(&Token::Pipe)?;
+                let body = self.parse_expr()?;
+                Expr::Lambda { params, body: Box::new(body) }
+            }
+
             // Logical not: !expr
             Token::Not => {
                 self.advance();
@@ -1054,14 +1103,32 @@ impl<'a> Parser<'a> {
             ))),
         };
 
-        // Postfix: .field access (can chain: a.b.c)
+        // Postfix: .field access or .method(args) (can chain: a.b.c, a.method())
         while self.check(&Token::Dot) {
             self.advance(); // consume .
             let field = self.expect_ident()?;
-            expr = Expr::FieldAccess {
-                object: Box::new(expr),
-                field,
-            };
+            // Check for method call: obj.method(args)
+            if self.check(&Token::LParen) {
+                self.advance(); // consume (
+                let mut args = Vec::new();
+                // First arg is the object itself (self)
+                args.push(expr);
+                // Parse remaining args
+                if !self.check(&Token::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.check(&Token::Comma) {
+                        self.advance();
+                        args.push(self.parse_expr()?);
+                    }
+                }
+                self.expect(&Token::RParen)?;
+                expr = Expr::Call { name: field, args };
+            } else {
+                expr = Expr::FieldAccess {
+                    object: Box::new(expr),
+                    field,
+                };
+            }
         }
 
         Ok(expr)

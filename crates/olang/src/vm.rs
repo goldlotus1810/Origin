@@ -746,6 +746,61 @@ impl OlangVM {
                             }
                             let _ = stack.push(result);
                         }
+                        "__str_len" => {
+                            // String length: count molecules in chain
+                            let s = vm_pop!(stack, events);
+                            let _ = stack.push(MolecularChain::from_number(s.0.len() as f64));
+                        }
+                        "__str_concat" => {
+                            // Concatenate two chains
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let mut result = a.0.clone();
+                            result.extend(b.0.iter().cloned());
+                            let _ = stack.push(MolecularChain(result));
+                        }
+                        "__to_string" => {
+                            // Number → string chain: encode digits as molecules
+                            let val = vm_pop!(stack, events);
+                            let n = val.to_number().unwrap_or(0.0);
+                            let s = if n == (n as i64 as f64) {
+                                alloc::format!("{}", n as i64)
+                            } else {
+                                alloc::format!("{}", n)
+                            };
+                            let mut mols = Vec::new();
+                            for b in s.bytes() {
+                                mols.push(Molecule {
+                                    shape: 0x02, relation: 0x01,
+                                    emotion: EmotionDim { valence: b, arousal: 0 },
+                                    time: 0x01,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__to_number" => {
+                            // String chain → number: decode molecules back to digits
+                            let val = vm_pop!(stack, events);
+                            // Try as number first
+                            if let Some(n) = val.to_number() {
+                                let _ = stack.push(MolecularChain::from_number(n));
+                            } else {
+                                // Decode string bytes from valence
+                                let s: String = val.0.iter()
+                                    .map(|m| m.emotion.valence as char)
+                                    .collect();
+                                if let Ok(n) = s.parse::<f64>() {
+                                    let _ = stack.push(MolecularChain::from_number(n));
+                                } else {
+                                    let _ = stack.push(MolecularChain::from_number(0.0));
+                                }
+                            }
+                        }
+                        "__print" => {
+                            // Print: emit top of stack as output (same as Emit but via call)
+                            let val = vm_pop!(stack, events);
+                            events.push(VmEvent::Output(val));
+                        }
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
