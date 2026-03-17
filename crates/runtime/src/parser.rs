@@ -187,6 +187,18 @@ pub enum OlangExpr {
         name: String,
         body: Vec<OlangExpr>,
     },
+    /// ○{spawn { loop 3 { stats } }} — concurrent execution (Go-style)
+    Spawn {
+        body: Vec<OlangExpr>,
+    },
+    /// ○{fire |> typeof |> emit} — pipe chain (Julia-style)
+    Pipe(Vec<OlangExpr>),
+    /// ○{use cluster} — import skill/module (Python-style)
+    Use(String),
+    /// ○{emit fire} — explicit emit (output to caller)
+    Emit(alloc::boxed::Box<OlangExpr>),
+    /// ○{return fire} — return value from function
+    Return(alloc::boxed::Box<OlangExpr>),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -284,6 +296,33 @@ impl OlangParser {
         // Function definition: fn name { <body> }
         if let Some(fn_expr) = self.try_parse_fn(trimmed) {
             return Ok(fn_expr);
+        }
+
+        // Spawn (Go-style concurrency): spawn { <body> }
+        if let Some(spawn_expr) = self.try_parse_spawn(trimmed) {
+            return Ok(spawn_expr);
+        }
+
+        // Use (Python-style import): use <skill>
+        if let Some(use_expr) = try_parse_use(trimmed) {
+            return Ok(use_expr);
+        }
+
+        // Emit: emit <expr>
+        if let Some(emit_expr) = self.try_parse_emit(trimmed) {
+            return Ok(emit_expr);
+        }
+
+        // Return: return <expr>
+        if let Some(ret_expr) = self.try_parse_return(trimmed) {
+            return Ok(ret_expr);
+        }
+
+        // Pipe (Julia-style): expr |> expr |> expr
+        if trimmed.contains("|>") {
+            if let Some(pipe_expr) = self.try_parse_pipe(trimmed) {
+                return Ok(pipe_expr);
+            }
         }
 
         // Arithmetic: detect numeric expressions like "1 + 2", "3.5 × 4", "10 - 3", "8 ÷ 2"
@@ -475,6 +514,78 @@ impl OlangParser {
         })
     }
 
+    /// Try to parse spawn (Go-style concurrency): "spawn { stats; dream }"
+    fn try_parse_spawn(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("spawn ") && !trimmed.starts_with("spawn{") {
+            return None;
+        }
+        let rest = if let Some(r) = trimmed.strip_prefix("spawn ") {
+            r.trim()
+        } else if let Some(r) = trimmed.strip_prefix("spawn") {
+            r
+        } else {
+            return None;
+        };
+        let brace_open = rest.find('{')?;
+        let brace_close = find_matching_brace(rest, brace_open)?;
+        let body_str = rest[brace_open + 1..brace_close].trim();
+        let body = self.parse_block(body_str);
+        Some(OlangExpr::Spawn { body })
+    }
+
+    /// Try to parse pipe (Julia-style): "fire |> typeof |> emit"
+    fn try_parse_pipe(&self, s: &str) -> Option<OlangExpr> {
+        let parts: Vec<&str> = s.split("|>").collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        let exprs: Vec<OlangExpr> = parts
+            .iter()
+            .filter_map(|part| {
+                let t = part.trim();
+                if t.is_empty() {
+                    None
+                } else {
+                    self.parse_expr(t).ok()
+                }
+            })
+            .collect();
+        if exprs.len() >= 2 {
+            Some(OlangExpr::Pipe(exprs))
+        } else {
+            None
+        }
+    }
+
+    /// Try to parse emit: "emit fire"
+    fn try_parse_emit(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("emit ") {
+            return None;
+        }
+        let arg = trimmed["emit ".len()..].trim();
+        if arg.is_empty() {
+            return None;
+        }
+        let expr = self.parse_expr(arg).ok()?;
+        Some(OlangExpr::Emit(alloc::boxed::Box::new(expr)))
+    }
+
+    /// Try to parse return: "return fire"
+    fn try_parse_return(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("return ") {
+            return None;
+        }
+        let arg = trimmed["return ".len()..].trim();
+        if arg.is_empty() {
+            return None;
+        }
+        let expr = self.parse_expr(arg).ok()?;
+        Some(OlangExpr::Return(alloc::boxed::Box::new(expr)))
+    }
+
     /// Parse a block of semicolon-separated statements into Vec<OlangExpr>.
     fn parse_block(&self, block: &str) -> Vec<OlangExpr> {
         if block.is_empty() {
@@ -492,6 +603,19 @@ impl OlangParser {
             })
             .collect()
     }
+}
+
+/// Try to parse use/import: "use cluster" or "use similarity"
+fn try_parse_use(s: &str) -> Option<OlangExpr> {
+    let trimmed = s.trim();
+    if !trimmed.starts_with("use ") {
+        return None;
+    }
+    let module = trimmed["use ".len()..].trim();
+    if module.is_empty() {
+        return None;
+    }
+    Some(OlangExpr::Use(module.to_string()))
 }
 
 /// Find matching closing brace for opening brace at `open_pos`.
@@ -1418,5 +1542,82 @@ mod tests {
     #[test]
     fn find_matching_brace_unclosed() {
         assert_eq!(find_matching_brace("{ hello", 0), None);
+    }
+
+    // ── Spawn (Go-style) ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_spawn() {
+        let r = parser().parse("○{spawn { stats; dream }}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Spawn { body }) => {
+                assert_eq!(body.len(), 2);
+                assert_eq!(body[0], OlangExpr::Command("stats".to_string()));
+                assert_eq!(body[1], OlangExpr::Command("dream".to_string()));
+            }
+            other => panic!("expected Spawn, got {:?}", other),
+        }
+    }
+
+    // ── Pipe (Julia-style) ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_pipe() {
+        let r = parser().parse("○{fire |> typeof}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Pipe(exprs)) => {
+                assert_eq!(exprs.len(), 2);
+                assert_eq!(exprs[0], OlangExpr::Query("fire".to_string()));
+            }
+            other => panic!("expected Pipe, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pipe_three_stages() {
+        let r = parser().parse("○{fire |> typeof |> stats}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Pipe(exprs)) => {
+                assert_eq!(exprs.len(), 3);
+            }
+            other => panic!("expected Pipe 3 stages, got {:?}", other),
+        }
+    }
+
+    // ── Use (Python-style) ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_use_module() {
+        let r = parser().parse("○{use cluster}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Use(module)) => {
+                assert_eq!(module, "cluster");
+            }
+            other => panic!("expected Use, got {:?}", other),
+        }
+    }
+
+    // ── Emit / Return ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_emit_expr() {
+        let r = parser().parse("○{emit fire}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Emit(inner)) => {
+                assert_eq!(*inner, OlangExpr::Query("fire".to_string()));
+            }
+            other => panic!("expected Emit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_return_expr() {
+        let r = parser().parse("○{return fire}");
+        match r {
+            ParseResult::OlangExpr(OlangExpr::Return(inner)) => {
+                assert_eq!(*inner, OlangExpr::Query("fire".to_string()));
+            }
+            other => panic!("expected Return, got {:?}", other),
+        }
     }
 }

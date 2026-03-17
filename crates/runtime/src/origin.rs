@@ -3296,6 +3296,24 @@ fn olang_expr_to_ir(expr: OlangExpr) -> OlangIrExpr {
             name,
             body: body.into_iter().map(olang_expr_to_ir).collect(),
         },
+
+        OlangExpr::Spawn { body } => OlangIrExpr::Spawn {
+            body: body.into_iter().map(olang_expr_to_ir).collect(),
+        },
+
+        OlangExpr::Pipe(exprs) => {
+            OlangIrExpr::Pipe(exprs.into_iter().map(olang_expr_to_ir).collect())
+        }
+
+        OlangExpr::Use(module) => OlangIrExpr::Use(module),
+
+        OlangExpr::Emit(inner) => {
+            OlangIrExpr::EmitExpr(alloc::boxed::Box::new(olang_expr_to_ir(*inner)))
+        }
+
+        OlangExpr::Return(inner) => {
+            OlangIrExpr::ReturnExpr(alloc::boxed::Box::new(olang_expr_to_ir(*inner)))
+        }
     }
 }
 

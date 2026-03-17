@@ -345,6 +345,18 @@ pub enum OlangIrExpr {
         name: String,
         body: Vec<OlangIrExpr>,
     },
+    /// spawn { <body> } — concurrent execution (Go-style: emit body as async task)
+    Spawn {
+        body: Vec<OlangIrExpr>,
+    },
+    /// expr |> expr |> expr — pipe chain (Julia-style: output of each feeds into next)
+    Pipe(Vec<OlangIrExpr>),
+    /// use <module> — import skill/module (Python-style)
+    Use(String),
+    /// emit <expr> — explicit output
+    EmitExpr(alloc::boxed::Box<OlangIrExpr>),
+    /// return <expr> — return from function
+    ReturnExpr(alloc::boxed::Box<OlangIrExpr>),
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -494,6 +506,42 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             // Use Store to remember fn_start as a named entry
             // For now, emit a Nop — function lookup happens via Call(name)
             let _ = (name, fn_start); // fn table would go here
+        }
+
+        OlangIrExpr::Spawn { body } => {
+            // Go-style: wrap body in scope, VM can detect spawn for async
+            // For now: sequential execution with spawn marker event
+            prog.push_op(Op::Nop); // placeholder: spawn marker
+            prog.push_op(Op::ScopeBegin);
+            for e in body {
+                emit_expr(e, prog);
+            }
+            prog.push_op(Op::ScopeEnd);
+        }
+
+        OlangIrExpr::Pipe(exprs) => {
+            // Julia-style: each expr's output feeds into next
+            // First expr pushes result, subsequent exprs consume + push
+            for e in exprs {
+                emit_expr(e, prog);
+            }
+            // Final result is on top of stack
+            prog.push_op(Op::Emit);
+        }
+
+        OlangIrExpr::Use(module) => {
+            // Python-style: load module/skill into scope
+            prog.push_op(Op::Load(module.clone()));
+        }
+
+        OlangIrExpr::EmitExpr(inner) => {
+            emit_expr(inner, prog);
+            prog.push_op(Op::Emit);
+        }
+
+        OlangIrExpr::ReturnExpr(inner) => {
+            emit_expr(inner, prog);
+            prog.push_op(Op::Ret);
         }
     }
 }
