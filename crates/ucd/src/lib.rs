@@ -140,8 +140,12 @@ pub fn is_relation_primitive(cp: u32) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use std::vec::Vec;
 
     // ── Forward lookup ──────────────────────────────────────────────────────
 
@@ -408,5 +412,44 @@ mod tests {
         assert_eq!(arousal_of(0x0041), 0x80); // moderate
         assert_eq!(time_of(0x0041), 0x03); // Medium
         assert_eq!(group_of(0x0041), 0x00); // no group
+    }
+
+    #[test]
+    fn count_unique_molecules() {
+        if table_len() == 0 {
+            return;
+        }
+        // Count unique 5-tuples using a sorted vec + dedup
+        let mut tuples: Vec<(u8, u8, u8, u8, u8)> = UCD_TABLE
+            .iter()
+            .map(|e| (e.shape, e.relation, e.valence, e.arousal, e.time))
+            .collect();
+        let total = tuples.len();
+        tuples.sort();
+        tuples.dedup();
+        let unique = tuples.len();
+        let collision_rate = 1.0 - (unique as f64 / total as f64);
+        assert!(
+            unique as f64 / total as f64 > 0.90,
+            "COLLISION: {total} entries → {unique} unique molecules ({:.1}% collision). Need >90% unique.",
+            collision_rate * 100.0
+        );
+    }
+
+    #[test]
+    fn count_unique_hashes() {
+        if table_len() == 0 {
+            return;
+        }
+        let mut hashes: Vec<u64> = UCD_TABLE.iter().map(|e| e.hash).collect();
+        let total = hashes.len();
+        hashes.sort();
+        hashes.dedup();
+        let unique = hashes.len();
+        assert!(
+            unique as f64 / total as f64 > 0.90,
+            "HASH COLLISION: {total} entries → {unique} unique hashes ({:.1}% collision).",
+            (1.0 - unique as f64 / total as f64) * 100.0
+        );
     }
 }
