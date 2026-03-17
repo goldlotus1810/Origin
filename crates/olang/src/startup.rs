@@ -103,6 +103,9 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         // Phase 2a: 4 axiom nodes (○, ∅, ∘, ∈) — nền tảng
         seed_axioms(&mut registry);
 
+        // Bulk mode: O(n log n) thay vì O(n²) — skip per-insert sort + LCA
+        registry.begin_bulk();
+
         // Phase 2b: L1 DNA — Skills, Agents, VM ops, Sensors
         // Phải chạy TRƯỚC L0 full vì cùng codepoint → L1 cần đúng NodeKind
         seed_l1_system(&mut registry);
@@ -110,6 +113,8 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         // Phase 2c: TOÀN BỘ ~5400 UCD entries → L0 (bảng tuần hoàn hoàn chỉnh)
         // Skip cái đã register bởi axioms + L1
         seed_l0_full(&mut registry);
+
+        registry.finalize_bulk();
 
         // Phase 2d: Natural language aliases cho L0 atoms phổ biến
         seed_l0_aliases(&mut registry);
