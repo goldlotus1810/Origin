@@ -158,6 +158,19 @@ pub enum OlangExpr {
         op: ArithOp,
         rhs: f64,
     },
+    /// ○{{ S=1 R=6 V=200 A=180 T=4 }} — molecular literal
+    MolecularLiteral {
+        shape: u8,
+        relation: u8,
+        valence: u8,
+        arousal: u8,
+        time: u8,
+    },
+    /// ○{let x = fire} — variable binding
+    LetBinding {
+        name: String,
+        value: Box<OlangExpr>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -232,6 +245,16 @@ impl OlangParser {
             return Ok(OlangExpr::Query(trimmed.to_string()));
         }
 
+        // Molecular literal: { S=1 R=6 V=200 A=180 T=4 }
+        if let Some(mol) = try_parse_molecular_literal(trimmed) {
+            return Ok(mol);
+        }
+
+        // Let binding: let x = <expr>
+        if let Some(binding) = self.try_parse_let(trimmed) {
+            return Ok(binding);
+        }
+
         // Arithmetic: detect numeric expressions like "1 + 2", "3.5 × 4", "10 - 3", "8 ÷ 2"
         if let Some(arith) = try_parse_arithmetic(trimmed) {
             return Ok(arith);
@@ -298,6 +321,30 @@ impl OlangParser {
             // Unknown → try as query
             _ => Ok(OlangExpr::Query(trimmed.to_string())),
         }
+    }
+
+    /// Try to parse let binding: "let x = fire" or "let x = { S=1 R=6 }"
+    fn try_parse_let(&self, s: &str) -> Option<OlangExpr> {
+        let trimmed = s.trim();
+        if !trimmed.starts_with("let ") {
+            return None;
+        }
+        let rest = trimmed["let ".len()..].trim();
+        let eq_pos = rest.find('=')?;
+        let name = rest[..eq_pos].trim();
+        let value_str = rest[eq_pos + 1..].trim();
+
+        if name.is_empty() || value_str.is_empty() {
+            return None;
+        }
+
+        // Parse the value expression recursively
+        let value_expr = self.parse_expr(value_str).ok()?;
+
+        Some(OlangExpr::LetBinding {
+            name: name.to_string(),
+            value: alloc::boxed::Box::new(value_expr),
+        })
     }
 }
 
@@ -395,6 +442,55 @@ fn tokenize(expr: &str) -> Vec<OlangToken> {
 
 fn token_from_str(s: &str) -> OlangToken {
     OlangToken::Node(s.to_string())
+}
+
+/// Try to parse molecular literal: { S=1 R=6 V=200 A=180 T=4 }
+///
+/// All 5 dimensions optional, defaults: S=1 R=1 V=128 A=128 T=3
+fn try_parse_molecular_literal(s: &str) -> Option<OlangExpr> {
+    let trimmed = s.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return None;
+    }
+    let inner = trimmed[1..trimmed.len() - 1].trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    // Defaults (from CLAUDE.md semantic: Sphere, Member, neutral, Medium)
+    let mut shape: u8 = 1;    // Sphere
+    let mut relation: u8 = 1; // Member
+    let mut valence: u8 = 128; // Neutral
+    let mut arousal: u8 = 128; // Neutral
+    let mut time: u8 = 3;     // Medium
+
+    let mut found_any = false;
+    for part in inner.split_whitespace() {
+        let kv: alloc::vec::Vec<&str> = part.splitn(2, '=').collect();
+        if kv.len() != 2 {
+            return None; // not a key=value pair
+        }
+        let key = kv[0].trim();
+        let val: u8 = match kv[1].trim().parse() {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+        match key {
+            "S" | "s" => shape = val,
+            "R" | "r" => relation = val,
+            "V" | "v" => valence = val,
+            "A" | "a" => arousal = val,
+            "T" | "t" => time = val,
+            _ => return None, // unknown dimension
+        }
+        found_any = true;
+    }
+
+    if !found_any {
+        return None;
+    }
+
+    Some(OlangExpr::MolecularLiteral { shape, relation, valence, arousal, time })
 }
 
 /// Try to parse arithmetic expression: "1 + 2", "3.14 × 2", "10 - 3", "8 ÷ 2"

@@ -231,6 +231,8 @@ impl OlangVM {
         let mut steps = 0u32;
         let mut pc = 0usize;
         let mut call_depth = 0u32;
+        // Loop stack: (jump_back_pc, remaining_iterations)
+        let mut loop_stack: Vec<(usize, u32)> = Vec::new();
 
         while pc < prog.ops.len() {
             if steps >= self.max_steps {
@@ -373,9 +375,16 @@ impl OlangVM {
                 }
 
                 Op::Loop(n) => {
-                    // Simple: push loop marker, unroll is caller's job
-                    // Trong VM đơn giản này: Loop(n) = noop (unroll ở compile time)
-                    let _ = n;
+                    // Loop(n): repeat next instruction block n times.
+                    // The block runs from pc (current, after Loop opcode) to the next
+                    // ScopeEnd or Halt. Uses loop_stack to track remaining iterations
+                    // and the jump-back target.
+                    // Max iterations capped at 1024 (QT2: ∞-1, không vô hạn).
+                    let count = (*n).min(1024);
+                    if count > 1 {
+                        loop_stack.push((pc, count - 1)); // (jump_back_to, remaining)
+                    }
+                    // First iteration starts immediately (fall through)
                 }
 
                 Op::Call(name) => {
@@ -481,6 +490,15 @@ impl OlangVM {
                     if scopes.len() > 1 {
                         scopes.pop();
                         call_depth = call_depth.saturating_sub(1);
+                    }
+                    // Check loop stack: if we're at end of a loop body, jump back
+                    if let Some(entry) = loop_stack.last_mut() {
+                        if entry.1 > 0 {
+                            entry.1 -= 1;
+                            pc = entry.0; // jump back to loop body start
+                        } else {
+                            loop_stack.pop();
+                        }
                     }
                 }
 
@@ -1358,6 +1376,67 @@ mod tests {
         prog.push_op(Op::Halt);
         let result = vm().execute(&prog);
         assert!(!result.has_error(), "Depth should reset after ScopeEnd");
+    }
+
+    // ── Loop ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn loop_basic_3_times() {
+        // Loop 3 times: emit 1.0 each iteration → 3 outputs
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Loop(3));
+        prog.push_op(Op::ScopeBegin);
+        prog.push_op(Op::PushNum(1.0));
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::ScopeEnd);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(!result.has_error(), "Loop 3 should not error");
+        assert_eq!(result.outputs().len(), 3, "3 iterations → 3 outputs");
+    }
+
+    #[test]
+    fn loop_once_same_as_no_loop() {
+        // Loop(1) = execute body once (no repeat)
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Loop(1));
+        prog.push_op(Op::ScopeBegin);
+        prog.push_op(Op::PushNum(42.0));
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::ScopeEnd);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert_eq!(result.outputs().len(), 1);
+    }
+
+    #[test]
+    fn loop_zero_no_body() {
+        // Loop(0) = skip body entirely? No — falls through once, no repeat.
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Loop(0));
+        prog.push_op(Op::ScopeBegin);
+        prog.push_op(Op::PushNum(1.0));
+        prog.push_op(Op::Emit);
+        prog.push_op(Op::ScopeEnd);
+        prog.push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        // Loop(0).min(1024) = 0, so no push to loop_stack, body runs once (fall-through)
+        assert_eq!(result.outputs().len(), 1, "Loop(0) falls through once");
+    }
+
+    #[test]
+    fn loop_capped_at_1024() {
+        // Loop(u32::MAX) should be capped to 1024
+        let vm = OlangVM::with_max_steps(65_536);
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Loop(u32::MAX));
+        prog.push_op(Op::ScopeBegin);
+        prog.push_op(Op::Nop); // lightweight body
+        prog.push_op(Op::ScopeEnd);
+        prog.push_op(Op::Halt);
+        let result = vm.execute(&prog);
+        // Should complete without MaxStepsExceeded (1024 * 3 ops = 3072 < 65536)
+        assert!(!result.has_error(), "Capped loop should complete");
     }
 
     // ── PushMol — molecular literal execution ──────────────────────────────

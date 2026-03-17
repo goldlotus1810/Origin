@@ -316,6 +316,19 @@ pub enum OlangIrExpr {
         builtin: String,
         rhs: f64,
     },
+    /// { S=1 R=6 V=200 A=180 T=4 } — molecular literal → PushMol opcode
+    MolecularLiteral {
+        shape: u8,
+        relation: u8,
+        valence: u8,
+        arousal: u8,
+        time: u8,
+    },
+    /// let x = <expr> — variable binding → emit value + Store(name)
+    LetBinding {
+        name: String,
+        value: alloc::boxed::Box<OlangIrExpr>,
+    },
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -373,6 +386,21 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             prog.push_op(Op::PushNum(*lhs));
             prog.push_op(Op::PushNum(*rhs));
             prog.push_op(Op::Call(builtin.clone()));
+        }
+
+        OlangIrExpr::MolecularLiteral {
+            shape,
+            relation,
+            valence,
+            arousal,
+            time,
+        } => {
+            prog.push_op(Op::PushMol(*shape, *relation, *valence, *arousal, *time));
+        }
+
+        OlangIrExpr::LetBinding { name, value } => {
+            emit_expr(value, prog);
+            prog.push_op(Op::Store(name.clone()));
         }
     }
 }
