@@ -225,7 +225,7 @@ HOÀN THÀNH (Phases):
 
 TIẾP THEO:
   Phase 10: Dream→KnowTree L3 pipeline          — ưu tiên CAO
-  Phase 11: Display layer (chain_to_emoji)       — ưu tiên TRUNG BÌNH
+  Phase 11: Olang Parser — thêm RelOps thiếu    — ưu tiên CAO
   Phase 12: Data L2-Ln seeding                   — ưu tiên TRUNG BÌNH
 ```
 

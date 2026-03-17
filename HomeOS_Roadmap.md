@@ -599,9 +599,12 @@ METRICS hiện tại:
 
 TIẾP THEO:
   Phase 10: Dream→KnowTree L3 pipeline + Fibonacci trigger
-  Phase 11: Display layer (chain_to_emoji)
+  Phase 11: Olang Parser — thêm RelOps thiếu (⊥ ∖ ↔ etc.)
   Phase 12: Data L2-Ln seeding
   Phase 13: Hardware deployment (RPi, WASM browser)
+
+GHI CHÚ: chain_to_emoji() đã hoạt động (olang/startup.rs:834).
+  Không còn là TODO — đã wire vào runtime từ trước.
 
 GHI CHÚ:
   origin.olang hiện có: 35 nodes L0, 10 edges, 116 aliases

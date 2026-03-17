@@ -1,12 +1,13 @@
 # TRUTH.md — Archived Notes
 
 > **Status:** ARCHIVED (2026-03-17)
-> Nội dung gốc đã được tích hợp vào [docs/roadmap.md](docs/roadmap.md).
+> Nội dung gốc đã lỗi thời hoàn toàn.
 
-## DONE — Display Layer (Phase 4 completion) ✓
+## DONE — Display Layer ✓
 
-chain_to_emoji() — đã ghi nhận. Xem Phase 11 trong roadmap.
+chain_to_emoji() đã được wire hoàn chỉnh tại:
+- `olang/startup.rs:834` — core function
+- `runtime/origin.rs` — gọi trực tiếp trong process_olang()
+- Hỗ trợ: ZWJ reconstruction, UCD hash lookup, bucket search, fallback
 
-## DONE — Phase 8: Data L2-Ln
-
-Xem Phase 12 trong [docs/roadmap.md](docs/roadmap.md).
+Không còn là TODO. Đã hoạt động.
