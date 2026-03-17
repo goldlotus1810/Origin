@@ -22,7 +22,7 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::lca::lca_weighted;
+use crate::lca::{lca, lca_weighted};
 use crate::molecular::MolecularChain;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,9 +153,18 @@ pub struct Registry {
     /// B supersedes A: old=hash(A), new=hash(B)
     qr_supersede: Vec<(u64, u64)>,
 
-    /// Cache: all chains for LCA computation
-    /// (layer, chain_hash, chain) — dùng khi cập nhật layer_rep
-    chain_cache: Vec<(u8, u64, MolecularChain)>,
+    /// Reverse index: chain_hash → first alias name (sorted by hash for O(log n) lookup).
+    /// Built during finalize_bulk(), maintained incrementally during normal inserts.
+    hash_to_name: Vec<(u64, String)>,
+
+    /// Current representative chain per layer — for incremental LCA.
+    /// Only 16 slots (one per layer), replaced on each insert.
+    /// Saves ~41 bytes/node vs storing all chains (at 1M nodes = 41 MB saved).
+    layer_rep_chain: [Option<MolecularChain>; 16],
+
+    /// Temporary chain cache used ONLY during bulk insert mode.
+    /// Cleared after finalize_bulk() to free memory.
+    bulk_chains: Vec<(u8, MolecularChain)>,
 
     /// Bulk mode: skip per-insert sorting + layer_rep update.
     /// Call `finalize_bulk()` when done.
@@ -174,10 +183,15 @@ impl Registry {
         Self {
             entries: Vec::new(),
             names: Vec::new(),
+            hash_to_name: Vec::new(),
             layer_rep: [None; 16],
             branch_wm: Vec::new(),
             qr_supersede: Vec::new(),
-            chain_cache: Vec::new(),
+            layer_rep_chain: [
+                None, None, None, None, None, None, None, None,
+                None, None, None, None, None, None, None, None,
+            ],
+            bulk_chains: Vec::new(),
             bulk_mode: false,
             bulk_sorted_prefix: 0,
             dirty_layers: 0,
@@ -210,6 +224,13 @@ impl Registry {
         self.names.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         self.names.dedup_by(|(a, _), (b, _)| a == b);
 
+        // Build reverse index: hash → first alias name (sorted by hash)
+        self.hash_to_name = self.names.iter()
+            .map(|(name, hash)| (*hash, name.clone()))
+            .collect();
+        self.hash_to_name.sort_unstable_by_key(|(h, _)| *h);
+        self.hash_to_name.dedup_by_key(|(h, _)| *h);
+
         // Recalculate layer_rep for dirty layers — ONE LCA per layer
         for layer in 0..16u8 {
             if self.dirty_layers & (1 << layer) != 0 {
@@ -217,22 +238,28 @@ impl Registry {
             }
         }
         self.dirty_layers = 0;
+
+        // Free bulk_chains — no longer needed after layer_rep is computed.
+        // Saves ~41 bytes per node (at 1M nodes = 41 MB freed).
+        self.bulk_chains = Vec::new();
     }
 
-    /// Recalculate layer representative from chain_cache — O(n) for that layer.
+    /// Recalculate layer representative from bulk_chains — O(n) for that layer.
     fn recalc_layer_rep(&mut self, layer: u8) {
         let same_layer: Vec<(&MolecularChain, u32)> = self
-            .chain_cache
+            .bulk_chains
             .iter()
-            .filter(|(l, _, _)| *l == layer)
-            .map(|(_, _, c)| (c, 1u32))
+            .filter(|(l, _)| *l == layer)
+            .map(|(_, c)| (c, 1u32))
             .collect();
 
         if same_layer.is_empty() {
             self.layer_rep[layer as usize] = None;
+            self.layer_rep_chain[layer as usize] = None;
         } else {
             let rep = lca_weighted(&same_layer);
             self.layer_rep[layer as usize] = Some(rep.chain_hash());
+            self.layer_rep_chain[layer as usize] = Some(rep);
         }
     }
 
@@ -287,14 +314,13 @@ impl Registry {
         if self.bulk_mode {
             // Bulk mode: push unsorted, defer layer_rep
             self.entries.push((hash, entry));
-            self.chain_cache.push((layer, hash, chain.clone()));
+            self.bulk_chains.push((layer, chain.clone()));
             self.dirty_layers |= 1 << layer;
         } else {
-            // Normal mode: insert sorted + update layer_rep
+            // Normal mode: insert sorted + incremental layer_rep
             let pos = self.entries.partition_point(|&(h, _)| h < hash);
             self.entries.insert(pos, (hash, entry));
-            self.chain_cache.push((layer, hash, chain.clone()));
-            self.update_layer_rep(layer, chain);
+            self.update_layer_rep_incremental(layer, chain);
         }
 
         hash
@@ -316,6 +342,12 @@ impl Registry {
             }
             let pos = self.names.partition_point(|(n, _)| n.as_str() < name);
             self.names.insert(pos, (String::from(name), chain_hash));
+
+            // Maintain reverse index — only add if hash not already present
+            let rev_pos = self.hash_to_name.partition_point(|(h, _)| *h < chain_hash);
+            if rev_pos >= self.hash_to_name.len() || self.hash_to_name[rev_pos].0 != chain_hash {
+                self.hash_to_name.insert(rev_pos, (chain_hash, String::from(name)));
+            }
         }
     }
 
@@ -366,8 +398,15 @@ impl Registry {
             .map(|i| self.names[i].1)
     }
 
-    /// Reverse lookup: hash → first alias name (nếu có).
+    /// Reverse lookup: hash → first alias name (nếu có) — O(log n).
     pub fn lookup_name_by_hash(&self, chain_hash: u64) -> Option<String> {
+        // Use reverse index if available
+        if !self.hash_to_name.is_empty() {
+            return self.hash_to_name
+                .binary_search_by_key(&chain_hash, |(h, _)| *h)
+                .ok()
+                .map(|i| self.hash_to_name[i].1.clone());
+        }
         self.names
             .iter()
             .find(|(_, h)| *h == chain_hash)
@@ -425,28 +464,27 @@ impl Registry {
 
     // ── Layer representative ─────────────────────────────────────────────────
 
-    /// Cập nhật NodeLx = LCA của tất cả nodes trong tầng Lx.
-    fn update_layer_rep(&mut self, layer: u8, new_chain: &MolecularChain) {
+    /// Incremental layer_rep update — O(1) per insert instead of O(n).
+    /// Merges new_chain with current representative via LCA.
+    fn update_layer_rep_incremental(&mut self, layer: u8, new_chain: &MolecularChain) {
         if layer >= 16 {
             return;
         }
 
-        // Collect tất cả chains trong cùng tầng
-        let same_layer: Vec<(&MolecularChain, u32)> = self
-            .chain_cache
-            .iter()
-            .filter(|(l, _, _)| *l == layer)
-            .map(|(_, _, c)| (c, 1u32))
-            .collect();
-
-        if same_layer.is_empty() {
-            self.layer_rep[layer as usize] = Some(new_chain.chain_hash());
-            return;
+        let idx = layer as usize;
+        match self.layer_rep_chain[idx].take() {
+            Some(current_rep) => {
+                // Merge with existing representative
+                let merged = lca(&current_rep, new_chain);
+                self.layer_rep[idx] = Some(merged.chain_hash());
+                self.layer_rep_chain[idx] = Some(merged);
+            }
+            None => {
+                // First chain in this layer
+                self.layer_rep[idx] = Some(new_chain.chain_hash());
+                self.layer_rep_chain[idx] = Some(new_chain.clone());
+            }
         }
-
-        // LCA của toàn bộ tầng
-        let rep_chain = lca_weighted(&same_layer);
-        self.layer_rep[layer as usize] = Some(rep_chain.chain_hash());
     }
 
     // ── Stats ────────────────────────────────────────────────────────────────
@@ -466,8 +504,16 @@ impl Registry {
         self.names.len()
     }
 
-    /// Reverse lookup: tìm alias đầu tiên cho chain_hash — O(n).
+    /// Reverse lookup: tìm alias đầu tiên cho chain_hash — O(log n) via reverse index.
     pub fn alias_for_hash(&self, hash: u64) -> Option<&str> {
+        // Use reverse index if available (post-finalize or normal mode)
+        if !self.hash_to_name.is_empty() {
+            return self.hash_to_name
+                .binary_search_by_key(&hash, |(h, _)| *h)
+                .ok()
+                .map(|i| self.hash_to_name[i].1.as_str());
+        }
+        // Fallback: linear scan (during bulk mode or empty reverse index)
         self.names
             .iter()
             .find(|(_, h)| *h == hash)
@@ -515,6 +561,69 @@ impl Registry {
     /// Đếm entries theo NodeKind.
     pub fn count_by_kind(&self, kind: NodeKind) -> usize {
         self.entries.iter().filter(|(_, e)| e.kind == kind).count()
+    }
+
+    // ── Memory stats ──────────────────────────────────────────────────────
+
+    /// Estimated RAM usage in bytes.
+    ///
+    /// Returns (entries_bytes, aliases_bytes, misc_bytes, total_bytes).
+    pub fn memory_usage(&self) -> (usize, usize, usize, usize) {
+        // entries: Vec<(u64, RegistryEntry)> — each ~35 bytes + Vec overhead
+        let entry_size = core::mem::size_of::<(u64, RegistryEntry)>();
+        let entries_bytes = self.entries.capacity() * entry_size;
+
+        // names: Vec<(String, u64)> — String = 24B overhead + heap content + u64
+        let name_overhead = core::mem::size_of::<(String, u64)>();
+        let name_heap: usize = self.names.iter().map(|(s, _)| s.len()).sum();
+        let aliases_bytes = self.names.capacity() * name_overhead + name_heap;
+
+        // reverse index: hash_to_name
+        let rev_overhead = core::mem::size_of::<(u64, String)>();
+        let rev_heap: usize = self.hash_to_name.iter().map(|(_, s)| s.len()).sum();
+        let rev_bytes = self.hash_to_name.capacity() * rev_overhead + rev_heap;
+
+        // misc: layer_rep_chain, branch_wm, qr_supersede, bulk_chains
+        let rep_chain_bytes: usize = self.layer_rep_chain.iter()
+            .filter_map(|o| o.as_ref())
+            .map(|c| c.0.len() * 5 + 24) // Vec overhead + molecules
+            .sum();
+        let branch_bytes = self.branch_wm.capacity() * core::mem::size_of::<(u64, u8)>();
+        let qr_bytes = self.qr_supersede.capacity() * core::mem::size_of::<(u64, u64)>();
+        let bulk_bytes = self.bulk_chains.capacity()
+            * core::mem::size_of::<(u8, MolecularChain)>();
+        let misc_bytes = rep_chain_bytes + branch_bytes + qr_bytes + bulk_bytes + rev_bytes + 144;
+
+        let total = entries_bytes + aliases_bytes + misc_bytes;
+        (entries_bytes, aliases_bytes, misc_bytes, total)
+    }
+
+    // ── Tiered eviction ──────────────────────────────────────────────────
+
+    /// Evict L2+ entries from RAM — returns evicted entries for TieredStore.
+    ///
+    /// Keeps L0 + L1 in RAM (always hot). Removes L2+ entries from
+    /// `entries` Vec, freeing memory. Caller stores them in TieredStore.
+    ///
+    /// At 1B nodes: 139 GB → ~196 KB (L0+L1 only).
+    pub fn evict_cold(&mut self, min_layer: u8) -> Vec<(u64, RegistryEntry)> {
+        let mut evicted = Vec::new();
+        let mut kept = Vec::new();
+
+        for (hash, entry) in self.entries.drain(..) {
+            if entry.layer >= min_layer {
+                evicted.push((hash, entry));
+            } else {
+                kept.push((hash, entry));
+            }
+        }
+        self.entries = kept;
+        evicted
+    }
+
+    /// Count entries by layer.
+    pub fn count_by_layer(&self, layer: u8) -> usize {
+        self.entries.iter().filter(|(_, e)| e.layer == layer).count()
     }
 
     /// Summary: đếm từng nhóm NodeKind.
@@ -843,6 +952,79 @@ mod tests {
         let summary = r.kind_summary();
         assert!(summary.iter().any(|(k, c)| *k == NodeKind::Skill && *c == 1));
         assert!(summary.iter().any(|(k, c)| *k == NodeKind::Agent && *c == 1));
+    }
+
+    #[test]
+    fn evict_cold_removes_l2_plus() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let c0 = encode_codepoint(0x1F525); // L0
+        let c1 = encode_codepoint(0x2654);  // L1
+        let c2 = encode_codepoint(0x2655);  // L2
+        let c3 = encode_codepoint(0x2656);  // L3
+
+        r.insert(&c0, 0, 0, 0, false);
+        r.insert(&c1, 1, 1, 0, false);
+        let h2 = r.insert(&c2, 2, 2, 0, false);
+        let h3 = r.insert(&c3, 3, 3, 0, false);
+
+        assert_eq!(r.len(), 4);
+
+        // Evict L2+
+        let evicted = r.evict_cold(2);
+        assert_eq!(evicted.len(), 2, "Should evict 2 L2+ entries");
+        assert_eq!(r.len(), 2, "Should keep 2 L0+L1 entries");
+
+        // L2+ hashes are gone from RAM
+        assert!(r.lookup_hash(h2).is_none());
+        assert!(r.lookup_hash(h3).is_none());
+
+        // L0+L1 still in RAM
+        assert!(r.lookup_hash(c0.chain_hash()).is_some());
+        assert!(r.lookup_hash(c1.chain_hash()).is_some());
+    }
+
+    #[test]
+    fn memory_usage_returns_nonzero() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let chain = encode_codepoint(0x1F525);
+        r.insert(&chain, 0, 0, 0, false);
+        r.register_alias("fire", chain.chain_hash());
+
+        let (entries, aliases, _misc, total) = r.memory_usage();
+        assert!(entries > 0, "Entries bytes > 0");
+        assert!(aliases > 0, "Aliases bytes > 0");
+        assert!(total > 0, "Total > 0");
+        assert_eq!(total, entries + aliases + _misc);
+    }
+
+    #[test]
+    fn reverse_index_after_bulk() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        r.begin_bulk();
+        let chain = encode_codepoint(0x1F525);
+        let hash = r.insert(&chain, 0, 0, 0, false);
+        r.register_alias("fire", hash);
+        r.finalize_bulk();
+
+        // Reverse index should work after finalize
+        let name = r.alias_for_hash(hash);
+        assert_eq!(name, Some("fire"));
+    }
+
+    #[test]
+    fn reverse_index_normal_mode() {
+        if skip_if_empty() { return; }
+        let mut r = Registry::new();
+        let chain = encode_codepoint(0x1F525);
+        let hash = r.insert(&chain, 0, 0, 0, false);
+        r.register_alias("fire", hash);
+
+        // Reverse index should work in normal mode
+        assert_eq!(r.alias_for_hash(hash), Some("fire"));
+        assert_eq!(r.lookup_name_by_hash(hash), Some(String::from("fire")));
     }
 }
 

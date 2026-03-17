@@ -681,6 +681,59 @@ impl HomeRuntime {
                 }
             }
 
+            "ram" => {
+                // ○{ram} — memory usage breakdown
+                let (reg_entries, reg_aliases, reg_misc, reg_total) =
+                    self.registry.memory_usage();
+                let silk_bytes = self.learning.graph().memory_usage();
+                let silk_edges = self.learning.graph().len();
+                let silk_cap = 100_000usize; // max_edges from maintain()
+                let stm_obs = self.learning.stm().len();
+                let stm_bytes = stm_obs * 60; // ~60 bytes per observation
+
+                // Format helper: bytes → human-readable
+                fn fmt_bytes(b: usize) -> String {
+                    if b >= 1_048_576 {
+                        format!("{:.1} MB", b as f64 / 1_048_576.0)
+                    } else if b >= 1024 {
+                        format!("{:.1} KB", b as f64 / 1024.0)
+                    } else {
+                        format!("{} B", b)
+                    }
+                }
+
+                let total = reg_total + silk_bytes + stm_bytes;
+
+                let text = format!(
+                    "RAM Usage ○\n\
+                     ─── Registry ───\n\
+                     Entries  : {} nodes → {}\n\
+                     Aliases  : {} names → {}\n\
+                     Misc     : {}\n\
+                     Subtotal : {}\n\
+                     ─── Silk Graph ───\n\
+                     Edges    : {} / {} cap → {}\n\
+                     ─── STM ───\n\
+                     Obs      : {} → {}\n\
+                     ─── Total ───\n\
+                     Estimated: {}",
+                    self.registry.len(), fmt_bytes(reg_entries),
+                    self.registry.alias_count(), fmt_bytes(reg_aliases),
+                    fmt_bytes(reg_misc),
+                    fmt_bytes(reg_total),
+                    silk_edges, silk_cap, fmt_bytes(silk_bytes),
+                    stm_obs, fmt_bytes(stm_bytes),
+                    fmt_bytes(total),
+                );
+
+                Response {
+                    text,
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
             "dream" => {
                 self.run_dream(ts);
                 let result = self
@@ -958,6 +1011,7 @@ impl HomeRuntime {
                      ○{term ∂ ctx}         — context query\n\
                      ○{dream}              — run Dream cycle\n\
                      ○{stats}              — system statistics\n\
+                     ○{ram}                — memory usage breakdown\n\
                      ○{health}             — system health check\n\
                      ○{memory}             — show learned knowledge\n\
                      ○{cluster}            — cluster STM observations\n\
@@ -3262,6 +3316,17 @@ mod tests {
         assert_eq!(r.kind, ResponseKind::System);
         assert!(r.text.contains("Turns"), "Stats có Turns");
         assert!(r.text.contains("STM"), "Stats có STM");
+    }
+
+    #[test]
+    fn olang_ram_command() {
+        let mut rt = rt();
+        let r = rt.process_text("○{ram}", 2000);
+        assert_eq!(r.kind, ResponseKind::System);
+        assert!(r.text.contains("RAM Usage"), "Has RAM Usage header");
+        assert!(r.text.contains("Registry"), "Shows Registry section");
+        assert!(r.text.contains("Silk Graph"), "Shows Silk Graph section");
+        assert!(r.text.contains("Estimated"), "Shows total estimate");
     }
 
     #[test]

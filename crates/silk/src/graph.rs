@@ -378,6 +378,14 @@ impl SilkGraph {
         nodes.len()
     }
 
+    // ── Memory stats ──────────────────────────────────────────────────────
+
+    /// Estimated RAM usage in bytes.
+    pub fn memory_usage(&self) -> usize {
+        let edge_size = core::mem::size_of::<SilkEdge>();
+        self.edges.capacity() * edge_size
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
 
     fn find_edge_idx(&self, from: u64, to: u64, kind: EdgeKind) -> Option<usize> {
