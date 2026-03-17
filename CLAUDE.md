@@ -64,6 +64,21 @@ Tại sao ~5400 mà không phải 150K (toàn bộ Unicode)?
 → Mỗi nhóm tạo 1 chiều ĐỘC LẬP (orthogonal)
 → Đủ để định vị BẤT KỲ khái niệm nào trong không gian 5D
 → Phần còn lại của Unicode = text thường, dùng qua alias → node
+
+Tagged Sparse Encoding (v0.05):
+  Mỗi Molecule serialize = [presence_mask: 1B][non-default values: 0-5B]
+  Defaults bị bỏ qua:  S=Sphere, R=Member, V=0x80, A=0x80, T=Medium
+  ●  (shape=Sphere, time=Static) → [0x10][0x01]                  = 2 bytes (thay vì 5)
+  🔥 (V=0xC0, A=0xC0, time=Fast) → [0x1C][0xC0][0xC0][0x04]     = 4 bytes (thay vì 5)
+  ∈  (relation=Member, time=Static) → [0x10][0x01]                = 2 bytes (thay vì 5)
+
+  Files implement:
+    molecular.rs  — Core: to_tagged_bytes/from_tagged_bytes, presence_mask, 10 tests
+    writer.rs     — VERSION 0x05, NodeRecord ghi tagged format
+    reader.rs     — Parse cả v0.03/v0.04 (legacy) và v0.05 (tagged)
+    compact.rs    — Delta so sánh với tagged_size, Full dùng tagged
+    qr.rs         — Wire format tagged (signing vẫn dùng to_bytes cho hash stability)
+    ir.rs         — Op::Push bytecode dùng tagged
 ```
 
 ---
