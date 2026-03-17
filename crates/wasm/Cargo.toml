@@ -19,4 +19,5 @@ context = { workspace = true }
 agents  = { workspace = true }
 memory  = { workspace = true }
 runtime = { workspace = true }
+isl     = { path = "../isl" }
 wasm-bindgen = { version = "0.2" }

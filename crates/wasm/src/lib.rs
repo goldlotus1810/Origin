@@ -13,6 +13,7 @@ pub mod bridge;
 
 use wasm_bindgen::prelude::*;
 
+use bridge::EventStream;
 use runtime::origin::{HomeRuntime, Response, ResponseKind};
 use silk::walk::ResponseTone;
 
@@ -25,6 +26,7 @@ use silk::walk::ResponseTone;
 pub struct HomeOSWasm {
     rt: HomeRuntime,
     turn_count: u64,
+    events: EventStream,
 }
 
 #[wasm_bindgen]
@@ -39,6 +41,7 @@ impl HomeOSWasm {
         HomeOSWasm {
             rt: HomeRuntime::new(js_timestamp_u64()),
             turn_count: 0,
+            events: EventStream::default(),
         }
     }
 
@@ -48,6 +51,7 @@ impl HomeOSWasm {
         HomeOSWasm {
             rt: HomeRuntime::with_file(js_timestamp_u64(), Some(bytes)),
             turn_count: 0,
+            events: EventStream::default(),
         }
     }
 
@@ -55,12 +59,42 @@ impl HomeOSWasm {
     ///
     /// Input: text thường hoặc ○{...}
     /// Output: JSON { text, tone, fx, kind, turn }
+    ///
+    /// Side effect: pushes emotion event to EventStream.
     #[wasm_bindgen]
     pub fn process(&mut self, input: &str) -> String {
         self.turn_count += 1;
         let ts = js_timestamp();
         let response = self.rt.process_text(input, ts);
+        // Push emotion update to event stream for browser subscribers
+        let fx = response.fx;
+        self.events.push_emotion(0.0, 0.0, fx);
         response_to_json(&response, self.turn_count)
+    }
+
+    /// Drain pending events as binary frames for WebSocket push.
+    ///
+    /// Call after process() to get emotion/dream/silk updates.
+    /// Returns array of binary frame byte arrays (each is a BridgeFrame).
+    #[wasm_bindgen]
+    pub fn drain_events(&mut self) -> Vec<u8> {
+        let frames = self.events.drain_bytes();
+        // Concatenate: [count:4][len0:4][frame0][len1:4][frame1]...
+        let mut out = Vec::new();
+        let count = frames.len() as u32;
+        out.extend_from_slice(&count.to_be_bytes());
+        for frame in &frames {
+            let len = frame.len() as u32;
+            out.extend_from_slice(&len.to_be_bytes());
+            out.extend_from_slice(frame);
+        }
+        out
+    }
+
+    /// Number of pending events.
+    #[wasm_bindgen(getter)]
+    pub fn pending_events(&self) -> u32 {
+        self.events.pending() as u32
     }
 
     /// f(x) — ConversationCurve hiện tại.
@@ -100,6 +134,12 @@ impl Default for HomeOSWasm {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Quick create HomeOS with origin.olang bytes.
+#[wasm_bindgen]
+pub fn create_homeos_with_file(bytes: &[u8]) -> HomeOSWasm {
+    HomeOSWasm::new_with_file(bytes)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -309,6 +349,20 @@ mod tests {
             r.contains("1800") || r.contains("741741"),
             "Crisis JSON phải có helpline"
         );
+    }
+
+    #[test]
+    fn event_stream_wired() {
+        let mut os = HomeOSWasm::new();
+        assert_eq!(os.pending_events(), 0);
+        os.process("xin chào");
+        assert!(os.pending_events() > 0, "process() should push emotion event");
+        let bytes = os.drain_events();
+        // Format: [count:4][len0:4][frame0]...
+        assert!(bytes.len() >= 4);
+        let count = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        assert!(count >= 1, "at least 1 event frame");
+        assert_eq!(os.pending_events(), 0, "drain clears events");
     }
 
     #[test]
