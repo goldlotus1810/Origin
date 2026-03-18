@@ -311,6 +311,76 @@ impl SilkEdge {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HebbianLink — slim learned connection (19 bytes vs SilkEdge 46 bytes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Slim Hebbian learned connection — chỉ giữ weight + fire_count.
+///
+/// EmotionTag KHÔNG ở đây — emotion nằm trong V+A của node (Molecule).
+/// "Silk không phải dữ liệu. Silk là hệ quả của 5D."
+///
+/// Hebbian = PHÁT HIỆN kết nối implicit, không TẠO kết nối mới.
+/// Weight = SỨC MẠNH phát hiện (bao nhiêu lần co-activate).
+///
+/// Size: 8 + 8 + 1 + 2 = 19 bytes (vs SilkEdge 46 bytes = 59% tiết kiệm)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HebbianLink {
+    pub from_hash: u64,
+    pub to_hash: u64,
+    /// Weight quantized to u8: value / 255.0 = f32 ∈ [0.0, 1.0]
+    pub weight: u8,
+    /// Số lần co-activate
+    pub fire_count: u16,
+}
+
+impl HebbianLink {
+    /// Weight as f32 ∈ [0.0, 1.0].
+    pub fn weight_f32(&self) -> f32 {
+        self.weight as f32 / 255.0
+    }
+
+    /// Set weight from f32 (quantize to u8).
+    pub fn set_weight(&mut self, w: f32) {
+        self.weight = (w.clamp(0.0, 1.0) * 255.0) as u8;
+    }
+
+    /// Key for sorting: (from, to).
+    pub fn key(&self) -> (u64, u64) {
+        (self.from_hash, self.to_hash)
+    }
+
+    /// Create new link with initial weight (weak start).
+    pub fn new(from: u64, to: u64) -> Self {
+        Self {
+            from_hash: from,
+            to_hash: to,
+            weight: 26, // 26/255 ≈ 0.10 (same as SilkEdge::associative start)
+            fire_count: 1,
+        }
+    }
+
+    /// Serialize to 19 bytes: [from:8][to:8][weight:1][fire:2]
+    pub fn to_bytes(&self) -> [u8; 19] {
+        let mut out = [0u8; 19];
+        out[0..8].copy_from_slice(&self.from_hash.to_le_bytes());
+        out[8..16].copy_from_slice(&self.to_hash.to_le_bytes());
+        out[16] = self.weight;
+        out[17..19].copy_from_slice(&self.fire_count.to_le_bytes());
+        out
+    }
+
+    /// Deserialize from 19 bytes.
+    pub fn from_bytes(data: &[u8; 19]) -> Self {
+        Self {
+            from_hash: u64::from_le_bytes([data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]]),
+            to_hash: u64::from_le_bytes([data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]]),
+            weight: data[16],
+            fire_count: u16::from_le_bytes([data[17], data[18]]),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -397,5 +467,45 @@ mod tests {
     fn edge_serialization_size() {
         let e = SilkEdge::structural(0xDEAD, 0xBEEF, EdgeKind::Causes, 0);
         assert_eq!(e.to_bytes().len(), 46);
+    }
+
+    // ── HebbianLink ────────────────────────────────────────────────────────
+
+    #[test]
+    fn hebbian_link_weight_quantization() {
+        let mut link = HebbianLink::new(0xA, 0xB);
+        link.set_weight(0.5);
+        let w = link.weight_f32();
+        assert!((w - 0.5).abs() < 0.01, "Quantized 0.5 → {}", w);
+
+        link.set_weight(1.0);
+        assert_eq!(link.weight, 255);
+
+        link.set_weight(0.0);
+        assert_eq!(link.weight, 0);
+    }
+
+    #[test]
+    fn hebbian_link_serialization() {
+        let link = HebbianLink {
+            from_hash: 0xDEADBEEF,
+            to_hash: 0xCAFEBABE,
+            weight: 128,
+            fire_count: 42,
+        };
+        let bytes = link.to_bytes();
+        assert_eq!(bytes.len(), 19);
+
+        let restored = HebbianLink::from_bytes(&bytes);
+        assert_eq!(restored, link);
+    }
+
+    #[test]
+    fn hebbian_link_size_savings() {
+        // HebbianLink = 19 bytes, SilkEdge = 46 bytes → 59% savings
+        assert_eq!(core::mem::size_of::<[u8; 19]>(), 19);
+        // SilkEdge::to_bytes() = 46
+        let ratio = 19.0 / 46.0;
+        assert!(ratio < 0.5, "HebbianLink < 50% of SilkEdge: {:.0}%", ratio * 100.0);
     }
 }
