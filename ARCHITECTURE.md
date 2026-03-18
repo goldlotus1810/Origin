@@ -134,7 +134,7 @@ tools/
 
 ---
 
-## Silk Architecture — 3 Layers + Vertical
+## Silk Architecture — 3 Tầng × 2 Hướng
 
 ### Nguyên lý: Silk = hệ quả tự nhiên của 5D
 
@@ -153,13 +153,18 @@ Cùng nhóm máu trên chiều nào → Silk trên chiều đó.
 
 ### 3 tầng Silk (horizontal, implicit, 0 bytes)
 
-| Tầng | Tên | Số lượng | Trạng thái |
-|------|-----|---------|-----------|
-| Base | 37 kênh (8S+8R+8V+8A+5T) | 37 | ✅ SilkIndex |
-| Compound | 31 mẫu C(5,k) k=1..5 | 31 | ✅ CompoundKind enum |
-| Precise | ~5400 kênh (= số L0 nodes) | ~5400 | SPEC — chưa implement |
+| Tầng | Tên | Cách hoạt động | Số lượng | Status |
+|------|-----|----------------|---------|--------|
+| Base | 37 kênh (8S+8R+8V+8A+5T) | Cùng base value = cùng "nhóm máu" | 37 | ✅ SilkIndex |
+| Compound | 31 mẫu C(5,k) k=1..5 | Chia sẻ k chiều cùng lúc = kiểu quan hệ | 31 | ✅ CompoundKind enum |
+| Precise | ~5400 kênh (= số L0 nodes) | Cùng variant chính xác = match hoàn hảo | ~5400 | SPEC — chưa implement |
 
 ```
+Công thức sức mạnh kết nối:
+  strength(A, B) = Σ match(dim) × precision(dim)
+  match(dim)     = 1 nếu cùng base, 0 nếu khác
+  precision(dim) = 1.0 nếu cùng variant, 0.5 nếu chỉ cùng base
+
 Strength = number of shared dimensions:
   1 dim shared = 0.20 (loosely related)    → C(5,1) =  5 patterns
   2 dims       = 0.40 (clearly related)    → C(5,2) = 10 patterns
@@ -170,11 +175,18 @@ Strength = number of shared dimensions:
 37 kênh × 31 mẫu = 1147 kiểu quan hệ có nghĩa
 
 CompoundKind examples:
-  ShapeValence     = "looks similar + feels similar" → visual metaphor
-  RelationValence  = "relates similar + feels similar" → moral analog
-  ValenceArousal   = "same emotional state" → empathy link
-  AllButShape      = "different shape, everything else same" → deep metaphor
+  ShapeValence     = "trông giống + cảm giống" → visual metaphor
+  RelationValence  = "quan hệ giống + cảm giống" → moral analog
+  ValenceArousal   = "cùng trạng thái cảm xúc" → empathy link
+  AllButShape      = "khác hình, giống HẾT còn lại" → deep metaphor
 ```
+
+### 2 Hướng Silk
+
+| Hướng | Tên | Lưu trữ | Status |
+|-------|-----|---------|--------|
+| Ngang | Silk tự do (implicit, cùng tầng) | 0 bytes | ✅ SilkIndex |
+| Dọc | Silk đại diện (parent pointer) | 5460 × 8B = 43 KB | ✅ parent_map |
 
 ### Vertical Silk (parent pointer, 43 KB)
 
@@ -189,7 +201,7 @@ L5→L4:     3 pointers
 L6→L5:     2 pointers
 L7→L6:     1 pointer
 ─────────────────────
-Total: 5460 × 8B = 43 KB
+Tổng: 5460 × 8B = 43 KB
 
 API:
   register_parent(child, parent)  → đăng ký parent pointer
@@ -204,7 +216,7 @@ Query: O(1) via parent chain traversal
 ### Learned Silk (Hebbian, explicit)
 
 ```
-Hebbian learning: fire together → wire together
+Hebbian = phát hiện cái đã có, không tạo cái mới.
 co_activate(a, b) → strengthen awareness of implicit relationship
 HebbianLink: (hash_a, hash_b, weight, fire_count, emotion_tag)
 
@@ -231,6 +243,12 @@ Mỗi byte trong Molecule = tham chiếu đến công thức gốc L0:
   Time     = f_t(inputs...)    ← công thức thời gian
 
   Chưa có input → TIỀM NĂNG    Có input → GIÁ TRỊ CỤ THỂ    Đủ → node CHÍN
+
+Hệ quả:
+  Dream    = đánh giá công thức nào đã "chín" → promote QR
+  LeoAI    = tổ hợp công thức A ∘ B → công thức C mới
+  evolve() = thay 1 biến trong công thức → loài mới
+  16GB     = 100M concept × 7 bytes công thức = 700 MB (vs TB nếu lưu giá trị)
 ```
 
 ### NodeState = Molecule + Maturity + Origin
@@ -286,6 +304,26 @@ Layer enforcement (QT⑪):
 QR promote gate:
   maturity == Mature required
   neighbor_bonus from unified_neighbors() boosts confidence
+```
+
+### Node Complete Lifecycle
+```
+encode_codepoint(cp)
+    → MolecularChain (5 bytes)
+    → OlangWriter.append_node()      ← GHI FILE TRƯỚC (QT9)
+    → Registry.insert_with_kind()    ← cập nhật RAM SAU
+    → Observation (fire_count=1, maturity=Formula)
+    → Silk.co_activate()
+
+Repeated co-activation:
+    fire_count++ → maturity: Formula → Evaluating
+    Hebbian weight ≥ 0.854 + fire_count ≥ Fib[depth] → Mature
+
+DreamCycle.run():
+    cluster similar Observations (cùng layer — QT⑪)
+    LCA(cluster) → new MolecularChain
+    DreamProposal → AAM.review() → Approved
+    → QR write (is_qr=true, ED25519 signed, append-only forever)
 ```
 
 ---

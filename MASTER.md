@@ -4,7 +4,7 @@
 > Sau mỗi phiên: CẬP NHẬT file này.
 
 **Cập nhật:** 2026-03-18
-**Tests:** 2,348 pass · 0 fail · 0 clippy warnings · 0 external deps
+**Tests:** 2,354 pass · 0 fail · 0 clippy warnings · 0 external deps
 **Code:** ~82,000 lines Rust · 11 crates + 4 tools · no_std core
 
 ---
@@ -69,6 +69,25 @@
 #6 Agent hierarchy dead    — Chiefs idle, 0 Workers, 0 ISL messages           [HIGH, LARGE effort]
 ```
 
+### Node & Silk — 8 Gaps (SPEC_NODE_SILK — ALL RESOLVED ✅):
+```
+Gap #1  Silk dọc (parent pointer)     — ✅ parent_map in SilkGraph
+Gap #2  31 compound patterns          — ✅ CompoundKind enum implemented
+Gap #3  Dream 5D similarity           — ✅ MolSummary + implicit Silk bonus
+Gap #4  Dream layer filtering         — ✅ Observation.layer + layer grouping
+Gap #5  unified_neighbors() wired     — ✅ Dream uses neighbor_bonus
+Gap #6  Molecule = công thức          — ✅ NodeState = Molecule + Maturity + Origin
+Gap #7  CompositionOrigin             — ✅ lca_with_origin(), evolve() tracks origin
+Gap #8  Maturity advance weight=0     — ✅ heuristic_weight from Silk
+```
+
+### Silk thiết kế vs thực tế:
+```
+3 tầng:  Base 37 kênh ✅ | Compound 31 mẫu ✅ | Precise ~5400 (SPEC)
+2 hướng: Ngang (implicit) ✅ | Dọc (parent 43KB) ✅
+Hebbian = phát hiện cái đã có, không tạo mới ✅
+```
+
 ### SPEC FILES:
 ```
 SPEC_MATURITY_PIPELINE.md  — Wire Maturity vào Dream (covers #3, #4)
@@ -97,7 +116,7 @@ SPEC_NODE_SILK.md          — 8 Gaps: ALL 8 IMPLEMENTED ✅
 | server | 13 | REPL boot/run |
 | inspector | 9 | File verification |
 | bench | 6 | Performance benchmarks |
-| **Total** | **2,348** | |
+| **Total** | **2,354** | |
 
 ---
 
@@ -151,4 +170,4 @@ M: SPEC_NODE_SILK all 8 gaps implemented — parent_map, CompoundKind,
 
 ---
 
-*HomeOS · 2026-03-18 · 2,348 tests · ~82K LoC · ○(∅)==○*
+*HomeOS · 2026-03-18 · 2,354 tests · ~82K LoC · ○(∅)==○*

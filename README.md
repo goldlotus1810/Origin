@@ -54,6 +54,32 @@ Silk dọc (parent pointer, 43KB):
 
 ---
 
+## Node & Silk
+
+Mỗi byte trong Molecule = **công thức**, không phải giá trị tĩnh:
+
+```
+Molecule [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5D
+    ├── SDF      → công thức hình dạng (hữu hình — render được)
+    ├── Spline   → công thức biến đổi (vô hình — 6 temporal curves)
+    └── Silk     → công thức quan hệ (kết nối — 0 bytes implicit)
+```
+
+**Silk** = hệ quả tự nhiên của 5D, không phải edge list:
+
+| Tầng | Kênh | Ý nghĩa |
+|------|------|---------|
+| Base | 37 (8S+8R+8V+8A+5T) | Cùng "nhóm máu" trên 1 chiều |
+| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều → 1147 kiểu quan hệ |
+| Vertical | 5460 pointers = 43KB | Parent-child giữa các tầng |
+
+```
+Node lifecycle: Formula → Evaluating → Mature → QR (append-only, signed)
+evolve(dim, val): thay 1/5 chiều → loài mới (e.g. 🔥 → "lửa nhẹ")
+```
+
+---
+
 ## Cấu Trúc
 
 ```
