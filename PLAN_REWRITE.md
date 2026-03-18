@@ -82,9 +82,34 @@ origin.olang = self-contained executable binary
 │                                                          │
 └─────────────────────────────────────────────────────────┘
 
-Chạy:
-  Linux:   chmod +x origin.olang && ./origin.olang
-  macOS:   chmod +x origin.olang && ./origin.olang
+Chạy (sau khi cài):
+  o                    ← symlink → /usr/local/bin/o → origin.olang
+  origin               ← symlink dài hơn (alias)
+
+  Cả hai → REPL. Không argument = interactive mode.
+
+Cài đặt lần đầu:
+  cargo build --release -p builder
+  ./builder --output /usr/local/bin/origin.olang
+  ln -s /usr/local/bin/origin.olang /usr/local/bin/o
+  chmod +x /usr/local/bin/origin.olang
+
+Sau đó — chỉ cần 1 lệnh:
+  o                              REPL (interactive)
+  o install emotion.ol           ăn file .ol → compile+encode → append vào chính nó
+  o install stdlib/*.ol          ăn nhiều file cùng lúc
+  o update  curve_v2.ol          cập nhật (append version mới, giữ cũ)
+  o learn   book.ol              ăn tri thức → encode → append knowledge
+  o run     script.ol            chạy rồi quên (không append)
+  o build   --arch arm64         tự build bản mới cho architecture khác
+
+Sao chép sang máy khác:
+  scp /usr/local/bin/origin.olang user@other:/usr/local/bin/o
+  # Xong. Không cần gì thêm. 1 file = toàn bộ hệ thống.
+
+Platform:
+  Linux:   ELF executable (x86_64 / arm64 / riscv)
+  macOS:   Mach-O executable (arm64 / x86_64)
   WASM:    browser loads origin.olang → WebAssembly.instantiate()
   Android: dlopen("origin.olang") → jump to vm_offset
 
@@ -94,6 +119,85 @@ Kích thước ước tính:
   Knowledge:   16 KB (seed) → grows to GB
   ─────────────
   Seed total:  ~616 KB ← NHỎ HƠN 1 BỨC ẢNH
+```
+
+---
+
+## .ol Files — Thức ăn tự nhận dạng
+
+```
+.ol = source file cho origin.olang
+Khi origin.olang "ăn" 1 file .ol, parser tự nhận dạng từng statement:
+
+  ○{ ... }          → PROGRAM   compile → bytecode → append VM section
+  ○ "x" rel "y"    → DATA      encode → MolecularChain → append knowledge
+  "x" rel "y"      → DATA      relation/edge → append knowledge
+  { S=1 R=6 ... }  → DATA      molecular literal → encode trực tiếp
+
+Parser nhìn token đầu tiên → biết ngay:
+  ○{    → bắt đầu code block → PROGRAM
+  ○ "   → bắt đầu node declaration → DATA
+  "     → bắt đầu relation → DATA
+  {     → molecular literal → DATA
+
+KHÔNG CẦN:
+  ❌ Header "type: program" / "type: data"
+  ❌ File extension khác nhau (.olp vs .old)
+  ❌ Metadata khai báo nội dung
+  ❌ Tách file code vs file data
+
+Giống DNA: cùng 1 chuỗi nucleotide, ribosome TỰ BIẾT
+đoạn nào là gene (code), đoạn nào là regulatory (data).
+Cấu trúc Olang TỰ MÔ TẢ — không cần annotation bên ngoài.
+```
+
+### Ví dụ: emotion.ol (hỗn hợp code + data)
+
+```
+file: emotion.ol
+
+○ "buồn" ∈ cảm-xúc              ← DATA: tạo node + edge
+○ "vui"  ∈ cảm-xúc              ← DATA: tạo node + edge
+○ "giận" ∈ cảm-xúc              ← DATA: tạo node + edge
+
+"buồn" ⊂ "cảm-xúc"             ← DATA: relation (hierarchy)
+"buồn" → "mất-việc"             ← DATA: causality edge
+
+{ S=1 R=6 V=60 A=180 T=4 }     ← DATA: molecular literal (buồn)
+
+○{                               ← PROGRAM: bắt đầu code block
+  fn blend_emotion(a, b, w) {
+    let v = a.V * w + b.V * (1.0 - w);
+    let ar = a.A * w + b.A * (1.0 - w);
+    return { V=v, A=ar };
+  }
+
+  fn amplify(emo, silk_weight) {
+    return emo * (1.0 + silk_weight * 0.618);
+  }
+}                                ← PROGRAM: kết thúc code block
+
+"buồn" → "cô-đơn"              ← DATA: thêm edge (sau code block cũng được)
+```
+
+### Workflow: o install emotion.ol
+
+```
+o install emotion.ol
+
+Parser đọc tuần tự:
+  1. ○ "buồn" ∈ cảm-xúc    → encode chain → append KNOWLEDGE section
+  2. ○ "vui"  ∈ cảm-xúc    → encode chain → append KNOWLEDGE section
+  3. ○ "giận" ∈ cảm-xúc    → encode chain → append KNOWLEDGE section
+  4. "buồn" ⊂ "cảm-xúc"   → encode edge  → append KNOWLEDGE section
+  5. "buồn" → "mất-việc"   → encode edge  → append KNOWLEDGE section
+  6. { S=1 R=6 V=60 ... }  → encode mol   → append KNOWLEDGE section
+  7. ○{ fn blend... }      → compile      → append BYTECODE section
+  8. "buồn" → "cô-đơn"    → encode edge  → append KNOWLEDGE section
+
+Tất cả vào CÙNG 1 FILE origin.olang.
+Sau khi ăn xong, emotion.ol có thể xóa.
+origin.olang đã hấp thụ mọi thứ.
 ```
 
 ---
@@ -606,4 +710,83 @@ Reproduce           ❌ Cần cargo build            ✅ origin.olang sinh clone
 
 ---
 
-*HomeOS · 2026-03-18 · Plan Rewrite v2 · origin.olang = Self-Contained Executable*
+---
+
+## UI — 2 Giao diện
+
+### Terminal (ANSI — mặc định)
+
+```
+o [enter] → REPL
+
+┌──────────────────────────────────────────────┐
+│ ○ HomeOS v0.05                    ○ buồn 0.3 │  ← status bar (emotion state)
+├──────────────────────────────────────────────┤
+│                                              │
+│  bạn: tôi buồn vì mất việc                  │
+│                                              │
+│  ○: Cảm giác nặng nề và mệt mỏi —          │
+│     bạn muốn kể thêm không?                 │
+│                                              │
+│  bạn: ○{ stats }                             │
+│                                              │
+│  ○: STM: 42 nodes │ Silk: 187 edges          │
+│     Dream: 3 pending │ QR: 12 signed         │
+│                                              │
+├──────────────────────────────────────────────┤
+│ ○ >                                          │  ← input
+└──────────────────────────────────────────────┘
+
+ANSI features:
+  - 256 colors cho emotion visualization
+  - ConversationCurve tone → text color
+    Supportive = warm (amber)
+    Gentle = soft (blue)
+    Celebratory = bright (green)
+    Pause = muted (gray)
+  - Box drawing cho structure
+  - UTF-8 đầy đủ (Unicode 18.0 = nền tảng)
+  - No dependency — raw ANSI escape codes
+```
+
+### Browser (WebSocket + WASM)
+
+```
+origin.olang --serve 8080
+  → HTTP server (minimal, trong bytecode)
+  → WebSocket cho ISL bridge
+  → Serve 1 HTML file (embedded trong origin.olang)
+
+Browser UI:
+  ┌─────────────────────────────────────────────────┐
+  │  ○ HomeOS                          [●] connected │
+  ├────────────┬────────────────────────────────────┤
+  │            │                                     │
+  │  Agents    │   Chat                              │
+  │  ├ LeoAI   │                                     │
+  │  ├ Chief   │   bạn: tôi buồn vì mất việc        │
+  │  └ Workers │                                     │
+  │            │   ○: Cảm giác nặng nề...            │
+  │  Memory    │                                     │
+  │  ├ STM     │                                     │
+  │  ├ QR      │                                     │
+  │  └ Dream   │                                     │
+  │            │                                     │
+  │  Silk ◎    │   [VSDF viewport]                   │
+  │  (graph)   │   (3D molecule visualization)       │
+  │            │                                     │
+  ├────────────┴────────────────────────────────────┤
+  │  ○ >                                             │
+  └─────────────────────────────────────────────────┘
+
+Tech stack:
+  HTML/CSS/JS = embedded string trong bytecode section
+  WebSocket   = ISL bridge (isl → ws → browser)
+  Canvas 2D   = VSDF FFR rendering (Fibonacci spiral)
+  No framework. No npm. No build step.
+  origin.olang serve tất cả từ chính nó.
+```
+
+---
+
+*HomeOS · 2026-03-18 · Plan Rewrite v3 · origin.olang = Self-Contained Living Executable*
