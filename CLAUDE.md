@@ -671,7 +671,7 @@ DREAM     = Offline consolidation (STM → cluster → promote QR)
 
 ## Olang — Ngôn ngữ của HomeOS
 
-**Tham khảo đầy đủ:** `docs/olang_guide.md`
+**Tham khảo đầy đủ:** `docs/olang_handbook.md`
 
 ```
 Olang = ngôn ngữ lập trình + suy luận + sáng tạo
