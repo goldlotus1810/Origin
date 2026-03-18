@@ -82,6 +82,35 @@ pub const RT_AMEND: u8 = 0x04;
 /// → L0 đọc file → biết mình có gì → cuốn sổ cái đầy đủ.
 pub const RT_NODE_KIND: u8 = 0x05;
 
+/// Record type: STM Observation — persist short-term memory vào origin.olang.
+///
+/// Format: [0x06][chain_hash: 8][valence: 4][arousal: 4][dominance: 4][intensity: 4]
+///         [fire_count: 4][maturity: 1][layer: 1][timestamp: 8]
+/// Total: 1 + 8 + 16 + 4 + 1 + 1 + 8 = 39 bytes
+///
+/// QT8: origin.olang = bộ nhớ duy nhất, RAM = cache tạm.
+pub const RT_STM: u8 = 0x06;
+
+/// Record type: HebbianLink — persist learned Silk weight vào origin.olang.
+///
+/// Format: [0x07][from_hash: 8][to_hash: 8][weight: 1][fire_count: 2][timestamp: 8]
+/// Total: 1 + 8 + 8 + 1 + 2 + 8 = 28 bytes
+pub const RT_HEBBIAN: u8 = 0x07;
+
+/// Record type: KnowTree CompactNode — persist L2+ knowledge vào origin.olang.
+///
+/// Format: [0x08][data_len: 2][compact_node_bytes: N][timestamp: 8]
+/// Total: 1 + 2 + N + 8 bytes
+pub const RT_KNOWTREE: u8 = 0x08;
+
+/// Record type: ConversationCurve — persist emotion trajectory vào origin.olang.
+///
+/// Format: [0x09][valence: 4][fx_dn: 4][timestamp: 8]
+/// Total: 1 + 4 + 4 + 8 = 17 bytes
+///
+/// Mỗi turn ghi 1 record. Boot replay → reconstruct curve.
+pub const RT_CURVE: u8 = 0x09;
+
 /// Header size: MAGIC(4) + VERSION(1) + CREATED(8) = 13 bytes
 pub const HEADER_SIZE: usize = 13;
 
@@ -250,6 +279,98 @@ impl OlangWriter {
         self.buf.push(kind);
         self.buf.extend_from_slice(&timestamp.to_le_bytes());
 
+        self.write_count += 1;
+        offset
+    }
+
+    /// Ghi STM Observation record.
+    ///
+    /// Persist 1 observation vào origin.olang (QT8: file = bộ nhớ duy nhất).
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_stm(
+        &mut self,
+        chain_hash: u64,
+        valence: f32,
+        arousal: f32,
+        dominance: f32,
+        intensity: f32,
+        fire_count: u32,
+        maturity: u8,
+        layer: u8,
+        timestamp: i64,
+    ) -> u64 {
+        let offset = self.buf.len() as u64;
+        self.buf.push(RT_STM);
+        self.buf.extend_from_slice(&chain_hash.to_le_bytes());
+        self.buf.extend_from_slice(&valence.to_le_bytes());
+        self.buf.extend_from_slice(&arousal.to_le_bytes());
+        self.buf.extend_from_slice(&dominance.to_le_bytes());
+        self.buf.extend_from_slice(&intensity.to_le_bytes());
+        self.buf.extend_from_slice(&fire_count.to_le_bytes());
+        self.buf.push(maturity);
+        self.buf.push(layer);
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+        self.write_count += 1;
+        offset
+    }
+
+    /// Ghi HebbianLink record.
+    ///
+    /// Persist 1 learned Silk weight vào origin.olang.
+    pub fn append_hebbian(
+        &mut self,
+        from_hash: u64,
+        to_hash: u64,
+        weight: u8,
+        fire_count: u16,
+        timestamp: i64,
+    ) -> u64 {
+        let offset = self.buf.len() as u64;
+        self.buf.push(RT_HEBBIAN);
+        self.buf.extend_from_slice(&from_hash.to_le_bytes());
+        self.buf.extend_from_slice(&to_hash.to_le_bytes());
+        self.buf.push(weight);
+        self.buf.extend_from_slice(&fire_count.to_le_bytes());
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+        self.write_count += 1;
+        offset
+    }
+
+    /// Ghi KnowTree CompactNode record.
+    ///
+    /// Persist 1 L2+ compact node vào origin.olang.
+    pub fn append_knowtree(
+        &mut self,
+        compact_bytes: &[u8],
+        timestamp: i64,
+    ) -> Result<u64, WriteError> {
+        if compact_bytes.len() > u16::MAX as usize {
+            return Err(WriteError::NameTooLong); // reuse error variant
+        }
+        let offset = self.buf.len() as u64;
+        self.buf.push(RT_KNOWTREE);
+        self.buf.extend_from_slice(&(compact_bytes.len() as u16).to_le_bytes());
+        self.buf.extend_from_slice(compact_bytes);
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+        self.write_count += 1;
+        Ok(offset)
+    }
+
+    /// Ghi ConversationCurve turn record.
+    ///
+    /// Mỗi turn ghi 1 record: valence + fx_dn + ts.
+    /// Boot replay tất cả records → reconstruct curve.
+    pub fn append_curve(
+        &mut self,
+        valence: f32,
+        fx_dn: f32,
+        timestamp: i64,
+    ) -> u64 {
+        let offset = self.buf.len() as u64;
+        self.buf.push(RT_CURVE);
+        self.buf.extend_from_slice(&valence.to_le_bytes());
+        self.buf.extend_from_slice(&fx_dn.to_le_bytes());
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
         self.write_count += 1;
         offset
     }

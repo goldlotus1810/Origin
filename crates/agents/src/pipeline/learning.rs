@@ -140,11 +140,55 @@ impl ShortTermMemory {
         &self.observations
     }
 
+    /// Mutable access to observations — for restore from origin.olang.
+    pub fn all_mut(&mut self) -> &mut Vec<Observation> {
+        &mut self.observations
+    }
+
     /// Tìm observation theo chain_hash.
     pub fn find_by_hash(&self, hash: u64) -> Option<&Observation> {
         self.observations
             .iter()
             .find(|o| o.chain.chain_hash() == hash)
+    }
+
+    /// Restore an observation from origin.olang — boot path.
+    ///
+    /// Pushes a raw observation without encoding (chain already exists in registry).
+    /// QT8: origin.olang = bộ nhớ duy nhất, RAM = cache.
+    pub fn push_raw(
+        &mut self,
+        _chain_hash: u64,
+        emotion: EmotionTag,
+        fire_count: u32,
+        maturity: Maturity,
+        layer: u8,
+        timestamp: i64,
+    ) {
+        if self.observations.len() >= self.max_size {
+            // LFU eviction
+            if let Some(min_idx) = self
+                .observations
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, o)| o.fire_count)
+                .map(|(i, _)| i)
+            {
+                self.observations.remove(min_idx);
+            }
+        }
+
+        // Tạo observation stub — chain rỗng (hash đã có trong registry).
+        // Chain sẽ được resolve khi cần qua registry lookup.
+        self.observations.push(Observation {
+            chain: MolecularChain::empty(),
+            emotion,
+            timestamp,
+            fire_count,
+            mol_summary: None,
+            maturity,
+            layer,
+        });
     }
 
     /// Xóa observations đã được promote lên QR.
@@ -475,6 +519,56 @@ impl LearningLoop {
     /// Dream candidates từ STM.
     pub fn dream_candidates(&self, n: usize) -> Vec<&Observation> {
         self.stm.top_n(n)
+    }
+
+    /// Restore STM observation from origin.olang — boot path.
+    ///
+    /// QT8: origin.olang = bộ nhớ duy nhất. Boot replay → RAM cache.
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore_stm_observation(
+        &mut self,
+        chain_hash: u64,
+        valence: f32,
+        arousal: f32,
+        dominance: f32,
+        intensity: f32,
+        fire_count: u32,
+        maturity_byte: u8,
+        layer: u8,
+        timestamp: i64,
+    ) {
+        let emotion = silk::edge::EmotionTag {
+            valence,
+            arousal,
+            dominance,
+            intensity,
+        };
+        let maturity = olang::molecular::Maturity::from_byte(maturity_byte);
+
+        // Tìm observation đã có (dedup by hash — append-only, last wins)
+        if let Some(obs) = self
+            .stm
+            .all_mut()
+            .iter_mut()
+            .find(|o| o.chain.chain_hash() == chain_hash)
+        {
+            // Update — last record wins (append-only)
+            obs.emotion = emotion;
+            obs.fire_count = fire_count;
+            obs.maturity = maturity;
+            obs.layer = layer;
+            obs.timestamp = timestamp;
+            return;
+        }
+
+        // Mới — push raw observation (không qua encode pipeline)
+        self.stm.push_raw(chain_hash, emotion, fire_count, maturity, layer, timestamp);
+    }
+
+    /// Restore ConversationCurve turn from origin.olang — boot path.
+    pub fn restore_curve_turn(&mut self, valence: f32, fx_dn: f32) {
+        self.context.curve_mut().push(valence);
+        self.context.curve_mut().update_dn(fx_dn);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

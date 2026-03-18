@@ -210,6 +210,17 @@ impl KnowTree {
         hashes
     }
 
+    // ── Restore from origin.olang ──────────────────────────────────────────
+
+    /// Restore a compact node from origin.olang bytes — boot path.
+    ///
+    /// QT8: origin.olang = bộ nhớ duy nhất, RAM = cache.
+    pub fn restore_compact_node(&mut self, data: &[u8]) {
+        if let Some(node) = CompactNode::from_bytes(data) {
+            self.store.restore_node(node);
+        }
+    }
+
     // ── Stats ────────────────────────────────────────────────────────────────
 
     /// Total nodes across all layers.

@@ -264,6 +264,37 @@ impl HomeRuntime {
             );
         }
 
+        // Restore Hebbian links từ file → SilkGraph.learned
+        for heb in &boot_result.hebbian_records {
+            learning.graph_mut().restore_learned(
+                heb.from_hash,
+                heb.to_hash,
+                heb.weight,
+                heb.fire_count,
+            );
+        }
+
+        // Restore STM observations từ file → ShortTermMemory
+        // Append-only: replay all records, dedup by hash (last wins)
+        for stm_rec in &boot_result.stm_records {
+            learning.restore_stm_observation(
+                stm_rec.chain_hash,
+                stm_rec.valence,
+                stm_rec.arousal,
+                stm_rec.dominance,
+                stm_rec.intensity,
+                stm_rec.fire_count,
+                stm_rec.maturity,
+                stm_rec.layer,
+                stm_rec.timestamp,
+            );
+        }
+
+        // Restore ConversationCurve từ file — replay valence turns
+        for curve_rec in &boot_result.curve_records {
+            learning.restore_curve_turn(curve_rec.valence, curve_rec.fx_dn);
+        }
+
         // QT8: nhận pending_writes từ boot (L0+L1 seeds chưa có trong file)
         let mut pending_writes = boot_result.pending_writes;
 
@@ -308,6 +339,11 @@ impl HomeRuntime {
             platform: None,
             module_loader: olang::module::ModuleLoader::new(alloc::vec!["stdlib".into(), ".".into()]),
         };
+
+        // Restore KnowTree compact nodes từ file
+        for kt_rec in &boot_result.knowtree_records {
+            rt.knowtree.restore_compact_node(&kt_rec.data);
+        }
 
         // ── Run bootstrap programs — firmware trên VM ─────────────────────
         // bootstrap_programs() = Olang source strings cho bản năng bẩm sinh
@@ -2921,12 +2957,82 @@ impl HomeRuntime {
             }
         }
 
+        // ── T6a2: Persist STM observation vào origin.olang ──────────────
+        // QT8: origin.olang = bộ nhớ duy nhất, RAM = cache tạm.
+        if let ProcessResult::Ok { ref chain, emotion: _ } = proc_result {
+            let hash = chain.chain_hash();
+            if let Some(obs) = self.learning.stm().find_by_hash(hash) {
+                use olang::writer::OlangWriter;
+                let mut stm_writer = OlangWriter::new_append();
+                stm_writer.append_stm(
+                    hash,
+                    obs.emotion.valence,
+                    obs.emotion.arousal,
+                    obs.emotion.dominance,
+                    obs.emotion.intensity,
+                    obs.fire_count,
+                    obs.maturity.as_byte(),
+                    obs.layer,
+                    ts,
+                );
+                self.pending_writes.extend_from_slice(stm_writer.as_bytes());
+            }
+        }
+
+        // ── T6a3: Persist Hebbian links vào origin.olang ──────────────
+        // Lưu learned weights mới/cập nhật từ co_activate
+        if let ProcessResult::Ok { ref chain, .. } = proc_result {
+            let hash = chain.chain_hash();
+            let graph = self.learning.graph();
+            let links: alloc::vec::Vec<_> = graph.learned_links_from(hash);
+            if !links.is_empty() {
+                use olang::writer::OlangWriter;
+                let mut heb_writer = OlangWriter::new_append();
+                for link in &links {
+                    heb_writer.append_hebbian(
+                        link.from_hash,
+                        link.to_hash,
+                        link.weight,
+                        link.fire_count,
+                        ts,
+                    );
+                }
+                self.pending_writes.extend_from_slice(heb_writer.as_bytes());
+            }
+        }
+
+        // ── T6a4: Persist ConversationCurve turn vào origin.olang ─────
+        // Mỗi turn ghi 1 record: valence + fx_dn → replay khi boot.
+        {
+            let curve = self.learning.context().curve();
+            if curve.turn_count() > 0 {
+                use olang::writer::OlangWriter;
+                let mut curve_writer = OlangWriter::new_append();
+                curve_writer.append_curve(
+                    curve.current_v(),
+                    curve.fx_dn,
+                    ts,
+                );
+                self.pending_writes.extend_from_slice(curve_writer.as_bytes());
+            }
+        }
+
         // ── T6b: KnowTree — store text as L2 compact node ───────────────
         if let ProcessResult::Ok { ref chain, emotion } = proc_result {
             if let ContentInput::Text { ref content, .. } = input {
                 let word_hashes = olang::knowtree::text_to_word_hashes(content);
                 if !word_hashes.is_empty() {
                     self.knowtree.store_sentence(chain, None, &word_hashes, ts);
+
+                    // ── T6b1: Persist KnowTree compact node vào origin.olang ──
+                    // Lấy compact bytes từ node vừa store
+                    if let Some(compact_node) = self.knowtree.lookup(chain.chain_hash(), 2) {
+                        let compact_bytes = compact_node.to_bytes();
+                        use olang::writer::OlangWriter;
+                        let mut kt_writer = OlangWriter::new_append();
+                        let _ = kt_writer.append_knowtree(&compact_bytes, ts);
+                        self.pending_writes.extend_from_slice(kt_writer.as_bytes());
+                    }
                 }
             }
 
@@ -5814,7 +5920,9 @@ mod integration_tests {
         let _ = rt.drain_pending_writes();
         // Teach something first
         rt.process_text("Scarlett O'Hara là nhân vật chính", 1000);
-        assert!(!rt.has_pending_writes(), "Normal text không ghi pending");
+        // QT8: normal text GHI pending (STM + Hebbian + Curve + L1 node)
+        // origin.olang = bộ nhớ duy nhất, RAM = cache tạm.
+        let _ = rt.drain_pending_writes();
 
         // User ra lệnh "hãy học"
         let resp = rt.process_text("hãy học điều này: Scarlett rất mạnh mẽ", 2000);
