@@ -183,6 +183,9 @@ pub enum VmEvent {
         /// Module path (dot-separated)
         path: String,
     },
+    /// Early return from ? operator (Err/None propagation).
+    /// VM should execute Ret to return from current function.
+    EarlyReturn,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1980,6 +1983,162 @@ impl OlangVM {
                             }
                             let _ = stack.push(result);
                         }
+                        // ── Phase 5 A10: ? error propagation ──────────────
+                        "__try_unwrap" => {
+                            // Stack: [enum_value]
+                            // If tag starts with "Result::Err" or "Option::None" → early return (push value, set Ret)
+                            // If tag starts with "Result::Ok" or "Option::Some" → unwrap payload
+                            // Otherwise → leave value as-is (non-enum passthrough)
+                            let value = vm_pop!(stack, events);
+                            let parts = split_array_chain(&value);
+                            let tag_str = if !parts.is_empty() {
+                                chain_to_string(&parts[0]).unwrap_or_default()
+                            } else {
+                                chain_to_string(&value).unwrap_or_default()
+                            };
+
+                            if tag_str.ends_with("::Err") || tag_str.ends_with("::None")
+                                || tag_str == "Err" || tag_str == "None"
+                            {
+                                // Early return: push the original Err/None value back
+                                // and signal return via Ret event
+                                let _ = stack.push(value);
+                                // Set PC past end to force return
+                                events.push(VmEvent::EarlyReturn);
+                            } else if tag_str.ends_with("::Ok") || tag_str.ends_with("::Some")
+                                || tag_str == "Ok" || tag_str == "Some"
+                            {
+                                // Unwrap payload: skip tag, return first payload element
+                                if parts.len() >= 2 {
+                                    let _ = stack.push(parts[1].clone());
+                                } else {
+                                    // Ok/Some with no payload → push empty
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
+                            } else if value.is_empty() {
+                                // Empty chain treated as None → early return
+                                let _ = stack.push(value);
+                                events.push(VmEvent::EarlyReturn);
+                            } else {
+                                // Not an enum — passthrough (truthy value)
+                                let _ = stack.push(value);
+                            }
+                        }
+                        // ── Phase 5 A11: Option/Result constructors + methods ──
+                        "__opt_some" => {
+                            // Stack: [value] → Option::Some(value)
+                            let val = vm_pop!(stack, events);
+                            let tag = string_to_chain("Option::Some");
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(sep);
+                            result.0.extend(val.0.iter().copied());
+                            let _ = stack.push(result);
+                        }
+                        "__opt_none" => {
+                            // Stack: [] → Option::None
+                            let _ = stack.push(string_to_chain("Option::None"));
+                        }
+                        "__res_ok" => {
+                            // Stack: [value] → Result::Ok(value)
+                            let val = vm_pop!(stack, events);
+                            let tag = string_to_chain("Result::Ok");
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(sep);
+                            result.0.extend(val.0.iter().copied());
+                            let _ = stack.push(result);
+                        }
+                        "__res_err" => {
+                            // Stack: [value] → Result::Err(value)
+                            let val = vm_pop!(stack, events);
+                            let tag = string_to_chain("Result::Err");
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(sep);
+                            result.0.extend(val.0.iter().copied());
+                            let _ = stack.push(result);
+                        }
+                        "__opt_is_some" => {
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
+                            let is = tag.ends_with("::Some") || tag == "Some";
+                            let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
+                        }
+                        "__opt_is_none" => {
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
+                            let is = tag.ends_with("::None") || tag == "None" || val.is_empty();
+                            let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
+                        }
+                        "__res_is_ok" => {
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
+                            let is = tag.ends_with("::Ok") || tag == "Ok";
+                            let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
+                        }
+                        "__res_is_err" => {
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
+                            let is = tag.ends_with("::Err") || tag == "Err";
+                            let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
+                        }
+                        "__opt_unwrap" => {
+                            // Unwrap Some payload, panic on None
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
+                            if tag.ends_with("::None") || tag == "None" || val.is_empty() {
+                                events.push(VmEvent::Error(VmError::StackUnderflow));
+                            } else if parts.len() >= 2 {
+                                let _ = stack.push(parts[1].clone());
+                            } else {
+                                let _ = stack.push(val);
+                            }
+                        }
+                        "__opt_unwrap_or" => {
+                            // Stack: [option_value, default_value]
+                            let default = vm_pop!(stack, events);
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
+                            if tag.ends_with("::None") || tag == "None" || val.is_empty()
+                                || tag.ends_with("::Err") || tag == "Err"
+                            {
+                                let _ = stack.push(default);
+                            } else if parts.len() >= 2 {
+                                let _ = stack.push(parts[1].clone());
+                            } else {
+                                let _ = stack.push(val);
+                            }
+                        }
+                        "__res_map_err" => {
+                            // Stack: [result_value, closure]
+                            // If Err → apply closure to error payload; if Ok → passthrough
+                            let closure = vm_pop!(stack, events);
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { String::new() };
+                            if tag.ends_with("::Err") || tag == "Err" {
+                                // Apply closure to error payload
+                                let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
+                                let _ = stack.push(payload);
+                                let _ = stack.push(closure);
+                                // Let CallClosure handle it — push mapped result back as Err
+                                // For simplicity: just push Err(payload) — closure application needs VM loop
+                                // TODO: full closure application requires recursive VM call
+                                let _ = stack.push(val); // passthrough for now
+                            } else {
+                                let _ = stack.push(val); // Ok passthrough
+                            }
+                        }
                         "__method_call" => {
                             // Stack: [self, arg0, ..., argN, arg_count, method_name]
                             let method_name_chain = vm_pop!(stack, events);
@@ -3046,6 +3205,13 @@ impl OlangVM {
                 Op::Halt => {
                     break;
                 }
+            }
+
+            // Phase 5 A10: Handle EarlyReturn from ? operator
+            // ? on Err/None → early return (same as Ret: break current execution)
+            if events.iter().any(|e| matches!(e, VmEvent::EarlyReturn)) {
+                events.retain(|e| !matches!(e, VmEvent::EarlyReturn));
+                break;
             }
         }
 

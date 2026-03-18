@@ -855,6 +855,9 @@ impl HomeRuntime {
                 VmEvent::ModDecl { path } => {
                     output_text.push_str(&format!("[mod {}] ", path));
                 }
+                VmEvent::EarlyReturn => {
+                    // Handled inside VM — should not reach runtime
+                }
             }
         }
 

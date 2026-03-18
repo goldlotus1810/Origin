@@ -661,6 +661,9 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             validate_expr(value, scope, errors);
             validate_expr(default, scope, errors);
         }
+        Expr::TryPropagate(inner) => {
+            validate_expr(inner, scope, errors);
+        }
         Expr::Tuple(elements) => {
             for e in elements {
                 validate_expr(e, scope, errors);
@@ -747,6 +750,7 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         | Expr::MethodCall { .. } | Expr::SelfRef
         | Expr::ChannelCreate => ChainKind::Unknown,
         Expr::UnwrapOr { value, .. } => infer_expr_kind(value),
+        Expr::TryPropagate(inner) => infer_expr_kind(inner),
         Expr::Tuple(_) => ChainKind::Unknown,
         Expr::FStr { .. } => ChainKind::Unknown,
         Expr::BitShl(..) | Expr::BitShr(..) | Expr::BitAnd(..)
@@ -1891,6 +1895,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "assert_eq" => Some("__assert_eq"),
                 "assert_ne" => Some("__assert_ne"),
                 "assert_true" => Some("__assert_true"),
+                // Phase 5 A11: Builtin Option/Result constructors
+                "Some" => Some("__opt_some"),
+                "None" => Some("__opt_none"),
+                "Ok" => Some("__res_ok"),
+                "Err" => Some("__res_err"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -2424,6 +2433,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "pad_left" => Some("__str_pad_left"),
                 "pad_right" => Some("__str_pad_right"),
                 "char_at" => Some("__str_char_at"),
+                // Phase 5 A11: Option/Result methods
+                "is_some" => Some("__opt_is_some"),
+                "is_none" => Some("__opt_is_none"),
+                "is_ok" => Some("__res_is_ok"),
+                "is_err" => Some("__res_is_err"),
+                "unwrap" => Some("__opt_unwrap"),
+                "unwrap_or" => Some("__opt_unwrap_or"),
+                "map_err" => Some("__res_map_err"),
                 // Phase 3 B6: Byte operations
                 "to_bytes" => Some("__to_bytes"),
                 "from_bytes" => Some("__from_bytes"),
@@ -2536,6 +2553,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             // End
             let end = ctx.current_pos();
             ctx.patch_jump(jmp_pos, end);
+        }
+
+        Expr::TryPropagate(inner) => {
+            // ? operator: evaluate inner, check if Err/None → early return, else unwrap Ok/Some payload
+            lower_expr(inner, ctx);
+            ctx.emit(Op::Call("__try_unwrap".into()));
         }
 
         Expr::Tuple(elements) => {
@@ -6563,5 +6586,278 @@ mod tests {
         assert!(!outputs.is_empty());
         let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
         assert_eq!(s, "platform ok");
+    }
+
+    // ── Phase 5 A10: ? error propagation tests ──────────────────────────────
+
+    #[test]
+    fn try_propagate_ok_unwraps() {
+        // ? on Ok(42) should unwrap to 42
+        let src = r#"
+            let r = Result::Ok(42);
+            let v = r?;
+            emit v;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "? on Ok should unwrap and emit");
+        let n = outputs[0].to_number().unwrap_or(-1.0);
+        assert_eq!(n, 42.0);
+    }
+
+    #[test]
+    fn try_propagate_some_unwraps() {
+        // ? on Some(10) should unwrap to 10
+        let src = r#"
+            let x = Option::Some(10);
+            let v = x?;
+            emit v;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "? on Some should unwrap and emit");
+        let n = outputs[0].to_number().unwrap_or(-1.0);
+        assert_eq!(n, 10.0);
+    }
+
+    #[test]
+    fn try_propagate_err_early_returns() {
+        // ? on Err("fail") should early return — no emit after
+        let src = r#"
+            let r = Result::Err("fail");
+            let v = r?;
+            emit 999;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        // 999 should NOT appear — early return before emit
+        let has_999 = outputs.iter().any(|o| o.to_number() == Some(999.0));
+        assert!(!has_999, "? on Err should early return, not reach emit 999");
+    }
+
+    #[test]
+    fn try_propagate_none_early_returns() {
+        // ? on None should early return
+        let src = r#"
+            let x = Option::None;
+            let v = x?;
+            emit 888;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        let has_888 = outputs.iter().any(|o| o.to_number() == Some(888.0));
+        assert!(!has_888, "? on None should early return, not reach emit 888");
+    }
+
+    #[test]
+    fn try_propagate_chained() {
+        // Chaining ? calls: a? then b?
+        let src = r#"
+            let a = Result::Ok(5);
+            let b = Result::Ok(10);
+            let va = a?;
+            let vb = b?;
+            emit va + vb;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "chained ? on Ok should work");
+        let n = outputs[0].to_number().unwrap_or(-1.0);
+        assert_eq!(n, 15.0);
+    }
+
+    #[test]
+    fn try_propagate_validation() {
+        // ? should parse and validate without errors
+        let src = "let v = x?;";
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "? should validate without errors: {:?}", errors);
+    }
+
+    // ── Phase 5 A11: Builtin Option/Result tests ────────────────────────────
+
+    #[test]
+    fn builtin_some_constructor() {
+        let src = r#"
+            let x = Some(42);
+            emit x.is_some();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(1.0));
+    }
+
+    #[test]
+    fn builtin_none_constructor() {
+        let src = r#"
+            let x = None();
+            emit x.is_none();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(1.0));
+    }
+
+    #[test]
+    fn builtin_ok_constructor() {
+        let src = r#"
+            let r = Ok(100);
+            emit r.is_ok();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(1.0));
+    }
+
+    #[test]
+    fn builtin_err_constructor() {
+        let src = r#"
+            let r = Err("fail");
+            emit r.is_err();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(1.0));
+    }
+
+    #[test]
+    fn builtin_unwrap_some() {
+        let src = r#"
+            let x = Some(77);
+            emit x.unwrap();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(77.0));
+    }
+
+    #[test]
+    fn builtin_unwrap_or_none() {
+        let src = r#"
+            let x = None();
+            emit x.unwrap_or(99);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(99.0));
+    }
+
+    #[test]
+    fn builtin_unwrap_or_some() {
+        let src = r#"
+            let x = Some(55);
+            emit x.unwrap_or(99);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(55.0));
+    }
+
+    #[test]
+    fn builtin_ok_unwrap_with_try() {
+        // Ok(42)? should unwrap to 42
+        let src = r#"
+            let r = Ok(42);
+            let v = r?;
+            emit v;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(42.0));
+    }
+
+    #[test]
+    fn builtin_err_early_return_with_try() {
+        // Err("fail")? should early return
+        let src = r#"
+            let r = Err("fail");
+            let v = r?;
+            emit 777;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        let has_777 = outputs.iter().any(|o| o.to_number() == Some(777.0));
+        assert!(!has_777, "Err? should early return, not reach emit 777");
+    }
+
+    #[test]
+    fn builtin_is_some_on_none() {
+        let src = r#"
+            let x = None();
+            emit x.is_some();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(0.0));
+    }
+
+    #[test]
+    fn builtin_is_ok_on_err() {
+        let src = r#"
+            let r = Err("oops");
+            emit r.is_ok();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(0.0));
     }
 }
