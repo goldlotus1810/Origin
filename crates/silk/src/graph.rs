@@ -1,22 +1,28 @@
 //! # graph — SilkGraph
 //!
-//! In-memory graph của tất cả Silk edges.
-//! Sorted by (from_hash, to_hash, kind) cho binary search O(log n).
+//! 3-layer Silk architecture:
 //!
-//! ## Dual-threshold cluster (Dream):
-//!   cluster_score(A,B) =
-//!     0.3 × chain_similarity(A,B) +
-//!     0.4 × hebbian_weight(A,B) +
-//!     0.3 × co_activation_count(A,B) / max_count
-//!   cluster nếu score ≥ 0.6
+//! 1. **Implicit** (SilkIndex): 37 buckets × Ln-1 — 0 bytes edges.
+//!    "Silk = hệ quả toán học của 5D, không phải dữ liệu."
+//!
+//! 2. **Learned** (HebbianLink): slim 19-byte connections.
+//!    Hebbian = PHÁT HIỆN kết nối implicit, không TẠO mới.
+//!    Emotion nằm trong V+A của node, không trên edge.
+//!
+//! 3. **Structural** (SilkEdge): backward compat, parent pointers.
+//!
+//! ## Unified query:
+//!   unified_weight(A, B) = max(implicit_strength, hebbian_weight)
+//!   unified_neighbors(A) = implicit ∪ hebbian (merged by hash)
 
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::edge::{EdgeKind, EmotionTag, SilkEdge};
+use crate::edge::{EdgeKind, EmotionTag, HebbianLink, SilkEdge};
 use crate::hebbian::{
     blend_emotion, fib, hebbian_decay, hebbian_strengthen, should_promote, PROMOTE_WEIGHT,
 };
+use crate::index::SilkIndex;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MolSummary — Lightweight 5D coordinates cho Silk
@@ -89,17 +95,254 @@ impl MolSummary {
 // SilkGraph
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// In-memory Silk graph.
+/// Unified neighbor result: hash + combined weight.
+#[derive(Debug, Clone, Copy)]
+pub struct SilkNeighbor {
+    /// Node hash
+    pub hash: u64,
+    /// Combined weight: max(implicit_strength, hebbian_weight)
+    pub weight: f32,
+    /// Implicit strength from 5D (0.0 if not in index)
+    pub implicit: f32,
+    /// Hebbian learned weight (0.0 if not learned)
+    pub hebbian: f32,
+    /// Số chiều implicit chia sẻ (0..5)
+    pub shared_dims: u8,
+}
+
+/// In-memory Silk graph — 3-layer architecture.
 ///
-/// Tất cả edges sorted by key (from, to, kind) để binary search.
+/// Layer 1: SilkIndex (implicit 5D, 0 bytes edges)
+/// Layer 2: HebbianLink (slim learned connections, 19 bytes each)
+/// Layer 3: SilkEdge (structural, backward compat)
 pub struct SilkGraph {
+    /// Structural + legacy associative edges (backward compat)
     edges: Vec<SilkEdge>,
+    /// Implicit 5D index — 37 buckets, 0-cost connections
+    index: SilkIndex,
+    /// Slim Hebbian links — learned co-activations (sorted by key)
+    learned: Vec<HebbianLink>,
 }
 
 impl SilkGraph {
     /// Tạo graph rỗng.
     pub fn new() -> Self {
-        Self { edges: Vec::new() }
+        Self {
+            edges: Vec::new(),
+            index: SilkIndex::new(),
+            learned: Vec::new(),
+        }
+    }
+
+    // ── SilkIndex access ────────────────────────────────────────────────────
+
+    /// Access implicit 5D index.
+    pub fn index(&self) -> &SilkIndex {
+        &self.index
+    }
+
+    /// Mutable access to index (for registering nodes).
+    pub fn index_mut(&mut self) -> &mut SilkIndex {
+        &mut self.index
+    }
+
+    /// Index a node into the implicit 5D buckets.
+    pub fn index_node(&mut self, hash: u64, mol: &MolSummary) {
+        self.index.index_node(hash, mol);
+    }
+
+    // ── HebbianLink access ──────────────────────────────────────────────────
+
+    /// Number of learned HebbianLinks.
+    pub fn learned_count(&self) -> usize {
+        self.learned.len()
+    }
+
+    /// Find a HebbianLink by (from, to).
+    pub fn find_learned(&self, from: u64, to: u64) -> Option<&HebbianLink> {
+        let key = (from, to);
+        self.learned
+            .binary_search_by_key(&key, |l| l.key())
+            .ok()
+            .map(|i| &self.learned[i])
+    }
+
+    /// Learned weight between two nodes (0.0 if not learned).
+    pub fn learned_weight(&self, from: u64, to: u64) -> f32 {
+        self.find_learned(from, to)
+            .map(|l| l.weight_f32())
+            .unwrap_or(0.0)
+    }
+
+    /// Strengthen or create a HebbianLink (slim co-activation).
+    ///
+    /// This is the NEW preferred way to learn connections:
+    /// - No EmotionTag on edge (emotion lives in node V+A)
+    /// - 19 bytes instead of 46 bytes
+    /// - Hebbian = discovery of implicit 5D connection strength
+    pub fn learn(&mut self, from: u64, to: u64, reward: f32) {
+        let key = (from, to);
+        match self.learned.binary_search_by_key(&key, |l| l.key()) {
+            Ok(idx) => {
+                let link = &mut self.learned[idx];
+                let w = hebbian_strengthen(link.weight_f32(), reward);
+                link.set_weight(w);
+                link.fire_count = link.fire_count.saturating_add(1);
+            }
+            Err(pos) => {
+                self.learned.insert(pos, HebbianLink::new(from, to));
+            }
+        }
+    }
+
+    /// Strengthen with implicit 5D similarity boost.
+    ///
+    /// If molecules share ≥2 dims → reward boosted.
+    pub fn learn_mol(
+        &mut self,
+        from: u64,
+        to: u64,
+        from_mol: Option<&MolSummary>,
+        to_mol: Option<&MolSummary>,
+        reward: f32,
+    ) {
+        let sim_bonus = match (from_mol, to_mol) {
+            (Some(a), Some(b)) => SilkIndex::implicit_silk(a, b).strength,
+            _ => 0.0,
+        };
+
+        let boosted = if sim_bonus >= 0.3 {
+            reward * (1.0 + sim_bonus * 0.5)
+        } else {
+            reward
+        };
+
+        let key = (from, to);
+        match self.learned.binary_search_by_key(&key, |l| l.key()) {
+            Ok(idx) => {
+                let link = &mut self.learned[idx];
+                let w = hebbian_strengthen(link.weight_f32(), boosted);
+                link.set_weight(w);
+                link.fire_count = link.fire_count.saturating_add(1);
+            }
+            Err(pos) => {
+                let mut link = HebbianLink::new(from, to);
+                // Nodes sharing ≥3 dims start stronger
+                if sim_bonus >= 0.6 {
+                    link.set_weight((link.weight_f32() + sim_bonus * 0.3).min(0.8));
+                }
+                self.learned.insert(pos, link);
+            }
+        }
+    }
+
+    /// Decay all learned links by elapsed time.
+    pub fn decay_learned(&mut self, elapsed_ns: i64) {
+        for link in &mut self.learned {
+            let w = hebbian_decay(link.weight_f32(), elapsed_ns);
+            link.set_weight(w);
+        }
+        // Remove links that decayed below threshold
+        self.learned.retain(|l| l.weight_f32() >= 0.01);
+    }
+
+    // ── Unified query (implicit + learned) ──────────────────────────────────
+
+    /// Unified weight between 2 nodes: max(implicit, hebbian, legacy_assoc).
+    ///
+    /// This is the PREFERRED query method — combines all 3 layers.
+    pub fn unified_weight(&self, from: u64, to: u64, from_mol: Option<&MolSummary>, to_mol: Option<&MolSummary>) -> f32 {
+        // Layer 1: implicit from 5D
+        let implicit = match (from_mol, to_mol) {
+            (Some(a), Some(b)) => SilkIndex::implicit_silk(a, b).strength,
+            _ => 0.0,
+        };
+
+        // Layer 2: learned (HebbianLink)
+        let hebb = self.learned_weight(from, to)
+            .max(self.learned_weight(to, from));
+
+        // Layer 3: legacy (SilkEdge assoc)
+        let legacy = self.assoc_weight(from, to)
+            .max(self.assoc_weight(to, from));
+
+        implicit.max(hebb).max(legacy)
+    }
+
+    /// Unified neighbors: implicit + learned + legacy merged.
+    ///
+    /// Returns sorted by weight desc.
+    pub fn unified_neighbors(&self, hash: u64, mol: Option<&MolSummary>) -> Vec<SilkNeighbor> {
+        use alloc::collections::BTreeMap;
+        let mut map: BTreeMap<u64, SilkNeighbor> = BTreeMap::new();
+
+        // Layer 1: implicit neighbors from index
+        if let Some(m) = mol {
+            for (h, shared) in self.index.implicit_neighbors(hash, m) {
+                let implicit_str = shared as f32 * 0.20; // approximate
+                map.insert(h, SilkNeighbor {
+                    hash: h,
+                    weight: implicit_str,
+                    implicit: implicit_str,
+                    hebbian: 0.0,
+                    shared_dims: shared,
+                });
+            }
+        }
+
+        // Layer 2: learned links (from this node)
+        for link in &self.learned {
+            if link.from_hash == hash || link.to_hash == hash {
+                let other = if link.from_hash == hash { link.to_hash } else { link.from_hash };
+                let w = link.weight_f32();
+                let entry = map.entry(other).or_insert(SilkNeighbor {
+                    hash: other,
+                    weight: 0.0,
+                    implicit: 0.0,
+                    hebbian: 0.0,
+                    shared_dims: 0,
+                });
+                entry.hebbian = entry.hebbian.max(w);
+                entry.weight = entry.weight.max(w);
+            }
+        }
+
+        // Layer 3: legacy edges (backward compat)
+        for e in &self.edges {
+            if e.from_hash == hash || e.to_hash == hash {
+                let other = if e.from_hash == hash { e.to_hash } else { e.from_hash };
+                let entry = map.entry(other).or_insert(SilkNeighbor {
+                    hash: other,
+                    weight: 0.0,
+                    implicit: 0.0,
+                    hebbian: 0.0,
+                    shared_dims: 0,
+                });
+                entry.weight = entry.weight.max(e.weight);
+            }
+        }
+
+        let mut result: Vec<SilkNeighbor> = map.into_values().collect();
+        result.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(core::cmp::Ordering::Equal));
+        result
+    }
+
+    /// Promote candidates from learned links (Dream input).
+    pub fn learned_promote_candidates(&self, depth: usize) -> Vec<(u64, u64, f32)> {
+        let max_fire = self.learned.iter().map(|l| l.fire_count as u32).max().unwrap_or(1);
+
+        let mut candidates: Vec<(u64, u64, f32)> = self.learned
+            .iter()
+            .filter(|l| should_promote(l.weight_f32(), l.fire_count as u32, depth))
+            .map(|l| {
+                let fire_ratio = l.fire_count as f32 / max_fire as f32;
+                let score = 0.4 * l.weight_f32() + 0.3 * fire_ratio;
+                (l.from_hash, l.to_hash, score)
+            })
+            .collect();
+
+        candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
+        candidates
     }
 
     // ── Insert / Connect ─────────────────────────────────────────────────────

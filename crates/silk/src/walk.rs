@@ -13,7 +13,7 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
 use crate::edge::{EdgeKind, EmotionTag};
-use crate::graph::SilkGraph;
+use crate::graph::{MolSummary, SilkGraph};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WalkResult
@@ -94,6 +94,80 @@ pub fn sentence_affect(
     // Normalize
     if total_weight > 0.0 {
         // Clamp valence và arousal
+        composite.valence = composite.valence.clamp(-1.0, 1.0);
+        composite.arousal = composite.arousal.clamp(0.0, 1.0);
+        composite.dominance = composite.dominance.clamp(0.0, 1.0);
+        composite.intensity = composite.intensity.clamp(0.0, 1.0);
+    }
+
+    WalkResult {
+        composite,
+        path,
+        total_weight,
+    }
+}
+
+/// Walk qua unified Silk (implicit 5D + learned Hebbian) để tính emotion.
+///
+/// Giống sentence_affect nhưng dùng unified_weight thay vì chỉ assoc_weight.
+/// Khi có MolSummary cho mỗi từ → implicit Silk boost emotion amplification.
+///
+/// Đây là cách đúng theo tài liệu:
+/// "Silk = hệ quả của 5D. Hebbian = phát hiện, không tạo mới."
+pub fn sentence_affect_unified(
+    graph: &SilkGraph,
+    word_hashes: &[u64],
+    word_emotions: &[EmotionTag],
+    word_mols: &[Option<MolSummary>],
+    max_depth: usize,
+) -> WalkResult {
+    if word_hashes.is_empty() {
+        return WalkResult {
+            composite: EmotionTag::NEUTRAL,
+            path: Vec::new(),
+            total_weight: 0.0,
+        };
+    }
+
+    let mut composite = word_emotions
+        .first()
+        .copied()
+        .unwrap_or(EmotionTag::NEUTRAL);
+    let mut path = Vec::new();
+    let mut total_weight = 1.0f32;
+
+    path.push(word_hashes[0]);
+
+    for i in 1..word_hashes.len().min(word_emotions.len()) {
+        let hash = word_hashes[i];
+        let w_emo = word_emotions[i];
+
+        // Unified weight: implicit(5D) + hebbian + legacy
+        let prev_mol = if i - 1 < word_mols.len() { word_mols[i - 1].as_ref() } else { None };
+        let curr_mol = if i < word_mols.len() { word_mols[i].as_ref() } else { None };
+
+        let edge_weight = graph.unified_weight(
+            word_hashes[i - 1], hash,
+            prev_mol, curr_mol,
+        );
+
+        if edge_weight > 0.01 {
+            let amplified = amplify_emotion(w_emo, edge_weight);
+            composite = blend_composite(composite, amplified, edge_weight);
+            total_weight += edge_weight;
+        } else {
+            composite = blend_composite(composite, w_emo, 0.3);
+            total_weight += 0.3;
+        }
+
+        path.push(hash);
+
+        if path.len() >= max_depth {
+            break;
+        }
+    }
+
+    if total_weight > 0.0 {
         composite.valence = composite.valence.clamp(-1.0, 1.0);
         composite.arousal = composite.arousal.clamp(0.0, 1.0);
         composite.dominance = composite.dominance.clamp(0.0, 1.0);
