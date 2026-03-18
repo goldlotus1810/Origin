@@ -510,7 +510,7 @@ pub fn detect_tense(text: &str) -> Tense {
 /// Infer context với tense — recency tự động từ thì của câu.
 ///
 /// Kết hợp infer_context + detect_tense → EmotionContext hoàn chỉnh.
-pub fn infer_context_with_tense(text: &str) -> super::context::EmotionContext {
+pub fn infer_context_with_tense(text: &str) -> crate::context::EmotionContext {
     let mut ctx = infer_context(text);
     let tense = detect_tense(text);
 
