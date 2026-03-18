@@ -1001,5 +1001,101 @@ Cùng bytecode chạy trên vm_x86_64 và vm_arm64:
 
 ---
 
+## Phase 5+ Note: GPU/NPU Offload khi scale 100B nodes
+
+```
+HIỆN TẠI (Phase 1): CPU-only là ĐÚNG.
+  - 5400 L0 nodes → mọi thứ sequential, microseconds
+  - Dream cluster vài trăm observations → trivial
+  - Silk walk vài nghìn edges → instant
+
+TƯƠNG LAI (100B nodes = 3.3 TB knowledge):
+  - Dream clustering O(N²) trên 1M+ observations → KHÔNG THỂ CPU-only
+  - Silk graph traversal 100B edges → BFS/DFS = minutes
+  - Batch LCA: cluster 1M nodes → 1M × 5D weighted avg
+  - Batch FNV-1a: import 10M chains/sec pipeline
+  - Similarity search: nearest neighbor trong 100B 5D points
+
+COMPUTE LANDSCAPE trên ARM64:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ Unit         Capability              Access                 │
+  ├─────────────────────────────────────────────────────────────┤
+  │ CPU (A78+)   General, sequential     Direct ASM (hiện tại)  │
+  │ GPU (Mali/   Parallel f32/f16,       Vulkan Compute shader  │
+  │      Adreno) 1000+ cores             OpenCL (deprecated)    │
+  │ NPU (Hexagon Tensor ops, int8/int4   NNAPI / QNN / vendor   │
+  │      /APU)   matrix multiply         SDK (fragmented)       │
+  │ Apple GPU    Unified memory,         Metal Compute shader   │
+  │              f32/f16, 128+ cores                            │
+  │ Apple ANE    Neural Engine, int8     CoreML only (opaque)    │
+  └─────────────────────────────────────────────────────────────┘
+
+WORKLOAD → ACCELERATOR MAPPING:
+  Workload                    Best fit     Why
+  ──────────────────────────────────────────────────────────────
+  Opcode dispatch             CPU          Sequential, branchy
+  FNV-1a (single)             CPU          Sequential, few ops
+  FNV-1a (batch 10M)          GPU          Embarrassingly parallel
+  LCA (single)                CPU          5D avg, trivial
+  LCA (batch 1M)              GPU          1M independent 5D avgs
+  Dream clustering            GPU          Pairwise distance matrix
+  Silk BFS/DFS                CPU+GPU      Graph traversal hybrid
+  Similarity search (KNN)     GPU/NPU      5D nearest neighbor
+  SHA-256 (batch verify)      GPU          Parallel blocks
+  Molecule comparison (5D)    NPU          Low-precision vector ops
+  ──────────────────────────────────────────────────────────────
+
+THIẾT KẾ DỰ KIẾN (Phase 5+):
+  1. VM thêm opcode: GpuSubmit(kernel_id, data_ptr, data_len)
+     → Không thay đổi bytecode format — chỉ thêm tag mới
+     → Kernel = pre-compiled compute shader, embed trong origin.olang
+
+  2. Kernel types (ít, tập trung):
+     KERNEL_BATCH_HASH      — N chains → N hashes (GPU)
+     KERNEL_BATCH_LCA       — N×M chains → N LCA results (GPU)
+     KERNEL_DISTANCE_MATRIX — N observations → N×N similarity (GPU)
+     KERNEL_KNN_SEARCH      — query 5D → top-K nearest (GPU/NPU)
+     KERNEL_SILK_BFS        — start node → reachable set (GPU)
+
+  3. Memory model:
+     CPU (origin.olang) ←→ GPU (device memory)
+     ARM64: Unified Memory (Apple/Qualcomm) → zero-copy
+     x86_64: PCIe transfer → explicit copy
+
+  4. Fallback chain: NPU → GPU → SIMD (NEON) → scalar CPU
+     Runtime detect capabilities → chọn path nhanh nhất
+     HAL đã có: has_simd, has_crypto → thêm has_gpu, has_npu
+
+  5. Nguyên tắc:
+     ① GPU/NPU = ACCELERATOR, không phải REQUIREMENT
+       origin.olang PHẢI chạy được trên CPU-only (phone cũ, RPi)
+     ② Kết quả GPU == kết quả CPU (deterministic, bitwise)
+       → f32 trên GPU vs f64 trên CPU = KHÔNG CHẤP NHẬN
+       → Phải dùng f64 hoặc fixed-point đảm bảo consistency
+     ③ Không vendor lock-in: Vulkan (cross-platform) > Metal/CUDA
+       → Apple: Metal (bắt buộc) + Vulkan (MoltenVK fallback)
+     ④ Kernel code embed trong origin.olang (self-contained)
+       → Không download shader runtime
+       → SPIR-V binary embed trong bytecode section
+
+CON SỐ ƯỚC TÍNH (100B nodes):
+  Operation              CPU (1 core)    GPU (Mali-G78)    Speedup
+  ─────────────────────────────────────────────────────────────────
+  1M FNV-1a hashes       50ms            0.5ms             100×
+  1M LCA (5D avg)        200ms           2ms               100×
+  Distance matrix 10K    500ms           5ms               100×
+  KNN search (K=10)      1s              10ms              100×
+  Silk BFS (depth=5)     2s              200ms             10×
+  Dream cluster (1M obs) 30min           30s               60×
+  ─────────────────────────────────────────────────────────────────
+
+⚠️ KHÔNG IMPLEMENT BÂY GIỜ.
+   Phase 1: CPU-only, correct, simple.
+   Phase 5: Profile real workloads → thêm GPU kernel cho bottleneck.
+   Thiết kế VM sao cho THÊM opcode = backward compatible.
+```
+
+---
+
 *Tham chiếu: PLAN_REWRITE.md § Giai đoạn 1.2*
 *Phụ thuộc: PLAN_1_1 (vm_x86_64.S), PLAN_0_5 (bytecode format)*

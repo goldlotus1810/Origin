@@ -1327,6 +1327,110 @@ Auditability         ~1000 LOC Rust            ~1500 LOC WAT
 
 ---
 
+## Phase 5+ Note: WebGPU/Compute khi scale 100B nodes
+
+```
+HIỆN TẠI (Phase 1): WASM CPU-only là ĐÚNG.
+  - VM stack machine, sequential opcodes
+  - Vài nghìn nodes → microseconds
+
+TƯƠNG LAI (100B nodes):
+  Cùng bottleneck như native:
+    - Dream clustering O(N²) → cần parallel
+    - Batch LCA/hash → cần parallel
+    - Similarity search → cần parallel
+
+  Nhưng WASM có đường riêng: WebGPU
+
+WEBGPU — GPU TRONG BROWSER:
+  ┌──────────────────────────────────────────────────────────┐
+  │ WebGPU (2023+, W3C standard)                             │
+  │                                                          │
+  │ Compute shaders:    WGSL language (≈ simplified GLSL)    │
+  │ Data types:         f32, i32, u32, vec2/3/4, mat4x4      │
+  │ Workgroups:         parallel execution (like CUDA blocks)│
+  │ Buffer binding:     GPU ←→ WASM linear memory            │
+  │ Browser support:    Chrome 113+, Firefox 141+, Safari 18+│
+  │                                                          │
+  │ ⚠ KHÔNG CÓ f64 — chỉ f32!                               │
+  │ → Precision issue cho FNV-1a (64-bit hash)               │
+  │ → Cần emulate i64 bằng 2×u32 hoặc dùng CPU fallback     │
+  └──────────────────────────────────────────────────────────┘
+
+WORKLOAD → ACCELERATOR MAPPING (WASM context):
+  Workload                    CPU (WASM)    WebGPU        Notes
+  ─────────────────────────────────────────────────────────────
+  Opcode dispatch             ✅            ❌            Sequential
+  FNV-1a (single)             ✅            ❌            64-bit, sequential
+  FNV-1a (batch 10M)          ❌ slow       ⚠️ i64 issue  Emulate 64-bit trên GPU
+  LCA (batch 1M, 5D avg)      ❌ slow       ✅ f32 OK     5D avg = f32 acceptable
+  Dream distance matrix        ❌ slow       ✅            Pairwise 5D distance
+  KNN search                   ❌ slow       ✅            Parallel scan
+  Silk BFS                     ⚠️            ⚠️           Graph = irregular access
+  SHA-256 (batch)              ❌ slow       ✅ u32 ops    SHA-256 = u32 math
+  ─────────────────────────────────────────────────────────────
+
+THIẾT KẾ DỰ KIẾN:
+  1. Thêm host import:
+     (import "env" "host_gpu_available" (func $host_gpu_available (result i32)))
+     (import "env" "host_gpu_submit"
+       (func $host_gpu_submit (param i32 i32 i32 i32) (result i32)))
+       ;; (kernel_id, input_ptr, input_len, output_ptr) → status
+
+  2. JS host side:
+     host_gpu_submit → GPUDevice.createComputePipeline()
+                     → dispatch workgroups
+                     → readBuffer → copy to WASM memory
+
+  3. WGSL Kernels (embed as strings in host.js):
+     @compute @workgroup_size(256)
+     fn batch_lca(@builtin(global_invocation_id) id: vec3u) {
+       // 5D weighted average per pair
+       let idx = id.x;
+       let a = load_mol(input, idx * 2);
+       let b = load_mol(input, idx * 2 + 1);
+       store_mol(output, idx, avg_5d(a, b));
+     }
+
+  4. Fallback: WebGPU unavailable → CPU WASM (always works)
+
+  5. Precision strategy:
+     ① LCA, similarity, Dream scoring: f32 OK (approximate math)
+     ② FNV-1a hash: MUST be i64 → CPU only, hoặc emulate
+        emulate_i64_mul(a_hi, a_lo, b_hi, b_lo) trên GPU
+        → 4× chậm hơn nhưng vẫn parallel → net win cho batch
+     ③ SHA-256: u32 math → GPU native, no precision issue
+     ④ Kết quả GPU == kết quả CPU trong error margin ε
+        FNV-1a: exact match (emulated i64)
+        LCA: |gpu_result - cpu_result| < 1e-5 (f32 vs f64)
+
+WASM-SPECIFIC CONSIDERATIONS:
+  - SharedArrayBuffer + Atomics cho Web Worker parallelism
+    (cần COOP/COEP headers — server phải hỗ trợ)
+  - WASM threads proposal → pthreads-like trong WASM
+    → CPU-side parallel khi không có WebGPU
+  - WASM SIMD (128-bit): i32x4, f32x4, f64x2
+    → Process 2 molecules (5D) cùng lúc trên CPU
+    → Intermediate step trước khi cần GPU
+
+CON SỐ ƯỚC TÍNH (100B nodes, browser):
+  Operation              WASM CPU      WebGPU          Speedup
+  ─────────────────────────────────────────────────────────────
+  1M LCA (5D f32)        400ms         4ms             100×
+  Distance matrix 10K    1s            10ms            100×
+  SHA-256 batch 100K     2s            20ms            100×
+  FNV-1a batch 1M (emu)  100ms         5ms             20×
+  Dream cluster (1M)     60min         1min            60×
+  ─────────────────────────────────────────────────────────────
+
+⚠️ KHÔNG IMPLEMENT BÂY GIỜ.
+   Phase 1: WASM CPU-only, correct, portable.
+   Phase 5: Profile real workloads → thêm WebGPU cho bottleneck.
+   host_gpu_submit = 1 import thêm, backward compatible.
+```
+
+---
+
 *Tham chiếu: PLAN_REWRITE.md § Giai đoạn 1.3*
 *Phụ thuộc: PLAN_1_1 (vm_x86_64.S), PLAN_0_5 (bytecode format)*
 *Liên quan: crates/wasm/src/bridge.rs (BridgeMsg protocol giữ lại)*
