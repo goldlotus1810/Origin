@@ -3,9 +3,9 @@
 > **Đọc file này TRƯỚC KHI viết bất kỳ dòng code nào.**
 > Mọi AI (Claude, GPT, Copilot...) mở project này đều phải hiểu những gì dưới đây.
 >
-> **⚠️ REWRITE đang diễn ra.** Đọc `plans/README.md` trước khi code.
+> **⚠️ REWRITE đang diễn ra.** Đọc `TASKBOARD.md` → claim task → rồi mới code.
 > Mọi việc mới đều có Plan chi tiết — KHÔNG tự ý viết Rust mới.
-> Xem: [Plans](#️-trước-khi-viết-bất-kỳ-code-nào--đọc-plans)
+> Xem: [Phối hợp](#️-trước-khi-viết-bất-kỳ-code-nào--đọc-plans) | [TASKBOARD.md](TASKBOARD.md)
 
 ---
 
@@ -719,11 +719,13 @@ KHÔNG TỰ Ý viết code mới nếu chưa đọc Plan tương ứng.
 📂 plans/PLAN_AUTH_*.md      ← Auth (song song được)
 
 QUY TRÌNH BẮT BUỘC:
-  1. Đọc plans/README.md → xem dependency graph
-  2. Tìm Plan phù hợp với việc cần làm
+  0. git pull → đọc TASKBOARD.md → xem task nào FREE
+  1. Claim task: cập nhật TASKBOARD.md → commit + push NGAY
+  2. Đọc Plan tương ứng (plans/PLAN_*.md)
   3. Đọc TOÀN BỘ Plan đó (bối cảnh, rào cản, DoD)
   4. Viết code THEO Plan — không tự sáng tác
-  5. Nếu không có Plan → HỎI trước, KHÔNG tự viết
+  5. Xong → cập nhật TASKBOARD.md → DONE
+  6. Nếu không có Plan → HỎI trước, KHÔNG tự viết
 
 TẠI SAO?
   — Rust codebase hiện tại ĐANG BỊ THAY THẾ dần bởi Olang
