@@ -144,6 +144,49 @@ pub enum Stmt {
 
     /// `obj.field = expr;` or `obj.a.b.c = expr;` — assign to field of dict/record
     FieldAssign { object: String, fields: Vec<String>, value: Expr },
+
+    /// `struct Name { field1, field2, ... }` — struct definition
+    StructDef { name: String, fields: Vec<StructField> },
+
+    /// `enum Name { Variant1, Variant2(Type), ... }` — enum definition
+    EnumDef { name: String, variants: Vec<EnumVariant> },
+
+    /// `impl Name { fn method(self, ...) { ... } ... }` — impl block
+    ImplBlock { target: String, methods: Vec<Stmt> },
+
+    /// `trait Name { fn method(self); ... }` — trait definition
+    TraitDef { name: String, methods: Vec<TraitMethod> },
+
+    /// `impl TraitName for StructName { ... }` — trait implementation
+    ImplTrait { trait_name: String, target: String, methods: Vec<Stmt> },
+
+    /// `spawn { body }` — concurrent task
+    Spawn { body: Vec<Stmt> },
+}
+
+/// Struct field with optional type annotation.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub struct StructField {
+    pub name: String,
+    pub type_name: Option<String>,
+}
+
+/// Enum variant — unit, tuple, or struct variant.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub struct EnumVariant {
+    pub name: String,
+    /// Payload types (empty = unit variant)
+    pub fields: Vec<String>,
+}
+
+/// Trait method signature (no body).
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub struct TraitMethod {
+    pub name: String,
+    pub params: Vec<String>,
 }
 
 /// Match arm — pattern + body.
@@ -172,6 +215,8 @@ pub enum MatchPattern {
     },
     /// Wildcard: `_` — matches anything (default arm)
     Wildcard,
+    /// Enum variant: `Color::Red` or `Option::Some(x)`
+    EnumPattern { enum_name: String, variant: String, bindings: Vec<String> },
 }
 
 /// Comparison operator.
@@ -299,6 +344,21 @@ pub enum Expr {
 
     /// Conditional expression: `if cond { a } else { b }`
     IfExpr { cond: Box<Expr>, then_expr: Box<Expr>, else_expr: Box<Expr> },
+
+    /// Struct instantiation: `Point { x: 1, y: 2 }`
+    StructLiteral { name: String, fields: Vec<(String, Expr)> },
+
+    /// Enum variant: `Color::Red` or `Option::Some(value)`
+    EnumVariantExpr { enum_name: String, variant: String, args: Vec<Expr> },
+
+    /// Method call: `obj.method(args)` — dispatched via impl table
+    MethodCall { object: Box<Expr>, method: String, args: Vec<Expr> },
+
+    /// Self reference: `self`
+    SelfRef,
+
+    /// `channel()` — create a new channel for spawn communication
+    ChannelCreate,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,6 +496,16 @@ impl<'a> Parser<'a> {
                 if self.check(&Token::Semi) { self.advance(); }
                 Ok(Stmt::Use(module))
             }
+            Token::Struct => self.parse_struct_def(),
+            Token::Enum => self.parse_enum_def(),
+            Token::Impl => self.parse_impl(),
+            Token::Trait => self.parse_trait_def(),
+            Token::Pub => {
+                self.advance(); // consume 'pub'
+                // pub struct / pub fn / pub enum / pub trait — skip pub, parse inner
+                self.parse_stmt()
+            }
+            Token::Spawn => self.parse_spawn(),
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -600,10 +670,27 @@ impl<'a> Parser<'a> {
                     _ => Err(ParseError::new("Expected molecular literal pattern")),
                 }
             }
-            // Ident → type name (SDF, MATH, EMOTICON, etc.)
+            // Ident → type name OR enum variant pattern (Name::Variant or Name::Variant(x))
             Token::Ident(_) => {
                 let name = self.expect_ident()?;
-                Ok(MatchPattern::TypeName(name))
+                // Check for :: (enum variant pattern)
+                if self.check(&Token::ColonColon) {
+                    self.advance();
+                    let variant = self.expect_ident()?;
+                    // Optional payload bindings: Name::Variant(x, y)
+                    let mut bindings = Vec::new();
+                    if self.check(&Token::LParen) {
+                        self.advance();
+                        while !self.check(&Token::RParen) && !self.at_eof() {
+                            bindings.push(self.expect_ident()?);
+                            if self.check(&Token::Comma) { self.advance(); }
+                        }
+                        self.expect(&Token::RParen)?;
+                    }
+                    Ok(MatchPattern::EnumPattern { enum_name: name, variant, bindings })
+                } else {
+                    Ok(MatchPattern::TypeName(name))
+                }
             }
             _ => Err(ParseError::new("Expected match pattern (type name, { mol }, or _)")),
         }
@@ -661,6 +748,134 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         Ok(Stmt::While { cond, body })
+    }
+
+    // ── Type system: struct, enum, impl, trait ──────────────────────────────
+
+    /// `struct Name { field1: Type, field2, ... }`
+    fn parse_struct_def(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'struct'
+        let name = self.expect_ident()?;
+        self.expect(&Token::LBrace)?;
+        let mut fields = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let field_name = self.expect_ident()?;
+            let type_name = if self.check(&Token::Colon) {
+                self.advance();
+                Some(self.expect_ident()?)
+            } else {
+                None
+            };
+            fields.push(StructField { name: field_name, type_name });
+            if self.check(&Token::Comma) {
+                self.advance();
+            }
+        }
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) { self.advance(); }
+        Ok(Stmt::StructDef { name, fields })
+    }
+
+    /// `enum Name { Variant1, Variant2(Type), ... }`
+    fn parse_enum_def(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'enum'
+        let name = self.expect_ident()?;
+        self.expect(&Token::LBrace)?;
+        let mut variants = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let variant_name = self.expect_ident()?;
+            let mut fields = Vec::new();
+            if self.check(&Token::LParen) {
+                self.advance();
+                while !self.check(&Token::RParen) && !self.at_eof() {
+                    fields.push(self.expect_ident()?);
+                    if self.check(&Token::Comma) { self.advance(); }
+                }
+                self.expect(&Token::RParen)?;
+            }
+            variants.push(EnumVariant { name: variant_name, fields });
+            if self.check(&Token::Comma) { self.advance(); }
+        }
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) { self.advance(); }
+        Ok(Stmt::EnumDef { name, variants })
+    }
+
+    /// `impl Name { ... }` or `impl Trait for Name { ... }`
+    fn parse_impl(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'impl'
+        let first = self.expect_ident()?;
+        // Check for `impl Trait for Type { ... }`
+        if self.check(&Token::For) {
+            self.advance();
+            let target = self.expect_ident()?;
+            self.expect(&Token::LBrace)?;
+            let mut methods = Vec::new();
+            while !self.check(&Token::RBrace) && !self.at_eof() {
+                if self.check(&Token::Pub) { self.advance(); }
+                methods.push(self.parse_fn()?);
+            }
+            self.expect(&Token::RBrace)?;
+            if self.check(&Token::Semi) { self.advance(); }
+            return Ok(Stmt::ImplTrait {
+                trait_name: first,
+                target,
+                methods,
+            });
+        }
+        // Plain impl
+        self.expect(&Token::LBrace)?;
+        let mut methods = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            if self.check(&Token::Pub) { self.advance(); }
+            methods.push(self.parse_fn()?);
+        }
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) { self.advance(); }
+        Ok(Stmt::ImplBlock { target: first, methods })
+    }
+
+    /// `trait Name { fn method(self); ... }`
+    fn parse_trait_def(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'trait'
+        let name = self.expect_ident()?;
+        self.expect(&Token::LBrace)?;
+        let mut methods = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            if self.check(&Token::Pub) { self.advance(); }
+            self.expect(&Token::Fn)?;
+            let method_name = self.expect_ident()?;
+            self.expect(&Token::LParen)?;
+            let mut params = Vec::new();
+            while !self.check(&Token::RParen) && !self.at_eof() {
+                if self.check(&Token::SelfKw) {
+                    self.advance();
+                    params.push("self".into());
+                } else {
+                    params.push(self.expect_ident()?);
+                }
+                if self.check(&Token::Comma) { self.advance(); }
+            }
+            self.expect(&Token::RParen)?;
+            if self.check(&Token::Semi) { self.advance(); }
+            methods.push(TraitMethod { name: method_name, params });
+        }
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) { self.advance(); }
+        Ok(Stmt::TraitDef { name, methods })
+    }
+
+    /// `spawn { body }`
+    fn parse_spawn(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'spawn'
+        self.expect(&Token::LBrace)?;
+        let mut body = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            body.push(self.parse_stmt()?);
+        }
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) { self.advance(); }
+        Ok(Stmt::Spawn { body })
     }
 
     /// command (STR)? ';'?
@@ -849,10 +1064,19 @@ impl<'a> Parser<'a> {
     fn parse_params(&mut self) -> Result<Vec<String>, ParseError> {
         let mut params = Vec::new();
         if !self.check(&Token::RParen) {
-            params.push(self.expect_ident()?);
-            while self.check(&Token::Comma) {
+            // Accept `self` as first parameter
+            if self.check(&Token::SelfKw) {
                 self.advance();
+                params.push("self".into());
+                if self.check(&Token::Comma) { self.advance(); }
+            }
+            while !self.check(&Token::RParen) && !self.at_eof() {
                 params.push(self.expect_ident()?);
+                if self.check(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
             }
         }
         Ok(params)
@@ -1045,8 +1269,37 @@ impl<'a> Parser<'a> {
                 let name = name.clone();
                 self.advance();
 
+                // Check for :: (enum variant or associated function)
+                if self.check(&Token::ColonColon) {
+                    self.advance(); // consume ::
+                    let variant = self.expect_ident()?;
+                    // Check for payload: Name::Variant(args)
+                    if self.check(&Token::LParen) {
+                        self.advance();
+                        let args = self.parse_args()?;
+                        self.expect(&Token::RParen)?;
+                        Expr::EnumVariantExpr { enum_name: name, variant, args }
+                    } else {
+                        Expr::EnumVariantExpr { enum_name: name, variant, args: Vec::new() }
+                    }
+                }
+                // Check for struct literal: Name { field: value, ... }
+                // Distinguish from block: Name followed by { ident : (not =)
+                else if self.check(&Token::LBrace) && self.is_struct_literal(&name) {
+                    self.advance(); // consume {
+                    let mut fields = Vec::new();
+                    while !self.check(&Token::RBrace) && !self.at_eof() {
+                        let field_name = self.expect_ident()?;
+                        self.expect(&Token::Colon)?;
+                        let value = self.parse_expr()?;
+                        fields.push((field_name, value));
+                        if self.check(&Token::Comma) { self.advance(); }
+                    }
+                    self.expect(&Token::RBrace)?;
+                    Expr::StructLiteral { name, fields }
+                }
                 // Check for function call: name(args)
-                if self.check(&Token::LParen) {
+                else if self.check(&Token::LParen) {
                     self.advance();
                     let args = self.parse_args()?;
                     self.expect(&Token::RParen)?;
@@ -1064,6 +1317,20 @@ impl<'a> Parser<'a> {
                 } else {
                     Expr::Ident(name)
                 }
+            }
+
+            // self keyword
+            Token::SelfKw => {
+                self.advance();
+                Expr::SelfRef
+            }
+
+            // channel() — create a new channel
+            Token::Channel => {
+                self.advance();
+                self.expect(&Token::LParen)?;
+                self.expect(&Token::RParen)?;
+                Expr::ChannelCreate
             }
 
             Token::Int(val) => {
@@ -1175,9 +1442,6 @@ impl<'a> Parser<'a> {
             if self.check(&Token::LParen) {
                 self.advance(); // consume (
                 let mut args = Vec::new();
-                // First arg is the object itself (self)
-                args.push(expr);
-                // Parse remaining args
                 if !self.check(&Token::RParen) {
                     args.push(self.parse_expr()?);
                     while self.check(&Token::Comma) {
@@ -1186,7 +1450,11 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(&Token::RParen)?;
-                expr = Expr::Call { name: field, args };
+                expr = Expr::MethodCall {
+                    object: Box::new(expr),
+                    method: field,
+                    args,
+                };
             } else {
                 expr = Expr::FieldAccess {
                     object: Box::new(expr),
@@ -1196,6 +1464,22 @@ impl<'a> Parser<'a> {
         }
 
         Ok(expr)
+    }
+
+    /// Check if `Name {` is a struct literal (capitalized name + { ident : ).
+    /// Struct names must start with uppercase letter.
+    fn is_struct_literal(&self, name: &str) -> bool {
+        // Name must start with uppercase
+        if !name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            return false;
+        }
+        // Look ahead: { ident :
+        if self.pos + 2 < self.tokens.len() {
+            matches!(&self.tokens[self.pos + 1], Token::Ident(_))
+                && matches!(&self.tokens[self.pos + 2], Token::Colon)
+        } else {
+            false
+        }
     }
 
     /// Look ahead to determine if `{` starts a Dict literal (`{ key: value }`)

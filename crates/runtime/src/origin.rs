@@ -441,6 +441,11 @@ impl HomeRuntime {
                 self.uptime_ns = ts;
                 self.process_olang(expr, ts)
             }
+            ParseResult::FullProgram(source) => {
+                self.turn_count += 1;
+                self.uptime_ns = ts;
+                self.run_program(&source, ts)
+            }
             ParseResult::Error(e) => Response {
                 text: format!("Parse error: {}", e),
                 tone: ResponseTone::Engaged,
@@ -841,6 +846,9 @@ impl HomeRuntime {
                         body_ops_count
                     ));
                 }
+                VmEvent::UseModule { name } => {
+                    output_text.push_str(&format!("[use {}] ", name));
+                }
             }
         }
 
@@ -992,6 +1000,34 @@ impl HomeRuntime {
                 VmEvent::RequestStats => {
                     let resp = self.handle_command("stats", ts);
                     output_text.push_str(&resp.text);
+                }
+                VmEvent::UseModule { name } => {
+                    // Try to load module file via HAL platform
+                    if let Some(ref platform) = self.platform {
+                        // Try paths: name.olang, name
+                        let paths = [
+                            format!("{}.olang", name),
+                            name.clone(),
+                        ];
+                        let mut loaded = false;
+                        for path in &paths {
+                            if let Some(data) = platform.read_file(path) {
+                                if let Ok(source) = core::str::from_utf8(&data) {
+                                    let resp = self.run_program(source, ts);
+                                    if !resp.text.is_empty() && resp.kind != ResponseKind::Blocked {
+                                        output_text.push_str(&resp.text);
+                                    }
+                                    loaded = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if !loaded {
+                            output_text.push_str(&format!("[module '{}' not found] ", name));
+                        }
+                    } else {
+                        output_text.push_str(&format!("[no platform for module '{}'] ", name));
+                    }
                 }
                 _ => {} // Other events handled silently
             }

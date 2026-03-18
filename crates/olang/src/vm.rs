@@ -166,6 +166,11 @@ pub enum VmEvent {
         /// Number of opcodes in the spawned block
         body_ops_count: usize,
     },
+    /// Module import request. Runtime loads + executes the module file.
+    UseModule {
+        /// Module name or path
+        name: String,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -377,6 +382,9 @@ impl OlangVM {
         let mut loop_stack: Vec<(usize, u32)> = Vec::new();
         // Try/catch stack: catch handler PC targets
         let mut try_stack: Vec<usize> = Vec::new();
+        // Channel store: id → queue of messages (cooperative concurrency)
+        let mut channels: Vec<Vec<MolecularChain>> = Vec::new();
+        let mut next_channel_id: u64 = 1;
 
         while pc < prog.ops.len() {
             if steps >= self.max_steps {
@@ -1551,6 +1559,149 @@ impl OlangVM {
                             // Pop duration_ms — no-op in VM (Runtime handles)
                             let _duration = vm_pop!(stack, events);
                         }
+
+                        // ── Type system builtins ──────────────────────────────
+                        "__struct_def" => {
+                            // Stack: [fields_array, name_chain]
+                            // Register struct type — store in scope as metadata
+                            let name_chain = vm_pop!(stack, events);
+                            let fields = vm_pop!(stack, events);
+                            // Store struct definition: "__struct_Name" → fields array
+                            let name = chain_to_string(&name_chain).unwrap_or_default();
+                            let key = alloc::format!("__struct_{}", name);
+                            let scope = scopes.last_mut().unwrap();
+                            scope.push((key, fields));
+                        }
+                        "__struct_tag" => {
+                            // Stack: [dict_chain, name_chain]
+                            // Tag a dict with a struct type name
+                            let name_chain = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            // Prepend type tag as first key-value pair "__type" => name
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let type_key = string_to_chain("__type");
+                            let mut tagged = MolecularChain(Vec::new());
+                            tagged.0.extend(type_key.0.iter().copied());
+                            tagged.0.push(sep);
+                            tagged.0.extend(name_chain.0.iter().copied());
+                            if !dict.is_empty() {
+                                tagged.0.push(sep);
+                                tagged.0.extend(dict.0.iter().copied());
+                            }
+                            let _ = stack.push(tagged);
+                        }
+                        "__enum_def" => {
+                            // Stack: [variants_array, name_chain]
+                            let name_chain = vm_pop!(stack, events);
+                            let variants = vm_pop!(stack, events);
+                            let name = chain_to_string(&name_chain).unwrap_or_default();
+                            let key = alloc::format!("__enum_{}", name);
+                            let scope = scopes.last_mut().unwrap();
+                            scope.push((key, variants));
+                        }
+                        "__enum_unit" => {
+                            // Stack: [tag_chain]
+                            // Unit variant — just push tag as-is
+                            // tag is already on stack
+                        }
+                        "__enum_payload" => {
+                            // Stack: [tag, arg0, arg1, ..., count]
+                            // Build: tag | sep | arg0 | sep | arg1 ...
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut args = Vec::new();
+                            for _ in 0..count {
+                                args.push(vm_pop!(stack, events));
+                            }
+                            args.reverse();
+                            let tag = vm_pop!(stack, events);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            for arg in args {
+                                result.0.push(sep);
+                                result.0.extend(arg.0.iter().copied());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__method_call" => {
+                            // Stack: [self, arg0, ..., argN, arg_count, method_name]
+                            let method_name_chain = vm_pop!(stack, events);
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(1.0) as usize;
+                            let method_name = chain_to_string(&method_name_chain).unwrap_or_default();
+                            // Pop all args (including self)
+                            let mut args = Vec::new();
+                            for _ in 0..count {
+                                args.push(vm_pop!(stack, events));
+                            }
+                            args.reverse();
+                            // Get type tag from self (first arg) — look for __type key
+                            let self_val = &args[0];
+                            let elements = split_array_chain(self_val);
+                            let mut type_name = String::new();
+                            let type_key = string_to_chain("__type");
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == type_key.0 {
+                                    type_name = chain_to_string(&elements[i + 1]).unwrap_or_default();
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            // Lookup mangled function name: __Type_method
+                            let mangled = alloc::format!("__{type_name}_{method_name}");
+                            // Push args back and call the mangled function
+                            for arg in &args {
+                                let _ = stack.push(arg.clone());
+                            }
+                            events.push(VmEvent::LookupAlias(mangled));
+                        }
+                        // ── Channel builtins ──────────────────────────────
+                        "__channel_new" => {
+                            // Create a new channel, push its ID as a number
+                            let id = next_channel_id;
+                            next_channel_id += 1;
+                            channels.push(Vec::new()); // queue for this channel
+                            let _ = stack.push(MolecularChain::from_number(id as f64));
+                        }
+                        "__channel_send" => {
+                            // Stack: [channel_id, value]
+                            let value = vm_pop!(stack, events);
+                            let ch_chain = vm_pop!(stack, events);
+                            let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                            if ch_id >= 1 && ch_id <= channels.len() {
+                                channels[ch_id - 1].push(value);
+                            }
+                            let _ = stack.push(MolecularChain::from_number(1.0)); // success
+                        }
+                        "__channel_recv" => {
+                            // Stack: [channel_id] → pops first message or empty
+                            let ch_chain = vm_pop!(stack, events);
+                            let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                            if ch_id >= 1 && ch_id <= channels.len() && !channels[ch_id - 1].is_empty() {
+                                let msg = channels[ch_id - 1].remove(0);
+                                let _ = stack.push(msg);
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+
+                        "__use_module" => {
+                            // Module loading — emit event for Runtime to handle
+                            let module_chain = vm_pop!(stack, events);
+                            let name = chain_to_string(&module_chain).unwrap_or_default();
+                            events.push(VmEvent::UseModule { name });
+                        }
+
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));

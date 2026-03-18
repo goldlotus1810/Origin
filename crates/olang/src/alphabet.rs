@@ -340,6 +340,22 @@ pub enum Keyword {
     Return,
     /// `use` — import module
     Use,
+    /// `struct` — struct definition
+    Struct,
+    /// `enum` — enum definition
+    Enum,
+    /// `impl` — impl block
+    Impl,
+    /// `trait` — trait definition
+    Trait,
+    /// `self` — self reference in methods
+    SelfKw,
+    /// `pub` — public visibility
+    Pub,
+    /// `spawn` — concurrent task
+    Spawn,
+    /// `channel` — create communication channel
+    Channel,
 }
 
 /// Check xem string có phải keyword không.
@@ -361,6 +377,14 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "continue" => Some(Keyword::Continue),
         "return" => Some(Keyword::Return),
         "use" => Some(Keyword::Use),
+        "struct" => Some(Keyword::Struct),
+        "enum" => Some(Keyword::Enum),
+        "impl" => Some(Keyword::Impl),
+        "trait" => Some(Keyword::Trait),
+        "self" => Some(Keyword::SelfKw),
+        "pub" => Some(Keyword::Pub),
+        "spawn" => Some(Keyword::Spawn),
+        "channel" => Some(Keyword::Channel),
         _ => None,
     }
 }
@@ -503,6 +527,24 @@ pub enum Token {
     Return,
     /// `use`
     Use,
+    /// `struct`
+    Struct,
+    /// `enum`
+    Enum,
+    /// `impl`
+    Impl,
+    /// `trait`
+    Trait,
+    /// `self`
+    SelfKw,
+    /// `pub`
+    Pub,
+    /// `spawn`
+    Spawn,
+    /// `channel`
+    Channel,
+    /// `::` — path separator (enum variants, module paths)
+    ColonColon,
     /// `[`
     LBracket,
     /// `]`
@@ -680,6 +722,11 @@ impl<'a> Lexer<'a> {
             }
             ':' => {
                 self.chars.next();
+                // Check for :: (path separator)
+                if let Some(&(_, ':')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::ColonColon;
+                }
                 return Token::Colon;
             }
             '<' => {
@@ -866,6 +913,14 @@ impl<'a> Lexer<'a> {
                 Keyword::Continue => Token::Continue,
                 Keyword::Return => Token::Return,
                 Keyword::Use => Token::Use,
+                Keyword::Struct => Token::Struct,
+                Keyword::Enum => Token::Enum,
+                Keyword::Impl => Token::Impl,
+                Keyword::Trait => Token::Trait,
+                Keyword::SelfKw => Token::SelfKw,
+                Keyword::Pub => Token::Pub,
+                Keyword::Spawn => Token::Spawn,
+                Keyword::Channel => Token::Channel,
             };
         }
 

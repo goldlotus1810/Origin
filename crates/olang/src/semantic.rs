@@ -339,6 +339,32 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
                 scope.exit();
             }
         }
+
+        // ── Type system statements — define types + methods ────────────────
+        Stmt::StructDef { name, fields: _ } => {
+            scope.define_local(name);
+        }
+        Stmt::EnumDef { name, variants: _ } => {
+            scope.define_local(name);
+        }
+        Stmt::ImplBlock { target: _, methods } => {
+            for m in methods {
+                validate_stmt(m, scope, errors);
+            }
+        }
+        Stmt::TraitDef { name, methods: _ } => {
+            scope.define_local(name);
+        }
+        Stmt::ImplTrait { trait_name: _, target: _, methods } => {
+            for m in methods {
+                validate_stmt(m, scope, errors);
+            }
+        }
+        Stmt::Spawn { body } => {
+            for s in body {
+                validate_stmt(s, scope, errors);
+            }
+        }
     }
 }
 
@@ -488,6 +514,30 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
                 }
             }
         }
+
+        // ── Type system expressions ────────────────────────────────────────
+        Expr::StructLiteral { name: _, fields } => {
+            for (_key, value) in fields {
+                validate_expr(value, scope, errors);
+            }
+        }
+        Expr::EnumVariantExpr { enum_name: _, variant: _, args } => {
+            for arg in args {
+                validate_expr(arg, scope, errors);
+            }
+        }
+        Expr::MethodCall { object, method: _, args } => {
+            validate_expr(object, scope, errors);
+            for arg in args {
+                validate_expr(arg, scope, errors);
+            }
+        }
+        Expr::SelfRef => {
+            // Valid only inside impl methods — checked at compile time
+        }
+        Expr::ChannelCreate => {
+            // Always valid — creates a new channel
+        }
     }
 }
 
@@ -550,6 +600,9 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
                 },
             }
         }
+        Expr::StructLiteral { .. } | Expr::EnumVariantExpr { .. }
+        | Expr::MethodCall { .. } | Expr::SelfRef
+        | Expr::ChannelCreate => ChainKind::Unknown,
     }
 }
 
@@ -568,7 +621,11 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         | Stmt::Break | Stmt::Continue
         | Stmt::Assign { .. }
         | Stmt::FieldAssign { .. }
-        | Stmt::Use(_) => ChainKind::Void,
+        | Stmt::Use(_)
+        | Stmt::StructDef { .. } | Stmt::EnumDef { .. }
+        | Stmt::ImplBlock { .. } | Stmt::TraitDef { .. }
+        | Stmt::ImplTrait { .. }
+        | Stmt::Spawn { .. } => ChainKind::Void,
         Stmt::Return(Some(expr)) => infer_expr_kind(expr),
         Stmt::Return(None) => ChainKind::Void,
     }
@@ -609,7 +666,7 @@ fn string_to_key_chain(s: &str) -> crate::molecular::MolecularChain {
 pub fn lower(stmts: &[Stmt]) -> OlangProgram {
     let mut ctx = LowerCtx::new();
 
-    // First pass: collect function definitions
+    // First pass: collect function definitions + impl methods
     for stmt in stmts {
         if let Stmt::FnDef { name, params, body } = stmt {
             ctx.fns.push(FnDef {
@@ -617,6 +674,24 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
                 params: params.clone(),
                 body: body.clone(),
             });
+        }
+        // Collect impl methods as mangled functions
+        let methods = match stmt {
+            Stmt::ImplBlock { target, methods } => Some((target, methods)),
+            Stmt::ImplTrait { target, methods, .. } => Some((target, methods)),
+            _ => None,
+        };
+        if let Some((target, methods)) = methods {
+            for m in methods {
+                if let Stmt::FnDef { name: method_name, params, body } = m {
+                    let full_name = alloc::format!("__{}_{}", target, method_name);
+                    ctx.fns.push(FnDef {
+                        name: full_name,
+                        params: params.clone(),
+                        body: body.clone(),
+                    });
+                }
+            }
         }
     }
 
@@ -1159,6 +1234,29 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.patch_jump(jz_pos, next);
                         ctx.emit(Op::Pop); // pop match result on no-match path
                     }
+                    crate::syntax::MatchPattern::EnumPattern { enum_name, variant, bindings: _ } => {
+                        // Match enum variant: compare type tag
+                        ctx.emit(Op::Dup);
+                        let tag = alloc::format!("{}::{}", enum_name, variant);
+                        ctx.emit(Op::Load(tag));
+                        ctx.emit(Op::Call("__match_type".into()));
+                        let jz_pos = ctx.current_pos();
+                        ctx.emit(Op::Jz(0));
+                        ctx.emit(Op::Pop);
+
+                        let saved = ctx.locals.len();
+                        for s_stmt in &arm.body {
+                            lower_stmt(s_stmt, ctx);
+                        }
+                        ctx.locals.truncate(saved);
+
+                        end_jumps.push(ctx.current_pos());
+                        ctx.emit(Op::Jmp(0));
+
+                        let next = ctx.current_pos();
+                        ctx.patch_jump(jz_pos, next);
+                        ctx.emit(Op::Pop);
+                    }
                     crate::syntax::MatchPattern::MolLiteral { shape, relation, valence, arousal, time } => {
                         // DUP subject, push expected mol, compare
                         ctx.emit(Op::Dup);
@@ -1206,6 +1304,62 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             for jmp_pos in end_jumps {
                 ctx.patch_jump(jmp_pos, end);
             }
+        }
+
+        // ── Type system statements: struct/enum/impl/trait ─────────────────
+        Stmt::StructDef { name, fields } => {
+            // Register struct type: push name + field names as array → Call __struct_def
+            for f in fields {
+                ctx.emit(Op::Push(crate::vm::string_to_chain(&f.name)));
+            }
+            ctx.emit(Op::PushNum(fields.len() as f64));
+            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
+            ctx.emit(Op::Call("__struct_def".into()));
+        }
+
+        Stmt::EnumDef { name, variants } => {
+            // Register enum type: push name + variant names
+            for v in variants {
+                ctx.emit(Op::Push(crate::vm::string_to_chain(&v.name)));
+            }
+            ctx.emit(Op::PushNum(variants.len() as f64));
+            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
+            ctx.emit(Op::Call("__enum_def".into()));
+        }
+
+        Stmt::ImplBlock { target, methods } | Stmt::ImplTrait { target, methods, .. } => {
+            // Register methods as functions with mangled names: __Type__method
+            // These are stored in the function table and called via __method_call
+            for m in methods {
+                if let Stmt::FnDef { name: method_name, params, body } = m {
+                    let full_name = alloc::format!("__{}_{}", target, method_name);
+                    ctx.fns.push(FnDef {
+                        name: full_name,
+                        params: params.clone(),
+                        body: body.clone(),
+                    });
+                } else {
+                    lower_stmt(m, ctx);
+                }
+            }
+        }
+
+        Stmt::TraitDef { .. } => {
+            // Trait definitions are metadata only — no runtime code emitted.
+            // Validation happens at semantic level.
+        }
+
+        Stmt::Spawn { body } => {
+            // Lower spawn block: SpawnBegin + body + SpawnEnd
+            ctx.emit(Op::SpawnBegin);
+            ctx.emit(Op::ScopeBegin);
+            for s in body {
+                lower_stmt(s, ctx);
+            }
+            ctx.emit(Op::ScopeEnd);
+            ctx.emit(Op::SpawnEnd);
         }
     }
 }
@@ -1336,6 +1490,10 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 // System
                 "time" => Some("__time"),
                 "sleep" => Some("__sleep"),
+                // Channel
+                "channel" => Some("__channel_new"),
+                "channel_send" => Some("__channel_send"),
+                "channel_recv" => Some("__channel_recv"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -1726,6 +1884,104 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             let a = arousal.unwrap_or(128) as u8;   // moderate
             let t = time.unwrap_or(3) as u8;       // Medium
             ctx.emit(Op::PushMol(s, r, v, a, t));
+        }
+
+        // ── Type system expressions ────────────────────────────────────────
+        Expr::StructLiteral { name, fields } => {
+            // Create struct instance as dict: push field values + keys
+            for (key, value) in fields {
+                ctx.emit(Op::Push(crate::vm::string_to_chain(key)));
+                lower_expr(value, ctx);
+            }
+            ctx.emit(Op::PushNum(fields.len() as f64));
+            ctx.emit(Op::Call("__dict_new".into()));
+            // Tag with struct type name
+            ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
+            ctx.emit(Op::Call("__struct_tag".into()));
+        }
+
+        Expr::EnumVariantExpr { enum_name, variant, args } => {
+            // Create enum variant: push tag + optional payload
+            let tag = alloc::format!("{}::{}", enum_name, variant);
+            ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
+            if args.is_empty() {
+                // Unit variant: just the tag
+                ctx.emit(Op::Call("__enum_unit".into()));
+            } else {
+                // Variant with payload
+                for arg in args {
+                    lower_expr(arg, ctx);
+                }
+                ctx.emit(Op::PushNum(args.len() as f64));
+                ctx.emit(Op::Call("__enum_payload".into()));
+            }
+        }
+
+        Expr::MethodCall { object, method, args } => {
+            // Built-in methods → direct VM builtin calls
+            // Determine which builtin to call based on method name
+            let builtin = match method.as_str() {
+                // Array methods
+                "len" => Some("__array_len"),
+                "push" => Some("__array_push"),
+                "pop" => Some("__array_pop"),
+                "reverse" => Some("__array_reverse"),
+                "join" => Some("__array_join"),
+                "slice" => Some("__array_slice"),
+                "map" => Some("__array_map"),
+                "filter" => Some("__array_filter"),
+                // String methods
+                "contains" => Some("__str_contains"),
+                "split" => Some("__str_split"),
+                "replace" => Some("__str_replace"),
+                "starts_with" => Some("__str_starts_with"),
+                "ends_with" => Some("__str_ends_with"),
+                "index_of" => Some("__str_index_of"),
+                "trim" => Some("__str_trim"),
+                "upper" => Some("__str_upper"),
+                "lower" => Some("__str_lower"),
+                "substr" => Some("__str_substr"),
+                // Dict methods
+                "get" => Some("__dict_get"),
+                "set" => Some("__dict_set"),
+                "keys" => Some("__dict_keys"),
+                "values" => Some("__dict_values"),
+                "has_key" => Some("__dict_has_key"),
+                "merge" => Some("__dict_merge"),
+                "remove" => Some("__dict_remove"),
+                // Conversion
+                "to_string" => Some("__to_string"),
+                "to_number" => Some("__to_number"),
+                "is_empty" => Some("__is_empty"),
+                // Channel methods
+                "send" => Some("__channel_send"),
+                "recv" => Some("__channel_recv"),
+                _ => None,
+            };
+            if let Some(builtin_name) = builtin {
+                lower_expr(object, ctx);
+                for arg in args {
+                    lower_expr(arg, ctx);
+                }
+                ctx.emit(Op::Call(builtin_name.into()));
+            } else {
+                // User-defined method: push self + args, dispatch via type tag
+                lower_expr(object, ctx);
+                for arg in args {
+                    lower_expr(arg, ctx);
+                }
+                ctx.emit(Op::PushNum(args.len() as f64 + 1.0)); // +1 for self
+                ctx.emit(Op::Push(crate::vm::string_to_chain(method)));
+                ctx.emit(Op::Call("__method_call".into()));
+            }
+        }
+
+        Expr::SelfRef => {
+            ctx.emit(Op::LoadLocal("self".into()));
+        }
+
+        Expr::ChannelCreate => {
+            ctx.emit(Op::Call("__channel_new".into()));
         }
     }
 }
@@ -2837,14 +3093,15 @@ mod tests {
 
     #[test]
     fn parse_method_call() {
-        // obj.method(args) desugars to Call { name: "method", args: [obj, ...] }
+        // obj.method(args) produces MethodCall { object, method, args }
         let stmts = parse("emit arr.len();").unwrap();
         match &stmts[0] {
-            Stmt::Emit(Expr::Call { name, args }) => {
-                assert_eq!(name, "len");
-                assert_eq!(args.len(), 1);
+            Stmt::Emit(Expr::MethodCall { object, method, args }) => {
+                assert!(matches!(object.as_ref(), Expr::Ident(n) if n == "arr"));
+                assert_eq!(method, "len");
+                assert_eq!(args.len(), 0);
             }
-            other => panic!("Expected Emit(Call), got {:?}", other),
+            other => panic!("Expected Emit(MethodCall), got {:?}", other),
         }
     }
 
