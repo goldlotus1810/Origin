@@ -16,6 +16,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+/// Authentication: master key, first-run setup, ISL signing
+pub mod auth;
 /// Core runtime: HomeRuntime, ○{} parser, router
 pub mod core;
 /// Output: response templates, errors, metrics
