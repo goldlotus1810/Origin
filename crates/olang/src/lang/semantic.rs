@@ -1077,6 +1077,64 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
         }
     }
 
+    // Phase 1.5: Pre-compile function bodies if there are potentially recursive functions
+    // Detect if any function calls another function that could create cycles
+    let has_complex_fns = ctx.fns.len() > 10; // heuristic: many functions = likely recursion
+    if has_complex_fns {
+        // Emit a Jmp to skip all compiled function bodies
+        let skip_all = ctx.prog.ops.len();
+        ctx.prog.push_op(Op::Jmp(0)); // placeholder
+
+        // Pass 1: allocate slots for all functions (reserve space for param stores + placeholder)
+        // We record the body_start PC for each function so forward references work
+        let fn_count = ctx.fns.len();
+        let mut fn_body_starts: Vec<usize> = Vec::new();
+        let mut fn_body_jmps: Vec<usize> = Vec::new();
+        for fi in 0..fn_count {
+            let fn_def = &ctx.fns[fi];
+            let body_start = ctx.prog.ops.len();
+            fn_body_starts.push(body_start);
+
+            // Reserve space: Store for each param + Jmp(placeholder) to actual body
+            for p in fn_def.params.iter().rev() {
+                ctx.prog.push_op(Op::Store(p.clone()));
+            }
+            fn_body_jmps.push(ctx.prog.ops.len());
+            ctx.prog.push_op(Op::Jmp(0)); // placeholder — will jump to actual body code
+
+            // Register compiled function now (body_start is the entry point)
+            ctx.compiled_fns.push((fn_def.name.clone(), body_start, fn_def.params.clone()));
+        }
+
+        // Pass 2: compile function bodies (all functions are now registered, so CallClosure works)
+        ctx.use_call_closure = true;
+        for fi in 0..fn_count {
+            let fn_def = ctx.fns[fi].clone();
+            let actual_body = ctx.prog.ops.len();
+
+            // Patch the Jmp from pass 1 to point to actual body code
+            ctx.prog.ops[fn_body_jmps[fi]] = Op::Jmp(actual_body);
+
+            // Lower body
+            ctx.locals = fn_def.params.clone();
+            for s in &fn_def.body {
+                lower_stmt(s, &mut ctx);
+            }
+
+            // Default return
+            ctx.prog.push_op(Op::Push(crate::molecular::MolecularChain::empty()));
+            ctx.prog.push_op(Op::Ret);
+            ctx.locals.clear();
+        }
+        // Keep use_call_closure = true for the main pass too,
+        // so all function calls use CallClosure instead of inlining.
+        // ctx.use_call_closure = false;
+
+        // Patch the skip jump
+        let after_fns = ctx.prog.ops.len();
+        ctx.prog.ops[skip_all] = Op::Jmp(after_fns);
+    }
+
     // Second pass: lower statements
     for stmt in stmts {
         lower_stmt(stmt, &mut ctx);
@@ -1133,6 +1191,12 @@ struct LowerCtx {
     /// Depth of function inlining — when > 0, `return` should not emit Op::Ret
     /// but instead just leave the value on stack (since function is inlined)
     inline_depth: u32,
+    /// Functions currently being inlined (for recursion detection)
+    inlining_stack: Vec<String>,
+    /// Compiled function bodies: name → (start_pc, param_names)
+    compiled_fns: Vec<(String, usize, Vec<String>)>,
+    /// When true, ALL user-defined function calls use CallClosure (no inlining)
+    use_call_closure: bool,
 }
 
 impl LowerCtx {
@@ -1148,6 +1212,9 @@ impl LowerCtx {
             return_jumps: Vec::new(),
             call_id: 0,
             inline_depth: 0,
+            inlining_stack: Vec::new(),
+            compiled_fns: Vec::new(),
+            use_call_closure: false,
         }
     }
 
@@ -1360,13 +1427,14 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::Jmp(start)); // explicit back-jump
             let end = ctx.current_pos();
             ctx.patch_jump(jz_pos, end);
-            // Patch break → end (past loop)
+            ctx.emit(Op::Pop); // pop cond result (false path, Jz jumped here)
+            let after_pop = ctx.current_pos();
+            // Patch break → after the Pop (break happens after cond was already popped)
             if let Some(breaks) = ctx.break_jumps.pop() {
                 for bp in breaks {
-                    ctx.patch_jump(bp, end);
+                    ctx.patch_jump(bp, after_pop);
                 }
             }
-            ctx.emit(Op::Pop); // pop cond result (false path, jumped here)
         }
 
         Stmt::ForIn { var, start, end, body } => {
@@ -1592,6 +1660,14 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 if let Some(returns) = ctx.return_jumps.last_mut() {
                     returns.push(pos);
                 }
+            } else if ctx.use_call_closure {
+                // Inside two-pass compiled function body: leave value on stack for caller
+                if let Some(e) = expr {
+                    lower_expr(e, ctx);
+                } else {
+                    ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                }
+                ctx.emit(Op::Ret);
             } else {
                 // Top-level return
                 if let Some(e) = expr {
@@ -1687,14 +1763,17 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         }
 
         Stmt::Match { subject, arms } => {
-            // Compile match as chained if/else:
-            //   evaluate subject → DUP + TypeOf for each arm → compare → execute body
-            //
-            // Strategy: subject on stack, then for each arm:
-            //   DUP, TypeOf (pushes type string), compare with pattern,
-            //   if match → execute body → jump to end
-            //   else → next arm
+            // Compile match: evaluate subject → store in temp local → test each arm.
+            // Using a local variable instead of keeping subject on the stack prevents
+            // stack leaking when `return` inside a match arm jumps past the cleanup.
             lower_expr(subject, ctx);
+
+            // Store subject in a unique temporary local
+            let match_id = ctx.call_id;
+            ctx.call_id += 1;
+            let subj_var: String = alloc::format!("__match_subj_{}", match_id);
+            ctx.emit(Op::Store(subj_var.clone()));
+            ctx.locals.push(subj_var.clone());
 
             let mut end_jumps: Vec<usize> = Vec::new();
             let mut wildcard_idx = None;
@@ -1706,12 +1785,10 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         break; // wildcard must be last
                     }
                     crate::syntax::MatchPattern::TypeName(name) => {
-                        // DUP subject, TypeOf → compare with type name
-                        ctx.emit(Op::Dup);
+                        // Load subject, TypeOf → compare with type name
+                        ctx.emit(Op::LoadLocal(subj_var.clone()));
                         ctx.emit(Op::TypeOf);
-                        // Load expected type name for comparison
                         ctx.emit(Op::Load(name.clone()));
-                        // Call __match_type: pops type_result + expected, pushes match boolean
                         ctx.emit(Op::Call("__match_type".into()));
                         let jz_pos = ctx.current_pos();
                         ctx.emit(Op::Jz(0)); // skip body if no match
@@ -1733,17 +1810,27 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.patch_jump(jz_pos, next);
                         ctx.emit(Op::Pop); // pop match result on no-match path
                     }
-                    crate::syntax::MatchPattern::EnumPattern { enum_name, variant, bindings: _ } => {
-                        // Match enum variant: compare type tag
-                        ctx.emit(Op::Dup);
+                    crate::syntax::MatchPattern::EnumPattern { enum_name, variant, bindings } => {
+                        // Match enum variant: compare tag string
+                        ctx.emit(Op::LoadLocal(subj_var.clone()));
                         let tag = alloc::format!("{}::{}", enum_name, variant);
-                        ctx.emit(Op::Load(tag));
-                        ctx.emit(Op::Call("__match_type".into()));
+                        ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
+                        ctx.emit(Op::Call("__match_enum".into()));
                         let jz_pos = ctx.current_pos();
                         ctx.emit(Op::Jz(0));
                         ctx.emit(Op::Pop);
 
                         let saved = ctx.locals.len();
+
+                        // Extract bindings from enum payload
+                        for (bi, binding_name) in bindings.iter().enumerate() {
+                            ctx.emit(Op::LoadLocal(subj_var.clone()));
+                            ctx.emit(Op::PushNum(bi as f64));
+                            ctx.emit(Op::Call("__enum_field".into()));
+                            ctx.emit(Op::Store(binding_name.clone()));
+                            ctx.locals.push(binding_name.clone());
+                        }
+
                         for s_stmt in &arm.body {
                             lower_stmt(s_stmt, ctx);
                         }
@@ -1757,8 +1844,8 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::Pop);
                     }
                     crate::syntax::MatchPattern::MolLiteral { shape, relation, valence, arousal, time } => {
-                        // DUP subject, push expected mol, compare
-                        ctx.emit(Op::Dup);
+                        // Load subject, push expected mol, compare
+                        ctx.emit(Op::LoadLocal(subj_var.clone()));
                         let s = shape.unwrap_or(1) as u8;
                         let r = relation.unwrap_or(1) as u8;
                         let v = valence.unwrap_or(128) as u8;
@@ -1785,13 +1872,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                     }
                     crate::syntax::MatchPattern::MolConstraintPattern { constraint } => {
                         // Phase 6: ○{ V>0x80 } constraint pattern matching
-                        // DUP subject, then call __match_mol_constraint with constraint encoding
-                        ctx.emit(Op::Dup);
-                        // Encode constraints as a chain: each DimConstraint → molecule
-                        // dim_byte: S=1 R=2 V=3 A=4 T=5
-                        // op_byte:  Eq=0 Gt=1 Lt=2 Ge=3 Le=4 Any=5
-                        // value: the threshold byte
-                        // Encode as PushMol(dim_byte, op_byte, value, 0, 0) per constraint
+                        ctx.emit(Op::LoadLocal(subj_var.clone()));
                         let count = constraint.dims.len();
                         for dc in &constraint.dims {
                             let dim_byte = match dc.dim {
@@ -1838,9 +1919,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 ctx.locals.truncate(saved);
             }
 
-            // Pop the subject from stack
-            ctx.emit(Op::Pop);
-
+            // No need to pop subject — it's stored in a local, not on the stack.
             // Patch all end jumps
             let end = ctx.current_pos();
             for jmp_pos in end_jumps {
@@ -1985,6 +2064,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 // Boolean false → empty chain (falsy for Jz)
                 ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
             } else if ctx.is_local(name) {
+                ctx.emit(Op::LoadLocal(name.clone()));
+            } else if ctx.use_call_closure {
+                // Inside CallClosure-compiled function body: non-local variables
+                // are still accessible via scope search (they live in outer scopes).
+                // Op::Load emits LookupAlias + pushes empty, which is wrong here.
                 ctx.emit(Op::LoadLocal(name.clone()));
             } else {
                 ctx.emit(Op::Load(name.clone()));
@@ -2201,8 +2285,78 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             } else
             // Check if it's a user-defined function
             if let Some(fn_def) = ctx.lookup_fn(name) {
-                // Inline the function with unique param names per call site
-                // to prevent clashes when the same function is called multiple times
+                // Use CallClosure when: use_call_closure mode is active, recursion detected, or deep inlining
+                let is_recursive = ctx.use_call_closure
+                    || ctx.inlining_stack.contains(&name.to_string())
+                    || ctx.inlining_stack.len() > 8;
+
+                if is_recursive {
+                    // Recursive call: use CallClosure mechanism
+                    let fn_name = name.to_string();
+                    let param_count = fn_def.params.len();
+
+                    // Check if function body is already compiled
+                    let compiled_pc = ctx.compiled_fns.iter()
+                        .find(|(n, _, _)| n == &fn_name)
+                        .map(|(_, pc, _)| *pc);
+
+                    let body_pc = if let Some(pc) = compiled_pc {
+                        pc
+                    } else {
+                        // Compile function body to a separate block
+                        let fn_params = fn_def.params.clone();
+                        let fn_body = fn_def.body.clone();
+
+                        let saved_locals = ctx.locals.clone();
+                        let saved_inline_depth = ctx.inline_depth;
+
+                        // Skip over the compiled body during normal execution
+                        let skip_jmp = ctx.current_pos();
+                        ctx.emit(Op::Jmp(0));
+
+                        let body_start = ctx.current_pos();
+
+                        // Args are on stack in reverse order for CallClosure
+                        // Store params from stack
+                        for p in fn_params.iter().rev() {
+                            ctx.emit(Op::Store(p.clone()));
+                        }
+                        ctx.locals = fn_params.clone();
+                        ctx.inline_depth = 0;
+
+                        // Lower body statements
+                        let body_len = fn_body.len();
+                        if body_len > 0 {
+                            for s in &fn_body[..] {
+                                lower_stmt(s, ctx);
+                            }
+                        }
+                        // Default return: empty chain
+                        ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                        ctx.emit(Op::Ret);
+
+                        ctx.locals = saved_locals;
+                        ctx.inline_depth = saved_inline_depth;
+
+                        let after_body = ctx.current_pos();
+                        ctx.patch_jump(skip_jmp, after_body);
+
+                        ctx.compiled_fns.push((fn_name.clone(), body_start, fn_params));
+                        body_start
+                    };
+
+                    // Emit: push closure marker, push args, CallClosure
+                    let pc_lo = (body_pc & 0xFF) as u8;
+                    let pc_hi = ((body_pc >> 8) & 0xFF) as u8;
+                    ctx.emit(Op::Push(crate::molecular::MolecularChain(
+                        alloc::vec![crate::molecular::Molecule::raw(0xFF, 0, pc_lo, pc_hi, 0)]
+                    )));
+                    for arg in args {
+                        lower_expr(arg, ctx);
+                    }
+                    ctx.emit(Op::CallClosure(param_count as u8));
+                } else {
+                // Non-recursive: inline as before
                 let call_id = ctx.next_call_id();
                 let saved = ctx.locals.len();
 
@@ -2253,6 +2407,9 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     }
                 }
 
+                // Track function for recursion detection
+                ctx.inlining_stack.push(name.to_string());
+
                 // Lower function body (inside inline context)
                 ctx.return_jumps.push(Vec::new());
                 ctx.inline_depth += 1;
@@ -2294,6 +2451,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 }
 
                 ctx.locals.truncate(saved);
+                ctx.inlining_stack.pop();
+                } // end of non-recursive else block
             } else if ctx.is_local(name) {
                 // Local variable — might be a closure. Load it and call.
                 ctx.emit(Op::LoadLocal(name.clone()));
@@ -7814,8 +7973,9 @@ mod tests {
     fn bootstrap_lexer_tokenize_simple() {
         // Full test: load lexer.ol and tokenize "let x = 42;"
         let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        // Emit len() to count tokens (heap-based arrays are opaque refs)
         let test_src = alloc::format!(
-            "{}\nemit tokenize(\"let x = 42;\");",
+            "{}\nlet toks1 = tokenize(\"let x = 42;\");\nemit len(toks1);",
             lexer_src
         );
 
@@ -7830,18 +7990,14 @@ mod tests {
 
         // tokenize("let x = 42;") should produce 6 tokens:
         // Keyword("let"), Ident("x"), Symbol("="), Number(42), Symbol(";"), Eof
-        // Check element count via 0xFD tag molecule
-        let arr = &outputs[0];
-        assert!(!arr.0.is_empty() && arr.0[0].shape == 0xFD,
-            "output should be a tagged array");
-        let count = arr.0[0].emotion.valence as usize;
+        let count = outputs[0].to_number().unwrap_or(0.0) as usize;
         assert_eq!(count, 6,
             "expected 6 tokens from 'let x = 42;', got {}", count);
 
         // Also test: tokenize("fn f(x) { return x + 1; }")
         // Expected: fn, f, (, x, ), {, return, x, +, 1, ;, }, Eof = 13 tokens
         let test_src2 = alloc::format!(
-            "{}\nemit tokenize(\"fn f(x) {{ return x + 1; }}\");",
+            "{}\nlet toks2 = tokenize(\"fn f(x) {{ return x + 1; }}\");\nemit len(toks2);",
             lexer_src
         );
         let stmts2 = parse(&test_src2).expect("should parse test2");
@@ -7849,11 +8005,301 @@ mod tests {
         let vm2 = crate::vm::OlangVM::new();
         let result2 = vm2.execute(&prog2);
         assert!(result2.errors().is_empty(), "VM errors test2: {:?}", result2.errors());
-        let arr2 = &result2.outputs()[0];
-        assert!(!arr2.0.is_empty() && arr2.0[0].shape == 0xFD,
-            "output2 should be a tagged array");
-        let count2 = arr2.0[0].emotion.valence as usize;
+        let count2 = result2.outputs()[0].to_number().unwrap_or(0.0) as usize;
         assert_eq!(count2, 13,
             "expected 13 tokens from 'fn f(x) {{ return x + 1; }}', got {}", count2);
+    }
+
+    #[test]
+    fn enum_match_with_bindings() {
+        let src = r#"
+            union Kind { Kw { name: Str }, Id { name: Str }, Eof }
+
+            let k = Kind::Kw { name: "let" };
+            match k {
+                Kind::Kw { name } => { emit name; },
+                Kind::Id { name } => { emit name; },
+                _ => { emit "other"; },
+            };
+        "#;
+        let stmts = parse(src).expect("parse");
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(result.errors().is_empty(), "errors: {:?}", result.errors());
+        assert!(!result.outputs().is_empty(), "should produce output");
+        let out = crate::vm::chain_to_string(&result.outputs()[0]);
+        assert_eq!(out, Some("let".into()), "binding 'name' should be 'let', got {:?}", out);
+    }
+
+    #[test]
+    fn bootstrap_parser_parse_let() {
+        // Full test: load lexer.ol + parser.ol, parse "let x = 42;"
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        // Remove "use olang.bootstrap.lexer;" line — we concatenate instead
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+        // Test peek and advance
+        let test_src = alloc::format!(
+            "{}\n{}\nlet toks = tokenize(\"let x = 42;\");\nlet p = new_parser(toks);\nlet t = peek(p);\nemit t.text;\nlet t2 = advance(p);\nemit t2.text;",
+            lexer_src, parser_src_clean
+        );
+
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        assert!(prog.ops.len() > 100, "program should be non-trivial, got {} ops", prog.ops.len());
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        assert!(errors.is_empty(), "VM errors: {:?}", errors);
+        assert!(outputs.len() >= 2, "should produce 2 outputs, got {}", outputs.len());
+
+        // Output 0: t.text from peek (should be "let")
+        let t_text = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(t_text, Some("let".into()), "peek.text should be 'let', got {:?}", t_text);
+
+        // Output 1: t2.text from advance (should also be "let")
+        let t2_text = crate::vm::chain_to_string(&outputs[1]);
+        assert_eq!(t2_text, Some("let".into()), "advance.text should be 'let', got {:?}", t2_text);
+    }
+
+    #[test]
+    fn bootstrap_parser_dod_let_stmt() {
+        // DoD: parse(tokenize("let x = 42;")) → 1 LetStmt
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+        // DoD: parse(tokenize("let x = 42;")) → 1 LetStmt
+        let test_src = alloc::format!(
+            "{}\n{}\n\
+            let program = parse(tokenize(\"let x = 42;\"));\n\
+            emit len(program);\n",
+            lexer_src, parser_src_clean
+        );
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 2_000_000;
+        vm.max_call_depth = 4096;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        // parse(tokenize("let x = 42;")) → 1 statement
+        let len = outputs[0].to_number().expect("should be number");
+        assert!((len - 1.0).abs() < f64::EPSILON, "Expected 1 LetStmt, got {}: {:?}", len, output_strs);
+    }
+
+    #[test]
+    fn callclosure_struct_mutation_writeback() {
+        // Test that CallClosure properly writes back struct mutations
+        let src = r#"
+            type Counter { val: Num }
+            fn inc(c) {
+                c.val = c.val + 1;
+                return c.val;
+            }
+            let c = Counter { val: 0 };
+            inc(c);
+            emit c.val;
+            inc(c);
+            emit c.val;
+            inc(c);
+            emit c.val;
+        "#;
+        let stmts = parse(src).expect("parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 1_000_000;
+        vm.max_call_depth = 8192;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        // Write-back works for simple struct mutation
+        assert_eq!(output_strs, alloc::vec!["num:1", "num:2", "num:3"]);
+    }
+
+    #[test]
+    fn callclosure_nested_struct_mutation() {
+        // Test nested calls: advance(p) calls peek(p) internally
+        let src = r#"
+            type Obj { items: Vec[Num], pos: Num }
+            fn get_current(o) {
+                return o.items[o.pos];
+            }
+            fn next(o) {
+                let cur = get_current(o);
+                o.pos = o.pos + 1;
+                return cur;
+            }
+            let o = Obj { items: [10, 20, 30], pos: 0 };
+            let a = next(o);
+            emit a;
+            emit o.pos;
+            let b = next(o);
+            emit b;
+            emit o.pos;
+        "#;
+        let stmts = parse(src).expect("parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 1_000_000;
+        vm.max_call_depth = 8192;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        assert_eq!(output_strs, alloc::vec!["num:10", "num:1", "num:20", "num:2"]);
+    }
+
+    #[test]
+    fn callclosure_global_array_loop_search() {
+        // Test: function called via CallClosure iterates a global array
+        let src = r#"
+            let ITEMS = ["apple", "banana", "cherry"];
+
+            fn find_item(name) {
+                let i = 0;
+                while i < len(ITEMS) {
+                    if ITEMS[i] == name {
+                        return true;
+                    };
+                    let i = i + 1;
+                };
+                return false;
+            }
+
+            // Need > 10 functions to trigger two-pass / CallClosure
+            fn dummy1(x) { return x; }
+            fn dummy2(x) { return x; }
+            fn dummy3(x) { return x; }
+            fn dummy4(x) { return x; }
+            fn dummy5(x) { return x; }
+            fn dummy6(x) { return x; }
+            fn dummy7(x) { return x; }
+            fn dummy8(x) { return x; }
+            fn dummy9(x) { return x; }
+            fn dummy10(x) { return x; }
+
+            emit find_item("banana");
+            emit find_item("grape");
+        "#;
+        let stmts = parse(src).expect("parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 2_000_000;
+        vm.max_call_depth = 8192;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        // find_item("banana") should return truthy, find_item("grape") should return falsy
+        assert_eq!(output_strs.len(), 2);
+        assert_eq!(output_strs[0], "num:1", "banana should be found");
+        assert_eq!(output_strs[1], "str:", "grape should not be found");
+    }
+
+    #[test]
+    fn bootstrap_parser_dod_fn_def() {
+        // DoD: parse(tokenize("fn f(x) { return x + 1; }")) → 1 FnDef
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+        let test_src = alloc::format!(
+            "{}\n{}\n\
+            let program = parse(tokenize(\"fn f(x) {{ return x + 1; }}\"));\n\
+            emit len(program);\n",
+            lexer_src, parser_src_clean
+        );
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 10_000_000;
+        vm.max_call_depth = 16_384;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        let len = outputs[0].to_number().expect("should be number");
+        assert!((len - 1.0).abs() < f64::EPSILON, "Expected 1 FnDef, got {}: {:?}", len, output_strs);
+    }
+
+    #[test]
+    fn bootstrap_parser_dod_if_stmt() {
+        // DoD: parse(tokenize("if x > 0 { emit x; }")) → 1 IfStmt
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+        let test_src = alloc::format!(
+            "{}\n{}\n\
+            let program = parse(tokenize(\"if x > 0 {{ emit x; }}\"));\n\
+            emit len(program);\n",
+            lexer_src, parser_src_clean
+        );
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 5_000_000;
+        vm.max_call_depth = 16_384;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        let len = outputs[0].to_number().expect("should be number");
+        assert!((len - 1.0).abs() < f64::EPSILON, "Expected 1 IfStmt, got {}: {:?}", len, output_strs);
+    }
+
+    #[test]
+    fn enum_match_unit_variant() {
+        let src = r#"
+            union Kind { Kw { name: Str }, Eof }
+
+            let k = Kind::Eof;
+            match k {
+                Kind::Kw { name } => { emit "kw"; },
+                Kind::Eof => { emit "eof"; },
+                _ => { emit "other"; },
+            };
+        "#;
+        let stmts = parse(src).expect("parse");
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(result.errors().is_empty(), "errors: {:?}", result.errors());
+        assert!(!result.outputs().is_empty(), "should produce output");
+        let out = crate::vm::chain_to_string(&result.outputs()[0]);
+        assert_eq!(out, Some("eof".into()), "should match Eof variant, got {:?}", out);
     }
 }

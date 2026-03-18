@@ -854,7 +854,7 @@ impl<'a> Parser<'a> {
                 if self.check(&Token::ColonColon) {
                     self.advance();
                     let variant = self.expect_ident()?;
-                    // Optional payload bindings: Name::Variant(x, y)
+                    // Optional payload bindings: Name::Variant(x, y) or Name::Variant { x, y }
                     let mut bindings = Vec::new();
                     if self.check(&Token::LParen) {
                         self.advance();
@@ -863,6 +863,15 @@ impl<'a> Parser<'a> {
                             if self.check(&Token::Comma) { self.advance(); }
                         }
                         self.expect(&Token::RParen)?;
+                    } else if self.check(&Token::LBrace) {
+                        // Struct-style: Name::Variant { field1, field2 }
+                        // Used by parser.ol: TokenKind::Keyword { name }
+                        self.advance();
+                        while !self.check(&Token::RBrace) && !self.at_eof() {
+                            bindings.push(self.expect_ident()?);
+                            if self.check(&Token::Comma) { self.advance(); }
+                        }
+                        self.expect(&Token::RBrace)?;
                     }
                     Ok(MatchPattern::EnumPattern { enum_name: name, variant, bindings })
                 } else {
@@ -996,7 +1005,16 @@ impl<'a> Parser<'a> {
             let field_name = self.expect_ident()?;
             let type_name = if self.check(&Token::Colon) {
                 self.advance();
-                Some(self.expect_ident()?)
+                let tn = self.expect_ident()?;
+                // Skip generic params: Vec[T], Vec[Expr], etc.
+                if self.check(&Token::LBracket) {
+                    self.advance();
+                    while !self.check(&Token::RBracket) && !self.at_eof() {
+                        self.advance();
+                    }
+                    if self.check(&Token::RBracket) { self.advance(); }
+                }
+                Some(tn)
             } else {
                 None
             };
@@ -1034,10 +1052,18 @@ impl<'a> Parser<'a> {
                 self.advance();
                 while !self.check(&Token::RBrace) && !self.at_eof() {
                     let field_name = self.expect_ident()?;
-                    // Optional `: Type` annotation (ignored at runtime — dynamically typed)
+                    // Optional `: Type` or `: Vec[Type]` annotation (ignored at runtime)
                     if self.check(&Token::Colon) {
                         self.advance();
-                        let _type_name = self.expect_ident()?; // consume type, discard
+                        let _type_name = self.expect_ident()?;
+                        // Skip generic params: Vec[T], Vec[Expr], etc.
+                        if self.check(&Token::LBracket) {
+                            self.advance();
+                            while !self.check(&Token::RBracket) && !self.at_eof() {
+                                self.advance();
+                            }
+                            if self.check(&Token::RBracket) { self.advance(); }
+                        }
                     }
                     fields.push(field_name);
                     if self.check(&Token::Comma) { self.advance(); }
@@ -1679,18 +1705,20 @@ impl<'a> Parser<'a> {
                         Expr::EnumVariantExpr { enum_name: name, variant, args }
                     } else if self.check(&Token::LBrace) {
                         // Struct-style: Name::Variant { field: value, ... }
-                        // Used by Olang bootstrap: TokenKind::Keyword { name: text }
+                        // Lower as StructLiteral with full tag name so it creates a dict
+                        // with __type = "VariantName" and named fields
                         self.advance(); // consume {
-                        let mut args = Vec::new();
+                        let mut fields = Vec::new();
                         while !self.check(&Token::RBrace) && !self.at_eof() {
-                            let _field_name = self.expect_ident()?;
+                            let field_name = self.expect_ident()?;
                             self.expect(&Token::Colon)?;
                             let value = self.parse_expr()?;
-                            args.push(value);
+                            fields.push((field_name, value));
                             if self.check(&Token::Comma) { self.advance(); }
                         }
                         self.expect(&Token::RBrace)?;
-                        Expr::EnumVariantExpr { enum_name: name, variant, args }
+                        let full_name = alloc::format!("{}::{}", name, variant);
+                        Expr::StructLiteral { name: full_name, fields }
                     } else {
                         Expr::EnumVariantExpr { enum_name: name, variant, args: Vec::new() }
                     }
@@ -1911,32 +1939,44 @@ impl<'a> Parser<'a> {
             ))),
         };
 
-        // Postfix: .field access or .method(args) (can chain: a.b.c, a.method())
-        while self.check(&Token::Dot) {
-            self.advance(); // consume .
-            let field = self.expect_ident()?;
-            // Check for method call: obj.method(args)
-            if self.check(&Token::LParen) {
-                self.advance(); // consume (
-                let mut args = Vec::new();
-                if !self.check(&Token::RParen) {
-                    args.push(self.parse_expr()?);
-                    while self.check(&Token::Comma) {
-                        self.advance();
+        // Postfix: .field, .method(args), [index] (can chain: a.b.c, a[i], a.b[i].c)
+        loop {
+            if self.check(&Token::Dot) {
+                self.advance(); // consume .
+                let field = self.expect_ident()?;
+                // Check for method call: obj.method(args)
+                if self.check(&Token::LParen) {
+                    self.advance(); // consume (
+                    let mut args = Vec::new();
+                    if !self.check(&Token::RParen) {
                         args.push(self.parse_expr()?);
+                        while self.check(&Token::Comma) {
+                            self.advance();
+                            args.push(self.parse_expr()?);
+                        }
                     }
+                    self.expect(&Token::RParen)?;
+                    expr = Expr::MethodCall {
+                        object: Box::new(expr),
+                        method: field,
+                        args,
+                    };
+                } else {
+                    expr = Expr::FieldAccess {
+                        object: Box::new(expr),
+                        field,
+                    };
                 }
-                self.expect(&Token::RParen)?;
-                expr = Expr::MethodCall {
-                    object: Box::new(expr),
-                    method: field,
-                    args,
+            } else if self.check(&Token::LBracket) {
+                self.advance(); // consume [
+                let index = self.parse_expr()?;
+                self.expect(&Token::RBracket)?;
+                expr = Expr::Index {
+                    array: Box::new(expr),
+                    index: Box::new(index),
                 };
             } else {
-                expr = Expr::FieldAccess {
-                    object: Box::new(expr),
-                    field,
-                };
+                break;
             }
         }
 
