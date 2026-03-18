@@ -70,17 +70,17 @@ Node A và Node B chia sẻ cùng base value trên bất kỳ chiều nào → S
 > *"Kết nối tầng trên → qua NodeLx đại diện (Fib[n+2] threshold)"*
 
 ```
-L0: 5400 nodes  ─── Silk tự do (horizontal, 0 bytes)
+ 5400 nodes  ─── Silk tự do (horizontal, 0 bytes)
      │ parent pointer (vertical, 8 bytes/node)
-L1:   37 nodes  ─── Silk tự do
+   37 nodes  ─── Silk tự do
      │
-L2:   12 nodes
+   12 nodes
      │
 ...
-L7:    1 node (○)
+   1 node (○)
 ```
 
-Tổng: **5460 parent pointers × 8 bytes = 43 KB** cho toàn bộ mạng Silk dọc.  
+Tổng: **5460 parent pointers × 8 bytes = 43 KB** cho mạng Silk dọc.  
 Hiện tại: `SilkGraph` **không có** field này. `SilkIndex` chỉ có 37 horizontal buckets.
 
 ### Sức mạnh kết nối = số chiều chung
