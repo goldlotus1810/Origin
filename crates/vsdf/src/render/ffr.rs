@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use olang::molecular::{EmotionDim, MolecularChain, Molecule};
+use olang::molecular::{MolecularChain, Molecule};
 
 /// Fibonacci(n) mod 2^64 — dùng u64 để tránh overflow.
 pub fn fib64(n: u64) -> u64 {
@@ -69,15 +69,13 @@ impl FfrPoint {
 
     /// Convert sang Molecule.
     pub fn to_molecule(&self) -> Molecule {
-        Molecule {
-            shape: self.shape + 1,       // +1: 0x01..0x07
-            relation: self.relation + 1, // +1: 0x01..0x08
-            emotion: EmotionDim {
-                valence: self.valence,
-                arousal: self.arousal,
-            },
-            time: self.time + 1, // +1: 0x01..0x05
-        }
+        Molecule::raw(
+            self.shape + 1,       // +1: 0x01..0x07
+            self.relation + 1, // +1: 0x01..0x08
+            self.valence,
+            self.arousal,
+            self.time + 1, // +1: 0x01..0x05
+        )
     }
 
     /// Khoảng cách Fibonacci giữa 2 điểm (5D Manhattan trên index).

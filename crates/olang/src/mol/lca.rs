@@ -21,7 +21,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::molecular::{
-    ComposeOp, CompositionOrigin, EmotionDim, MolecularChain, Molecule, NodeState, RelationBase,
+    ComposeOp, CompositionOrigin, MolecularChain, Molecule, NodeState, RelationBase,
     ShapeBase, TimeDim,
 };
 
@@ -140,12 +140,37 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
             .iter()
             .map(|(c, w)| (c.0[mol_idx].time, *w))
             .collect();
+        let fs_vals: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].fs, *w))
+            .collect();
+        let fr_vals: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].fr, *w))
+            .collect();
+        let fv_vals: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].fv, *w))
+            .collect();
+        let fa_vals: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].fa, *w))
+            .collect();
+        let ft_vals: Vec<(u8, u32)> = valid
+            .iter()
+            .map(|(c, w)| (c.0[mol_idx].ft, *w))
+            .collect();
 
         let shape_byte = mode_or_wavg_base(&shapes, total_weight, 8);
         let relation_byte = mode_or_wavg_base(&relations, total_weight, 8);
         let valence = mode_or_wavg(&valences, total_weight);
         let arousal = mode_or_wavg(&arousals, total_weight);
         let time_byte = mode_or_wavg_base(&times, total_weight, 5);
+        let fs = mode_or_wavg(&fs_vals, total_weight);
+        let fr = mode_or_wavg(&fr_vals, total_weight);
+        let fv = mode_or_wavg(&fv_vals, total_weight);
+        let fa = mode_or_wavg(&fa_vals, total_weight);
+        let ft = mode_or_wavg(&ft_vals, total_weight);
 
         // Per-dimension weighted variance: Σ w_i × (val_i - mean)² / Σ w_i
         let all_dims: [&[(u8, u32)]; 5] = [&shapes, &relations, &valences, &arousals, &times];
@@ -190,12 +215,13 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
             time_byte
         };
 
-        result_mols.push(Molecule {
-            shape,
-            relation,
-            emotion: EmotionDim { valence, arousal },
-            time,
-        });
+        let mut mol = Molecule::raw(shape, relation, valence, arousal, time);
+        mol.fs = fs;
+        mol.fr = fr;
+        mol.fv = fv;
+        mol.fa = fa;
+        mol.ft = ft;
+        result_mols.push(mol);
     }
 
     let chain = MolecularChain(result_mols);

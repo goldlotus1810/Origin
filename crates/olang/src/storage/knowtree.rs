@@ -619,18 +619,16 @@ pub fn text_to_word_hashes(text: &str) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molecular::{EmotionDim, Molecule, ShapeBase, TimeDim};
+    use crate::molecular::{Molecule, ShapeBase, TimeDim};
 
     fn test_chain(v: u8) -> MolecularChain {
-        MolecularChain::single(Molecule {
-            shape: ShapeBase::Sphere.as_byte(),
-            relation: RelationBase::Member.as_byte(),
-            emotion: EmotionDim {
-                valence: v,
-                arousal: 0x80,
-            },
-            time: TimeDim::Medium.as_byte(),
-        })
+        MolecularChain::single(Molecule::raw(
+            ShapeBase::Sphere.as_byte(),
+            RelationBase::Member.as_byte(),
+            v,
+            0x80,
+            TimeDim::Medium.as_byte(),
+        ))
     }
 
     #[test]

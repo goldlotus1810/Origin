@@ -6,7 +6,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase};
+use crate::molecular::{MolecularChain, Molecule, RelationBase};
 
 /// Encode một codepoint Unicode → MolecularChain (1 molecule).
 ///
@@ -20,12 +20,17 @@ pub fn encode_codepoint(cp: u32) -> MolecularChain {
     let arousal = ucd::arousal_of(cp);
     let time = ucd::time_of(cp);
 
-    MolecularChain::single(Molecule {
-        shape,
-        relation,
-        emotion: EmotionDim { valence, arousal },
-        time,
-    })
+    let mut mol = Molecule::raw(shape, relation, valence, arousal, time);
+    // Set real formula from UCD — nếu có entry thì dùng công thức, không thì giữ UNSET
+    if let Some(entry) = ucd::lookup(cp) {
+        mol.fs = entry.fs;
+        mol.fr = entry.fr;
+        mol.fv = entry.fv;
+        mol.fa = entry.fa;
+        mol.ft = entry.ft;
+    }
+
+    MolecularChain::single(mol)
 }
 
 /// Encode ZWJ sequence → MolecularChain (N molecules).
