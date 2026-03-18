@@ -50,7 +50,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::ir::{OlangProgram, Op};
-use crate::syntax::{CmpOp, Expr, Stmt};
+use crate::syntax::{CmpOp, Expr, FStrPart, Stmt};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SemError — lỗi ngữ nghĩa
@@ -636,6 +636,21 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
                 validate_expr(e, scope, errors);
             }
         }
+        Expr::FStr { parts } => {
+            for part in parts {
+                if let FStrPart::Expr(expr) = part {
+                    validate_expr(expr, scope, errors);
+                }
+            }
+        }
+        Expr::BitShl(l, r) | Expr::BitShr(l, r)
+        | Expr::BitAnd(l, r) | Expr::BitXor(l, r) => {
+            validate_expr(l, scope, errors);
+            validate_expr(r, scope, errors);
+        }
+        Expr::BitNot(inner) => {
+            validate_expr(inner, scope, errors);
+        }
     }
 }
 
@@ -703,6 +718,9 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         | Expr::ChannelCreate => ChainKind::Unknown,
         Expr::UnwrapOr { value, .. } => infer_expr_kind(value),
         Expr::Tuple(_) => ChainKind::Unknown,
+        Expr::FStr { .. } => ChainKind::Unknown,
+        Expr::BitShl(..) | Expr::BitShr(..) | Expr::BitAnd(..)
+        | Expr::BitXor(..) | Expr::BitNot(..) => ChainKind::Numeric,
     }
 }
 
@@ -1759,6 +1777,41 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "channel" => Some("__channel_new"),
                 "channel_send" => Some("__channel_send"),
                 "channel_recv" => Some("__channel_recv"),
+                // Phase 3 B5: String upgrades
+                "str_matches" => Some("__str_matches"),
+                "str_chars" => Some("__str_chars"),
+                "str_repeat" => Some("__str_repeat"),
+                "str_pad_left" => Some("__str_pad_left"),
+                "str_pad_right" => Some("__str_pad_right"),
+                "str_char_at" => Some("__str_char_at"),
+                // Phase 3 B6: Byte operations
+                "bytes_new" => Some("__bytes_new"),
+                "bytes_len" => Some("__byte_len"),
+                "bytes_get_u8" => Some("__bytes_get_u8"),
+                "bytes_set_u8" => Some("__bytes_set_u8"),
+                "bytes_get_u16_be" => Some("__bytes_get_u16_be"),
+                "bytes_set_u16_be" => Some("__bytes_set_u16_be"),
+                "bytes_get_u32_be" => Some("__bytes_get_u32_be"),
+                "bytes_set_u32_be" => Some("__bytes_set_u32_be"),
+                "pack" => Some("__pack"),
+                "unpack" => Some("__unpack"),
+                // Phase 3 B6: Bitwise operations
+                "bit_and" => Some("__bit_and"),
+                "bit_or" => Some("__bit_or"),
+                "bit_xor" => Some("__bit_xor"),
+                "bit_not" => Some("__bit_not"),
+                "bit_shl" => Some("__bit_shl"),
+                "bit_shr" => Some("__bit_shr"),
+                // Phase 3 B7: Math stdlib
+                "tan" => Some("__hyp_tan"),
+                "atan" => Some("__hyp_atan"),
+                "atan2" => Some("__hyp_atan2"),
+                "exp" => Some("__hyp_exp"),
+                "ln" => Some("__hyp_ln"),
+                "clamp" => Some("__hyp_clamp"),
+                "fib" => Some("__math_fib"),
+                "PI" => Some("__math_pi"),
+                "PHI" => Some("__math_phi"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -2285,6 +2338,23 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 // Channel methods
                 "send" => Some("__channel_send"),
                 "recv" => Some("__channel_recv"),
+                // Phase 3 B5: String upgrades
+                "matches" => Some("__str_matches"),
+                "chars" => Some("__str_chars"),
+                "repeat" => Some("__str_repeat"),
+                "pad_left" => Some("__str_pad_left"),
+                "pad_right" => Some("__str_pad_right"),
+                "char_at" => Some("__str_char_at"),
+                // Phase 3 B6: Byte operations
+                "to_bytes" => Some("__to_bytes"),
+                "from_bytes" => Some("__from_bytes"),
+                "byte_len" => Some("__byte_len"),
+                "get_u8" => Some("__bytes_get_u8"),
+                "set_u8" => Some("__bytes_set_u8"),
+                "get_u16_be" => Some("__bytes_get_u16_be"),
+                "set_u16_be" => Some("__bytes_set_u16_be"),
+                "get_u32_be" => Some("__bytes_get_u32_be"),
+                "set_u32_be" => Some("__bytes_set_u32_be"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -2396,6 +2466,51 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             }
             ctx.emit(Op::PushNum(elements.len() as f64));
             ctx.emit(Op::Call("__array_new".into()));
+        }
+
+        // ── Phase 3 B5: f-string interpolation ─────────────────────────────
+        Expr::FStr { parts } => {
+            // Build string by concatenating parts:
+            // Push empty string, then concat each part
+            ctx.emit(Op::Push(crate::vm::string_to_chain("")));
+            for part in parts {
+                match part {
+                    FStrPart::Literal(s) => {
+                        ctx.emit(Op::Push(crate::vm::string_to_chain(s)));
+                    }
+                    FStrPart::Expr(expr) => {
+                        lower_expr(expr, ctx);
+                        ctx.emit(Op::Call("__to_string".into()));
+                    }
+                }
+                ctx.emit(Op::Call("__str_concat".into()));
+            }
+        }
+
+        // ── Phase 3 B6: Bitwise operations ─────────────────────────────────
+        Expr::BitShl(lhs, rhs) => {
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            ctx.emit(Op::Call("__bit_shl".into()));
+        }
+        Expr::BitShr(lhs, rhs) => {
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            ctx.emit(Op::Call("__bit_shr".into()));
+        }
+        Expr::BitAnd(lhs, rhs) => {
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            ctx.emit(Op::Call("__bit_and".into()));
+        }
+        Expr::BitXor(lhs, rhs) => {
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            ctx.emit(Op::Call("__bit_xor".into()));
+        }
+        Expr::BitNot(inner) => {
+            lower_expr(inner, ctx);
+            ctx.emit(Op::Call("__bit_not".into()));
         }
     }
 }
@@ -5688,5 +5803,472 @@ mod tests {
             let prog = lower(&stmts);
             assert!(prog.ops.len() > 0, "Method {} should compile to non-empty program", src_method);
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Phase 3 AI-B: String upgrades (B5) + Byte ops (B6) + Math stdlib (B7)
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── B5: f-string interpolation ──────────────────────────────────────
+
+    #[test]
+    fn fstring_simple() {
+        let src = r#"
+            let name = "world";
+            emit f"hello {name}";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "f-string should produce output");
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "hello world");
+    }
+
+    #[test]
+    fn fstring_multiple_exprs() {
+        let src = r#"
+            let a = 1;
+            let b = 2;
+            emit f"{a} + {b} = 3";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "1 + 2 = 3");
+    }
+
+    #[test]
+    fn fstring_no_interpolation() {
+        let src = r#"emit f"plain text";"#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "plain text");
+    }
+
+    #[test]
+    fn fstring_with_arithmetic() {
+        let src = r#"emit f"result: {2 + 3}";"#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "result: 5");
+    }
+
+    #[test]
+    fn fstring_parse_produces_fstr_expr() {
+        let src = r#"emit f"hi {x}";"#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::Emit(Expr::FStr { parts }) => {
+                assert!(parts.len() >= 2, "should have literal + expr parts");
+            }
+            other => panic!("Expected Emit(FStr), got {:?}", other),
+        }
+    }
+
+    // ── B5: String methods ──────────────────────────────────────────────
+
+    #[test]
+    fn str_matches_glob() {
+        let src = r#"
+            let s = "hello world";
+            emit s.matches("hello*");
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert!(!outputs[0].is_empty(), "hello world matches hello*");
+    }
+
+    #[test]
+    fn str_matches_glob_fail() {
+        let src = r#"
+            let s = "goodbye";
+            emit s.matches("hello*");
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert!(outputs[0].is_empty(), "goodbye should not match hello*");
+    }
+
+    #[test]
+    fn str_repeat_method() {
+        let src = r#"
+            let s = "ab";
+            emit s.repeat(3);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "ababab");
+    }
+
+    #[test]
+    fn str_char_at_method() {
+        let src = r#"
+            let s = "hello";
+            emit s.char_at(1);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "e");
+    }
+
+    #[test]
+    fn str_pad_left_method() {
+        let src = r#"
+            let s = "42";
+            emit s.pad_left(5, "0");
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "00042");
+    }
+
+    // ── B6: Bitwise operations ──────────────────────────────────────────
+
+    #[test]
+    fn bit_and_operator() {
+        let src = "emit 255 & 15;";  // 0xFF & 0x0F
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 15.0).abs() < f64::EPSILON, "255 & 15 = 15, got {}", val);
+    }
+
+    #[test]
+    fn bit_xor_operator() {
+        let src = "emit 255 ^ 15;";  // 0xFF ^ 0x0F
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 240.0).abs() < f64::EPSILON, "255 ^ 15 = 240, got {}", val);
+    }
+
+    #[test]
+    fn bit_shl_operator() {
+        let src = "emit 1 << 3;";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 8.0).abs() < f64::EPSILON, "1 << 3 = 8, got {}", val);
+    }
+
+    #[test]
+    fn bit_shr_operator() {
+        let src = "emit 16 >> 2;";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 4.0).abs() < f64::EPSILON, "16 >> 2 = 4, got {}", val);
+    }
+
+    #[test]
+    fn bit_not_operator() {
+        let src = "emit ~0;";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(0.0);
+        assert!((val - (-1.0)).abs() < f64::EPSILON, "~0 = -1, got {}", val);
+    }
+
+    #[test]
+    fn bit_combined() {
+        // (160 & 255) << 1
+        let src = "emit (160 & 255) << 1;";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 320.0).abs() < f64::EPSILON, "(160 & 255) << 1 = 320, got {}", val);
+    }
+
+    // ── B6: Bytes operations ────────────────────────────────────────────
+
+    #[test]
+    fn bytes_new_and_set_get() {
+        let src = r#"
+            let buf = bytes_new(4);
+            let buf = buf.set_u8(0, 1);
+            emit buf.get_u8(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 1.0).abs() < f64::EPSILON, "get_u8(0) = 1, got {}", val);
+    }
+
+    #[test]
+    fn bytes_u16_be() {
+        let src = r#"
+            let buf = bytes_new(4);
+            let buf = buf.set_u16_be(0, 4660);
+            emit buf.get_u16_be(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 4660.0).abs() < f64::EPSILON, "get_u16_be = 4660 (0x1234), got {}", val);
+    }
+
+    #[test]
+    fn bytes_u32_be() {
+        let src = r#"
+            let buf = bytes_new(8);
+            let buf = buf.set_u32_be(0, 305419896);
+            emit buf.get_u32_be(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 305419896.0).abs() < 1.0, "get_u32_be = 305419896 (0x12345678), got {}", val);
+    }
+
+    // ── B7: Math stdlib ─────────────────────────────────────────────────
+
+    #[test]
+    fn math_fib_basic() {
+        let src = "emit fib(11);";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 89.0).abs() < f64::EPSILON, "fib(11) = 89, got {}", val);
+    }
+
+    #[test]
+    fn math_fib_zero() {
+        let src = "emit fib(0);";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val).abs() < f64::EPSILON, "fib(0) = 0, got {}", val);
+    }
+
+    #[test]
+    fn math_fib_one() {
+        let src = "emit fib(1);";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 1.0).abs() < f64::EPSILON, "fib(1) = 1, got {}", val);
+    }
+
+    #[test]
+    fn math_pi_constant() {
+        let src = "emit PI();";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - core::f64::consts::PI).abs() < 1e-10, "PI = 3.14159..., got {}", val);
+    }
+
+    #[test]
+    fn math_phi_constant() {
+        let src = "emit PHI();";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 1.618033988749895).abs() < 1e-10, "PHI = 1.618..., got {}", val);
+    }
+
+    #[test]
+    fn math_tan_basic() {
+        let src = "emit tan(0);";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!(val.abs() < 1e-10, "tan(0) = 0, got {}", val);
+    }
+
+    #[test]
+    fn math_clamp() {
+        let src = "emit clamp(15, 0, 10);";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 10.0).abs() < f64::EPSILON, "clamp(15, 0, 10) = 10, got {}", val);
+    }
+
+    #[test]
+    fn math_exp_and_ln() {
+        let src = "emit ln(exp(1));";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 1.0).abs() < 1e-6, "ln(exp(1)) = 1, got {}", val);
+    }
+
+    #[test]
+    fn math_sqrt_already_works() {
+        let src = "emit sqrt(144);";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 12.0).abs() < 1e-6, "sqrt(144) = 12, got {}", val);
+    }
+
+    // ── B5+B6+B7 combined ───────────────────────────────────────────────
+
+    #[test]
+    fn phase3_combined_fstr_with_math() {
+        let src = r#"
+            let n = 11;
+            let f = fib(n);
+            emit f"fib({n}) = {f}";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "fib(11) = 89");
+    }
+
+    #[test]
+    fn phase3_bitwise_mask_isl() {
+        // Simulate ISL address packing
+        let src = r#"
+            let layer = 1;
+            let group = 2;
+            let addr = (layer << 8) + group;
+            emit addr;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 258.0).abs() < f64::EPSILON, "(1<<8)+2 = 258, got {}", val);
+    }
+
+    #[test]
+    fn phase3_fib_sequence_check() {
+        // Validate Fibonacci: fib(n) = fib(n-1) + fib(n-2) for n=10
+        let src = r#"
+            let a = fib(8);
+            let b = fib(9);
+            let c = fib(10);
+            emit c - (a + b);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-999.0);
+        assert!(val.abs() < f64::EPSILON, "fib(10) - fib(8) - fib(9) = 0, got {}", val);
     }
 }

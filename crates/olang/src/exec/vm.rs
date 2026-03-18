@@ -273,6 +273,26 @@ impl VmStack {
 
 /// Classify chain by dominant molecule characteristics.
 ///
+/// Simple glob pattern matching: * = any chars, ? = any single char.
+fn glob_match(text: &str, pattern: &str) -> bool {
+    let (t, p) = (text.as_bytes(), pattern.as_bytes());
+    let (mut ti, mut pi) = (0usize, 0usize);
+    let (mut star_pi, mut star_ti) = (usize::MAX, 0usize);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == b'?' || p[pi] == t[ti]) {
+            ti += 1; pi += 1;
+        } else if pi < p.len() && p[pi] == b'*' {
+            star_pi = pi; star_ti = ti; pi += 1;
+        } else if star_pi != usize::MAX {
+            pi = star_pi + 1; star_ti += 1; ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == b'*' { pi += 1; }
+    pi == p.len()
+}
+
 /// Maps ShapeBase to Unicode group categories:
 /// Split an array-encoded MolecularChain by separator molecules (shape=0, relation=0).
 /// Split array chain by separator molecules (shape=0, relation=0, v=0, a=0, t=0).
@@ -1011,23 +1031,21 @@ impl OlangVM {
                             let _ = stack.push(MolecularChain(result));
                         }
                         "__to_string" => {
-                            // Number → string chain: encode digits as molecules
+                            // Convert value to string chain
                             let val = vm_pop!(stack, events);
-                            let n = val.to_number().unwrap_or(0.0);
-                            let s = if n == (n as i64 as f64) {
-                                alloc::format!("{}", n as i64)
+                            // If already a string chain, keep as-is
+                            if !val.is_empty() && val.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01) {
+                                let _ = stack.push(val);
                             } else {
-                                alloc::format!("{}", n)
-                            };
-                            let mut mols = Vec::new();
-                            for b in s.bytes() {
-                                mols.push(Molecule {
-                                    shape: 0x02, relation: 0x01,
-                                    emotion: EmotionDim { valence: b, arousal: 0 },
-                                    time: 0x01,
-                                });
+                                // Number → string chain
+                                let n = val.to_number().unwrap_or(0.0);
+                                let s = if n == (n as i64 as f64) {
+                                    alloc::format!("{}", n as i64)
+                                } else {
+                                    alloc::format!("{}", n)
+                                };
+                                let _ = stack.push(string_to_chain(&s));
                             }
-                            let _ = stack.push(MolecularChain(mols));
                         }
                         "__to_number" => {
                             // String chain → number: decode molecules back to digits
@@ -2115,6 +2133,358 @@ impl OlangVM {
                             let path_chain = vm_pop!(stack, events);
                             let path = chain_to_string(&path_chain).unwrap_or_default();
                             events.push(VmEvent::ModDecl { path });
+                        }
+
+                        // ── Phase 3 B5: String upgrades ────────────────────
+                        "__str_matches" => {
+                            // Stack: [string, pattern] → 1.0 if matches, empty if not
+                            // Simple glob: * = any chars, ? = any single char
+                            let pat = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let pat_str = chain_to_string(&pat).unwrap_or_default();
+                            let matched = glob_match(&s_str, &pat_str);
+                            if matched {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__str_chars" => {
+                            // Stack: [string] → array of single-char strings
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut mols = Vec::new();
+                            for ch in s_str.chars() {
+                                if !mols.is_empty() { mols.push(sep.clone()); }
+                                let mut buf = [0u8; 4];
+                                let c_str = ch.encode_utf8(&mut buf);
+                                for b in c_str.bytes() {
+                                    mols.push(Molecule {
+                                        shape: b, relation: 1,
+                                        emotion: EmotionDim { valence: 0x80, arousal: 0x80 },
+                                        time: 3,
+                                    });
+                                }
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__str_repeat" => {
+                            // Stack: [string, count] → repeated string
+                            let count = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let n = count.to_number().unwrap_or(1.0) as usize;
+                            let repeated = s_str.repeat(n.min(10000));
+                            let _ = stack.push(string_to_chain(&repeated));
+                        }
+                        "__str_pad_left" => {
+                            // Stack: [string, width, fill_char] → padded string
+                            let fill = vm_pop!(stack, events);
+                            let width = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let w = width.to_number().unwrap_or(0.0) as usize;
+                            let fill_str = chain_to_string(&fill).unwrap_or_else(|| String::from(" "));
+                            let fill_ch = fill_str.chars().next().unwrap_or(' ');
+                            let pad_count = w.saturating_sub(s_str.len());
+                            let mut result = String::new();
+                            for _ in 0..pad_count { result.push(fill_ch); }
+                            result.push_str(&s_str);
+                            let _ = stack.push(string_to_chain(&result));
+                        }
+                        "__str_pad_right" => {
+                            // Stack: [string, width, fill_char] → padded string
+                            let fill = vm_pop!(stack, events);
+                            let width = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let w = width.to_number().unwrap_or(0.0) as usize;
+                            let fill_str = chain_to_string(&fill).unwrap_or_else(|| String::from(" "));
+                            let fill_ch = fill_str.chars().next().unwrap_or(' ');
+                            let mut result = s_str.clone();
+                            let pad_count = w.saturating_sub(s_str.len());
+                            for _ in 0..pad_count { result.push(fill_ch); }
+                            let _ = stack.push(string_to_chain(&result));
+                        }
+                        "__str_char_at" => {
+                            // Stack: [string, index] → single char string or empty
+                            let idx = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            if let Some(ch) = s_str.chars().nth(i) {
+                                let mut buf = [0u8; 4];
+                                let c_str = ch.encode_utf8(&mut buf);
+                                let _ = stack.push(string_to_chain(c_str));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+
+                        // ── Phase 3 B6: Bitwise operations ─────────────────
+                        "__bit_and" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0) as i64;
+                            let nb = b.to_number().unwrap_or(0.0) as i64;
+                            let _ = stack.push(MolecularChain::from_number((na & nb) as f64));
+                        }
+                        "__bit_or" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0) as i64;
+                            let nb = b.to_number().unwrap_or(0.0) as i64;
+                            let _ = stack.push(MolecularChain::from_number((na | nb) as f64));
+                        }
+                        "__bit_xor" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0) as i64;
+                            let nb = b.to_number().unwrap_or(0.0) as i64;
+                            let _ = stack.push(MolecularChain::from_number((na ^ nb) as f64));
+                        }
+                        "__bit_not" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0) as i64;
+                            let _ = stack.push(MolecularChain::from_number((!na) as f64));
+                        }
+                        "__bit_shl" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0) as i64;
+                            let nb = b.to_number().unwrap_or(0.0) as u32;
+                            let _ = stack.push(MolecularChain::from_number(na.wrapping_shl(nb.min(63)) as f64));
+                        }
+                        "__bit_shr" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0) as i64;
+                            let nb = b.to_number().unwrap_or(0.0) as u32;
+                            let _ = stack.push(MolecularChain::from_number(na.wrapping_shr(nb.min(63)) as f64));
+                        }
+
+                        // ── Phase 3 B6: Bytes operations ───────────────────
+                        "__bytes_new" => {
+                            // Stack: [size] → bytes chain (all zeros)
+                            let size = vm_pop!(stack, events);
+                            let n = size.to_number().unwrap_or(0.0) as usize;
+                            let n = n.min(65536); // safety limit
+                            let mut mols = Vec::with_capacity(n);
+                            for _ in 0..n {
+                                mols.push(Molecule {
+                                    shape: 0, relation: 1,
+                                    emotion: EmotionDim { valence: 0x80, arousal: 0x80 },
+                                    time: 3,
+                                });
+                            }
+                            let _ = stack.push(MolecularChain(mols));
+                        }
+                        "__byte_len" => {
+                            let a = vm_pop!(stack, events);
+                            let _ = stack.push(MolecularChain::from_number(a.0.len() as f64));
+                        }
+                        "__bytes_get_u8" => {
+                            // Stack: [bytes, index] → value
+                            let idx = vm_pop!(stack, events);
+                            let buf = vm_pop!(stack, events);
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            if i < buf.0.len() {
+                                let _ = stack.push(MolecularChain::from_number(buf.0[i].shape as f64));
+                            } else {
+                                let _ = stack.push(MolecularChain::from_number(0.0));
+                            }
+                        }
+                        "__bytes_set_u8" => {
+                            // Stack: [bytes, index, value] → updated bytes
+                            let val = vm_pop!(stack, events);
+                            let idx = vm_pop!(stack, events);
+                            let mut buf = vm_pop!(stack, events);
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            let v = val.to_number().unwrap_or(0.0) as u8;
+                            if i < buf.0.len() {
+                                buf.0[i].shape = v;
+                            }
+                            let _ = stack.push(buf);
+                        }
+                        "__bytes_get_u16_be" => {
+                            // Stack: [bytes, index] → u16 value (big-endian)
+                            let idx = vm_pop!(stack, events);
+                            let buf = vm_pop!(stack, events);
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            if i + 1 < buf.0.len() {
+                                let hi = buf.0[i].shape as u16;
+                                let lo = buf.0[i + 1].shape as u16;
+                                let _ = stack.push(MolecularChain::from_number(((hi << 8) | lo) as f64));
+                            } else {
+                                let _ = stack.push(MolecularChain::from_number(0.0));
+                            }
+                        }
+                        "__bytes_set_u16_be" => {
+                            // Stack: [bytes, index, value] → updated bytes
+                            let val = vm_pop!(stack, events);
+                            let idx = vm_pop!(stack, events);
+                            let mut buf = vm_pop!(stack, events);
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            let v = val.to_number().unwrap_or(0.0) as u16;
+                            if i + 1 < buf.0.len() {
+                                buf.0[i].shape = (v >> 8) as u8;
+                                buf.0[i + 1].shape = (v & 0xFF) as u8;
+                            }
+                            let _ = stack.push(buf);
+                        }
+                        "__bytes_get_u32_be" => {
+                            // Stack: [bytes, index] → u32 value (big-endian)
+                            let idx = vm_pop!(stack, events);
+                            let buf = vm_pop!(stack, events);
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            if i + 3 < buf.0.len() {
+                                let v = (buf.0[i].shape as u32) << 24
+                                    | (buf.0[i + 1].shape as u32) << 16
+                                    | (buf.0[i + 2].shape as u32) << 8
+                                    | (buf.0[i + 3].shape as u32);
+                                let _ = stack.push(MolecularChain::from_number(v as f64));
+                            } else {
+                                let _ = stack.push(MolecularChain::from_number(0.0));
+                            }
+                        }
+                        "__bytes_set_u32_be" => {
+                            // Stack: [bytes, index, value] → updated bytes
+                            let val = vm_pop!(stack, events);
+                            let idx = vm_pop!(stack, events);
+                            let mut buf = vm_pop!(stack, events);
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            let v = val.to_number().unwrap_or(0.0) as u32;
+                            if i + 3 < buf.0.len() {
+                                buf.0[i].shape = (v >> 24) as u8;
+                                buf.0[i + 1].shape = (v >> 16) as u8;
+                                buf.0[i + 2].shape = (v >> 8) as u8;
+                                buf.0[i + 3].shape = (v & 0xFF) as u8;
+                            }
+                            let _ = stack.push(buf);
+                        }
+                        "__pack" => {
+                            // Simple pack: Stack: [format_str, value1, value2, ...] → bytes chain
+                            // Format: "NB" where N = count of bytes per field
+                            // e.g., "4B 4B 1B 3B" → 12 bytes
+                            let fmt = vm_pop!(stack, events);
+                            let fmt_str = chain_to_string(&fmt).unwrap_or_default();
+                            let fields: Vec<&str> = fmt_str.split_whitespace().collect();
+                            let mut values = Vec::new();
+                            for _ in 0..fields.len() {
+                                values.push(vm_pop!(stack, events));
+                            }
+                            values.reverse();
+                            let mut result_mols = Vec::new();
+                            for (field, val) in fields.iter().zip(values.iter()) {
+                                let size: usize = field.trim_end_matches('B').parse().unwrap_or(1);
+                                let n = val.to_number().unwrap_or(0.0) as u64;
+                                for bi in (0..size).rev() {
+                                    result_mols.push(Molecule {
+                                        shape: ((n >> (bi * 8)) & 0xFF) as u8,
+                                        relation: 1,
+                                        emotion: EmotionDim { valence: 0x80, arousal: 0x80 },
+                                        time: 3,
+                                    });
+                                }
+                            }
+                            let _ = stack.push(MolecularChain(result_mols));
+                        }
+                        "__unpack" => {
+                            // Stack: [format_str, bytes_chain] → array of values
+                            let bytes = vm_pop!(stack, events);
+                            let fmt = vm_pop!(stack, events);
+                            let fmt_str = chain_to_string(&fmt).unwrap_or_default();
+                            let fields: Vec<&str> = fmt_str.split_whitespace().collect();
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result_mols = Vec::new();
+                            let mut offset = 0usize;
+                            for field in &fields {
+                                let size: usize = field.trim_end_matches('B').parse().unwrap_or(1);
+                                let mut val: u64 = 0;
+                                for bi in 0..size {
+                                    if offset + bi < bytes.0.len() {
+                                        val = (val << 8) | bytes.0[offset + bi].shape as u64;
+                                    }
+                                }
+                                offset += size;
+                                if !result_mols.is_empty() { result_mols.push(sep.clone()); }
+                                let num_chain = MolecularChain::from_number(val as f64);
+                                result_mols.extend(num_chain.0);
+                            }
+                            let _ = stack.push(MolecularChain(result_mols));
+                        }
+
+                        // ── Phase 3 B7: Math stdlib ────────────────────────
+                        "__hyp_tan" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::tan(na)));
+                        }
+                        "__hyp_atan" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::atan(na)));
+                        }
+                        "__hyp_atan2" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::atan2(na, nb)));
+                        }
+                        "__hyp_exp" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::exp(na)));
+                        }
+                        "__hyp_ln" => {
+                            let a = vm_pop!(stack, events);
+                            let na = a.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(homemath::log(na)));
+                        }
+                        "__hyp_clamp" => {
+                            let hi = vm_pop!(stack, events);
+                            let lo = vm_pop!(stack, events);
+                            let x = vm_pop!(stack, events);
+                            let nx = x.to_number().unwrap_or(0.0);
+                            let nlo = lo.to_number().unwrap_or(0.0);
+                            let nhi = hi.to_number().unwrap_or(1.0);
+                            let clamped = if nx < nlo { nlo } else if nx > nhi { nhi } else { nx };
+                            let _ = stack.push(MolecularChain::from_number(clamped));
+                        }
+                        "__math_fib" => {
+                            // Fibonacci: fib(n) → F(n)
+                            let a = vm_pop!(stack, events);
+                            let n = a.to_number().unwrap_or(0.0) as u64;
+                            let result = if n <= 1 {
+                                n
+                            } else {
+                                let (mut a, mut b) = (0u64, 1u64);
+                                for _ in 0..n - 1 {
+                                    let tmp = b;
+                                    b = a.saturating_add(b);
+                                    a = tmp;
+                                }
+                                b
+                            };
+                            let _ = stack.push(MolecularChain::from_number(result as f64));
+                        }
+                        "__math_pi" => {
+                            let _ = stack.push(MolecularChain::from_number(core::f64::consts::PI));
+                        }
+                        "__math_phi" => {
+                            // Golden ratio φ = (1 + √5) / 2
+                            let _ = stack.push(MolecularChain::from_number(1.618_033_988_749_895));
                         }
 
                         _ => {
