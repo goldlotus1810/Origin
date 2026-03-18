@@ -2,6 +2,10 @@
 
 > **Đọc file này TRƯỚC KHI viết bất kỳ dòng code nào.**
 > Mọi AI (Claude, GPT, Copilot...) mở project này đều phải hiểu những gì dưới đây.
+>
+> **⚠️ REWRITE đang diễn ra.** Đọc `plans/README.md` trước khi code.
+> Mọi việc mới đều có Plan chi tiết — KHÔNG tự ý viết Rust mới.
+> Xem: [Plans](#️-trước-khi-viết-bất-kỳ-code-nào--đọc-plans)
 
 ---
 
@@ -701,8 +705,47 @@ QT Axioms:
 
 ---
 
+## ⚠️ TRƯỚC KHI VIẾT BẤT KỲ CODE NÀO — ĐỌC PLANS
+
+```
+HomeOS đang trong quá trình REWRITE.
+Mọi việc mới đều có Plan chi tiết.
+KHÔNG TỰ Ý viết code mới nếu chưa đọc Plan tương ứng.
+
+📋 PLAN_REWRITE.md          ← Kim chỉ nam tổng thể (7 giai đoạn)
+📂 plans/README.md           ← Mục lục + dependency graph + phân việc
+📂 plans/PLAN_0_1_*.md       ← Plan đầu tiên cần làm (test lexer.ol)
+📂 plans/PLAN_0_2_*.md       ← ... tiếp theo ...
+📂 plans/PLAN_AUTH_*.md      ← Auth (song song được)
+
+QUY TRÌNH BẮT BUỘC:
+  1. Đọc plans/README.md → xem dependency graph
+  2. Tìm Plan phù hợp với việc cần làm
+  3. Đọc TOÀN BỘ Plan đó (bối cảnh, rào cản, DoD)
+  4. Viết code THEO Plan — không tự sáng tác
+  5. Nếu không có Plan → HỎI trước, KHÔNG tự viết
+
+TẠI SAO?
+  — Rust codebase hiện tại ĐANG BỊ THAY THẾ dần bởi Olang
+  — Viết thêm Rust code mới = NỢ KỸ THUẬT phải xóa sau
+  — Plans chỉ rõ: cái gì viết bằng Rust (tạm), cái gì viết bằng Olang (vĩnh viễn)
+  — Mỗi Plan có "Rào cản" + "Giải pháp" → tránh mất thời gian khám phá lại
+
+NGOẠI LỆ cho phép viết Rust mới:
+  ✅ Bug fix cho code Rust hiện tại
+  ✅ Test cho code Rust hiện tại
+  ✅ Phần Rust được Plan chỉ định (VD: PLAN_1_4 builder, PLAN_AUTH)
+  ✅ FFI bridge / VM extension được Plan yêu cầu
+  ❌ Feature mới bằng Rust mà Plan nói viết bằng Olang
+  ❌ Thêm crate mới không có trong Plan
+  ❌ Refactor lớn code Rust sắp bị thay thế
+```
+
+---
+
 ## Khi viết code mới
 
+0. **ĐỌC Plan tương ứng trong `plans/` TRƯỚC** (xem mục trên)
 1. Hỏi: "Thứ này có phải là ○[f] không?" — nếu phải hardcode → dừng lại
 2. Mọi Molecule phải từ `encode_codepoint()` hoặc `lca()`
 3. Emotion phải đi qua TOÀN BỘ pipeline — không tắt bước nào
