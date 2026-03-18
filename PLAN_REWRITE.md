@@ -88,11 +88,140 @@ Chạy (sau khi cài):
 
   Cả hai → REPL. Không argument = interactive mode.
 
-Cài đặt lần đầu:
-  cargo build --release -p builder
-  ./builder --output /usr/local/bin/origin.olang
-  ln -s /usr/local/bin/origin.olang /usr/local/bin/o
-  chmod +x /usr/local/bin/origin.olang
+Cài đặt lần đầu (First Run — chỉ xảy ra 1 lần):
+
+  $ ./origin.olang
+
+  ┌──────────────────────────────────────────────────────┐
+  │              ○ HomeOS — First Run Setup               │
+  ├──────────────────────────────────────────────────────┤
+  │                                                      │
+  │  QUY TẮC SỬ DỤNG                                    │
+  │  ────────────────                                    │
+  │  1. origin.olang là tài sản cá nhân của bạn.        │
+  │     File này chứa MỌI THỨ: VM, logic, tri thức,     │
+  │     khóa xác thực. MẤT FILE = MẤT HẾT.             │
+  │                                                      │
+  │  2. HomeOS học từ bạn. Dữ liệu KHÔNG rời khỏi      │
+  │     thiết bị. Không cloud. Không telemetry.           │
+  │     Bạn sở hữu 100% dữ liệu của mình.              │
+  │                                                      │
+  │  3. Append-only: HomeOS không xóa, không ghi đè.     │
+  │     Mọi thay đổi được ghi lại vĩnh viễn.            │
+  │                                                      │
+  │  4. HomeOS KHÔNG chịu trách nhiệm cho:              │
+  │     - Quyết định dựa trên đề xuất của HomeOS        │
+  │     - Mất file do lỗi phần cứng / người dùng        │
+  │     - Hành vi của Worker trên thiết bị ngoại vi      │
+  │     HomeOS là CÔNG CỤ. Người dùng quyết định.       │
+  │     AAM approve = NGƯỜI DÙNG approve.                │
+  │                                                      │
+  │  5. Backup: xuất key.ol để khôi phục trên máy khác. │
+  │     Không có key.ol → không khôi phục được.           │
+  │                                                      │
+  │  [Đồng ý & Tiếp tục]    [Thoát]                     │
+  └──────────────────────────────────────────────────────┘
+
+  (Người dùng chọn [Đồng ý & Tiếp tục])
+
+  ┌──────────────────────────────────────────────────────┐
+  │              ○ Tạo Master Key                         │
+  ├──────────────────────────────────────────────────────┤
+  │                                                      │
+  │  Master Key = quyền tối cao trên origin.olang này.   │
+  │  Khóa này lock ISL chain → chỉ bạn điều khiển AAM.  │
+  │                                                      │
+  │  Tên người dùng: [_______________]                   │
+  │  Mật khẩu:       [_______________]                   │
+  │  Xác nhận:       [_______________]                   │
+  │                                                      │
+  │  ⚠ Mật khẩu → derive Ed25519 keypair:               │
+  │    password → Argon2id(salt=username) → seed 32B     │
+  │    seed → Ed25519 keypair                            │
+  │    public_key → ghi vào origin.olang header          │
+  │    private_key → KHÔNG lưu (derive lại từ password)  │
+  │                                                      │
+  │  ⚠ QUAN TRỌNG:                                      │
+  │    - Quên mật khẩu = mất quyền truy cập             │
+  │    - File origin.olang BỊ KHÓA bằng key này         │
+  │    - Mọi lệnh ISL tier-0 (AAM) cần ký bằng key này │
+  │                                                      │
+  │  [Tạo Key & Bắt đầu]                                │
+  └──────────────────────────────────────────────────────┘
+
+  (Hệ thống tạo key)
+
+  ○ Master Key created.
+  ○ ISL chain locked: AAM → [public_key_hash] only.
+  ○ Mọi Chief/Worker phải được AAM (bạn) approve.
+
+  ┌──────────────────────────────────────────────────────┐
+  │              ○ Nhận dạng sinh trắc (tuỳ chọn)        │
+  ├──────────────────────────────────────────────────────┤
+  │                                                      │
+  │  Thêm xác thực sinh trắc để mở khóa nhanh?          │
+  │  (Có thể thêm/cập nhật sau bằng: o auth biometric)  │
+  │                                                      │
+  │  [Vân tay]  [Khuôn mặt]  [Giọng nói]  [Bỏ qua]    │
+  │                                                      │
+  │  Sinh trắc = layer PHỤ, KHÔNG thay thế password.     │
+  │  Password vẫn là master key cuối cùng.               │
+  │                                                      │
+  │  Cơ chế:                                             │
+  │    biometric_hash → AES-256-GCM encrypt(seed)        │
+  │    → lưu encrypted_seed trong origin.olang           │
+  │    → unlock bằng biometric → decrypt → Ed25519 key   │
+  │    → Fallback: luôn có thể dùng password             │
+  │                                                      │
+  └──────────────────────────────────────────────────────┘
+
+  ○ Setup complete. Welcome to HomeOS.
+  ○ >
+
+Cấu trúc key trong origin.olang:
+  HEADER mở rộng (sau 32 bytes gốc):
+    [master_pubkey: 32B]       Ed25519 public key
+    [salt: 16B]                Argon2id salt
+    [bio_encrypted_seed: 48B]  encrypted private seed (nếu có biometric)
+    [bio_method: 1B]           0=none, 1=fingerprint, 2=face, 3=voice
+    [setup_ts: 8B]             timestamp lần cài đặt
+    [terms_hash: 8B]           hash của bản quy tắc đã đồng ý
+
+  ISL chain lock:
+    Mọi ISLMessage có msg_type ∈ {Approved, Emergency, Program}
+    → payload PHẢI có Ed25519 signature từ master_key
+    → Worker/Chief verify trước khi thực thi
+    → Giả mạo ISL = bất khả thi (không có private key)
+
+Backup & Recovery — key.ol:
+  o export key.ol              ← xuất key + metadata (encrypted)
+  o import key.ol              ← nhập key vào origin.olang mới
+
+  key.ol chứa:
+    [encrypted_seed: 48B]      AES-256-GCM(password → key, seed)
+    [master_pubkey: 32B]       để verify đúng key
+    [username_hash: 8B]        để verify đúng người
+    [created_ts: 8B]           timestamp
+    [origin_id: 8B]            hash của origin.olang gốc
+
+  Khôi phục trên máy mới:
+    1. Cài origin.olang mới (fresh)
+    2. o import key.ol
+    3. Nhập password → decrypt seed → verify pubkey match
+    4. origin.olang mới kế thừa quyền tối cao
+    5. Knowledge KHÔNG khôi phục (phải sync riêng hoặc học lại)
+
+  ⚠ MẤT CẢ FILE LẪN KEY.OL = MẤT VĨNH VIỄN
+    Không backdoor. Không recovery service.
+    Đây là thiết kế có chủ đích: BẠN sở hữu. Không ai khác.
+
+Auth commands (sau khi cài):
+  o auth status               ← xem trạng thái xác thực
+  o auth biometric add        ← thêm/cập nhật sinh trắc
+  o auth biometric remove     ← xóa sinh trắc (vẫn giữ password)
+  o auth password change      ← đổi mật khẩu (cần mật khẩu cũ)
+  o export key.ol             ← backup master key
+  o import key.ol             ← restore master key
 
 Sau đó — chỉ cần 1 lệnh:
   o                              REPL (interactive)
