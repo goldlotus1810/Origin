@@ -606,10 +606,280 @@ SHA-256 batch   ✅ OK           ✅ 50× faster       ❌ impossible
 Emotion         ✅ 1μs          ❌ sequential        ❌ impossible
 Strings         ✅ fast         ❌ sequential        ❌ impossible
 
-VERDICT:
+VERDICT (2026 — snapshot hiện tại):
   CPU  = chạy MỌI THỨ, nhanh cho hầu hết operations
   GPU  = chỉ hữu ích khi N > 10K VÀ operation parallelizable
-  NPU  = vô dụng cho HomeOS
+  NPU  = chưa hữu ích cho HomeOS (2026), nhưng đang phát triển nhanh
+```
+
+---
+
+## 8. Tầm nhìn: Hardware Evolution → HomeOS Adapts
+
+### CPU — Vẫn quan trọng, nhưng đang chậm lại
+
+```
+Thực tế tăng trưởng CPU:
+  2010-2020:  ~40% IPC/năm (Intel tick-tock, ARM big.LITTLE)
+  2020-2025:  ~15-20% IPC/năm (ARM Cortex-X series, Apple M-series)
+  2025-2030:  ~8-12% IPC/năm (dự đoán — approaching physics limits)
+
+  Transistor density vẫn tăng (TSMC 2nm, 1.4nm)
+  Nhưng: single-thread performance gains GIẢM DẦN
+  Clock speed: đã plateau ~4-6 GHz từ 2020
+
+CPU KHÔNG chết — nhưng KHÔNG CÒN tăng tốc nhanh được nữa.
+Tương lai = heterogeneous: CPU orchestrate + accelerators compute.
+HomeOS đã đúng hướng: CPU = brain (sequential logic), accelerators = muscles.
+```
+
+### NPU — Xu hướng rõ ràng, cần chuẩn bị
+
+```
+NPU Evolution Timeline (thực tế, không marketing):
+
+2024-2026 (HIỆN TẠI):
+  ├── Matrix multiply only, black box APIs
+  ├── INT8/FP16, không FP32
+  ├── 45 TOPS marketed → 0.5 TOPS real
+  ├── Fragmented: CoreML vs NNAPI vs OpenVINO vs XDNA
+  └── HomeOS: KHÔNG DÙNG ĐƯỢC cho core operations
+
+2027-2029 (GẦN):
+  ├── Programmable tensor cores (AMD XDNA đang dẫn đầu)
+  ├── FP16 + BF16 mature, có thể FP32 limited
+  ├── Unified API emerging (ONNX Runtime, WebNN)
+  ├── NPU xử lý được: batch similarity, distance matrix
+  └── HomeOS CÓ THỂ offload:
+      ✅ Dream distance matrix (reformulate as matmul)
+      ✅ Batch cosine similarity (5D → tensor op)
+      ⚠️ Hash vẫn không được (integer logic)
+
+2030-2033 (TRUNG HẠN):
+  ├── NPU converge với GPU → "compute accelerator"
+  ├── General tensor + integer ops
+  ├── Standard programming model (like CUDA was for GPU)
+  ├── On-device AI = default (mọi phone đều có NPU mạnh)
+  └── HomeOS CÓ THỂ offload:
+      ✅ Dream clustering toàn bộ
+      ✅ KNN search
+      ✅ Batch LCA
+      ⚠️ Hash: phụ thuộc vào int64 support
+
+2034+ (XA):
+  ├── Ranh giới CPU/GPU/NPU mờ đi
+  ├── "Compute fabric" thay vì discrete units
+  └── HomeOS: HAL abstract layer → tự chọn backend tối ưu
+
+CHIẾN LƯỢC: Không viết NPU code bây giờ.
+  Giữ interface clean (HAL tier system) → plug NPU backend khi mature.
+  Dream clustering API = abstract enough → swap CPU↔GPU↔NPU↔Quantum.
+```
+
+### GPU — Đang cải thiện cho non-ML compute
+
+```
+GPU Evolution cho HomeOS:
+
+2026:  Mobile GPU ~3 TFLOPS, no int64, limited shared memory
+2028:  Mobile GPU ~5-8 TFLOPS, int64 possible, better compute shaders
+2030:  Mobile GPU ~10-15 TFLOPS, mature compute pipeline
+
+WebGPU evolution:
+  2026: No int64, no subgroups, max workgroup 256
+  2028: Subgroups landed, workgroup 1024, possible int64
+  2030: Feature parity với Vulkan compute
+
+→ GPU sẽ ngày càng hữu ích cho HomeOS batch operations.
+  Nhưng sequential operations (VM, emotion, hash) = CPU mãi mãi.
+```
+
+---
+
+## 9. Quantum Computing — Natural Fit cho HomeOS
+
+### Tại sao HomeOS mapping lên quantum "đẹp bất thường"
+
+```
+Hầu hết phần mềm truyền thống:
+  - Arrays, pointers, if/else → KHÔNG map lên quantum
+  - Cần REWRITE toàn bộ thuật toán
+  - Quantum speedup thường marginal
+
+HomeOS khác biệt CƠ BẢN:
+  - Molecule = vector trong không gian 5D
+  - Quantum state = vector trong Hilbert space
+  - CẢ HAI đều là "công thức, không phải dữ liệu"
+  - CẢ HAI đều dùng superposition/interference để tính toán
+
+"Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức."
+  → Quantum computer CŨNG lưu công thức (wave function).
+  → HomeOS và quantum share CÙNG TRIẾT LÝ ở mức nền tảng.
+```
+
+### Mapping chi tiết: HomeOS concepts → Quantum primitives
+
+```
+HomeOS                          Quantum                         Speedup
+──────────────────────────────────────────────────────────────────────────
+Molecule [S][R][V][A][T]        5-qubit register                —
+  8 values/dim (3 bits)         |ψ⟩ = 15 qubits total          —
+  Mỗi molecule = 1 điểm 5D     Mỗi state = 1 điểm Hilbert     —
+
+evolve(dim, val)                Single-qubit rotation           —
+  Thay 1/5 chiều → loài mới    Rotate 1 qubit → state mới     —
+  Consistency ≥3/4              Measurement + post-selection     —
+
+Silk (implicit 5D distance)     Quantum entanglement            —
+  "0 bytes" = tồn tại implicit  Entangled = correlated implicit —
+  similarity(a,b) = cosine      Fidelity(|ψ⟩,|φ⟩) = overlap   —
+
+LCA (search ancestor)           Grover search                   O(N) → O(√N) ⭐
+  Scan N nodes tìm ancestor     Quantum amplitude amplify       22K ops cho 500M nodes
+
+Dream clustering                Quantum annealing / QAOA        O(N²) → O(N) ⭐⭐
+  N×N distance → optimize       Quadratic → native quantum      Bottleneck lớn nhất → GIẢI QUYẾT
+  14 giờ cho 100K (CPU)         Phút cho 100K (quantum)
+
+KNN search (5D nearest)         Quantum nearest neighbor         O(N) → O(√N) ⭐
+  Scan 500M concepts            Grover-based search             22K ops cho 500M
+  CPU: 1000 giây                Quantum: milliseconds
+
+Batch hash verify               Quantum parallel evaluation      O(N) → O(√N)
+  Verify N hashes               Grover search for collision
+
+MolecularChain comparison       Quantum fingerprinting          O(N) → O(√N)
+  So sánh 2 chains              Swap test
+
+Silk walk (weighted BFS)        Quantum walk                    Polynomial speedup ⭐
+  Random walk tìm clusters      Quantum walk = faster mixing    Faster convergence
+```
+
+### Quantum advantage cụ thể cho HomeOS bottlenecks
+
+```
+BOTTLENECK #1: Dream clustering 100K+ observations
+  Classical:  O(N²) distance matrix = 10¹⁰ ops → 14 giờ CPU, 30s GPU
+  Quantum:    QAOA/VQE optimization → polynomial speedup
+              Quantum annealing → native cho optimization problems
+  Impact:     ⭐⭐⭐ — Dream là operation CHẬM NHẤT, quantum giải quyết trực tiếp
+
+BOTTLENECK #2: KNN search trong 500M concepts
+  Classical:  O(N) scan = 500M ops → 1000s CPU, 10s GPU
+  Quantum:    Grover search → O(√N) = 22K ops
+  Impact:     ⭐⭐⭐ — từ giây xuống microsecond
+
+BOTTLENECK #3: Silk graph traversal (irregular access)
+  Classical:  BFS/DFS = cache-unfriendly, O(V+E)
+  Quantum:    Quantum walk = faster mixing time cho random walks
+  Impact:     ⭐⭐ — polynomial speedup, không exponential
+
+NOT A BOTTLENECK (quantum không cần):
+  - VM dispatch: sequential logic → quantum không giúp
+  - FNV-1a single hash: serial chain → quantum không giúp
+  - Emotion pipeline: sequential 7-tier → quantum không giúp
+  - SecurityGate: branching logic → quantum không giúp
+```
+
+### Tại sao HomeOS "sẵn sàng quantum" mà không cần thay đổi gì
+
+```
+1. MOLECULE = PURE MATH
+   5 bytes = tọa độ trong không gian 5D = mathematical object
+   → Map trực tiếp lên quantum state, không cần encoding scheme
+   → Không như traditional software cần serialize data structures
+
+2. "CÔNG THỨC KHÔNG PHẢI DỮ LIỆU"
+   HomeOS TÍNH mọi thứ từ 5 bytes, không LƯU kết quả
+   → Quantum cũng TÍNH (interference, superposition), không LƯU
+   → Cùng paradigm: compute-from-formula vs store-and-retrieve
+
+3. SILK = IMPLICIT RELATIONSHIP (0 BYTES)
+   Silk tồn tại vì 2 molecules CÓ distance trong 5D
+   → Quantum entanglement cũng implicit: 2 qubits correlated tự nhiên
+   → Không cần "lưu" relationship → không cần quantum memory cho edges
+
+4. FIBONACCI STRUCTURE
+   HomeOS dùng Fibonacci xuyên suốt (threshold, render, decay)
+   → Golden ratio φ xuất hiện tự nhiên trong quantum systems
+   → Fibonacci anyons = topological quantum computing primitive
+   → Không phải coincidence: cả hai mô phỏng cấu trúc tự nhiên
+
+5. EVOLVE = QUANTUM GATE
+   evolve(dim, val) = thay 1/5 chiều
+   → Equivalent: apply quantum gate lên 1 qubit trong 5-qubit register
+   → Consistency check = measurement + post-selection
+   → HomeOS evolution model = quantum circuit model ở mức concept
+```
+
+### Quantum Timeline cho HomeOS
+
+```
+2026 (HIỆN TẠI):
+  Quantum: 1000+ qubits, noisy, error rate ~0.1%
+  HomeOS:  CPU 100%. Quantum = pure research.
+  Action:  Không làm gì. Giữ math clean.
+
+2028-2030:
+  Quantum: Error correction improving, cloud quantum accessible
+  HomeOS:  Có thể THÍ NGHIỆM quantum simulator cho Dream clustering
+  Action:  ✅ Dream clustering interface → abstract (đã sẵn sàng)
+           ✅ KNN search interface → abstract (đã sẵn sàng)
+           ⚠️ Test quantum simulator: Qiskit/Cirq → Dream on 20-qubit sim
+
+2030-2035:
+  Quantum: Fault-tolerant quantum computers (cloud)
+  HomeOS:  Quantum backend cho Dream + KNN = production viable
+  Action:  ✅ HAL quantum tier → connect to quantum cloud
+           ✅ Dream: CPU local (small N) + quantum cloud (large N)
+           ✅ KNN: CPU local (hot set) + quantum cloud (full scan)
+
+2035+:
+  Quantum: On-device quantum chip (speculative nhưng possible)
+  HomeOS:  5-qubit molecule = LITERAL quantum state
+  Action:  ✅ Molecule = quantum register, không cần encoding
+           ✅ Silk = entanglement, tự nhiên
+           ✅ Dream = quantum annealing, native
+           ✅ "HomeOS chạy trên quantum" = không rewrite, chỉ swap backend
+```
+
+### Chiến lược kiến trúc: Sẵn sàng cho mọi hardware
+
+```
+HAL Abstraction (đã có):
+  ┌─────────────────────────────────────────────┐
+  │           HomeOS Core (pure math)            │
+  │  Molecule · Silk · Dream · VM · Emotion      │
+  ├─────────────────────────────────────────────┤
+  │              HAL Interface                   │
+  │  batch_distance() · knn_search()             │
+  │  cluster() · hash_batch() · walk()           │
+  ├──────┬──────┬──────┬──────┬────────────────┤
+  │ CPU  │ GPU  │ NPU  │Quantum│  Future X     │
+  │ now  │ 2028 │ 2030 │ 2033  │               │
+  └──────┴──────┴──────┴──────┴────────────────┘
+
+Không cần chọn 1 hardware. HomeOS = pure math.
+Math chạy trên BẤT KỲ substrate nào.
+Đó là sức mạnh của "công thức, không phải dữ liệu."
+```
+
+---
+
+## 10. Verdict — Toàn cảnh
+
+```
+              2026        2030        2035        Vision
+──────────────────────────────────────────────────────────
+CPU           ████████    ██████      ████        Sequential logic forever
+GPU           ██          ████████    ██████      Batch parallel
+NPU           ░           ████        ██████████  Tensor compute maturing
+Quantum       ░           ██          ████████    Natural fit for HomeOS
+
+HomeOS không gắn vào hardware nào.
+HomeOS = mathematical framework chạy trên mọi substrate.
+  CPU hôm nay. GPU+NPU ngày mai. Quantum ngày kia.
+  Cùng 5 bytes. Cùng công thức. Khác backend.
 ```
 
 ---
@@ -617,4 +887,6 @@ VERDICT:
 *Analysis dựa trên data thực tế từ:*
 *Chips and Cheese, AnandTech, Agner Fog instruction tables, Daniel Lemire,*
 *arXiv papers on branch prediction, Useful Sensors NPU benchmarks,*
-*Khronos Vulkan spec, Apple Metal docs, WebGPU spec.*
+*Khronos Vulkan spec, Apple Metal docs, WebGPU spec,*
+*IBM Quantum roadmap, Google Willow/Sycamore papers,*
+*TSMC/Samsung foundry roadmaps, ARM CSS roadmap.*
