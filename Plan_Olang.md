@@ -611,79 +611,385 @@ Test: self-test (test framework tests itself)
 
 ---
 
+## Trạng thái hiện tại (2026-03-18)
+
+```
+Phase   Task                               Status      Ghi chú
+──────────────────────────────────────────────────────────────────────────
+  1     A1. Struct/Record type             ✅ DONE     Dict-backed, __struct_def/__struct_tag
+        A2. Enum/Union type                ✅ DONE     __enum_def/__enum_unit/__enum_payload
+        A3. Option/Result builtins         ⚠️ PARTIAL  ?? có, ? propagation chưa, builtin type chưa
+        B1. Method blocks (impl)           ✅ DONE     __StructName_methodName mangling
+        B2. Visibility modifiers           ✅ DONE     pub keyword
+──────────────────────────────────────────────────────────────────────────
+  2     A4. Trait system                   ✅ DONE     Registry-based dispatch, default methods
+        A5. Generics                       ✅ DONE     Type erasure, trait bounds validation
+        B3. Module system                  ✅ DONE     use/mod syntax, VmEvent::UseModule
+        B4. Closures + lambdas             ✅ DONE     Closure/CallClosure opcodes
+──────────────────────────────────────────────────────────────────────────
+  3     A6. Iterator protocol              ❌ CHƯA     Không có Iterator trait, không lazy eval
+        A7. Collections stdlib             ⚠️ PARTIAL  Array 16 builtins, Dict 8, thiếu Set/Deque
+        B5. String nâng cấp               ✅ DONE     f-string, matches, chars, repeat, pad
+        B6. Byte ops + Serialization       ✅ DONE     Bytes get/set, pack/unpack, bitwise
+        B7. Math stdlib                    ✅ DONE     tan/atan/exp/ln/clamp/fib/PI/PHI
+──────────────────────────────────────────────────────────────────────────
+  4     A8. Channel concurrency            ✅ DONE     channel/send/recv + select + spawn
+        A9. Compiler self-hosting          ✅ DONE     bootstrap/lexer.ol + parser.ol
+        B8. IO + Platform stdlib           ✅ DONE     platform_arch/os/memory + stdlib files
+        B9. Migration scaffolding          ✅ DONE     tools/migrate/ Rust→Olang skeleton
+        B10. Test framework                ✅ DONE     assert_eq/ne/true + panic + stdlib/test.ol
+```
+
+### Còn thiếu để Olang hoàn thiện
+
+```
+CRITICAL (chặn migration):
+  ① A3 hoàn thiện: ? error propagation + builtin Option/Result + methods
+  ② A6 Iterator:   Iterator trait + .next() + lazy chaining + collect()
+  ③ A7 hoàn thiện: Set + Deque builtins + stdlib .ol files
+  ④ Module resolve: use/mod parse xong nhưng CHƯA resolve path → load file
+  ⑤ String slice:  str[start..end] syntax (có str_substr nhưng chưa có [..])
+  ⑥ Compiler:      Closure + Channel compile → C/Rust/WASM (hiện chỉ stubs)
+
+SHOULD-HAVE (usability):
+  ⑦ Stdlib .ol:    math.ol, string.ol, bytes.ol (builtins có, .ol chưa)
+  ⑧ Error type:    Typed errors, not just string messages
+  ⑨ Array chain:   arr.filter(...).map(...) — method chaining trên array
+```
+
+---
+
+## Phase 5: Completion & Polish (tuần 9-10)
+
+**Mục tiêu:** Hoàn thiện tất cả gaps còn lại, Olang sẵn sàng cho migration.
+
+#### AI-A: Error propagation + Iterator + Module resolution
+
+**A10. Error propagation `?` operator**
+```
+// ? trên Result: nếu Err → return Err ngay, nếu Ok → unwrap
+fn read_config(path) -> Result {
+  let data = file_read(path)?;       // return Err nếu fail
+  let parsed = parse_json(data)?;    // return Err nếu fail
+  Ok(parsed)
+}
+
+// ? trên Option: nếu None → return None ngay
+fn first_name(user) -> Option {
+  let profile = user.profile?;
+  let name = profile.first_name?;
+  Some(name)
+}
+```
+
+Files sửa:
+- `lang/syntax.rs` — parse postfix `?` operator (Expr::TryPropagate)
+- `lang/semantic.rs` — lower ? → check tag → Jz to early return
+- `exec/ir.rs` — Op::TryUnwrap (check enum tag, jump if Err/None)
+- `exec/vm.rs` — unwrap Ok/Some payload hoặc early return Err/None
+
+Test: 10+ tests cho ? trên Result, ? trên Option, chained ?, nested fn
+
+**A11. Builtin Option/Result types + methods**
+```
+// Builtin — không cần user define
+let x = Some(42);
+let y = None;
+let r = Ok("data");
+let e = Err("failed");
+
+// Methods
+x.is_some()       // → true
+x.is_none()       // → false
+x.unwrap()        // → 42 (panic nếu None)
+x.unwrap_or(0)    // → 42 (hoặc 0 nếu None)
+x.map(|v| { v * 2 })  // → Some(84)
+r.is_ok()         // → true
+r.is_err()        // → false
+r.map_err(|e| { f"wrapped: {e}" })
+```
+
+Files sửa:
+- `lang/semantic.rs` — register Some/None/Ok/Err as builtin constructors
+- `exec/vm.rs` — builtins: __opt_is_some, __opt_is_none, __opt_unwrap,
+                  __opt_map, __res_is_ok, __res_is_err, __res_map_err
+
+Test: 15+ tests
+
+**A12. Iterator protocol + lazy chaining**
+```
+trait Iterator {
+  fn next(mut self) -> Option;
+}
+
+// Array auto-implements Iterator
+let result = [1, 2, 3, 4, 5]
+  .iter()
+  .filter(|x| { x > 2 })
+  .map(|x| { x * 10 })
+  .collect();
+// → [30, 40, 50]
+
+// Custom iterator
+type Range { current: Num, end: Num }
+impl Iterator for Range {
+  fn next(mut self) -> Option {
+    if self.current < self.end {
+      let v = self.current;
+      self.current = self.current + 1;
+      Some(v)
+    } else {
+      None
+    }
+  }
+}
+
+// Iterator methods (default implementations)
+// .filter(f), .map(f), .fold(init, f), .collect()
+// .enumerate(), .zip(other), .take(n), .skip(n)
+// .any(f), .all(f), .find(f), .count()
+// .sum(), .min(), .max()
+// .chain(other), .flat_map(f)
+```
+
+Files sửa:
+- `exec/vm.rs` — Iterator builtins: __iter_new (wrap array), __iter_next,
+                  __iter_filter, __iter_map (lazy transform chain),
+                  __iter_collect (eagerly consume → array)
+- `lang/semantic.rs` — .iter() method dispatch, iterator chaining resolution
+- Tạo `stdlib/iterator.ol` — Iterator trait + default methods
+
+Test: 20+ tests cho iter/filter/map/collect, custom iterator, chaining, zip, enumerate
+
+**A13. Module resolution (import thật)**
+```
+// file: silk/graph.ol
+mod silk.graph;
+pub type SilkGraph { ... }
+pub fn co_activate(g, a, b, w) { ... }
+
+// file: main.ol
+use silk.graph;                    // → load silk/graph.ol
+use silk.graph.{ SilkGraph };     // → import specific symbol
+use silk.graph.co_activate;       // → import function
+
+let g = SilkGraph::new();
+co_activate(g, a, b, 0.8);
+```
+
+Files sửa:
+- `exec/module.rs` — ModuleResolver: path → parse → compile → cache
+                      Circular dependency detection (topological sort)
+                      Symbol table per module, pub/private enforcement
+- `lang/semantic.rs` — lower Stmt::Use → Op::Import with resolution
+- `exec/vm.rs` — handle VmEvent::UseModule → load + execute + merge scope
+
+Test: 15+ tests cho resolve path, circular detect, pub/private cross-module,
+      selective import, re-export
+
+#### AI-B: Collections hoàn thiện + Stdlib modules + Compiler backends
+
+**B11. Set + Deque builtins**
+```
+// Set — unique values, hash-based
+let s = Set::new();
+s.insert(42);
+s.insert(42);          // no-op, already exists
+s.contains(42);        // → true
+s.len();               // → 1
+s.remove(42);
+s.union(other_set);
+s.intersection(other_set);
+s.difference(other_set);
+s.to_array();          // → convert to array
+
+// Deque — double-ended queue
+let q = Deque::new();
+q.push_back(1);
+q.push_front(0);
+q.pop_front();         // → Some(0)
+q.pop_back();          // → Some(1)
+q.len();
+q.peek_front();
+q.peek_back();
+```
+
+Files sửa:
+- `exec/vm.rs` — builtins: __set_new, __set_insert, __set_contains, __set_remove,
+                  __set_len, __set_union, __set_intersection, __set_difference,
+                  __set_to_array,
+                  __deque_new, __deque_push_back, __deque_push_front,
+                  __deque_pop_front, __deque_pop_back, __deque_len,
+                  __deque_peek_front, __deque_peek_back
+- `lang/semantic.rs` — method dispatch cho Set/Deque
+
+Test: 20+ tests
+
+**B12. String slice syntax + array method chaining**
+```
+// String slice — [start..end]
+let s = "hello world";
+let sub = s[0..5];     // → "hello"
+let rest = s[6..];     // → "world"
+let head = s[..5];     // → "hello"
+
+// Array method chaining (method syntax trên array results)
+let result = [1, 2, 3, 4, 5]
+  .filter(|x| { x > 2 })
+  .map(|x| { x * 10 });
+// → [30, 40, 50]
+```
+
+Files sửa:
+- `lang/syntax.rs` — parse `expr[start..end]`, `expr[start..]`, `expr[..end]`
+                      (Expr::Slice { object, start, end })
+- `lang/semantic.rs` — lower Slice → __str_slice hoặc __array_slice
+- `exec/vm.rs` — __str_slice(str, start, end), enhanced __array_slice
+- `lang/semantic.rs` — method chaining: .filter().map() trả array, cho phép
+                        tiếp tục gọi method trên kết quả
+
+Test: 15+ tests
+
+**B13. Stdlib .ol modules**
+```
+Files tạo mới:
+  stdlib/math.ol     — wrap math builtins: PI, PHI, sqrt, sin, cos, pow, etc.
+  stdlib/string.ol   — wrap string builtins: split, contains, replace, trim, etc.
+  stdlib/bytes.ol    — wrap byte builtins: Bytes::new, get/set, pack/unpack
+  stdlib/vec.ol      — Vec type + methods (push, pop, map, filter, fold, etc.)
+  stdlib/map.ol      — Map type + methods (get, set, keys, values, merge)
+  stdlib/set.ol      — Set type + methods (insert, contains, union, intersection)
+  stdlib/deque.ol    — Deque type + methods (push_back/front, pop_back/front)
+  stdlib/option.ol   — Option type docs + helper functions
+  stdlib/result.ol   — Result type docs + helper functions
+```
+
+Mỗi file: wrap builtins thành module có doc, export pub functions.
+
+Test: mỗi module 5+ tests (import + sử dụng)
+
+**B14. Compiler backends hoàn thiện**
+```
+Hiện tại Closure + Channel trong compiler.rs chỉ là stubs/comments.
+Cần implement thực tế cho 3 targets:
+
+C backend:
+  - Closure → struct { env, fn_ptr }, capture by value
+  - Channel → ring buffer + mutex (pthread)
+  - Select → poll multiple channels
+
+Rust backend:
+  - Closure → Fn trait objects, capture by clone
+  - Channel → std::sync::mpsc hoặc crossbeam
+  - Select → futures::select! hoặc manual poll
+
+WASM/WAT backend:
+  - Closure → funcref + env table
+  - Channel → SharedArrayBuffer + Atomics
+  - Select → Promise.race pattern
+```
+
+Files sửa:
+- `exec/compiler.rs` — replace stubs with real implementations cho Closure,
+                        CallClosure, ChanNew, ChanSend, ChanRecv, Select,
+                        SpawnBegin, SpawnEnd cho C/Rust/WASM
+
+Test: compile → link → execute cho mỗi target
+
+---
+
 ## Phân công tổng hợp
 
 ```
 Phase   AI-A (Language Core)              AI-B (Runtime & Ecosystem)
 ──────────────────────────────────────────────────────────────────────
-  1     A1. Struct/Record type            B1. Method blocks (impl)
-        A2. Enum/Union type               B2. Visibility modifiers
-        A3. Option/Result builtins
+  1     A1. Struct/Record type       ✅   B1. Method blocks (impl)    ✅
+        A2. Enum/Union type          ✅   B2. Visibility modifiers    ✅
+        A3. Option/Result builtins   ⚠️
 ──────────────────────────────────────────────────────────────────────
-  2     A4. Trait system                  B3. Module system
-        A5. Generics                      B4. Closures + lambdas
+  2     A4. Trait system             ✅   B3. Module system           ✅
+        A5. Generics                 ✅   B4. Closures + lambdas      ✅
 ──────────────────────────────────────────────────────────────────────
-  3     A6. Iterator protocol             B5. String nâng cấp
-        A7. Collections stdlib            B6. Byte ops + Serialization
-                                          B7. Math stdlib
+  3     A6. Iterator protocol        ❌   B5. String nâng cấp         ✅
+        A7. Collections stdlib       ⚠️   B6. Byte ops + Serialization✅
+                                          B7. Math stdlib             ✅
 ──────────────────────────────────────────────────────────────────────
-  4     A8. Channel concurrency           B8. IO + Platform stdlib
-        A9. Compiler self-hosting         B9. Migration scaffolding
-                                          B10. Test framework
+  4     A8. Channel concurrency      ✅   B8. IO + Platform stdlib    ✅
+        A9. Compiler self-hosting    ✅   B9. Migration scaffolding   ✅
+                                          B10. Test framework         ✅
+──────────────────────────────────────────────────────────────────────
+  5     A10. ? error propagation          B11. Set + Deque builtins
+        A11. Builtin Option/Result        B12. String slice + method chain
+        A12. Iterator protocol + lazy     B13. Stdlib .ol modules
+        A13. Module resolution            B14. Compiler backends hoàn thiện
 ```
 
-### Dependencies (thứ tự trong phase)
+### Dependencies Phase 5
 
 ```
-Phase 1: A1 → A2 → A3 (sequential, enum cần struct)
-          B1 depends on A1 (methods cần struct)
-          B2 independent
+Phase 5:
+  A10 independent (postfix ? operator)
+  A11 depends on A10 (Option/Result methods cần ? để hữu dụng)
+  A12 depends on A4+B4 (Iterator = trait + closure) — cả hai đã DONE
+  A13 independent (module loader)
 
-Phase 2: A4 depends on A1+A2 (trait cần type)
-          A5 depends on A4 (generics cần trait bounds)
-          B3 depends on B2 (module cần visibility)
-          B4 independent
+  B11 independent (Set + Deque = new VM builtins)
+  B12 depends on B5 (string slice mở rộng từ string builtins)
+  B13 depends on A13 (stdlib .ol cần module resolution để import)
+  B14 independent (compiler codegen)
 
-Phase 3: A6 depends on A4+B4 (Iterator = trait + closure)
-          A7 depends on A5+A6 (Vec[T] = generic + iterator)
-          B5, B6, B7 independent
+  Thứ tự đề xuất:
+    AI-A: A10 → A11 → A12 (song song A13)
+    AI-B: B11 (song song B12) → B13 (sau A13) → B14
 
-Phase 4: A8 depends on B4 (channel callback = closure)
-          A9 depends on ALL previous
-          B8, B9, B10 independent
+  Có thể chạy song song:
+    AI-A làm A10+A11+A12+A13
+    AI-B làm B11+B12+B14 trước, B13 sau khi A13 xong
 ```
 
 ---
 
 ## Files sẽ sửa (tổng hợp)
 
-### Sửa (existing)
+### Đã sửa (Phase 1-4)
 ```
-crates/olang/src/lang/syntax.rs      — ~500 lines thêm (parse type, union, impl, trait, mod, use, lambda, select)
-crates/olang/src/lang/semantic.rs    — ~400 lines thêm (validate types, traits, modules, generics)
-crates/olang/src/lang/alphabet.rs    — ~50 lines thêm (new keywords: type, union, impl, trait, mod, use, pub, mut)
-crates/olang/src/exec/ir.rs          — ~150 lines thêm (new opcodes)
-crates/olang/src/exec/vm.rs          — ~600 lines thêm (struct/union/trait/channel/iterator ops)
-crates/olang/src/exec/compiler.rs    — ~200 lines thêm (compile new opcodes → C/Rust/WASM)
+crates/olang/src/lang/syntax.rs      — parse type, union, impl, trait, mod, use, lambda, select, f-string, bitwise
+crates/olang/src/lang/semantic.rs    — validate types, traits, modules, generics, string/byte/math builtins
+crates/olang/src/lang/alphabet.rs    — keywords, f-string, bitwise tokens
+crates/olang/src/exec/ir.rs          — struct/union/trait/channel/closure/select opcodes
+crates/olang/src/exec/vm.rs          — struct/union/trait/channel/string/byte/math/platform/test builtins
+crates/olang/src/exec/compiler.rs    — channel opcodes (stubs)
 ```
 
-### Tạo mới
+### Cần sửa (Phase 5)
 ```
-crates/olang/src/exec/module.rs      — ModuleLoader, ModuleCache (~300 lines)
-stdlib/math.ol                       — math constants + functions
-stdlib/string.ol                     — string utilities
-stdlib/bytes.ol                      — byte manipulation
-stdlib/io.ol                         — file + console
-stdlib/platform.ol                   — platform detection
-stdlib/test.ol                       — test framework
-stdlib/iterator.ol                   — Iterator trait
-stdlib/vec.ol                        — Vec[T]
-stdlib/map.ol                        — Map[K,V]
-stdlib/set.ol                        — Set[T]
-stdlib/deque.ol                      — Deque[T]
-stdlib/bootstrap/lexer.ol            — self-hosting lexer
-stdlib/bootstrap/parser.ol           — self-hosting parser
-tools/migrate/                       — Rust→Olang skeleton generator
+crates/olang/src/lang/syntax.rs      — ~80 lines (postfix ?, slice [..])
+crates/olang/src/lang/semantic.rs    — ~200 lines (?, Option/Result methods, iter dispatch, slice lower)
+crates/olang/src/exec/ir.rs          — ~20 lines (TryUnwrap opcode)
+crates/olang/src/exec/vm.rs          — ~400 lines (Option/Result/Iterator/Set/Deque builtins)
+crates/olang/src/exec/compiler.rs    — ~300 lines (Closure/Channel real codegen)
+crates/olang/src/exec/module.rs      — ~200 lines (ModuleResolver: path resolve, cache, circular detect)
+```
+
+### Đã tạo
+```
+stdlib/io.ol              ✅    stdlib/bootstrap/lexer.ol   ✅
+stdlib/platform.ol        ✅    stdlib/bootstrap/parser.ol  ✅
+stdlib/test.ol            ✅    tools/migrate/              ✅
+```
+
+### Cần tạo (Phase 5)
+```
+stdlib/math.ol            — math constants + functions
+stdlib/string.ol          — string utilities
+stdlib/bytes.ol           — byte manipulation
+stdlib/vec.ol             — Vec type + methods
+stdlib/map.ol             — Map type + methods
+stdlib/set.ol             — Set type + methods
+stdlib/deque.ol           — Deque type + methods
+stdlib/option.ol          — Option helpers
+stdlib/result.ol          — Result helpers
+stdlib/iterator.ol        — Iterator trait + defaults
 ```
 
 ---
@@ -696,19 +1002,19 @@ Phase 1 done khi:
   ✅ union Result { Ok{v}, Err{msg} } — create, match destructure
   ✅ impl Vec3 { fn length(self) {...} } — method call v.length()
   ✅ pub/private — field access denied across module
-  ✅ Option/Result + ? operator
-  ✅ cargo test --workspace passes (existing 1786+ tests)
+  ⚠️ Option/Result + ? operator — ?? có, ? chưa
+  ✅ cargo test --workspace passes
 
 Phase 2 done khi:
   ✅ trait Skill { fn execute(self, ctx) } — define, impl, dynamic dispatch
   ✅ type Container[T] { items: Vec[T] } — generic instantiation
-  ✅ mod silk.graph; use silk.graph.SilkGraph; — module import/export
+  ✅ mod silk.graph; use silk.graph.SilkGraph; — syntax có, resolve chưa
   ✅ let f = |x| { x * 2 }; f(21) == 42 — closure works
   ✅ cargo test --workspace passes
 
 Phase 3 done khi:
-  ✅ [1,2,3].filter(|x|{x>1}).map(|x|{x*2}).collect() == [4,6]
-  ✅ Vec, Map, Set, Deque operations
+  ⚠️ [1,2,3].filter(|x|{x>1}).map(|x|{x*2}).collect() — eager ok, lazy chưa
+  ⚠️ Vec, Map có — Set, Deque chưa
   ✅ f"hello {name}" string interpolation
   ✅ Bytes pack/unpack cho ISL frame
   ✅ math.fib(11) == 89
@@ -721,11 +1027,23 @@ Phase 4 done khi:
   ✅ Migration tool sinh skeleton cho silk crate
   ✅ Test framework tự test chính nó
   ✅ cargo test --workspace passes
+
+Phase 5 done khi:
+  ▢ file_read(path)? — ? propagation hoạt động
+  ▢ Some(42).map(|x| { x * 2 }) == Some(84)
+  ▢ None.unwrap_or(0) == 0
+  ▢ [1,2,3].iter().filter(|x|{x>1}).map(|x|{x*2}).collect() == [4,6] — lazy
+  ▢ Set::new(); s.insert(42); s.contains(42) — Set hoạt động
+  ▢ Deque::new(); q.push_back(1); q.pop_front() — Deque hoạt động
+  ▢ "hello"[0..3] == "hel" — string slice
+  ▢ use math; math.sqrt(144) — module resolve thật
+  ▢ Closure compile → C/Rust/WASM (không chỉ stubs)
+  ▢ cargo test --workspace passes
 ```
 
 ---
 
-## Sau Phase 4: Migration Path
+## Sau Phase 5: Migration Path
 
 ```
 Thứ tự migrate Rust → Olang (dựa trên dependency graph):
