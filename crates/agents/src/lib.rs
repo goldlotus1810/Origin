@@ -6,20 +6,32 @@
 //!   Worker [tier 2] — HomeOS thu nhỏ tại thiết bị
 //!   Skill — stateless functions (QT4: 1 Skill = 1 trách nhiệm)
 //!
-//! Mọi input → MolecularChain — cùng 1 format.
+//! ## Module Groups
+//!
+//! - [`hierarchy`] — Agent tiers: LeoAI, Chief, Worker
+//! - [`pipeline`]  — Processing: encoder, learning, gate, book reader
+//! - [`skills`]    — Stateless capabilities: instincts, domain skills
 
 #![no_std]
 #![allow(missing_docs)]
 
 extern crate alloc;
 
-pub mod book;
-pub mod chief;
-pub mod domain_skills;
-pub mod encoder;
-pub mod gate;
-pub mod instinct;
-pub mod learning;
-pub mod leo;
-pub mod skill;
-pub mod worker;
+/// Agent hierarchy: LeoAI (tier 1), Chief (tier 1), Worker (tier 2)
+pub mod hierarchy;
+/// Processing pipeline: encoder, learning, security gate, book reader
+pub mod pipeline;
+/// Skills: instincts + domain specializations
+pub mod skills;
+
+// Re-exports for backward compatibility
+pub use hierarchy::chief;
+pub use hierarchy::leo;
+pub use hierarchy::worker;
+pub use pipeline::book;
+pub use pipeline::encoder;
+pub use pipeline::gate;
+pub use pipeline::learning;
+pub use skills::domain_skills;
+pub use skills::instinct;
+pub use skills::skill;

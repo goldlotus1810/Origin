@@ -4,28 +4,29 @@
 //!   x86/x64 (PC/Server), ARM (di động/SoC), RISC-V (mở/tùy biến),
 //!   ESP32/RP2040 (embedded MCU), WASM (browser).
 //!
-//! Nguyên tắc:
-//!   - Trait = interface bất biến
-//!   - Impl = platform-specific (mock cho test)
-//!   - Worker gọi HAL trait — không biết platform
-//!   - no_std compatible — chạy trên bare-metal
+//! ## Module Groups
 //!
-//! Kiến trúc chipset:
-//!   Traditional (Northbridge/Southbridge) → PCH (single-chip) → SoC (all-in-one)
-//!   HAL abstract tất cả — Worker không cần biết chipset layout
+//! - [`detect`]    — Architecture detection, probing, tier classification, security
+//! - [`interface`] — Platform traits, FFI bridge, device drivers
 
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub mod arch;
-pub mod driver;
-pub mod ffi;
-pub mod platform;
-pub mod probe;
-pub mod security;
-pub mod tier;
+/// Detection: architecture, probing, tier, security
+pub mod detect;
+/// Hardware interfaces: platform, FFI, drivers
+pub mod interface;
+
+// Re-exports for backward compatibility
+pub use detect::arch;
+pub use detect::probe;
+pub use detect::security;
+pub use detect::tier;
+pub use interface::driver;
+pub use interface::ffi;
+pub use interface::platform;
 
 // Re-export core types
 pub use arch::{Architecture, ChipsetLayout, CpuInfo, MemoryInfo, PlatformProfile};
