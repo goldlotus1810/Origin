@@ -27,7 +27,7 @@ use olang::ir::{compile_expr, OlangIrExpr};
 use olang::optimize::{self, OptLevel};
 use olang::semantic;
 use olang::syntax;
-use olang::knowtree::KnowTree;
+use olang::knowtree::{KnowTree, SlimKnowTree};
 use olang::registry::Registry;
 use vsdf::body::{body_from_molecule_full, BodyStore};
 use olang::self_model::SelfModel;
@@ -123,8 +123,10 @@ pub struct HomeRuntime {
     last_dream_turn: u64, // turn khi Dream lần cuối chạy
     /// QT9: bytes chờ ghi disk — caller (server) drain và flush.
     pending_writes: alloc::vec::Vec<u8>,
-    /// L2-Ln knowledge storage — TieredStore compact encoding.
+    /// L2-Ln knowledge storage — TieredStore compact encoding (legacy).
     knowtree: KnowTree,
+    /// L2-Ln knowledge storage — spec-compliant ~10B/node format.
+    slim_knowtree: SlimKnowTree,
     /// Recent text history — cho reference resolution ("bà ấy", "anh ta"...).
     /// Giữ tối đa 16 turns gần nhất (text + timestamp).
     recent_texts: alloc::vec::Vec<RecentText>,
@@ -318,6 +320,7 @@ impl HomeRuntime {
             last_dream_turn: 0,
             pending_writes,
             knowtree: KnowTree::for_pc(),
+            slim_knowtree: SlimKnowTree::new(),
             recent_texts: alloc::vec::Vec::new(),
             dream_fib_index: 4, // Fib[4]=5: first dream after 5 turns
             dream_cycles: 0,
@@ -340,9 +343,19 @@ impl HomeRuntime {
             module_loader: olang::module::ModuleLoader::new(alloc::vec!["stdlib".into(), ".".into()]),
         };
 
-        // Restore KnowTree compact nodes từ file
+        // Restore KnowTree compact nodes từ file (legacy 0x08)
         for kt_rec in &boot_result.knowtree_records {
             rt.knowtree.restore_compact_node(&kt_rec.data);
+        }
+
+        // Restore SlimKnowTree nodes từ file (0x0A — spec-compliant)
+        for sk_rec in &boot_result.slim_knowtree_records {
+            rt.slim_knowtree.restore_slim_node(
+                sk_rec.hash,
+                &sk_rec.tagged,
+                sk_rec.layer,
+                sk_rec.timestamp,
+            );
         }
 
         // ── Run bootstrap programs — firmware trên VM ─────────────────────
@@ -3017,20 +3030,24 @@ impl HomeRuntime {
             }
         }
 
-        // ── T6b: KnowTree — store text as L2 compact node ───────────────
+        // ── T6b: KnowTree — store text as L2 node ──────────────────────
         if let ProcessResult::Ok { ref chain, emotion } = proc_result {
             if let ContentInput::Text { ref content, .. } = input {
                 let word_hashes = olang::knowtree::text_to_word_hashes(content);
                 if !word_hashes.is_empty() {
+                    // Legacy KnowTree (CompactNode) — backward compat
                     self.knowtree.store_sentence(chain, None, &word_hashes, ts);
 
-                    // ── T6b1: Persist KnowTree compact node vào origin.olang ──
-                    // Lấy compact bytes từ node vừa store
-                    if let Some(compact_node) = self.knowtree.lookup(chain.chain_hash(), 2) {
-                        let compact_bytes = compact_node.to_bytes();
+                    // SlimKnowTree (spec-compliant ~10B/node)
+                    self.slim_knowtree.store_sentence(chain, &word_hashes, ts);
+
+                    // ── T6b1: Persist as SlimKnowTree record (0x0A) ──
+                    {
                         use olang::writer::OlangWriter;
+                        let tagged = chain.to_tagged_bytes();
+                        let hash = chain.chain_hash();
                         let mut kt_writer = OlangWriter::new_append();
-                        let _ = kt_writer.append_knowtree(&compact_bytes, ts);
+                        let _ = kt_writer.append_slim_knowtree(hash, &tagged, 2, ts);
                         self.pending_writes.extend_from_slice(kt_writer.as_bytes());
                     }
                 }
@@ -3682,6 +3699,7 @@ impl HomeRuntime {
         let stored = chains.len();
         if !chains.is_empty() {
             self.knowtree.store_chapter(&chains, None, ts);
+            self.slim_knowtree.store_chapter(&chains, ts);
         }
         stored
     }
@@ -5245,6 +5263,7 @@ impl HomeRuntime {
                             self.gated_insert(chain, 3, ts, false, olang::registry::NodeKind::Knowledge, "dream:l3");
                             // L3 concept in KnowTree — with source edges
                             self.knowtree.store_concept(chain, None, 3, sources, ts);
+                            self.slim_knowtree.store_concept(chain, 3, sources, ts);
                             l3_this_cycle += 1;
 
                             // Co-activate L3 concept with source nodes in Silk
@@ -5270,6 +5289,7 @@ impl HomeRuntime {
                                 // L2: promote to KnowTree
                                 self.knowtree
                                     .promote_from_stm(&obs_chain, None, obs_fc, ts);
+                                self.slim_knowtree.promote_from_stm(&obs_chain, ts);
                                 // Track for STM cleanup
                                 promoted_hashes.push(*chain_hash);
                             }

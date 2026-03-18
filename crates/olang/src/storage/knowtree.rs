@@ -25,6 +25,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use alloc::collections::BTreeMap;
+
 use crate::compact::{CompactEdge, CompactNode, NodeWithEdges, SlimNode, SlimPage, TieredStore};
 use crate::hash::fnv1a_str;
 use crate::molecular::{MolecularChain, RelationBase};
@@ -314,6 +316,8 @@ impl KnowTree {
 pub struct SlimKnowTree {
     /// Pages per layer (layer → list of pages)
     pages: Vec<(u8, SlimPage)>,
+    /// Hash index: hash → (layer, page_index) for O(1) lookup
+    hash_index: BTreeMap<u64, (u8, usize)>,
     /// Current page per layer
     current_page_id: u32,
     /// Stats
@@ -329,6 +333,7 @@ impl SlimKnowTree {
     pub fn new() -> Self {
         Self {
             pages: Vec::new(),
+            hash_index: BTreeMap::new(),
             current_page_id: 0,
             total_nodes: 0,
             total_edges: 0,
@@ -349,13 +354,20 @@ impl SlimKnowTree {
 
         // Find or create current page for this layer
         let page = self.current_page_mut(layer, ts);
-        if !page.push_node(slim) {
+        if page.push_node(slim) {
+            // Stored in current page — find its index
+            let page_idx = self.pages.len() - 1
+                - self.pages.iter().rev().position(|(l, p)| *l == layer && !p.is_full()).unwrap_or(0);
+            self.hash_index.insert(hash, (layer, page_idx));
+        } else {
             // Page full → create new page
             self.current_page_id += 1;
             let mut new_page = SlimPage::new(self.current_page_id, layer, ts);
             let slim2 = SlimNode::from_chain(chain);
             new_page.push_node(slim2);
             self.pages.push((layer, new_page));
+            let page_idx = self.pages.len() - 1;
+            self.hash_index.insert(hash, (layer, page_idx));
         }
 
         self.total_nodes += 1;
@@ -426,8 +438,17 @@ impl SlimKnowTree {
 
     // ── Query operations ────────────────────────────────────────────────────
 
-    /// Lookup SlimNode by hash in a specific layer.
+    /// Lookup SlimNode by hash in a specific layer — O(1) via hash index.
     pub fn lookup(&self, hash: u64, layer: u8) -> Option<&SlimNode> {
+        // Fast path: hash index
+        if let Some(&(l, page_idx)) = self.hash_index.get(&hash) {
+            if l == layer {
+                if let Some((_, page)) = self.pages.get(page_idx) {
+                    return page.find_node(hash);
+                }
+            }
+        }
+        // Fallback: linear scan (for restored nodes without index)
         for (l, page) in &self.pages {
             if *l == layer {
                 if let Some(node) = page.find_node(hash) {
@@ -471,6 +492,37 @@ impl SlimKnowTree {
         }
 
         hashes
+    }
+
+    // ── Restore from origin.olang ──────────────────────────────────────────
+
+    /// Restore a SlimNode from origin.olang record 0x0A — boot path.
+    ///
+    /// QT8: origin.olang = bộ nhớ duy nhất, RAM = cache tạm.
+    pub fn restore_slim_node(&mut self, hash: u64, tagged: &[u8], layer: u8, ts: i64) {
+        let slim = SlimNode {
+            hash,
+            tagged: tagged.to_vec(),
+        };
+
+        let page = self.current_page_mut(layer, ts);
+        if page.push_node(slim) {
+            let page_idx = self.pages.len() - 1
+                - self.pages.iter().rev().position(|(l, p)| *l == layer && !p.is_full()).unwrap_or(0);
+            self.hash_index.insert(hash, (layer, page_idx));
+        } else {
+            self.current_page_id += 1;
+            let mut new_page = SlimPage::new(self.current_page_id, layer, ts);
+            new_page.push_node(SlimNode {
+                hash,
+                tagged: tagged.to_vec(),
+            });
+            self.pages.push((layer, new_page));
+            let page_idx = self.pages.len() - 1;
+            self.hash_index.insert(hash, (layer, page_idx));
+        }
+
+        self.total_nodes += 1;
     }
 
     // ── Serialization ───────────────────────────────────────────────────────

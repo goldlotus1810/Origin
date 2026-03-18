@@ -111,6 +111,18 @@ pub const RT_KNOWTREE: u8 = 0x08;
 /// Mỗi turn ghi 1 record. Boot replay → reconstruct curve.
 pub const RT_CURVE: u8 = 0x09;
 
+/// Record type: SlimKnowTree node — spec-compliant ~18B per record.
+///
+/// Format: [0x0A][hash: 8][tagged_len: 1][tagged: 1-6][layer: 1][timestamp: 8]
+/// Total: 1 + 8 + 1 + (1-6) + 1 + 8 = 20-25 bytes per record
+///
+/// So sánh với RT_KNOWTREE (0x08):
+///   0x08: CompactNode bytes (28B header + variable) — legacy, phình
+///   0x0A: SlimNode (hash + tagged mol + layer + ts) — spec-compliant
+///
+/// 500M records × 22B avg = 11GB → fits on phone with room to spare.
+pub const RT_SLIM_KNOWTREE: u8 = 0x0A;
+
 /// Header size: MAGIC(4) + VERSION(1) + CREATED(8) = 13 bytes
 pub const HEADER_SIZE: usize = 13;
 
@@ -351,6 +363,31 @@ impl OlangWriter {
         self.buf.push(RT_KNOWTREE);
         self.buf.extend_from_slice(&(compact_bytes.len() as u16).to_le_bytes());
         self.buf.extend_from_slice(compact_bytes);
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+        self.write_count += 1;
+        Ok(offset)
+    }
+
+    /// Ghi SlimKnowTree node record — spec-compliant format.
+    ///
+    /// Per-node: [0x0A][hash:8][tagged_len:1][tagged:1-6][layer:1][ts:8]
+    /// Thay thế append_knowtree() cho writes mới.
+    pub fn append_slim_knowtree(
+        &mut self,
+        hash: u64,
+        tagged_bytes: &[u8],
+        layer: u8,
+        timestamp: i64,
+    ) -> Result<u64, WriteError> {
+        if tagged_bytes.is_empty() || tagged_bytes.len() > 32 {
+            return Err(WriteError::ChainTooLong);
+        }
+        let offset = self.buf.len() as u64;
+        self.buf.push(RT_SLIM_KNOWTREE);
+        self.buf.extend_from_slice(&hash.to_le_bytes());
+        self.buf.push(tagged_bytes.len() as u8);
+        self.buf.extend_from_slice(tagged_bytes);
+        self.buf.push(layer);
         self.buf.extend_from_slice(&timestamp.to_le_bytes());
         self.write_count += 1;
         Ok(offset)
