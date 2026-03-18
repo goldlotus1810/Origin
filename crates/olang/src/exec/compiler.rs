@@ -234,6 +234,8 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::FileAppend => "{ Chain d = pop(&s); Chain p = pop(&s); olang_file_append((const char*)&p, (const uint8_t*)&d, sizeof(d)); }".into(),
         Op::SpawnBegin => "/* spawn begin */ {".into(),
         Op::SpawnEnd => "} /* spawn end */".into(),
+        Op::Closure(params, body_len) => format!("/* closure({},{}) */", params, body_len),
+        Op::CallClosure(arity) => format!("/* call_closure({}) */", arity),
     })
 }
 
@@ -368,6 +370,8 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::FileAppend => "{ let d = stack.pop().unwrap_or(0); let p = stack.pop().unwrap_or(0); unsafe { olang_file_append(p as *const u8, d as *const u8, 8); } }".into(),
         Op::SpawnBegin => "{ // spawn begin".into(),
         Op::SpawnEnd => "} // spawn end".into(),
+        Op::Closure(params, body_len) => format!("// closure({}, {})", params, body_len),
+        Op::CallClosure(arity) => format!("// call_closure({})", arity),
     })
 }
 
@@ -451,6 +455,8 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
         Op::FileAppend => format!("{{ let d = stack.pop().unwrap_or(0); let p = stack.pop().unwrap_or(0); unsafe {{ olang_file_append(p as *const u8, d as *const u8, 8); }} }} _pc = {};", next),
         Op::SpawnBegin => format!("/* spawn begin */ _pc = {};", next),
         Op::SpawnEnd => format!("/* spawn end */ _pc = {};", next),
+        Op::Closure(params, body_len) => format!("/* closure({},{}) */ _pc = {};", params, body_len, next),
+        Op::CallClosure(arity) => format!("/* call_closure({}) */ _pc = {};", arity, next),
     })
 }
 
@@ -613,6 +619,8 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         Op::FileAppend => "local.set $b  local.set $a  i32.const 256  i32.const 0  i32.const 8  call $file_append  drop  ;; file_append".into(),
         Op::SpawnBegin => ";; spawn begin".into(),
         Op::SpawnEnd => ";; spawn end".into(),
+        Op::Closure(params, body_len) => format!(";; closure({}, {})", params, body_len),
+        Op::CallClosure(arity) => format!(";; call_closure({})", arity),
     })
 }
 
@@ -694,6 +702,10 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; spawn begin", next),
         Op::SpawnEnd =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; spawn end", next),
+        Op::Closure(params, body_len) =>
+            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; closure({}, {})", next, params, body_len),
+        Op::CallClosure(arity) =>
+            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; call_closure({})", next, arity),
     })
 }
 

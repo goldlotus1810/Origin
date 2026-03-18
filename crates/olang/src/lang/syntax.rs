@@ -139,8 +139,11 @@ pub enum Stmt {
     /// `return expr;` — return value from function
     Return(Option<Expr>),
 
-    /// `use "module";` or `use module;` — import module
-    Use(String),
+    /// `use "module";` or `use module.path;` or `use module.path.{a, b};`
+    Use { module: String, imports: Vec<String> },
+
+    /// `mod module.path;` — module declaration
+    ModDecl(String),
 
     /// `obj.field = expr;` or `obj.a.b.c = expr;` — assign to field of dict/record
     FieldAssign { object: String, fields: Vec<String>, value: Expr },
@@ -164,12 +167,14 @@ pub enum Stmt {
     Spawn { body: Vec<Stmt> },
 }
 
-/// Struct field with optional type annotation.
+/// Struct field with optional type annotation and visibility.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]
 pub struct StructField {
     pub name: String,
     pub type_name: Option<String>,
+    /// `pub` field — accessible from outside the defining module
+    pub is_pub: bool,
 }
 
 /// Enum variant — unit, tuple, or struct variant.
@@ -486,8 +491,8 @@ impl<'a> Parser<'a> {
             }
             Token::Use => {
                 self.advance();
-                // use "module"; or use module;
-                let module = match self.peek() {
+                // use "module"; or use module.path; or use module.path.{a, b};
+                let mut path = match self.peek() {
                     Token::Str(s) => {
                         let s = s.clone();
                         self.advance();
@@ -500,8 +505,41 @@ impl<'a> Parser<'a> {
                     }
                     _ => return Err(ParseError::new("Expected module name after 'use'")),
                 };
+                // Parse dot-separated path: use silk.graph
+                while self.check(&Token::Dot) {
+                    self.advance();
+                    // Check for selective import: use silk.graph.{a, b}
+                    if self.check(&Token::LBrace) {
+                        self.advance();
+                        let mut imports = Vec::new();
+                        if !self.check(&Token::RBrace) {
+                            imports.push(self.expect_ident()?);
+                            while self.check(&Token::Comma) {
+                                self.advance();
+                                imports.push(self.expect_ident()?);
+                            }
+                        }
+                        self.expect(&Token::RBrace)?;
+                        if self.check(&Token::Semi) { self.advance(); }
+                        return Ok(Stmt::Use { module: path, imports });
+                    }
+                    let seg = self.expect_ident()?;
+                    path = alloc::format!("{path}.{seg}");
+                }
                 if self.check(&Token::Semi) { self.advance(); }
-                Ok(Stmt::Use(module))
+                Ok(Stmt::Use { module: path, imports: Vec::new() })
+            }
+            Token::ModKw => {
+                self.advance();
+                // mod module.path;
+                let mut path = self.expect_ident()?;
+                while self.check(&Token::Dot) {
+                    self.advance();
+                    let seg = self.expect_ident()?;
+                    path = alloc::format!("{path}.{seg}");
+                }
+                if self.check(&Token::Semi) { self.advance(); }
+                Ok(Stmt::ModDecl(path))
             }
             Token::Struct => self.parse_struct_def(),
             Token::Enum => self.parse_enum_def(),
@@ -784,6 +822,12 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LBrace)?;
         let mut fields = Vec::new();
         while !self.check(&Token::RBrace) && !self.at_eof() {
+            let is_pub = if self.check(&Token::Pub) {
+                self.advance();
+                true
+            } else {
+                false
+            };
             let field_name = self.expect_ident()?;
             let type_name = if self.check(&Token::Colon) {
                 self.advance();
@@ -791,7 +835,7 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            fields.push(StructField { name: field_name, type_name });
+            fields.push(StructField { name: field_name, type_name, is_pub });
             if self.check(&Token::Comma) {
                 self.advance();
             }
@@ -1694,6 +1738,9 @@ impl<'a> Parser<'a> {
                     | Token::Impl
                     | Token::Trait
                     | Token::Spawn
+                    | Token::Pub
+                    | Token::ModKw
+                    | Token::Use
             )
         })
     }

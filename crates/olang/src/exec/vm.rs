@@ -171,6 +171,18 @@ pub enum VmEvent {
         /// Module name or path
         name: String,
     },
+    /// Selective module import: load specific symbols from a module.
+    UseModuleSelective {
+        /// Module name or path
+        name: String,
+        /// Specific symbols to import
+        imports: Vec<String>,
+    },
+    /// Module declaration.
+    ModDecl {
+        /// Module path (dot-separated)
+        path: String,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1702,6 +1714,28 @@ impl OlangVM {
                             events.push(VmEvent::UseModule { name });
                         }
 
+                        "__use_module_selective" => {
+                            // Selective module import: pop count, import names, module name
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut imports = Vec::new();
+                            for _ in 0..count {
+                                let imp = vm_pop!(stack, events);
+                                imports.push(chain_to_string(&imp).unwrap_or_default());
+                            }
+                            imports.reverse(); // restore original order
+                            let module_chain = vm_pop!(stack, events);
+                            let name = chain_to_string(&module_chain).unwrap_or_default();
+                            events.push(VmEvent::UseModuleSelective { name, imports });
+                        }
+
+                        "__mod_decl" => {
+                            // Module declaration — register module path
+                            let path_chain = vm_pop!(stack, events);
+                            let path = chain_to_string(&path_chain).unwrap_or_default();
+                            events.push(VmEvent::ModDecl { path });
+                        }
+
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
@@ -1999,6 +2033,148 @@ impl OlangVM {
                 Op::CatchEnd => {
                     // End of catch block — pop try entry if still present
                     // (already popped if error occurred and caught)
+                }
+
+                Op::Closure(_param_count, body_len) => {
+                    // Create closure: jump over body, push closure marker.
+                    // Closure marker = chain with special encoding:
+                    //   molecule.shape = 0xFF (closure tag)
+                    //   molecule.relation = param_count
+                    //   molecule.emotion.valence/arousal = body PC as 2 bytes (low/high)
+                    let body_pc = pc;
+                    let pc_low = (body_pc & 0xFF) as u8;
+                    let pc_high = ((body_pc >> 8) & 0xFF) as u8;
+                    let marker = MolecularChain::single(Molecule {
+                        shape: 0xFF,
+                        relation: *_param_count,
+                        emotion: EmotionDim { valence: pc_low, arousal: pc_high },
+                        time: 1,
+                    });
+                    let _ = stack.push(marker);
+                    // Jump past the body
+                    pc += body_len;
+                }
+
+                Op::CallClosure(arity) => {
+                    // Call a closure: stack has [closure, arg1, arg2, ...]
+                    let arity_val = *arity as usize;
+                    // Pop args first (they're on top)
+                    let mut closure_args = Vec::new();
+                    for _ in 0..arity_val {
+                        closure_args.push(vm_pop!(stack, events));
+                    }
+                    closure_args.reverse();
+                    // Pop closure marker
+                    let closure = vm_pop!(stack, events);
+                    // Check if it's a closure marker (shape == 0xFF)
+                    if let Some(mol) = closure.first() {
+                        if mol.shape == 0xFF {
+                            let body_pc = mol.emotion.valence as usize
+                                | ((mol.emotion.arousal as usize) << 8);
+                            // Push args back so body can Store them
+                            for arg in closure_args.into_iter().rev() {
+                                let _ = stack.push(arg);
+                            }
+                            // New scope for closure execution
+                            scopes.push(Vec::new());
+                            // Save current PC, jump to closure body
+                            let saved_pc = pc;
+                            pc = body_pc;
+                            // Execute closure body inline until Ret
+                            while pc < prog.ops.len() && steps < self.max_steps {
+                                let op = &prog.ops[pc];
+                                pc += 1;
+                                steps += 1;
+                                if matches!(op, Op::Ret) {
+                                    break;
+                                }
+                                match op {
+                                    Op::Store(name) => {
+                                        let val = vm_pop!(stack, events);
+                                        if let Some(scope) = scopes.last_mut() {
+                                            if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
+                                                entry.1 = val;
+                                            } else {
+                                                scope.push((name.clone(), val));
+                                            }
+                                        }
+                                    }
+                                    Op::LoadLocal(name) => {
+                                        let val = scopes.iter().rev()
+                                            .find_map(|s| s.iter().rev().find(|(n, _)| n == name).map(|(_, c)| c.clone()))
+                                            .unwrap_or_else(MolecularChain::empty);
+                                        let _ = stack.push(val);
+                                    }
+                                    Op::PushNum(n) => {
+                                        let _ = stack.push(MolecularChain::from_number(*n));
+                                    }
+                                    Op::Push(chain) => {
+                                        let _ = stack.push(chain.clone());
+                                    }
+                                    Op::Call(fname) => {
+                                        match fname.as_str() {
+                                            "__hyp_add" | "__hyp_sub" | "__hyp_mul" | "__hyp_div"
+                                            | "__hyp_mod" | "__phys_add" | "__phys_sub" => {
+                                                let b = vm_pop!(stack, events);
+                                                let a = vm_pop!(stack, events);
+                                                let fa = a.to_number().unwrap_or(0.0);
+                                                let fb = b.to_number().unwrap_or(0.0);
+                                                let result = match fname.as_str() {
+                                                    "__hyp_add" | "__phys_add" => fa + fb,
+                                                    "__hyp_sub" | "__phys_sub" => fa - fb,
+                                                    "__hyp_mul" => fa * fb,
+                                                    "__hyp_div" => if fb.abs() > f64::EPSILON { fa / fb } else { 0.0 },
+                                                    "__hyp_mod" => if fb.abs() > f64::EPSILON { fa % fb } else { 0.0 },
+                                                    _ => 0.0,
+                                                };
+                                                let _ = stack.push(MolecularChain::from_number(result));
+                                            }
+                                            "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
+                                                let b = vm_pop!(stack, events);
+                                                let a = vm_pop!(stack, events);
+                                                let fa = a.to_number().unwrap_or(0.0);
+                                                let fb = b.to_number().unwrap_or(0.0);
+                                                let result = match fname.as_str() {
+                                                    "__cmp_lt" => fa < fb,
+                                                    "__cmp_gt" => fa > fb,
+                                                    "__cmp_le" => fa <= fb,
+                                                    "__cmp_ge" => fa >= fb,
+                                                    "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                                    _ => false,
+                                                };
+                                                let _ = stack.push(if result {
+                                                    MolecularChain::from_number(1.0)
+                                                } else {
+                                                    MolecularChain::empty()
+                                                });
+                                            }
+                                            _ => {
+                                                events.push(VmEvent::LookupAlias(fname.clone()));
+                                            }
+                                        }
+                                    }
+                                    Op::Lca => {
+                                        let b = vm_pop!(stack, events);
+                                        let a = vm_pop!(stack, events);
+                                        let _ = stack.push(lca(&a, &b));
+                                    }
+                                    Op::Pop => { let _ = vm_pop!(stack, events); }
+                                    Op::Dup => {
+                                        if let Some(top) = stack.peek() {
+                                            let _ = stack.push(top.clone());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            scopes.pop(); // pop closure scope
+                            pc = saved_pc;
+                        } else {
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                    } else {
+                        let _ = stack.push(MolecularChain::empty());
+                    }
                 }
 
                 Op::Halt => {

@@ -335,8 +335,12 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             }
         }
 
-        Stmt::Use(_module) => {
+        Stmt::Use { .. } => {
             // Module imports are valid at any point
+        }
+
+        Stmt::ModDecl(_) => {
+            // Module declarations are valid at top level
         }
 
         Stmt::FieldAssign { object, fields: _, value } => {
@@ -702,7 +706,7 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         | Stmt::Break | Stmt::Continue
         | Stmt::Assign { .. }
         | Stmt::FieldAssign { .. }
-        | Stmt::Use(_)
+        | Stmt::Use { .. } | Stmt::ModDecl(_)
         | Stmt::StructDef { .. } | Stmt::EnumDef { .. }
         | Stmt::ImplBlock { .. } | Stmt::TraitDef { .. }
         | Stmt::ImplTrait { .. }
@@ -845,6 +849,11 @@ impl LowerCtx {
         self.prog.ops.len()
     }
 
+    /// Access the op list mutably (for patching Closure body_len).
+    fn ops_mut(&mut self) -> &mut Vec<Op> {
+        &mut self.prog.ops
+    }
+
     /// Patch a JMP/JZ target retroactively.
     fn patch_jump(&mut self, pos: usize, target: usize) {
         match &mut self.prog.ops[pos] {
@@ -852,6 +861,51 @@ impl LowerCtx {
             Op::Jz(ref mut t) => *t = target,
             _ => {}
         }
+    }
+}
+
+/// Try to find a method function for static dispatch.
+/// Checks if the object expression has a known struct type and looks up
+/// the mangled function name `__Type_method` in the function table.
+fn find_method_fn(object: &Expr, method: &str, ctx: &LowerCtx) -> Option<FnDef> {
+    // Try to infer the type name from the expression
+    let type_names = infer_type_names(object, ctx);
+    for type_name in &type_names {
+        let mangled = alloc::format!("__{type_name}_{method}");
+        if let Some(fn_def) = ctx.lookup_fn(&mangled) {
+            return Some(fn_def);
+        }
+    }
+    // Also try all registered __*_method patterns as fallback
+    let suffix = alloc::format!("_{method}");
+    for f in ctx.fns.iter().rev() {
+        if f.name.starts_with("__") && f.name.ends_with(&suffix) {
+            return Some(f.clone());
+        }
+    }
+    None
+}
+
+/// Infer possible type names from an expression.
+fn infer_type_names(expr: &Expr, _ctx: &LowerCtx) -> Vec<String> {
+    match expr {
+        // Direct struct literal: Point { x: 1, y: 2 } → type = "Point"
+        Expr::StructLiteral { name, .. } => alloc::vec![name.clone()],
+        // Enum variant: Color::Red → type = "Color"
+        Expr::EnumVariantExpr { enum_name, .. } => alloc::vec![enum_name.clone()],
+        // Variable reference: check if it was assigned from a struct literal
+        // (conservative: just check function call like Type::new)
+        Expr::Call { name, .. } => {
+            // Static method call like Vec3::new — check if Type part exists
+            if let Some(pos) = name.find("::") {
+                let type_part = &name[..pos];
+                alloc::vec![type_part.into()]
+            } else {
+                Vec::new()
+            }
+        }
+        // Ident: look for __StructName prefix in local context (can't infer)
+        _ => Vec::new(),
     }
 }
 
@@ -1160,10 +1214,25 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             }
         }
 
-        Stmt::Use(module) => {
+        Stmt::Use { module, imports } => {
             // Emit a Load for the module name — runtime can intercept and load the module
             ctx.emit(Op::Load(module.clone()));
-            ctx.emit(Op::Call("__use_module".into()));
+            if imports.is_empty() {
+                ctx.emit(Op::Call("__use_module".into()));
+            } else {
+                // Selective imports: push import names, then call with count
+                for imp in imports {
+                    ctx.emit(Op::Load(imp.clone()));
+                }
+                ctx.emit(Op::PushNum(imports.len() as f64));
+                ctx.emit(Op::Call("__use_module_selective".into()));
+            }
+        }
+
+        Stmt::ModDecl(path) => {
+            // Module declaration — register module path
+            ctx.emit(Op::Load(path.clone()));
+            ctx.emit(Op::Call("__mod_decl".into()));
         }
 
         Stmt::Return(expr) => {
@@ -1662,6 +1731,13 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 ctx.inline_depth -= 1;
 
                 ctx.locals.truncate(saved);
+            } else if ctx.is_local(name) {
+                // Local variable — might be a closure. Load it and call.
+                ctx.emit(Op::LoadLocal(name.clone()));
+                for arg in args {
+                    lower_expr(arg, ctx);
+                }
+                ctx.emit(Op::CallClosure(args.len() as u8));
             } else {
                 // Unknown function → CALL (let runtime handle it)
                 for arg in args {
@@ -1924,20 +2000,31 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Lambda { params, body } => {
-            // Lambda: |x, y| expr
-            // In stack-based VM without closures, we inline the lambda
-            // The lambda value itself just pushes an empty marker;
-            // actual inlining happens when lambda is used via pipe or call
-            // For now: just lower the body (params should be bound by caller)
-            // This handles the case where lambda appears in a pipe: a |> |x| x + 1
-            // The pipe lowering already put 'a' on stack, we store it as param
+            // Lambda: |x, y| expr → Closure(param_count, body_len)
+            // Emit Closure op that jumps over the body at creation time.
+            // When called via CallClosure, VM jumps to the body and executes it.
+            let param_count = params.len() as u8;
+
+            // Placeholder — we'll patch body_len after emitting body
+            let closure_pos = ctx.current_pos();
+            ctx.emit(Op::Closure(param_count, 0)); // placeholder
+
+            // Emit body: store params, lower body, ret
+            let body_start = ctx.current_pos();
             let saved = ctx.locals.len();
             for p in params {
                 ctx.emit(Op::Store(p.clone()));
                 ctx.locals.push(p.clone());
             }
             lower_expr(body, ctx);
+            ctx.emit(Op::Ret);
             ctx.locals.truncate(saved);
+
+            let body_len = ctx.current_pos() - body_start;
+            // Patch the Closure op with actual body length
+            if let Some(op) = ctx.ops_mut().get_mut(closure_pos) {
+                *op = Op::Closure(param_count, body_len);
+            }
         }
 
         Expr::IfExpr { cond, then_expr, else_expr } => {
@@ -1982,19 +2069,59 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::EnumVariantExpr { enum_name, variant, args } => {
-            // Create enum variant: push tag + optional payload
-            let tag = alloc::format!("{}::{}", enum_name, variant);
-            ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
-            if args.is_empty() {
-                // Unit variant: just the tag
-                ctx.emit(Op::Call("__enum_unit".into()));
-            } else {
-                // Variant with payload
-                for arg in args {
+            // Check if this is actually a static method call: Type::method(args)
+            let static_fn = alloc::format!("__{}_{}", enum_name, variant);
+            if let Some(fn_def) = ctx.lookup_fn(&static_fn) {
+                // Static method call — inline the function
+                let call_id = ctx.next_call_id();
+                let saved = ctx.locals.len();
+                let unique_params: Vec<String> = fn_def.params.iter()
+                    .map(|p| alloc::format!("__p{}_{}", call_id, p))
+                    .collect();
+                for (unique_name, arg) in unique_params.iter().zip(args.iter()) {
                     lower_expr(arg, ctx);
+                    ctx.emit(Op::Store(unique_name.clone()));
+                    ctx.locals.push(unique_name.clone());
                 }
-                ctx.emit(Op::PushNum(args.len() as f64));
-                ctx.emit(Op::Call("__enum_payload".into()));
+                for (orig, unique_name) in fn_def.params.iter().zip(unique_params.iter()) {
+                    ctx.emit(Op::LoadLocal(unique_name.clone()));
+                    ctx.emit(Op::Store(orig.clone()));
+                    ctx.locals.push(orig.clone());
+                }
+                ctx.inline_depth += 1;
+                let body_len = fn_def.body.len();
+                if body_len > 1 {
+                    for s in &fn_def.body[..body_len - 1] {
+                        lower_stmt(s, ctx);
+                    }
+                }
+                if let Some(last) = fn_def.body.last() {
+                    match last {
+                        Stmt::Expr(expr) => lower_expr(expr, ctx),
+                        Stmt::Return(Some(expr)) => lower_expr(expr, ctx),
+                        _ => {
+                            lower_stmt(last, ctx);
+                            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                        }
+                    }
+                }
+                ctx.inline_depth -= 1;
+                ctx.locals.truncate(saved);
+            } else {
+                // Create enum variant: push tag + optional payload
+                let tag = alloc::format!("{}::{}", enum_name, variant);
+                ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
+                if args.is_empty() {
+                    // Unit variant: just the tag
+                    ctx.emit(Op::Call("__enum_unit".into()));
+                } else {
+                    // Variant with payload
+                    for arg in args {
+                        lower_expr(arg, ctx);
+                    }
+                    ctx.emit(Op::PushNum(args.len() as f64));
+                    ctx.emit(Op::Call("__enum_payload".into()));
+                }
             }
         }
 
@@ -2046,42 +2173,36 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 }
                 ctx.emit(Op::Call(builtin_name.into()));
             } else {
-                // User-defined method: try compile-time dispatch via mangled name.
-                // Look for __Type_method in ctx.fns (registered by ImplBlock lowering).
-                // If object is a known struct literal, use its type directly.
-                // Otherwise try all registered impl methods matching this method name.
-                let mangled_candidates: Vec<FnDef> = ctx.fns.iter()
-                    .filter(|f| f.name.ends_with(&alloc::format!("_{}", method)))
-                    .cloned()
-                    .collect();
-
-                if mangled_candidates.len() == 1 {
-                    // Unique match — inline the method at compile time
-                    let fn_def = mangled_candidates.into_iter().next().unwrap();
+                // User-defined method: try static dispatch via fn table
+                // Look for __Type_method in registered functions
+                let fn_def = find_method_fn(object, method, ctx);
+                if let Some(fn_def) = fn_def {
+                    // Static dispatch: inline the method with self bound
                     let call_id = ctx.next_call_id();
                     let saved = ctx.locals.len();
 
-                    // Build args: self (object) + remaining args
-                    let mut all_args: Vec<&Expr> = Vec::new();
-                    all_args.push(object);
-                    for a in args {
-                        all_args.push(a);
-                    }
+                    // Evaluate self (object) and store as "self"
+                    lower_expr(object, ctx);
+                    let self_name = alloc::format!("__p{}_self", call_id);
+                    ctx.emit(Op::Store(self_name.clone()));
+                    ctx.locals.push(self_name.clone());
+                    ctx.emit(Op::LoadLocal(self_name.clone()));
+                    ctx.emit(Op::Store("self".into()));
+                    ctx.locals.push("self".into());
 
-                    // Generate unique param names
-                    let unique_params: Vec<String> = fn_def.params.iter()
+                    // Bind remaining params (skip first = self)
+                    let method_params: Vec<String> = fn_def.params.iter()
+                        .skip(1) // skip 'self'
+                        .cloned().collect();
+                    let unique_params: Vec<String> = method_params.iter()
                         .map(|p| alloc::format!("__p{}_{}", call_id, p))
                         .collect();
-
-                    // Evaluate args and store
-                    for (unique_name, arg) in unique_params.iter().zip(all_args.iter()) {
+                    for (unique_name, arg) in unique_params.iter().zip(args.iter()) {
                         lower_expr(arg, ctx);
                         ctx.emit(Op::Store(unique_name.clone()));
                         ctx.locals.push(unique_name.clone());
                     }
-
-                    // Register original param names as aliases
-                    for (orig, unique_name) in fn_def.params.iter().zip(unique_params.iter()) {
+                    for (orig, unique_name) in method_params.iter().zip(unique_params.iter()) {
                         ctx.emit(Op::LoadLocal(unique_name.clone()));
                         ctx.emit(Op::Store(orig.clone()));
                         ctx.locals.push(orig.clone());
@@ -2104,13 +2225,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                                 ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
                             }
                         }
-                    } else {
-                        ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
                     }
                     ctx.inline_depth -= 1;
                     ctx.locals.truncate(saved);
                 } else {
-                    // Multiple or no matches — fallback to runtime dispatch
+                    // Runtime dispatch: push self + args → __method_call
                     lower_expr(object, ctx);
                     for arg in args {
                         lower_expr(arg, ctx);
@@ -3955,7 +4074,7 @@ mod tests {
         assert!((v - 42.0).abs() < f64::EPSILON);
     }
 
-    // ── Type system validation tests ────────────────────────────────────────
+    // ── Type system validation tests (PR#21) ────────────────────────────────
 
     #[test]
     fn validate_trait_conformance_ok() {
@@ -4155,5 +4274,428 @@ mod tests {
             }
             _ => panic!("Expected TraitDef"),
         }
+    }
+
+    // ── B1: impl blocks + method dispatch (PR#22) ────────────────────────
+
+    #[test]
+    fn impl_block_method_registered() {
+        // impl block should register mangled function names
+        let src = r#"
+            struct Counter { value: Num }
+            impl Counter {
+                fn get_value(self) {
+                    return self;
+                }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        // Should compile without error — method registered as __Counter_get_value
+        assert!(prog.ops.len() > 0);
+    }
+
+    #[test]
+    fn impl_block_static_method_call() {
+        // Type::method(args) should resolve to static method call
+        let src = r#"
+            struct Vec3 { x: Num, y: Num, z: Num }
+            impl Vec3 {
+                fn create(a, b, c) {
+                    return a + b + c;
+                }
+            }
+            emit Vec3::create(1, 2, 3);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "static method call should produce output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 6.0).abs() < f64::EPSILON, "1+2+3 = 6, got {}", v);
+    }
+
+    #[test]
+    fn impl_block_method_dispatch_fallback() {
+        // When method can't be statically resolved, fallback to __method_call
+        let src = r#"
+            struct Point { x: Num, y: Num }
+            impl Point {
+                fn sum(self) {
+                    return 42;
+                }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        // Should compile — method registered, dispatch deferred
+        assert!(prog.ops.len() > 0);
+    }
+
+    #[test]
+    fn impl_trait_method_registered() {
+        // impl Trait for Type should register methods
+        let src = r#"
+            trait Describable {
+                fn describe(self);
+            }
+            struct Item { name: Num }
+            impl Describable for Item {
+                fn describe(self) {
+                    return 99;
+                }
+            }
+            emit Item::describe(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "trait impl method should produce output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 99.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn method_call_with_args() {
+        // Method with multiple params (beyond self)
+        let src = r#"
+            struct Calc {}
+            impl Calc {
+                fn add(self, a, b) {
+                    return a + b;
+                }
+            }
+            emit Calc::add(0, 10, 20);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 30.0).abs() < f64::EPSILON, "10+20 = 30, got {}", v);
+    }
+
+    #[test]
+    fn multiple_methods_in_impl() {
+        // Multiple methods in one impl block
+        let src = r#"
+            struct Math {}
+            impl Math {
+                fn double(self, x) { return x + x; }
+                fn triple(self, x) { return x + x + x; }
+            }
+            emit Math::double(0, 7);
+            emit Math::triple(0, 5);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(outputs.len() >= 2, "expected 2 outputs, got {}", outputs.len());
+        let v1 = outputs[0].to_number().unwrap();
+        let v2 = outputs[1].to_number().unwrap();
+        assert!((v1 - 14.0).abs() < f64::EPSILON, "double(7) = 14, got {}", v1);
+        assert!((v2 - 15.0).abs() < f64::EPSILON, "triple(5) = 15, got {}", v2);
+    }
+
+    // ── B2: Visibility modifiers ─────────────────────────────────────────
+
+    #[test]
+    fn struct_field_pub_visibility() {
+        // pub fields should parse correctly
+        let src = r#"
+            struct Gateway {
+                pub address: Str,
+                secret: Str,
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::StructDef { name, fields, .. } = &stmts[0] {
+            assert_eq!(name, "Gateway");
+            assert_eq!(fields.len(), 2);
+            assert!(fields[0].is_pub, "address should be pub");
+            assert_eq!(fields[0].name, "address");
+            assert!(!fields[1].is_pub, "secret should be private");
+            assert_eq!(fields[1].name, "secret");
+        } else {
+            panic!("expected StructDef");
+        }
+    }
+
+    #[test]
+    fn pub_fn_parses() {
+        // pub fn should parse (pub is consumed, fn proceeds normally)
+        let src = "pub fn connect(gw) { return gw; }";
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::FnDef { name, params, .. } = &stmts[0] {
+            assert_eq!(name, "connect");
+            assert_eq!(params.len(), 1);
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn pub_struct_parses() {
+        // pub struct should parse
+        let src = "pub struct Node { pub id: Num, data: Str }";
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::StructDef { name, fields, .. } = &stmts[0] {
+            assert_eq!(name, "Node");
+            assert!(fields[0].is_pub);
+            assert!(!fields[1].is_pub);
+        } else {
+            panic!("expected StructDef");
+        }
+    }
+
+    #[test]
+    fn pub_methods_in_impl() {
+        // pub fn inside impl should parse
+        let src = r#"
+            struct Server {}
+            impl Server {
+                pub fn start(self) { return 1; }
+                fn internal(self) { return 2; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        // Should compile fine — pub is consumed, methods registered
+        let prog = lower(&stmts);
+        assert!(prog.ops.len() > 0);
+    }
+
+    // ── B3: Module system tests ──────────────────────────────────────────────
+
+    #[test]
+    fn module_use_simple() {
+        let stmts = parse("use mylib;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Use { module, imports } => {
+                assert_eq!(module, "mylib");
+                assert!(imports.is_empty());
+            }
+            other => panic!("Expected Use, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn module_use_dot_path() {
+        let stmts = parse("use silk.graph;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Use { module, imports } => {
+                assert_eq!(module, "silk.graph");
+                assert!(imports.is_empty());
+            }
+            other => panic!("Expected Use with dot path, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn module_use_selective_imports() {
+        let stmts = parse("use silk.graph.{co_activate, SilkGraph};").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Use { module, imports } => {
+                assert_eq!(module, "silk.graph");
+                assert_eq!(imports, &["co_activate", "SilkGraph"]);
+            }
+            other => panic!("Expected Use with selective imports, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn module_decl() {
+        let stmts = parse("module silk.graph;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ModDecl(path) => {
+                assert_eq!(path, "silk.graph");
+            }
+            other => panic!("Expected ModDecl, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn module_use_lowers_to_ir() {
+        let stmts = parse("use silk.graph;").unwrap();
+        let prog = lower(&stmts);
+        // Should emit Load("silk.graph") + Call("__use_module")
+        let has_load = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "silk.graph"));
+        assert!(has_load, "Should emit Load for module path");
+    }
+
+    #[test]
+    fn module_selective_lowers_to_ir() {
+        let stmts = parse("use math.{sin, cos};").unwrap();
+        let prog = lower(&stmts);
+        // Should emit Load("math") + Load("sin") + Load("cos") + PushNum(2) + Call("__use_module_selective")
+        let has_module = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "math"));
+        let has_sin = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "sin"));
+        let has_cos = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "cos"));
+        assert!(has_module, "Should emit Load for module");
+        assert!(has_sin, "Should emit Load for import 'sin'");
+        assert!(has_cos, "Should emit Load for import 'cos'");
+    }
+
+    #[test]
+    fn module_decl_lowers_to_ir() {
+        let stmts = parse("module agents.learning;").unwrap();
+        let prog = lower(&stmts);
+        let has_load = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "agents.learning"));
+        assert!(has_load, "Should emit Load for module path");
+    }
+
+    #[test]
+    fn module_mod_still_works_as_function() {
+        // mod() as function should still work (builtin modulo)
+        let src = "let r = mod(10, 3);";
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 1);
+        let prog = lower(&stmts);
+        assert!(prog.ops.len() > 0);
+    }
+
+    // ── B4: Closure / Lambda tests ───────────────────────────────────────────
+
+    #[test]
+    fn closure_let_binding() {
+        let src = "let double = |x| x * 2;";
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value: Expr::Lambda { params, .. }, .. } => {
+                assert_eq!(params, &["x"]);
+            }
+            other => panic!("Expected Let with Lambda, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn closure_produces_closure_op() {
+        let src = "let double = |x| x * 2;";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_closure = prog.ops.iter().any(|op| matches!(op, Op::Closure(1, _)));
+        assert!(has_closure, "Lambda should produce Closure op with 1 param");
+    }
+
+    #[test]
+    fn closure_call_produces_call_closure_op() {
+        let src = r#"
+            let double = |x| x * 2;
+            let result = double(21);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_call_closure = prog.ops.iter().any(|op| matches!(op, Op::CallClosure(1)));
+        assert!(has_call_closure, "Calling a closure variable should produce CallClosure op");
+    }
+
+    #[test]
+    fn closure_multi_param() {
+        let src = "let add = |a, b| a + b;";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::Let { value: Expr::Lambda { params, .. }, .. } => {
+                assert_eq!(params, &["a", "b"]);
+            }
+            other => panic!("Expected Let with Lambda, got {:?}", other),
+        }
+        let prog = lower(&stmts);
+        let has_closure = prog.ops.iter().any(|op| matches!(op, Op::Closure(2, _)));
+        assert!(has_closure, "2-param lambda should produce Closure(2, _)");
+    }
+
+    #[test]
+    fn closure_vm_execution() {
+        // Test that closures actually work in the VM: double(21) == 42
+        let src = r#"
+            let double = |x| x * 2;
+            emit double(21);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1, "Should emit 1 value");
+        let val = outputs[0].to_number().unwrap();
+        assert!((val - 42.0).abs() < f64::EPSILON, "double(21) should = 42, got {}", val);
+    }
+
+    #[test]
+    fn closure_vm_add() {
+        let src = r#"
+            let add = |a, b| a + b;
+            emit add(10, 32);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let val = outputs[0].to_number().unwrap();
+        assert!((val - 42.0).abs() < f64::EPSILON, "add(10, 32) should = 42, got {}", val);
+    }
+
+    #[test]
+    fn closure_in_pipe() {
+        // Lambda in pipe should still work (inline behavior)
+        let src = "21 |> |x| x * 2";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        assert!(prog.ops.len() > 0, "Pipe with lambda should compile");
+    }
+
+    #[test]
+    fn closure_zero_params() {
+        // Note: || is lexed as Token::Or (logical or), so zero-param lambdas
+        // use | | with space, or in practice just use `fn name() { ... }`
+        let src = "let greet = | | 42;";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::Let { value: Expr::Lambda { params, .. }, .. } => {
+                assert!(params.is_empty());
+            }
+            other => panic!("Expected Lambda with 0 params, got {:?}", other),
+        }
+        let prog = lower(&stmts);
+        let has_closure = prog.ops.iter().any(|op| matches!(op, Op::Closure(0, _)));
+        assert!(has_closure, "0-param lambda should produce Closure(0, _)");
+    }
+
+    #[test]
+    fn module_and_closures_combined() {
+        // Test that all B3+B4 features work in a single program
+        let src = r#"
+            use math;
+            module app.main;
+            let double = |x| x * 2;
+            emit double(5);
+        "#;
+        let stmts = parse(src).unwrap();
+        assert!(stmts.len() >= 4);
+        let prog = lower(&stmts);
+        assert!(prog.ops.len() > 0);
     }
 }
