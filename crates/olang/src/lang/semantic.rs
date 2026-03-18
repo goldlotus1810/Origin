@@ -998,7 +998,9 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
 
     // First pass: collect function definitions, impl methods, and trait defaults
     for stmt in stmts {
-        if let Stmt::FnDef { name, params, body, param_constraints, .. } = stmt {
+        // Unwrap pub wrapper: `pub fn foo(...)` → treat as `fn foo(...)`
+        let inner = if let Stmt::Pub(inner) = stmt { inner.as_ref() } else { stmt };
+        if let Stmt::FnDef { name, params, body, param_constraints, .. } = inner {
             ctx.fns.push(FnDef {
                 name: name.clone(),
                 params: params.clone(),
@@ -1123,6 +1125,8 @@ struct LowerCtx {
     break_jumps: Vec<Vec<usize>>,
     /// Continue targets: Jmp placeholders to patch to ScopeEnd
     continue_jumps: Vec<Vec<usize>>,
+    /// Return jump targets: Jmp placeholders to patch to end of inlined function
+    return_jumps: Vec<Vec<usize>>,
     /// Unique call site counter — prevents param name clashes when
     /// the same function is called multiple times in one expression
     call_id: u32,
@@ -1141,6 +1145,7 @@ impl LowerCtx {
             trait_impls: Vec::new(),
             break_jumps: Vec::new(),
             continue_jumps: Vec::new(),
+            return_jumps: Vec::new(),
             call_id: 0,
             inline_depth: 0,
         }
@@ -1232,8 +1237,14 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
     match stmt {
         Stmt::Let { name, value, .. } => {
             lower_expr(value, ctx);
-            ctx.emit(Op::Store(name.clone()));
-            ctx.locals.push(name.clone());
+            // If variable already exists in scope, use StoreUpdate to modify
+            // the existing binding (supports `let x = x + 1` rebinding pattern).
+            if ctx.locals.contains(name) {
+                ctx.emit(Op::StoreUpdate(name.clone()));
+            } else {
+                ctx.emit(Op::Store(name.clone()));
+                ctx.locals.push(name.clone());
+            }
         }
 
         Stmt::LetDestructure { names, value } => {
@@ -1295,10 +1306,16 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 let end_target = ctx.current_pos();
                 ctx.patch_jump(jmp_pos, end_target);
             } else {
-                // no else: JZ jumps to end
+                // no else: JZ jumps to pop_cond, then block falls to end
+                let jmp_pos = ctx.current_pos();
+                ctx.emit(Op::Jmp(0)); // skip the Pop (then-block completed)
+
+                let pop_target = ctx.current_pos();
+                ctx.patch_jump(jz_pos, pop_target);
+                ctx.emit(Op::Pop); // pop cond (only reached via Jz)
+
                 let end_target = ctx.current_pos();
-                ctx.patch_jump(jz_pos, end_target);
-                ctx.emit(Op::Pop); // pop cond
+                ctx.patch_jump(jmp_pos, end_target);
             }
         }
 
@@ -1315,9 +1332,10 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
         Stmt::While { cond, body } => {
             // while cond { body }
-            // Layout: Loop(1024) ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd [end:] Pop
-            // QT2: ∞-1 — capped at 1024 iterations
-            ctx.emit(Op::Loop(1024));
+            // Layout: [start:] ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd Jmp(start) [end:] Pop
+            // No Loop opcode — uses explicit Jmp for back-jump to avoid
+            // loop_stack corruption with nested while loops.
+            let start = ctx.current_pos();
             ctx.emit(Op::ScopeBegin);
             lower_expr(cond, ctx);
             let jz_pos = ctx.current_pos();
@@ -1331,14 +1349,15 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 lower_stmt(s, ctx);
             }
             ctx.locals.truncate(saved);
-            // Patch continue → ScopeEnd (triggers next iteration)
+            // Patch continue → ScopeEnd + Jmp(start)
             let scope_end_pos = ctx.current_pos();
             if let Some(conts) = ctx.continue_jumps.pop() {
                 for cp in conts {
                     ctx.patch_jump(cp, scope_end_pos);
                 }
             }
-            ctx.emit(Op::ScopeEnd); // triggers loop jump-back
+            ctx.emit(Op::ScopeEnd);
+            ctx.emit(Op::Jmp(start)); // explicit back-jump
             let end = ctx.current_pos();
             ctx.patch_jump(jz_pos, end);
             // Patch break → end (past loop)
@@ -1561,12 +1580,18 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
         Stmt::Return(expr) => {
             if ctx.inline_depth > 0 {
-                // Inside inlined function: just leave value on stack (no Ret)
+                // Inside inlined function: push return value and jump to end
                 if let Some(e) = expr {
                     lower_expr(e, ctx);
-                    // Value stays on stack as function's return value
+                } else {
+                    ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
                 }
-                // No Op::Ret — inlined functions continue after the call site
+                // Jump to end of inlined function (patched later)
+                let pos = ctx.current_pos();
+                ctx.emit(Op::Jmp(0)); // placeholder
+                if let Some(returns) = ctx.return_jumps.last_mut() {
+                    returns.push(pos);
+                }
             } else {
                 // Top-level return
                 if let Some(e) = expr {
@@ -1953,6 +1978,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             if name == "?" {
                 // Wildcard — push empty chain
                 ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+            } else if name == "true" {
+                // Boolean true → non-empty chain (truthy for Jz)
+                ctx.emit(Op::PushNum(1.0));
+            } else if name == "false" {
+                // Boolean false → empty chain (falsy for Jz)
+                ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
             } else if ctx.is_local(name) {
                 ctx.emit(Op::LoadLocal(name.clone()));
             } else {
@@ -2033,6 +2064,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "str_upper" => Some("__str_upper"),
                 "str_lower" => Some("__str_lower"),
                 "str_substr" => Some("__str_substr"),
+                "substr" => Some("__str_substr"),      // freestanding alias for bootstrap
+                "char_at" => Some("__str_char_at"),    // freestanding alias for bootstrap
                 // Math builtins
                 "floor" => Some("__hyp_floor"),
                 "ceil" => Some("__hyp_ceil"),
@@ -2157,6 +2190,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     }
                 }
                 ctx.emit(Op::Call(builtin_name.into()));
+                // Mutating builtins: store result back into the first arg
+                // push(arr, elem) → arr = __array_push(arr, elem)
+                if builtin_name == "__array_push" {
+                    if let Some(Expr::Ident(var_name)) = args.first() {
+                        ctx.emit(Op::Dup);
+                        ctx.emit(Op::StoreUpdate(var_name.clone()));
+                    }
+                }
             } else
             // Check if it's a user-defined function
             if let Some(fn_def) = ctx.lookup_fn(name) {
@@ -2213,6 +2254,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 }
 
                 // Lower function body (inside inline context)
+                ctx.return_jumps.push(Vec::new());
                 ctx.inline_depth += 1;
 
                 // Lower all statements except the last one normally
@@ -2228,26 +2270,28 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 if let Some(last) = fn_def.body.last() {
                     match last {
                         Stmt::Expr(expr) => {
-                            // Lower expression without Pop — value stays on stack
                             lower_expr(expr, ctx);
                         }
                         Stmt::Return(Some(expr)) => {
-                            // Return value stays on stack
                             lower_expr(expr, ctx);
                         }
                         _ => {
-                            // Other statements (emit, let, etc.) — lower normally
-                            // and push empty as dummy return value
                             lower_stmt(last, ctx);
                             ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
                         }
                     }
                 } else {
-                    // Empty function body — push empty
                     ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
                 }
 
                 ctx.inline_depth -= 1;
+                // Patch early return jumps to here
+                let end_pos = ctx.current_pos();
+                if let Some(returns) = ctx.return_jumps.pop() {
+                    for rp in returns {
+                        ctx.patch_jump(rp, end_pos);
+                    }
+                }
 
                 ctx.locals.truncate(saved);
             } else if ctx.is_local(name) {
@@ -2501,8 +2545,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                             ctx.emit(Op::Store(first_param.clone()));
                             ctx.locals.push(first_param.clone());
                         }
+                        ctx.return_jumps.push(Vec::new());
                         ctx.inline_depth += 1;
-                        // Handle last statement as return value
                         let body_len = fn_def.body.len();
                         if body_len > 1 {
                             for s in &fn_def.body[..body_len - 1] {
@@ -2522,6 +2566,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                             ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
                         }
                         ctx.inline_depth -= 1;
+                        let end_pos = ctx.current_pos();
+                        if let Some(returns) = ctx.return_jumps.pop() {
+                            for rp in returns {
+                                ctx.patch_jump(rp, end_pos);
+                            }
+                        }
                         ctx.locals.truncate(saved);
                     } else {
                         ctx.emit(Op::Call(name.clone()));
@@ -2624,6 +2674,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     ctx.emit(Op::Store(orig.clone()));
                     ctx.locals.push(orig.clone());
                 }
+                ctx.return_jumps.push(Vec::new());
                 ctx.inline_depth += 1;
                 let body_len = fn_def.body.len();
                 if body_len > 1 {
@@ -2642,6 +2693,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     }
                 }
                 ctx.inline_depth -= 1;
+                let end_pos = ctx.current_pos();
+                if let Some(returns) = ctx.return_jumps.pop() {
+                    for rp in returns {
+                        ctx.patch_jump(rp, end_pos);
+                    }
+                }
                 ctx.locals.truncate(saved);
             } else {
                 // Create enum variant: push tag + optional payload
@@ -2805,6 +2862,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     }
 
                     // Inline function body
+                    ctx.return_jumps.push(Vec::new());
                     ctx.inline_depth += 1;
                     let body_len = fn_def.body.len();
                     if body_len > 1 {
@@ -2823,6 +2881,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                         }
                     }
                     ctx.inline_depth -= 1;
+                    let end_pos = ctx.current_pos();
+                    if let Some(returns) = ctx.return_jumps.pop() {
+                        for rp in returns {
+                            ctx.patch_jump(rp, end_pos);
+                        }
+                    }
                     ctx.locals.truncate(saved);
                 } else {
                     // Runtime dispatch: push self + args → __method_call
@@ -3493,11 +3557,13 @@ mod tests {
     }
 
     #[test]
-    fn lower_while_has_loop_and_jz() {
+    fn lower_while_has_jmp_and_jz() {
         let stmts = parse("while x < 10 { emit x; }").unwrap();
         let prog = lower(&stmts);
-        assert!(prog.ops.iter().any(|op| matches!(op, Op::Loop(1024))), "Should have Loop(1024)");
+        // While loops use ScopeBegin + Jz(end) + body + ScopeEnd + Jmp(start)
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::ScopeBegin)), "Should have ScopeBegin");
         assert!(prog.ops.iter().any(|op| matches!(op, Op::Jz(_))), "Should have Jz for condition");
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::Jmp(_))), "Should have Jmp for back-jump");
         assert!(prog.ops.iter().any(|op| matches!(op, Op::Call(ref n) if n == "__cmp_lt")),
             "Should have __cmp_lt call");
     }
@@ -7506,5 +7572,288 @@ mod tests {
         assert!(public_names.contains(&"public_api"));
         assert!(public_names.contains(&"Config"));
         assert!(!public_names.contains(&"private_helper"));
+    }
+
+    // ── PLAN_0_1: Bootstrap lexer.ol tests ──────────────────────────────
+
+    #[test]
+    fn bootstrap_lexer_compiles() {
+        let source = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let stmts = parse(source).expect("lexer.ol must parse");
+        let prog = lower(&stmts);
+        assert!(!prog.ops.is_empty(), "lexer.ol must compile to ops");
+        // Verify tokenize function exists in the program
+        // lexer.ol has multiple functions + complex logic → should produce many ops
+        assert!(prog.ops.len() >= 50, "lexer.ol should produce substantial program, got {} ops", prog.ops.len());
+    }
+
+    #[test]
+    fn bootstrap_string_compare() {
+        // Verify ch >= "a" && ch <= "z" works with string comparison
+        let src = r#"
+            let ch = "m";
+            if ch >= "a" && ch <= "z" {
+                emit 1;
+            } else {
+                emit 0;
+            };
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON, "\"m\" >= \"a\" && \"m\" <= \"z\" should be true, got {}", v);
+    }
+
+    #[test]
+    fn bootstrap_string_compare_false() {
+        let src = r#"
+            let ch = "5";
+            if ch >= "a" && ch <= "z" {
+                emit 1;
+            } else {
+                emit 0;
+            };
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 0.0).abs() < f64::EPSILON, "\"5\" >= \"a\" should be false, got {}", v);
+    }
+
+    #[test]
+    fn bootstrap_substr_slice() {
+        // substr(s, start, end) should return s[start..end]
+        let src = r#"
+            let s = "hello world";
+            let part = substr(s, 0, 5);
+            emit part;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let s = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(s, Some("hello".into()), "substr(\"hello world\", 0, 5) should be \"hello\"");
+    }
+
+    #[test]
+    fn bootstrap_len_on_string() {
+        let src = r#"
+            let s = "hello";
+            emit len(s);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 5.0).abs() < f64::EPSILON, "len(\"hello\") should be 5, got {}", v);
+    }
+
+    #[test]
+    fn bootstrap_char_at_freestanding() {
+        let src = r#"
+            let s = "abc";
+            let ch = char_at(s, 1);
+            emit ch;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let s = crate::vm::chain_to_string(&outputs[0]);
+        assert_eq!(s, Some("b".into()), "char_at(\"abc\", 1) should be \"b\"");
+    }
+
+    #[test]
+    fn bootstrap_lexer_is_alpha() {
+        // Test the is_alpha function from lexer.ol
+        let src = r#"
+            fn is_alpha(ch) {
+                return (ch >= "a" && ch <= "z")
+                    || (ch >= "A" && ch <= "Z")
+                    || ch == "_";
+            }
+            emit is_alpha("m");
+            emit is_alpha("Z");
+            emit is_alpha("_");
+            emit is_alpha("5");
+            emit is_alpha(" ");
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 5, "expected 5 outputs, got {}", outputs.len());
+        // "m" → truthy, "Z" → truthy, "_" → truthy, "5" → falsy, " " → falsy
+        assert!(!outputs[0].is_empty(), "is_alpha(\"m\") should be truthy");
+        assert!(!outputs[1].is_empty(), "is_alpha(\"Z\") should be truthy");
+        assert!(!outputs[2].is_empty(), "is_alpha(\"_\") should be truthy");
+        assert!(outputs[3].is_empty(), "is_alpha(\"5\") should be falsy");
+        assert!(outputs[4].is_empty(), "is_alpha(\" \") should be falsy");
+    }
+
+    #[test]
+    fn bootstrap_lexer_is_digit() {
+        let src = r#"
+            fn is_digit(ch) {
+                return ch >= "0" && ch <= "9";
+            }
+            emit is_digit("5");
+            emit is_digit("a");
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+        assert!(!outputs[0].is_empty(), "is_digit(\"5\") should be truthy");
+        assert!(outputs[1].is_empty(), "is_digit(\"a\") should be falsy");
+    }
+
+    #[test]
+    fn bootstrap_lexer_while_continue() {
+        // Test while loop with let rebinding + continue — core pattern in lexer.ol
+        let src = r#"
+            let pos = 0;
+            let count = 0;
+            let s = "hello";
+            let slen = len(s);
+            while pos < slen {
+                let ch = char_at(s, pos);
+                if ch == "l" {
+                    let pos = pos + 1;
+                    continue;
+                };
+                let count = count + 1;
+                let pos = pos + 1;
+            };
+            emit count;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        // "hello" has 2 'l's, so count = 5-2 = 3 non-l characters
+        assert!((v - 3.0).abs() < f64::EPSILON, "expected 3 non-l chars, got {}", v);
+    }
+
+    #[test]
+    fn bootstrap_push_struct_array() {
+        let src = r#"
+            struct Item { name, value }
+            let arr = [];
+            push(arr, Item { name: "a", value: 1 });
+            push(arr, Item { name: "b", value: 2 });
+            emit len(arr);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        // Debug: check if chain_to_string detects the array as string
+        assert!((v - 2.0).abs() < f64::EPSILON,
+            "push 2 structs → len should be 2, got {}. is_string={:?}, mol_count={}",
+            v,
+            crate::vm::chain_to_string(&outputs[0]),
+            outputs[0].len());
+    }
+
+    #[test]
+    fn bootstrap_push_mutates_array() {
+        let src = r#"
+            let arr = [];
+            push(arr, 10);
+            push(arr, 20);
+            push(arr, 30);
+            emit len(arr);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 1);
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON, "push 3 elements → len should be 3, got {}", v);
+    }
+
+    #[test]
+    fn bootstrap_lexer_tokenize_simple() {
+        // Full test: load lexer.ol and tokenize "let x = 42;"
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let test_src = alloc::format!(
+            "{}\nemit tokenize(\"let x = 42;\");",
+            lexer_src
+        );
+
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        assert!(errors.is_empty(), "VM errors: {:?}", errors);
+        assert!(!outputs.is_empty(), "should produce output");
+
+        // tokenize("let x = 42;") should produce 6 tokens:
+        // Keyword("let"), Ident("x"), Symbol("="), Number(42), Symbol(";"), Eof
+        // Check element count via 0xFD tag molecule
+        let arr = &outputs[0];
+        assert!(!arr.0.is_empty() && arr.0[0].shape == 0xFD,
+            "output should be a tagged array");
+        let count = arr.0[0].emotion.valence as usize;
+        assert_eq!(count, 6,
+            "expected 6 tokens from 'let x = 42;', got {}", count);
+
+        // Also test: tokenize("fn f(x) { return x + 1; }")
+        // Expected: fn, f, (, x, ), {, return, x, +, 1, ;, }, Eof = 13 tokens
+        let test_src2 = alloc::format!(
+            "{}\nemit tokenize(\"fn f(x) {{ return x + 1; }}\");",
+            lexer_src
+        );
+        let stmts2 = parse(&test_src2).expect("should parse test2");
+        let prog2 = lower(&stmts2);
+        let vm2 = crate::vm::OlangVM::new();
+        let result2 = vm2.execute(&prog2);
+        assert!(result2.errors().is_empty(), "VM errors test2: {:?}", result2.errors());
+        let arr2 = &result2.outputs()[0];
+        assert!(!arr2.0.is_empty() && arr2.0[0].shape == 0xFD,
+            "output2 should be a tagged array");
+        let count2 = arr2.0[0].emotion.valence as usize;
+        assert_eq!(count2, 13,
+            "expected 13 tokens from 'fn f(x) {{ return x + 1; }}', got {}", count2);
     }
 }
