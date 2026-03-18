@@ -44,7 +44,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::hash::fnv1a;
-use crate::molecular::{EmotionDim, MolecularChain, Molecule};
+use crate::molecular::{MolecularChain, Molecule};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DeltaMolecule — chỉ lưu diff từ parent
@@ -142,12 +142,7 @@ impl DeltaMolecule {
             parent.time
         };
 
-        Some(Molecule {
-            shape,
-            relation,
-            emotion: EmotionDim { valence, arousal },
-            time,
-        })
+        Some(Molecule::raw(shape, relation, valence, arousal, time))
     }
 
     /// Serialized size (bytes).
@@ -1894,18 +1889,10 @@ impl TieredStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molecular::{EmotionDim, RelationBase};
+    use crate::molecular::RelationBase;
 
     fn test_mol(shape: u8, rel: u8, v: u8, a: u8, t: u8) -> Molecule {
-        Molecule {
-            shape,
-            relation: rel,
-            emotion: EmotionDim {
-                valence: v,
-                arousal: a,
-            },
-            time: t,
-        }
+        Molecule::raw(shape, rel, v, a, t)
     }
 
     // ── DeltaMolecule ──────────────────────────────────────────────────────────

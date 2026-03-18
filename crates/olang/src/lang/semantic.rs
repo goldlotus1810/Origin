@@ -969,12 +969,13 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
 fn string_to_key_chain(s: &str) -> crate::molecular::MolecularChain {
     let mut mols = Vec::new();
     for b in s.bytes() {
-        mols.push(crate::molecular::Molecule {
-            shape: 0x02,       // marker: string key
-            relation: 0x01,    // Member
-            emotion: crate::molecular::EmotionDim { valence: b, arousal: 0 },
-            time: 0x01,        // Static
-        });
+        mols.push(crate::molecular::Molecule::raw(
+            0x02,  // shape: marker string key
+            0x01,  // relation: Member
+            b,     // valence: byte value
+            0,     // arousal
+            0x01,  // time: Static
+        ));
     }
     crate::molecular::MolecularChain(mols)
 }

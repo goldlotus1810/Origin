@@ -1095,16 +1095,11 @@ mod word_level_tests {
 #[cfg(test)]
 mod evolution_tests {
     use super::*;
-    use olang::molecular::{EmotionDim, Molecule, MolecularChain};
+    use olang::molecular::{Molecule, MolecularChain};
 
     /// Tạo chain từ 1 molecule — CHỈ trong tests.
     fn chain_from_mol(shape: u8, relation: u8, v: u8, a: u8, t: u8) -> MolecularChain {
-        MolecularChain(alloc::vec![Molecule {
-            shape,
-            relation,
-            emotion: EmotionDim { valence: v, arousal: a },
-            time: t,
-        }])
+        MolecularChain(alloc::vec![Molecule::raw(shape, relation, v, a, t)])
     }
 
     #[test]

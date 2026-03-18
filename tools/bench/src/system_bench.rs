@@ -541,7 +541,7 @@ fn bench_knowtree() {
     println!("── 7. KnowTree Stress ────────────────────────────────────────");
 
     use olang::knowtree::{KnowTree, text_to_word_hashes};
-    use olang::molecular::{Molecule, EmotionDim};
+    use olang::molecular::Molecule;
 
     let mut kt = KnowTree::for_pc();
 
@@ -564,15 +564,13 @@ fn bench_knowtree() {
 
     for round in 0..10 {
         for (i, text) in sentences.iter().enumerate() {
-            let chain = MolecularChain::single(Molecule {
-                shape: ShapeBase::Sphere.encode(round as u8),
-                relation: RelationBase::Member.encode(i as u8),
-                emotion: EmotionDim {
-                    valence: 0x80 + (round * 5) as u8,
-                    arousal: 0x60 + (i * 3) as u8,
-                },
-                time: TimeDim::Medium.as_byte(),
-            });
+            let chain = MolecularChain::single(Molecule::raw(
+                ShapeBase::Sphere.encode(round as u8),
+                RelationBase::Member.encode(i as u8),
+                0x80 + (round * 5) as u8,
+                0x60 + (i * 3) as u8,
+                TimeDim::Medium.as_byte(),
+            ));
             let words = text_to_word_hashes(text);
             let hash = kt.store_sentence(&chain, None, &words, (round * 10 + i) as i64);
             all_hashes.push(hash);
@@ -607,12 +605,13 @@ fn bench_knowtree() {
     // Store concepts (LCA)
     let t = Instant::now();
     for chunk in all_hashes.chunks(5) {
-        let concept_chain = MolecularChain::single(Molecule {
-            shape: ShapeBase::Sphere.as_byte(),
-            relation: RelationBase::DerivedFrom.as_byte(),
-            emotion: EmotionDim { valence: 0x80, arousal: 0x80 },
-            time: TimeDim::Medium.as_byte(),
-        });
+        let concept_chain = MolecularChain::single(Molecule::raw(
+            ShapeBase::Sphere.as_byte(),
+            RelationBase::DerivedFrom.as_byte(),
+            0x80,
+            0x80,
+            TimeDim::Medium.as_byte(),
+        ));
         kt.store_concept(&concept_chain, None, 3, chunk, 9999);
     }
     let concept_time = t.elapsed();

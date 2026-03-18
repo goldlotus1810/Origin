@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use crate::ir::{OlangProgram, Op};
 use crate::lca::lca;
-use crate::molecular::{EmotionDim, Molecule, MolecularChain};
+use crate::molecular::{Molecule, MolecularChain};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VmEvent — side effects VM muốn thực hiện
@@ -45,12 +45,7 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
 /// Encode a string as a MolecularChain (each byte → 1 molecule).
 /// Inverse of chain_to_string.
 pub fn string_to_chain(s: &str) -> MolecularChain {
-    let mols: Vec<Molecule> = s.bytes().map(|b| Molecule {
-        shape: 0x02,
-        relation: 0x01,
-        emotion: EmotionDim { valence: b, arousal: 0 },
-        time: 0x01,
-    }).collect();
+    let mols: Vec<Molecule> = s.bytes().map(|b| Molecule::raw(0x02, 0x01, b, 0, 0x01)).collect();
     MolecularChain(mols)
 }
 
@@ -310,7 +305,7 @@ fn glob_match(text: &str, pattern: &str) -> bool {
 /// Iterator-level separator molecule (shape=0xFE) — distinct from array element separator.
 /// Used to delimit sections within an iterator encoding (__ITER__ tag, source, transforms).
 fn iter_sep() -> Molecule {
-    Molecule { shape: 0xFE, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 }
+    Molecule::raw(0xFE, 0, 0, 0, 0)
 }
 
 /// Split an iterator-encoded MolecularChain by iterator separator molecules (shape=0xFE).
@@ -622,15 +617,7 @@ impl OlangVM {
                     // Construct 1-molecule chain from explicit dimension values.
                     // Used by LeoAI to express knowledge as Olang code:
                     //   { S=1 R=2 V=128 A=128 T=3 } → Molecule → Chain
-                    let mol = Molecule {
-                        shape: *s,
-                        relation: *r,
-                        emotion: EmotionDim {
-                            valence: *v,
-                            arousal: *a,
-                        },
-                        time: *t,
-                    };
+                    let mol = Molecule::raw(*s, *r, *v, *a, *t);
                     let chain = MolecularChain(alloc::vec![mol]);
                     if let Err(e) = stack.push(chain) {
                         events.push(VmEvent::Error(e));
@@ -973,11 +960,7 @@ impl OlangVM {
                             }
                             elements.reverse(); // restore original order
                             // Build array chain: elem0 | sep | elem1 | sep | elem2 ...
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (i, elem) in elements.into_iter().enumerate() {
                                 if i > 0 {
@@ -1040,11 +1023,7 @@ impl OlangVM {
                             // Stack: [array, element]
                             let elem = vm_pop!(stack, events);
                             let mut arr = vm_pop!(stack, events);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             if !arr.is_empty() {
                                 arr.0.push(sep);
                             }
@@ -1063,11 +1042,7 @@ impl OlangVM {
                             }
                             pairs.reverse();
                             // Encode as flat chain: key0|sep|val0|sep|key1|sep|val1...
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (i, (key, val)) in pairs.into_iter().enumerate() {
                                 if i > 0 {
@@ -1104,11 +1079,7 @@ impl OlangVM {
                             // Returns array of keys (even-indexed elements)
                             let dict = vm_pop!(stack, events);
                             let elements = split_array_chain(&dict);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             let mut key_idx = 0;
                             let mut i = 0;
@@ -1144,11 +1115,7 @@ impl OlangVM {
                                 elements.push(value);
                             }
                             // Rebuild chain from elements
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (j, elem) in elements.into_iter().enumerate() {
                                 if j > 0 {
@@ -1259,11 +1226,7 @@ impl OlangVM {
                             if idx < elements.len() {
                                 elements[idx] = value;
                             }
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (j, elem) in elements.into_iter().enumerate() {
                                 if j > 0 { result.0.push(sep); }
@@ -1283,11 +1246,7 @@ impl OlangVM {
                                 .skip(start)
                                 .take(end.saturating_sub(start))
                                 .collect();
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (j, elem) in sliced.into_iter().enumerate() {
                                 if j > 0 { result.0.push(sep); }
@@ -1320,11 +1279,7 @@ impl OlangVM {
                                 let _ = stack.push(s); // no split on empty delim
                             } else {
                                 // Split
-                                let sep = Molecule {
-                                    shape: 0, relation: 0,
-                                    emotion: EmotionDim { valence: 0, arousal: 0 },
-                                    time: 0,
-                                };
+                                let sep = Molecule::raw(0, 0, 0, 0 , 0);
                                 let mut result = MolecularChain(Vec::new());
                                 let mut start = 0;
                                 let mut elem_idx = 0;
@@ -1342,11 +1297,7 @@ impl OlangVM {
                                     };
                                     if elem_idx > 0 { result.0.push(sep); }
                                     for &b in &s_bytes[start..end] {
-                                        result.0.push(Molecule {
-                                            shape: 0x02, relation: 0x01,
-                                            emotion: EmotionDim { valence: b, arousal: 0 },
-                                            time: 0x01,
-                                        });
+                                        result.0.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
                                     }
                                     elem_idx += 1;
                                     if found.is_some() {
@@ -1402,11 +1353,7 @@ impl OlangVM {
                             }
                             let mut mols = Vec::new();
                             for b in result_bytes {
-                                mols.push(Molecule {
-                                    shape: 0x02, relation: 0x01,
-                                    emotion: EmotionDim { valence: b, arousal: 0 },
-                                    time: 0x01,
-                                });
+                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1462,11 +1409,7 @@ impl OlangVM {
                             };
                             let mut mols = Vec::new();
                             for &b in trimmed {
-                                mols.push(Molecule {
-                                    shape: 0x02, relation: 0x01,
-                                    emotion: EmotionDim { valence: b, arousal: 0 },
-                                    time: 0x01,
-                                });
+                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1476,11 +1419,7 @@ impl OlangVM {
                             for m in &s.0 {
                                 let b = m.emotion.valence;
                                 let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
-                                mols.push(Molecule {
-                                    shape: 0x02, relation: 0x01,
-                                    emotion: EmotionDim { valence: upper, arousal: 0 },
-                                    time: 0x01,
-                                });
+                                mols.push(Molecule::raw(0x02, 0x01, upper, 0 , 0x01));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1490,11 +1429,7 @@ impl OlangVM {
                             for m in &s.0 {
                                 let b = m.emotion.valence;
                                 let lower = if b.is_ascii_uppercase() { b + 32 } else { b };
-                                mols.push(Molecule {
-                                    shape: 0x02, relation: 0x01,
-                                    emotion: EmotionDim { valence: lower, arousal: 0 },
-                                    time: 0x01,
-                                });
+                                mols.push(Molecule::raw(0x02, 0x01, lower, 0 , 0x01));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1580,11 +1515,7 @@ impl OlangVM {
                             // Stack: [dict] → array of values (odd-indexed elements)
                             let dict = vm_pop!(stack, events);
                             let elements = split_array_chain(&dict);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             let mut val_idx = 0;
                             let mut i = 1; // start at first value
@@ -1623,11 +1554,7 @@ impl OlangVM {
                                 }
                                 j += 2;
                             }
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (idx, elem) in a_elems.into_iter().enumerate() {
                                 if idx > 0 { result.0.push(sep); }
@@ -1640,11 +1567,7 @@ impl OlangVM {
                             let key = vm_pop!(stack, events);
                             let dict = vm_pop!(stack, events);
                             let elements = split_array_chain(&dict);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             let mut out_idx = 0;
                             let mut i = 0;
@@ -1666,11 +1589,7 @@ impl OlangVM {
                             let arr = vm_pop!(stack, events);
                             let mut elements = split_array_chain(&arr);
                             if let Some(last) = elements.pop() {
-                                let sep = Molecule {
-                                    shape: 0, relation: 0,
-                                    emotion: EmotionDim { valence: 0, arousal: 0 },
-                                    time: 0,
-                                };
+                                let sep = Molecule::raw(0, 0, 0, 0 , 0);
                                 let mut rest = MolecularChain(Vec::new());
                                 for (j, elem) in elements.into_iter().enumerate() {
                                     if j > 0 { rest.0.push(sep); }
@@ -1687,11 +1606,7 @@ impl OlangVM {
                             let arr = vm_pop!(stack, events);
                             let mut elements = split_array_chain(&arr);
                             elements.reverse();
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (j, elem) in elements.into_iter().enumerate() {
                                 if j > 0 { result.0.push(sep); }
@@ -1745,11 +1660,7 @@ impl OlangVM {
                             } else {
                             // Eager array map
                             let elements = split_array_chain(&arr);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
@@ -1788,11 +1699,7 @@ impl OlangVM {
                             } else {
                             // Eager array filter
                             let elements = split_array_chain(&arr);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             let mut count = 0usize;
                             if let Some(mol) = closure_marker.first() {
@@ -1919,11 +1826,7 @@ impl OlangVM {
                             // Returns array of [index, element] pairs (flattened as [0, e0, 1, e1, ...])
                             let arr = vm_pop!(stack, events);
                             let elements = split_array_chain(&arr);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (i, elem) in elements.iter().enumerate() {
                                 if i > 0 { result.0.push(sep); }
@@ -1963,9 +1866,7 @@ impl OlangVM {
                             let payload = vm_pop!(stack, events);
                             let addr = vm_pop!(stack, events);
                             events.push(VmEvent::Output(MolecularChain(alloc::vec![
-                                Molecule { shape: 0x0A, relation: 0x06,
-                                    emotion: EmotionDim { valence: 0x01, arousal: 0 },
-                                    time: 0x03 }
+                                Molecule::raw(0x0A, 0x06, 0x01, 0 , 0x03 )
                             ])));
                             // Emit ISL send event for runtime to handle
                             events.push(VmEvent::CreateEdge {
@@ -1988,11 +1889,7 @@ impl OlangVM {
                             // Encode type name as string chain
                             let mut mols = Vec::new();
                             for b in type_name.bytes() {
-                                mols.push(Molecule {
-                                    shape: 0x02, relation: 0x01,
-                                    emotion: EmotionDim { valence: b, arousal: 0 },
-                                    time: 0x01,
-                                });
+                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -2093,11 +1990,7 @@ impl OlangVM {
                             let name_chain = vm_pop!(stack, events);
                             let dict = vm_pop!(stack, events);
                             // Prepend type tag as first key-value pair "__type" => name
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let type_key = string_to_chain("__type");
                             let mut tagged = MolecularChain(Vec::new());
                             tagged.0.extend(type_key.0.iter().copied());
@@ -2134,11 +2027,7 @@ impl OlangVM {
                             }
                             args.reverse();
                             let tag = vm_pop!(stack, events);
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             for arg in args {
@@ -2226,7 +2115,7 @@ impl OlangVM {
                                     }
 
                                     // Build result array
-                                    let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                    let sep = Molecule::raw(0, 0, 0, 0, 0);
                                     let mut result = MolecularChain(Vec::new());
                                     for (idx, elem) in elements.iter().enumerate() {
                                         if idx > 0 { result.0.push(sep); }
@@ -2254,7 +2143,7 @@ impl OlangVM {
                                     // Return Some(first_element)
                                     let first = elements[0].clone();
                                     let tag = string_to_chain("Option::Some");
-                                    let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                    let sep = Molecule::raw(0, 0, 0, 0, 0);
                                     let mut result = MolecularChain(Vec::new());
                                     result.0.extend(tag.0.iter().copied());
                                     result.0.push(sep);
@@ -2275,7 +2164,7 @@ impl OlangVM {
                                 let source = &parts[1];
                                 let elements = split_array_chain(source);
                                 let taken: Vec<_> = elements.into_iter().take(n).collect();
-                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut new_source = MolecularChain(Vec::new());
                                 for (idx, elem) in taken.iter().enumerate() {
                                     if idx > 0 { new_source.0.push(sep); }
@@ -2308,7 +2197,7 @@ impl OlangVM {
                                 let source = &parts[1];
                                 let elements = split_array_chain(source);
                                 let skipped: Vec<_> = elements.into_iter().skip(n).collect();
-                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut new_source = MolecularChain(Vec::new());
                                 for (idx, elem) in skipped.iter().enumerate() {
                                     if idx > 0 { new_source.0.push(sep); }
@@ -2384,7 +2273,7 @@ impl OlangVM {
                             if parts_a.len() >= 2 && parts_b.len() >= 2 {
                                 let src_a = split_array_chain(&parts_a[1]);
                                 let src_b = split_array_chain(&parts_b[1]);
-                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut combined = MolecularChain(Vec::new());
                                 for (i, e) in src_a.iter().chain(src_b.iter()).enumerate() {
                                     if i > 0 { combined.0.push(sep); }
@@ -2418,7 +2307,7 @@ impl OlangVM {
                                     split_array_chain(&parts[1])
                                 } else { split_array_chain(&iter_b) }
                             };
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             let len = elems_a.len().min(elems_b.len());
                             for i in 0..len {
@@ -2446,7 +2335,7 @@ impl OlangVM {
                                     split_array_chain(&parts[1])
                                 } else { split_array_chain(&arr) }
                             };
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             let mut count = 0usize;
                             if let Some(mol) = closure_marker.first() {
@@ -2496,7 +2385,7 @@ impl OlangVM {
                                 }
                                 // Rebuild set
                                 let tag = string_to_chain("__SET__");
-                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(tag.0.iter().copied());
                                 result.0.push(isep);
@@ -2530,7 +2419,7 @@ impl OlangVM {
                                 let filtered: Vec<_> = elements.into_iter().filter(|e| e.0 != value.0).collect();
                                 let tag = string_to_chain("__SET__");
                                 let isep = iter_sep();
-                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(tag.0.iter().copied());
                                 result.0.push(isep);
@@ -2568,7 +2457,7 @@ impl OlangVM {
                             }
                             let tag = string_to_chain("__SET__");
                             let isep = iter_sep();
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(isep);
@@ -2588,7 +2477,7 @@ impl OlangVM {
                             let inter: Vec<_> = elems_a.into_iter().filter(|a| elems_b.iter().any(|b| b.0 == a.0)).collect();
                             let tag = string_to_chain("__SET__");
                             let isep = iter_sep();
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(isep);
@@ -2608,7 +2497,7 @@ impl OlangVM {
                             let diff: Vec<_> = elems_a.into_iter().filter(|a| !elems_b.iter().any(|b| b.0 == a.0)).collect();
                             let tag = string_to_chain("__SET__");
                             let isep = iter_sep();
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(isep);
@@ -2643,7 +2532,7 @@ impl OlangVM {
                             } else { Vec::new() };
                             elements.push(value);
                             let tag = string_to_chain("__DEQUE__");
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(isep);
@@ -2663,7 +2552,7 @@ impl OlangVM {
                             } else { Vec::new() };
                             elements.insert(0, value);
                             let tag = string_to_chain("__DEQUE__");
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(isep);
@@ -2685,7 +2574,7 @@ impl OlangVM {
                                     // Push updated deque back, then the popped value
                                     let tag = string_to_chain("__DEQUE__");
                                     let isep = iter_sep();
-                                    let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                    let sep = Molecule::raw(0, 0, 0, 0, 0);
                                     let mut result = MolecularChain(Vec::new());
                                     result.0.extend(tag.0.iter().copied());
                                     result.0.push(isep);
@@ -2711,7 +2600,7 @@ impl OlangVM {
                                     let back = elements.pop().unwrap();
                                     let tag = string_to_chain("__DEQUE__");
                                     let isep = iter_sep();
-                                    let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                    let sep = Molecule::raw(0, 0, 0, 0, 0);
                                     let mut result = MolecularChain(Vec::new());
                                     result.0.extend(tag.0.iter().copied());
                                     result.0.push(isep);
@@ -2781,7 +2670,7 @@ impl OlangVM {
                                 let elements = split_array_chain(&val);
                                 let actual_end = end.min(elements.len());
                                 let actual_start = start.min(actual_end);
-                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut result = MolecularChain(Vec::new());
                                 for (j, elem) in elements[actual_start..actual_end].iter().enumerate() {
                                     if j > 0 { result.0.push(sep); }
@@ -2806,7 +2695,7 @@ impl OlangVM {
                                         let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let some_tag = string_to_chain("Option::Some");
-                                        let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                        let sep = Molecule::raw(0, 0, 0, 0, 0);
                                         let mut result = MolecularChain(Vec::new());
                                         result.0.extend(some_tag.0.iter().cloned());
                                         result.0.push(sep);
@@ -2829,7 +2718,7 @@ impl OlangVM {
                                         let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let ok_tag = string_to_chain("Result::Ok");
-                                        let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                        let sep = Molecule::raw(0, 0, 0, 0, 0);
                                         let mut result = MolecularChain(Vec::new());
                                         result.0.extend(ok_tag.0.iter().cloned());
                                         result.0.push(sep);
@@ -2887,7 +2776,7 @@ impl OlangVM {
                             // Stack: [value] → Option::Some(value)
                             let val = vm_pop!(stack, events);
                             let tag = string_to_chain("Option::Some");
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(sep);
@@ -2902,7 +2791,7 @@ impl OlangVM {
                             // Stack: [value] → Result::Ok(value)
                             let val = vm_pop!(stack, events);
                             let tag = string_to_chain("Result::Ok");
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(sep);
@@ -2913,7 +2802,7 @@ impl OlangVM {
                             // Stack: [value] → Result::Err(value)
                             let val = vm_pop!(stack, events);
                             let tag = string_to_chain("Result::Err");
-                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             result.0.push(sep);
@@ -2991,7 +2880,7 @@ impl OlangVM {
                                         let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let err_tag = string_to_chain("Result::Err");
-                                        let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                        let sep = Molecule::raw(0, 0, 0, 0, 0);
                                         let mut result = MolecularChain(Vec::new());
                                         result.0.extend(err_tag.0.iter().cloned());
                                         result.0.push(sep);
@@ -3063,11 +2952,7 @@ impl OlangVM {
                             let found = scopes.iter().flat_map(|s| s.iter())
                                 .find(|(k, _)| k == &list_key)
                                 .map(|(_, v)| v.clone());
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let type_entry = string_to_chain(&type_name);
                             let mut list = found.unwrap_or_else(MolecularChain::empty);
                             if !list.is_empty() {
@@ -3180,22 +3065,14 @@ impl OlangVM {
                             // Stack: [string] → array of single-char strings
                             let s = vm_pop!(stack, events);
                             let s_str = chain_to_string(&s).unwrap_or_default();
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut mols = Vec::new();
                             for ch in s_str.chars() {
                                 if !mols.is_empty() { mols.push(sep.clone()); }
                                 let mut buf = [0u8; 4];
                                 let c_str = ch.encode_utf8(&mut buf);
                                 for b in c_str.bytes() {
-                                    mols.push(Molecule {
-                                        shape: b, relation: 1,
-                                        emotion: EmotionDim { valence: 0x80, arousal: 0x80 },
-                                        time: 3,
-                                    });
+                                    mols.push(Molecule::raw(b, 1, 0x80, 0x80 , 3));
                                 }
                             }
                             let _ = stack.push(MolecularChain(mols));
@@ -3303,11 +3180,7 @@ impl OlangVM {
                             let n = n.min(65536); // safety limit
                             let mut mols = Vec::with_capacity(n);
                             for _ in 0..n {
-                                mols.push(Molecule {
-                                    shape: 0, relation: 1,
-                                    emotion: EmotionDim { valence: 0x80, arousal: 0x80 },
-                                    time: 3,
-                                });
+                                mols.push(Molecule::raw(0, 1, 0x80, 0x80 , 3));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -3411,12 +3284,7 @@ impl OlangVM {
                                 let size: usize = field.trim_end_matches('B').parse().unwrap_or(1);
                                 let n = val.to_number().unwrap_or(0.0) as u64;
                                 for bi in (0..size).rev() {
-                                    result_mols.push(Molecule {
-                                        shape: ((n >> (bi * 8)) & 0xFF) as u8,
-                                        relation: 1,
-                                        emotion: EmotionDim { valence: 0x80, arousal: 0x80 },
-                                        time: 3,
-                                    });
+                                    result_mols.push(Molecule::raw(((n >> (bi * 8)) & 0xFF) as u8, 1, 0x80, 0x80 , 3));
                                 }
                             }
                             let _ = stack.push(MolecularChain(result_mols));
@@ -3427,11 +3295,7 @@ impl OlangVM {
                             let fmt = vm_pop!(stack, events);
                             let fmt_str = chain_to_string(&fmt).unwrap_or_default();
                             let fields: Vec<&str> = fmt_str.split_whitespace().collect();
-                            let sep = Molecule {
-                                shape: 0, relation: 0,
-                                emotion: EmotionDim { valence: 0, arousal: 0 },
-                                time: 0,
-                            };
+                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result_mols = Vec::new();
                             let mut offset = 0usize;
                             for field in &fields {
@@ -3893,12 +3757,7 @@ impl OlangVM {
                     let body_pc = pc;
                     let pc_low = (body_pc & 0xFF) as u8;
                     let pc_high = ((body_pc >> 8) & 0xFF) as u8;
-                    let marker = MolecularChain::single(Molecule {
-                        shape: 0xFF,
-                        relation: *_param_count,
-                        emotion: EmotionDim { valence: pc_low, arousal: pc_high },
-                        time: 1,
-                    });
+                    let marker = MolecularChain::single(Molecule::raw(0xFF, *_param_count, pc_low, pc_high , 1));
                     let _ = stack.push(marker);
                     // Jump past the body
                     pc += body_len;
@@ -4114,12 +3973,7 @@ impl OlangVM {
                                 let _ = stack.push(chain.clone());
                             }
                             Op::PushMol(s, r, v, a, t) => {
-                                let mol = Molecule {
-                                    shape: *s,
-                                    relation: *r,
-                                    emotion: EmotionDim { valence: *v, arousal: *a },
-                                    time: *t,
-                                };
+                                let mol = Molecule::raw(*s, *r, *v, *a , *t);
                                 let chain = MolecularChain(alloc::vec![mol]);
                                 let _ = stack.push(chain);
                             }
@@ -5392,11 +5246,7 @@ pub mod tests {
     fn key_chain(s: &str) -> MolecularChain {
         let mut mols = alloc::vec::Vec::new();
         for b in s.bytes() {
-            mols.push(Molecule {
-                shape: 0x02, relation: 0x01,
-                emotion: EmotionDim { valence: b, arousal: 0 },
-                time: 0x01,
-            });
+            mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
         }
         MolecularChain(mols)
     }
@@ -5456,11 +5306,7 @@ pub mod tests {
     fn str_chain(s: &str) -> MolecularChain {
         let mut mols = Vec::new();
         for b in s.bytes() {
-            mols.push(Molecule {
-                shape: 0x02, relation: 0x01,
-                emotion: EmotionDim { valence: b, arousal: 0 },
-                time: 0x01,
-            });
+            mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
         }
         MolecularChain(mols)
     }

@@ -460,7 +460,7 @@ pub enum ComposeOp {
 ///
 /// Mọi Molecule đến từ `encoder::encode_codepoint()`.
 /// Không bao giờ tạo Molecule struct literal trong code production.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct Molecule {
     /// Chiều hình dạng — raw hierarchical byte.
     /// Dùng `shape_base()` để lấy ShapeBase category.
@@ -473,9 +473,60 @@ pub struct Molecule {
     /// Chiều thời gian — raw hierarchical byte.
     /// Dùng `time_base()` để lấy TimeDim category.
     pub time: u8,
+    /// Formula rule ID for Shape dimension (0xFF = unset, runtime metadata only)
+    pub fs: u8,
+    /// Formula rule ID for Relation dimension (0xFF = unset, runtime metadata only)
+    pub fr: u8,
+    /// Formula rule ID for Valence dimension (0xFF = unset, runtime metadata only)
+    pub fv: u8,
+    /// Formula rule ID for Arousal dimension (0xFF = unset, runtime metadata only)
+    pub fa: u8,
+    /// Formula rule ID for Time dimension (0xFF = unset, runtime metadata only)
+    pub ft: u8,
 }
 
+/// PartialEq compares only the 5 core dimensions (shape, relation, valence, arousal, time).
+/// Formula fields (fs, fr, fv, fa, ft) are runtime metadata and excluded from identity.
+impl PartialEq for Molecule {
+    fn eq(&self, other: &Self) -> bool {
+        self.shape == other.shape
+            && self.relation == other.relation
+            && self.emotion == other.emotion
+            && self.time == other.time
+    }
+}
+
+impl Eq for Molecule {}
+
+impl core::hash::Hash for Molecule {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.shape.hash(state);
+        self.relation.hash(state);
+        self.emotion.hash(state);
+        self.time.hash(state);
+    }
+}
+
+/// Sentinel value indicating a formula field has not been set.
+pub const FORMULA_UNSET: u8 = 0xFF;
+
 impl Molecule {
+    /// Create a Molecule with all formula fields set to FORMULA_UNSET.
+    /// Use this instead of struct literals.
+    pub fn raw(shape: u8, relation: u8, valence: u8, arousal: u8, time: u8) -> Self {
+        Self {
+            shape,
+            relation,
+            emotion: EmotionDim { valence, arousal },
+            time,
+            fs: FORMULA_UNSET,
+            fr: FORMULA_UNSET,
+            fv: FORMULA_UNSET,
+            fa: FORMULA_UNSET,
+            ft: FORMULA_UNSET,
+        }
+    }
+
     /// Extract base ShapeBase category từ hierarchical shape byte.
     pub fn shape_base(&self) -> ShapeBase {
         ShapeBase::from_hierarchical(self.shape).unwrap_or(ShapeBase::Sphere)
@@ -510,15 +561,7 @@ impl Molecule {
         if b[0] == 0 || b[1] == 0 || b[4] == 0 {
             return None;
         }
-        Some(Self {
-            shape: b[0],
-            relation: b[1],
-            emotion: EmotionDim {
-                valence: b[2],
-                arousal: b[3],
-            },
-            time: b[4],
-        })
+        Some(Self::raw(b[0], b[1], b[2], b[3], b[4]))
     }
 
     /// Presence mask — bit nào bật = dimension đó ≠ default.
@@ -634,12 +677,7 @@ impl Molecule {
         };
 
         Some((
-            Self {
-                shape,
-                relation,
-                emotion: EmotionDim { valence, arousal },
-                time,
-            },
+            Self::raw(shape, relation, valence, arousal, time),
             idx,
         ))
     }
@@ -1097,15 +1135,13 @@ impl MolecularChain {
         let bits = n.to_bits().to_le_bytes();
         let mut mols = Vec::with_capacity(4);
         for chunk in bits.chunks(2) {
-            mols.push(Molecule {
-                shape: ShapeBase::Sphere.as_byte(),
-                relation: RelationBase::Equiv.as_byte(),
-                emotion: EmotionDim {
-                    valence: chunk[0],
-                    arousal: chunk[1],
-                },
-                time: TimeDim::Static.as_byte(),
-            });
+            mols.push(Molecule::raw(
+                ShapeBase::Sphere.as_byte(),
+                RelationBase::Equiv.as_byte(),
+                chunk[0],
+                chunk[1],
+                TimeDim::Static.as_byte(),
+            ));
         }
         Self(mols)
     }
@@ -1412,15 +1448,7 @@ impl CompactQR {
         let t = ((bits >> 7) & 0x07) as u8;
         let v = ((bits >> 3) & 0x0F) as u8;
         let a = (bits & 0x07) as u8;
-        Molecule {
-            shape: s + 1,
-            relation: r + 1,
-            emotion: EmotionDim {
-                valence: v * 16 + 8,
-                arousal: a * 32 + 16,
-            },
-            time: t + 1,
-        }
+        Molecule::raw(s + 1, r + 1, v * 16 + 8, a * 32 + 16, t + 1)
     }
 
     /// Implicit Silk: số chiều chung giữa 2 CompactQR (LOSSLESS).
@@ -1608,15 +1636,7 @@ mod tests {
     /// Tạo Molecule test — CHỈ dùng trong test.
     /// Production code dùng encoder::encode_codepoint().
     fn test_mol(shape: u8, relation: u8, v: u8, a: u8, t: u8) -> Molecule {
-        Molecule {
-            shape,
-            relation,
-            emotion: EmotionDim {
-                valence: v,
-                arousal: a,
-            },
-            time: t,
-        }
+        Molecule::raw(shape, relation, v, a, t)
     }
 
     #[test]
