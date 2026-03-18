@@ -962,10 +962,10 @@ Phase   AI-A (Language Core)              AI-B (Runtime & Ecosystem)
         A9. Compiler self-hosting    ✅   B9. Migration scaffolding   ✅
                                           B10. Test framework         ✅
 ──────────────────────────────────────────────────────────────────────
-  5     A10. ? error propagation     ✅   B11. Set + Deque builtins
-        A11. Builtin Option/Result  ✅   B12. String slice + method chain
-        A12. Iterator protocol+lazy ✅   B13. Stdlib .ol modules
-        A13. Module resolution      ✅   B14. Compiler backends hoàn thiện
+  5     A10. ? error propagation     ✅   B11. Set + Deque builtins       ✅
+        A11. Builtin Option/Result  ✅   B12. String slice + method chain✅
+        A12. Iterator protocol+lazy ✅   B13. Stdlib .ol modules         ✅
+        A13. Module resolution      ✅   B14. Compiler backends          ✅
 ```
 
 ### Dependencies Phase 5
@@ -1020,20 +1020,18 @@ crates/olang/src/exec/module.rs      — ~200 lines (ModuleResolver: path resolv
 stdlib/io.ol              ✅    stdlib/bootstrap/lexer.ol   ✅
 stdlib/platform.ol        ✅    stdlib/bootstrap/parser.ol  ✅
 stdlib/test.ol            ✅    tools/migrate/              ✅
+stdlib/math.ol            ✅    stdlib/string.ol            ✅
+stdlib/bytes.ol           ✅    stdlib/vec.ol               ✅
+stdlib/map.ol             ✅    stdlib/set.ol               ✅
+stdlib/deque.ol           ✅
 ```
 
-### Cần tạo (Phase 5)
+### Cần tạo (Phase 6)
 ```
-stdlib/math.ol            — math constants + functions
-stdlib/string.ol          — string utilities
-stdlib/bytes.ol           — byte manipulation
-stdlib/vec.ol             — Vec type + methods
-stdlib/map.ol             — Map type + methods
-stdlib/set.ol             — Set type + methods
-stdlib/deque.ol           — Deque type + methods
 stdlib/option.ol          — Option helpers
 stdlib/result.ol          — Result helpers
 stdlib/iterator.ol        — Iterator trait + defaults
+docs/molecular_types.md   — ○{ } constraint system documentation
 ```
 
 ---
@@ -1073,16 +1071,18 @@ Phase 4 done khi:
   ✅ cargo test --workspace passes
 
 Phase 5 done khi:
-  ▢ file_read(path)? — ? propagation hoạt động
-  ▢ Some(42).map(|x| { x * 2 }) == Some(84)
-  ▢ None.unwrap_or(0) == 0
-  ▢ [1,2,3].iter().filter(|x|{x>1}).map(|x|{x*2}).collect() == [4,6] — lazy
-  ▢ Set::new(); s.insert(42); s.contains(42) — Set hoạt động
-  ▢ Deque::new(); q.push_back(1); q.pop_front() — Deque hoạt động
-  ▢ "hello"[0..3] == "hel" — string slice
-  ▢ use math; math.sqrt(144) — module resolve thật
-  ▢ Closure compile → C/Rust/WASM (không chỉ stubs)
-  ▢ cargo test --workspace passes
+  ✅ file_read(path)? — ? propagation hoạt động
+  ✅ Some(42).map(|x| { x * 2 }) — Option.map implemented
+  ✅ None.unwrap_or(0) == 0
+  ✅ [1,2,3].iter().filter(|x|{x>1}).map(|x|{x*2}).collect() — iterator chaining
+  ✅ Set::new(); s.insert(42); s.contains(42) — Set hoạt động
+  ✅ Deque::new(); q.push_back(1); q.pop_front() — Deque hoạt động
+  ✅ "hello"[0..3] == "hel" — string slice syntax
+  ✅ zip + flat_map iterator methods
+  ✅ map_err closure thực sự apply (fixed from passthrough)
+  ✅ Closure/Spawn/Select compile → C/Rust/WASM (real codegen)
+  ✅ 7 stdlib modules: math, string, bytes, vec, map, set, deque
+  ✅ cargo test --workspace passes (2328 tests)
 ```
 
 ---
@@ -1386,18 +1386,237 @@ Files: `semantic.rs` — effect tracking per function
 ### Implementation plan Phase 6
 
 ```
-Task    Feature                      Depends on    Estimate
-──────────────────────────────────────────────────────────────
-6A      Molecular constraint parse   Phase 5 done   syntax.rs
-6B      Constraint propagation       6A             semantic.rs (static check)
-6C      Immutability by default      independent    semantic.rs (scope tracking)
-6D      Time-based CoW/Move/Share    6A+6C          vm.rs (value passing)
-6E      Exhaustive ○{ } match        6A             semantic.rs (range checker)
-6F      Effect system (Relation)     6A             semantic.rs (effect tracking)
-6G      Runtime constraint fallback  6B             vm.rs (dynamic check)
-6H      Documentation + examples    6A-6G           docs/molecular_types.md
+═══════════════════════════════════════════════════════════════════════════
+NHÓM 1: Node Lifecycle — SPEC_NODE_SILK Gaps #6, #7, #8
+  (Nền tảng: Molecule = công thức, không phải giá trị tĩnh)
+═══════════════════════════════════════════════════════════════════════════
 
-Validation:
+Task    Feature                      Depends on    Files
+──────────────────────────────────────────────────────────────
+6N1     Fix Maturity advance()       independent   agents/learning.rs
+        weight=0.0 bug                             memory/dream.rs
+        (SPEC Gap #8 — CRITICAL)
+
+6N2     NodeState wrapper            6N1           olang/mol/molecular.rs
+        Molecule + Maturity + Origin               olang/mol/writer.rs
+        (SPEC Gap #6 + #8)                         olang/mol/reader.rs
+
+6N3     CompositionOrigin enum       6N2           olang/mol/molecular.rs
+        Track LCA/evolve/Fuse                      olang/mol/lca.rs
+        nguồn gốc composition                      exec/vm.rs (Fuse op)
+        (SPEC Gap #7)
+
+═══════════════════════════════════════════════════════════════════════════
+NHÓM 2: Silk Structure — SPEC_NODE_SILK Gaps #1, #2, #4
+  (Wire thiết kế Silk gốc: vertical + compound patterns)
+═══════════════════════════════════════════════════════════════════════════
+
+Task    Feature                      Depends on    Files
+──────────────────────────────────────────────────────────────
+6S1     Parent pointer (Silk dọc)    independent   silk/graph.rs
+        BTreeMap<u64,u64> 43KB                     (+ seeder wire)
+        (SPEC Gap #1)
+
+6S2     Observation.layer            6S1           agents/learning.rs
+        Dream filter cùng tầng                     memory/dream.rs
+        (SPEC Gap #4 — QT⑪)
+
+6S3     CompoundKind enum (31 mẫu)   independent   silk/index.rs
+        classify_compound()
+        (SPEC Gap #2)
+
+6S4     Dream dùng MolSummary +      6S1+6S3      memory/dream.rs
+        implicit Silk bonus                        silk/graph.rs (index())
+        (SPEC Gap #3)
+
+6S5     Wire unified_neighbors()     6S1-6S4      runtime/origin.rs
+        (SPEC Gap #5)                              memory/dream.rs
+
+═══════════════════════════════════════════════════════════════════════════
+NHÓM 3: Molecular Type System — Olang Language Extension
+  (○{ } = 5D constraint system thay Generic + Lifetime + Trait)
+═══════════════════════════════════════════════════════════════════════════
+
+Task    Feature                      Depends on    Files                         Status
+──────────────────────────────────────────────────────────────────────────────────────────
+6A      Molecular constraint parse   Phase 5 done  syntax.rs                     ✅ DONE
+6B      Constraint propagation       6A            semantic.rs (static check)    ✅ DONE
+6C      Immutability by default      independent   semantic.rs (scope tracking)  ✅ DONE
+6D      Time-based CoW/Move/Share    6A+6C         semantic.rs (value semantics) ✅ DONE
+6E      Exhaustive ○{ } match        6A            semantic.rs (range checker)   ✅ DONE
+6F      Effect system (Relation)     6A            semantic.rs (effect tracking) ✅ DONE
+6G      Runtime constraint fallback  6B            vm.rs (dynamic check)         ✅ DONE
+6H      Documentation + examples    6A-6G          Plan_Olang.md                 ✅ DONE
+```
+
+### Thứ tự thực hiện Phase 6
+
+```
+                   ┌─── 6N1 (fix weight=0 bug) ←── QUICK FIX, LÀM TRƯỚC
+                   │       │
+                   │     6N2 (NodeState wrapper)
+                   │       │
+                   │     6N3 (CompositionOrigin)
+                   │
+  Phase 6 ─────┼─── 6S1 (parent pointer) ─── song song với 6N ──→
+                   │       │
+                   │     6S2 (Observation.layer)
+                   │       │
+                   │     6S3 (CompoundKind) ── song song 6S2
+                   │       │
+                   │     6S4 (Dream MolSummary+implicit)
+                   │       │
+                   │     6S5 (Wire unified_neighbors)
+                   │
+                   └─── 6A → 6B → 6C → 6D → 6E → 6F → 6G → 6H
+                         (sau khi 6N+6S ổn định)
+```
+
+### Chi tiết SPEC_NODE_SILK → Olang changes
+
+#### 6N1. Fix Maturity advance() weight=0.0 bug (Gap #8)
+
+```rust
+// ❌ HIỆN TẠI (learning.rs:84):
+obs.maturity = obs.maturity.advance(obs.fire_count, 0.0, fib_threshold);
+//                                                  ^^^
+//                       weight=0.0 → Mature UNREACHABLE (0.0 < 0.854 luôn)
+
+// ✅ SỬA:
+let weight = graph.assoc_weight(hash, hash)
+    .max(prev_hash.map_or(0.0, |ph| graph.assoc_weight(ph, hash)));
+obs.maturity = obs.maturity.advance(obs.fire_count, weight, fib_threshold);
+
+// + dream.rs: gate QR promote on maturity
+if best_obs.maturity != Maturity::Mature { continue; }
+```
+
+#### 6N2. NodeState wrapper (Gap #6 + #8)
+
+```rust
+// molecular.rs — Node = Molecule + lifecycle
+pub struct NodeState {
+    pub mol: Molecule,
+    pub maturity: Maturity,
+    pub origin: CompositionOrigin,  // → 6N3
+}
+
+// Hoặc lightweight: tagged format v0.06
+// [presence_mask:1B][maturity:1B][non-default values:0-5B]
+```
+
+Wire points:
+- Registry.insert_with_kind() ghi maturity
+- STM.push() init NodeState
+- Dream promote check maturity == Mature
+
+#### 6N3. CompositionOrigin enum (Gap #7)
+
+```rust
+// molecular.rs — track "node sinh ra từ đâu?"
+pub enum CompositionOrigin {
+    Innate(u32),                    // L0: encode_codepoint(cp)
+    Composed { sources: Vec<u64>, op: ComposeOp },  // LCA/Fuse
+    Evolved { source: u64, dim: u8, old_val: u8, new_val: u8 },
+}
+
+pub enum ComposeOp { Lca, Fuse, Program }
+```
+
+Wire points:
+- lca.rs: lca_weighted() → trả CompositionOrigin::Composed
+- molecular.rs: evolve() → trả CompositionOrigin::Evolved
+- vm.rs: Fuse opcode → CompositionOrigin::Composed { op: Fuse }
+- FormulaTable: mở rộng (Molecule, Option<CompositionOrigin>)
+
+#### 6S1. Parent pointer — Silk dọc (Gap #1)
+
+```rust
+// silk/graph.rs — thêm field
+pub struct SilkGraph {
+    edges: Vec<SilkEdge>,
+    index: SilkIndex,
+    learned: Vec<HebbianLink>,
+    parent_map: BTreeMap<u64, u64>,  // ← child → parent, 43KB
+}
+
+// Methods: register_parent(), parent_of(), children_of(), layer_of()
+```
+
+#### 6S2. Observation.layer (Gap #4)
+
+```rust
+// learning.rs — thêm field
+pub struct Observation {
+    // ... existing fields ...
+    pub layer: u8,   // default: 0 (L0)
+}
+
+// dream.rs — filter cùng layer trước cluster (QT⑪)
+let by_layer: BTreeMap<u8, Vec<&Observation>> = ...;
+for (layer, obs) in by_layer { cluster chỉ trong cùng layer }
+```
+
+#### 6S3. CompoundKind enum — 31 mẫu (Gap #2)
+
+```rust
+// silk/index.rs — 31 compound patterns
+pub enum CompoundKind {
+    // 5 × 1 chiều: ShapeOnly, RelationOnly, ValenceOnly, ArousalOnly, TimeOnly
+    // 10 × 2 chiều: ShapeRelation, ShapeValence, ..., ValenceArousal, ...
+    // 10 × 3 chiều: ShapeRelationValence, ...
+    // 5 × 4 chiều: AllButShape, AllButRelation, ...
+    // 1 × 5 chiều: Identical
+}
+
+impl ImplicitSilk {
+    pub fn compound_kind(&self) -> Option<CompoundKind> { ... }
+}
+```
+
+#### 6S4. Dream dùng MolSummary + implicit Silk (Gap #3)
+
+```rust
+// dream.rs — sửa cluster_score()
+fn cluster_score(...) -> f32 {
+    // ✅ MolSummary::similarity() thay vì chain byte similarity
+    let chain_sim = match (&a.mol_summary, &b.mol_summary) {
+        (Some(ma), Some(mb)) => ma.similarity(mb),
+        _ => a.chain.similarity_full(&b.chain),
+    };
+
+    // ✅ Implicit Silk bonus (5D shared dimensions)
+    let implicit_bonus = match (&a.mol_summary, &b.mol_summary) {
+        (Some(ma), Some(mb)) => {
+            graph.index().implicit_silk(ha, ma, hb, mb).strength * 0.5
+        }
+        _ => 0.0,
+    };
+
+    alpha * (chain_sim + implicit_bonus) + beta * hebbian + gamma * co_score
+}
+```
+
+### Validation Phase 6
+
+```
+Node Lifecycle (6N):
+  ▢ advance(fire=5, weight=0.9, fib=5) → Mature   (weight bug fixed)
+  ▢ advance(fire=5, weight=0.0, fib=5) → Evaluating (NOT Mature)
+  ▢ NodeState tracks Molecule + Maturity + Origin
+  ▢ lca_with_origin() returns CompositionOrigin::Composed
+  ▢ evolve() returns CompositionOrigin::Evolved
+  ▢ Dream QR promote gated by Maturity::Mature
+
+Silk Structure (6S):
+  ▢ SilkGraph.register_parent(child, parent) + parent_of() + layer_of()
+  ▢ parent_map supports 5460 entries (43KB budget)
+  ▢ Observation has layer field, Dream clusters same-layer only
+  ▢ CompoundKind classifies 31 patterns from ImplicitSilk.shared_dims
+  ▢ Dream cluster_score() uses MolSummary + implicit_silk() bonus
+  ▢ unified_neighbors() called in Dream and/or response rendering
+
+Molecular Type System (6A-6H):
   ▢ fn f(x: ○{ S=SDF }) — reject non-SDF argument at COMPILE TIME
   ▢ Constraint propagation: a()→○{V>0x80}, b(○{V>0x40}), b(a()) → no runtime check
   ▢ let x = 5; x = 10; → ERROR (immutable default)

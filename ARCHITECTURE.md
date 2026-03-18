@@ -99,24 +99,24 @@ ucd (UnicodeData.txt → compile-time table)
 ```
 crates/
 ├── ucd/        Unicode → Molecule lookup (build.rs, 5424 entries)       23 tests
-├── olang/      Core: Molecule · LCA · Registry · VM · Compact · KT    838 tests
+├── olang/      Core: Molecule · LCA · Registry · VM · Compact · KT   1088 tests
 │   └── src/
 │       ├── core/       Molecule, MolecularChain, LCA, encoder
 │       ├── storage/    Registry, Writer, Reader, Compact, KnowTree
 │       └── execution/  VM, IR, Compiler, Syntax, Semantic
-├── silk/       Hebbian learning · EmotionTag edges · Walk               88 tests
+├── silk/       Hebbian learning · EmotionTag edges · Walk · parent_map   85 tests
 ├── context/    Emotion V/A/D/I · ConversationCurve · Intent            168 tests
 │   └── src/
 │       ├── emotion/    EmotionTag, WordAffect, phrase blending
 │       └── pipeline/   Engine, Curve, Intent, Fusion, Snapshot
-├── agents/     Encoder · Learning · Gate · Instinct · Chief/Worker     282 tests
+├── agents/     Encoder · Learning · Gate · Instinct · Chief/Worker     284 tests
 │   └── src/
 │       ├── core/       Encoder, Learning loop, SecurityGate
 │       ├── intelligence/ LeoAI, 7 Instincts, Domain Skills
 │       └── hierarchy/  Chief, Worker, ISL routing
-├── memory/     STM · DreamCycle · Proposals · AAM                       65 tests
+├── memory/     STM · DreamCycle · Proposals · AAM                       32 tests
 ├── runtime/    HomeRuntime · ○{} Parser · Router                       273 tests
-├── hal/        Hardware Abstraction · Tier · FFI · Security             85 tests
+├── hal/        Hardware Abstraction · Tier · FFI · Security             68 tests
 ├── isl/        Inter-System Link messaging (AES-256-GCM)                31 tests
 ├── vsdf/       18 SDF generators · FFR · Physics · SceneGraph          123 tests
 │   └── src/
@@ -136,17 +136,28 @@ tools/
 
 ## Silk Architecture — 3 Tầng × 2 Hướng
 
-> Silk = hệ quả toán học tự nhiên của không gian 5D, không phải edge list.
-> Emotion KHÔNG phải metadata trên edge — Emotion LÀ 2 TRONG 5 CHIỀU của node (V + A).
-> "Cùng cảm xúc" = cùng công thức V hoặc A = TỰ ĐỘNG Silk.
+### Nguyên lý: Silk = hệ quả tự nhiên của 5D
 
-### 3 Tầng Silk
+```
+Silk KHÔNG CẦN LƯU EDGE.
+Silk = "2 node chia sẻ cùng công thức trên chiều nào?"
+     = lookup trong SilkIndex.
+
+Emotion không phải metadata trên edge.
+Emotion LÀ 2 TRONG 5 CHIỀU của node (V + A).
+"Cùng cảm xúc" = cùng công thức V hoặc A = TỰ ĐỘNG Silk.
+
+5400 công thức L0 → mỗi công thức = 1 "nhóm máu"
+Cùng nhóm máu trên chiều nào → Silk trên chiều đó.
+```
+
+### 3 tầng Silk (horizontal, implicit, 0 bytes)
 
 | Tầng | Tên | Cách hoạt động | Số lượng | Status |
 |------|-----|----------------|---------|--------|
 | Base | 37 kênh (8S+8R+8V+8A+5T) | Cùng base value = cùng "nhóm máu" | 37 | ✅ SilkIndex |
-| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều cùng lúc = kiểu quan hệ | 31 | ❌ CompoundKind enum |
-| Precise | ~5400 kênh | Cùng variant chính xác = match hoàn hảo | ~5400 | ❌ chưa implement |
+| Compound | 31 mẫu C(5,k) k=1..5 | Chia sẻ k chiều cùng lúc = kiểu quan hệ | 31 | ✅ CompoundKind enum |
+| Precise | ~5400 kênh (= số L0 nodes) | Cùng variant chính xác = match hoàn hảo | ~5400 | SPEC — chưa implement |
 
 ```
 Công thức sức mạnh kết nối:
@@ -154,24 +165,20 @@ Công thức sức mạnh kết nối:
   match(dim)     = 1 nếu cùng base, 0 nếu khác
   precision(dim) = 1.0 nếu cùng variant, 0.5 nếu chỉ cùng base
 
-37 kênh × 31 mẫu = 1147 KIỂU quan hệ có nghĩa
-```
+Strength = number of shared dimensions:
+  1 dim shared = 0.20 (loosely related)    → C(5,1) =  5 patterns
+  2 dims       = 0.40 (clearly related)    → C(5,2) = 10 patterns
+  3 dims       = 0.60 (near identical)     → C(5,3) = 10 patterns
+  4 dims       = 0.80 (almost same concept)→ C(5,4) =  5 patterns
+  5 dims       = 1.00 (same node)          → C(5,5) =  1 pattern
 
-### 31 Compound Patterns
+37 kênh × 31 mẫu = 1147 kiểu quan hệ có nghĩa
 
-```
-1 chiều chung:  C(5,1) =  5 mẫu → "liên quan nhẹ"
-2 chiều chung:  C(5,2) = 10 mẫu → "liên quan rõ"
-3 chiều chung:  C(5,3) = 10 mẫu → "gần giống"
-4 chiều chung:  C(5,4) =  5 mẫu → "gần như cùng"
-5 chiều chung:  C(5,5) =  1 mẫu → "cùng node"
-
-Ví dụ:
-  S+V       = "trông giống + cảm giống"         → ẩn dụ thị giác
-  R+V       = "quan hệ giống + cảm giống"       → moral analog
-  V+A       = "cùng trạng thái cảm xúc"         → empathy link
-  S+R+V     = "hình + quan hệ + cảm xúc giống"  → gần như cùng khái niệm
-  AllButS   = "khác hình, giống HẾT còn lại"    → ẩn dụ sâu
+CompoundKind examples:
+  ShapeValence     = "trông giống + cảm giống" → visual metaphor
+  RelationValence  = "quan hệ giống + cảm giống" → moral analog
+  ValenceArousal   = "cùng trạng thái cảm xúc" → empathy link
+  AllButShape      = "khác hình, giống HẾT còn lại" → deep metaphor
 ```
 
 ### 2 Hướng Silk
@@ -179,14 +186,14 @@ Ví dụ:
 | Hướng | Tên | Lưu trữ | Status |
 |-------|-----|---------|--------|
 | Ngang | Silk tự do (implicit, cùng tầng) | 0 bytes | ✅ SilkIndex |
-| Dọc | Silk đại diện (parent pointer) | 5460 × 8B = 43 KB | ❌ chưa implement |
+| Dọc | Silk đại diện (parent pointer) | 5460 × 8B = 43 KB | ✅ parent_map |
 
-### Vertical Silk — Parent Pointer (43 KB)
+### Vertical Silk (parent pointer, 43 KB)
+
 ```
-Mỗi node tại Lx là ĐẠI DIỆN cho 1 nhóm ở Lx-1.
-Mỗi node chỉ cần 1 pointer đến parent.
+SilkGraph.parent_map: BTreeMap<u64, u64>  (child_hash → parent_hash)
 
-L1→L0:  5400 pointers
+L1→L0:  5400 pointers  (each UCD atom → L1 representative)
 L2→L1:    37 pointers
 L3→L2:    12 pointers
 L4→L3:     5 pointers
@@ -196,25 +203,39 @@ L7→L6:     1 pointer
 ─────────────────────
 Tổng: 5460 × 8B = 43 KB
 
-Truy vấn O(1): 2 lookup đại diện + 1 so sánh 5D
+API:
+  register_parent(child, parent)  → đăng ký parent pointer
+  parent_of(hash)                 → Option<u64>
+  children_of(parent)             → Vec<u64>
+  layer_of(hash)                  → u8 (depth via parent chain)
+
+Query: O(1) via parent chain traversal
   "🔥 related to ∈?" → compare 5D + check shared parent at L1
 ```
 
-### Hebbian = Phát hiện cái đã có, không Tạo cái mới
+### Learned Silk (Hebbian, explicit)
+
 ```
-Silk fire together, wire together — không phải vì ai nối chúng lại,
-mà vì chúng đã ở cùng vị trí trong không gian 5D từ đầu.
-co_activate() PHÁT HIỆN quan hệ implicit, không TẠO mới.
+Hebbian = phát hiện cái đã có, không tạo cái mới.
+co_activate(a, b) → strengthen awareness of implicit relationship
+HebbianLink: (hash_a, hash_b, weight, fire_count, emotion_tag)
+
+3 query strategies merged by unified_neighbors():
+  1. implicit_silk()    → 5D dimensional comparison (0 bytes, computed)
+  2. learned (Hebbian)  → co-activation weights (explicit edges)
+  3. structural         → legacy SilkEdge (explicit edges)
+  → unified_neighbors() ranks and merges all 3 sources
 ```
 
 ---
 
-## Node = Molecule + Lifecycle
+## Node Architecture
 
-### Nguyên lý: Molecule = Công thức, không phải Giá trị
+### Molecule = Công thức, không phải Giá trị
 
 ```
-Mỗi byte trong Molecule = THAM CHIẾU đến công thức gốc L0:
+Mỗi byte trong Molecule = tham chiếu đến công thức gốc L0:
+
   Shape    = f_s(inputs...)    ← công thức hình dạng
   Relation = f_r(inputs...)    ← công thức quan hệ
   Valence  = f_v(inputs...)    ← công thức cảm xúc
@@ -230,21 +251,60 @@ Hệ quả:
   16GB     = 100M concept × 7 bytes công thức = 700 MB (vs TB nếu lưu giá trị)
 ```
 
-### Node Maturity Lifecycle
+### NodeState = Molecule + Maturity + Origin
+
+```rust
+NodeState {
+    mol: Molecule,               // 5D coordinate
+    maturity: Maturity,          // Formula → Evaluating → Mature
+    origin: CompositionOrigin,   // how was this node created?
+}
+```
+
+### CompositionOrigin — traceability
 
 ```
-  Formula     → node mới, chưa có input thật (5 công thức tiềm năng)
-  Evaluating  → fire_count > 0, đang tích lũy evidence
-  Mature      → weight ≥ 0.854 && fire_count ≥ fib(depth), sẵn sàng QR
+Innate(u32)                          → L0 node from encode_codepoint()
+Composed { sources: [u64], op }      → LCA/Fuse/Program tổ hợp nhiều nodes
+Evolved { source, dim, old, new }    → evolve() mutate 1/5 chiều
+
+ComposeOp: Lca | Fuse | Program
 
 Wire points:
-  STM.push()    → advance(fire_count, weight, fib_threshold)
-  Dream.run()   → DreamResult.matured_nodes = Vec<u64>
-  QR promote    → append-only, signed, permanent
+  lca_with_origin()  → returns (LcaResult, CompositionOrigin::Composed)
+  lca_to_node_state() → returns Option<NodeState>
+  evolve()           → EvolveResult includes CompositionOrigin::Evolved
 ```
 
-**Status:** Maturity enum ✅ | advance() ✅ | Wire to STM ❌ | Wire to Dream ❌
-**Bug:** advance(weight=0.0) → Mature unreachable (SPEC_MATURITY_PIPELINE)
+### Maturity Lifecycle (wired)
+
+```
+  Formula     → node created, no real input yet (5 potential functions)
+  Evaluating  → fire_count ≥ fib(depth), accumulating evidence
+  Mature      → weight ≥ 0.854 && fire_count ≥ fib(depth), ready for QR
+
+  STM.push()  → fire_count++ → advance(fire_count, heuristic_weight, fib_threshold)
+  Dream.run() → maturity check before QR promote + neighbor_bonus via unified_neighbors()
+  QR promote  → only if Mature → append-only, signed, permanent knowledge
+```
+
+### Dream Clustering (5D-aware, layer-filtered)
+
+```
+cluster_score(a, b):
+  α × MolSummary::similarity()      ← 5D molecular similarity (not byte-level)
+    + implicit_silk bonus            ← 5D shared dimensions
+  + β × Hebbian weight              ← co-activation strength
+  + γ × co_activation score         ← fire together count
+
+Layer enforcement (QT⑪):
+  Observations grouped by layer before clustering
+  → Dream never clusters L0 with L2
+
+QR promote gate:
+  maturity == Mature required
+  neighbor_bonus from unified_neighbors() boosts confidence
+```
 
 ### Node Complete Lifecycle
 ```
@@ -264,15 +324,6 @@ DreamCycle.run():
     LCA(cluster) → new MolecularChain
     DreamProposal → AAM.review() → Approved
     → QR write (is_qr=true, ED25519 signed, append-only forever)
-```
-
-### Composition Origin (SPEC — chưa implement)
-```
-L0 node  → Innate(codepoint)           — từ encode_codepoint()
-Composite → Composed{sources, op}       — từ LCA / Fuse / Program
-Evolved  → Evolved{source, dim, old, new} — từ evolve()
-
-Lợi ích: trace "concept này sinh từ L0 nào?", re-evaluate khi L0 thay đổi
 ```
 
 ---
@@ -360,4 +411,4 @@ Compact:     DeltaMolecule (1-6B vs 5B) + ChainDictionary (dedup)
 
 ---
 
-*HomeOS · ~82K LoC Rust · 2,227 tests · 0 clippy warnings · 0 external deps · no_std core*
+*HomeOS · ~82K LoC Rust · 2,348 tests · 0 clippy warnings · 0 external deps · no_std core*

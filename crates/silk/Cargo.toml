@@ -2,6 +2,7 @@
 name    = "silk"
 version.workspace = true
 edition.workspace = true
+description = "Silk — Hebbian knowledge graph with implicit 5D connections"
 
 [lib]
 path = "src/lib.rs"

@@ -1,7 +1,8 @@
 [package]
-name    = "homeos-wasm"
+name        = "homeos-wasm"
 version.workspace = true
 edition.workspace = true
+description = "HomeOS WebAssembly bindings for browser"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

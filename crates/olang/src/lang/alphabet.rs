@@ -79,7 +79,7 @@ pub fn classify(c: char) -> CharClass {
         // Physical (QT3: proven — đã chứng minh)
         '⧺' | '⊖' => CharClass::Physical,
         // Delimiters
-        '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',' | '=' | '?' | '"' | '|' | '.' | ':' => CharClass::Delimiter,
+        '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',' | '=' | '?' | '"' | '|' | '.' | ':' | '<' | '>' | '!' | '&' | '~' | '^' => CharClass::Delimiter,
         // Whitespace
         ' ' | '\t' | '\n' | '\r' => CharClass::Whitespace,
         // Digits
@@ -364,6 +364,8 @@ pub enum Keyword {
     Timeout,
     /// `from` — channel receive in select arm
     From,
+    /// `mut` — mutable variable binding
+    Mut,
 }
 
 /// Check xem string có phải keyword không.
@@ -397,6 +399,7 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "select" => Some(Keyword::Select),
         "timeout" => Some(Keyword::Timeout),
         "from" => Some(Keyword::From),
+        "mut" => Some(Keyword::Mut),
         _ => None,
     }
 }
@@ -594,6 +597,9 @@ pub enum Token {
     BitXor,
     /// `~` — bitwise NOT (unary)
     BitNot,
+
+    /// `mut` — mutable variable binding
+    Mut,
 
     // ── End ──
     /// End of input
@@ -1047,6 +1053,7 @@ impl<'a> Lexer<'a> {
                 Keyword::Select => Token::Select,
                 Keyword::Timeout => Token::Timeout,
                 Keyword::From => Token::From,
+                Keyword::Mut => Token::Mut,
             };
         }
 

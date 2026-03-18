@@ -20,7 +20,10 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::molecular::{EmotionDim, MolecularChain, Molecule, RelationBase, ShapeBase, TimeDim};
+use crate::molecular::{
+    ComposeOp, CompositionOrigin, EmotionDim, MolecularChain, Molecule, NodeState, RelationBase,
+    ShapeBase, TimeDim,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LCA of 2 chains
@@ -366,6 +369,39 @@ fn mode_or_wavg(values: &[(u8, u32)], total: u32) -> u8 {
 // ─────────────────────────────────────────────────────────────────────────────
 // LCA của nhiều chains (convenience)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// LCA kèm CompositionOrigin — track "node này sinh từ đâu?"
+///
+/// Trả về (LcaResult, CompositionOrigin::Composed { sources, op: Lca }).
+pub fn lca_with_origin(pairs: &[(&MolecularChain, u32)]) -> (LcaResult, CompositionOrigin) {
+    let result = lca_with_variance(pairs);
+    let sources: Vec<u64> = pairs
+        .iter()
+        .filter(|(c, _)| !c.is_empty())
+        .map(|(c, _)| c.chain_hash())
+        .collect();
+    let origin = if sources.len() == 1 {
+        // Single source — keep as innate if possible
+        CompositionOrigin::Unknown
+    } else {
+        CompositionOrigin::Composed {
+            sources,
+            op: ComposeOp::Lca,
+        }
+    };
+    (result, origin)
+}
+
+/// LCA kèm NodeState — convenience cho Dream pipeline.
+pub fn lca_to_node_state(pairs: &[(&MolecularChain, u32)]) -> Option<NodeState> {
+    let (result, origin) = lca_with_origin(pairs);
+    let mol = result.chain.first()?;
+    Some(NodeState {
+        mol: *mol,
+        maturity: crate::molecular::Maturity::Formula,
+        origin,
+    })
+}
 
 /// LCA của slice chains với equal weights.
 pub fn lca_many(chains: &[MolecularChain]) -> MolecularChain {
@@ -761,5 +797,35 @@ mod tests {
                 dv
             );
         }
+    }
+
+    // ── CompositionOrigin tracking ────────────────────────────────────────
+
+    #[test]
+    fn lca_with_origin_composed() {
+        let f = fire();
+        let w = water();
+        let (result, origin) = super::lca_with_origin(&[(&f, 1), (&w, 1)]);
+        assert!(!result.chain.is_empty());
+        match origin {
+            super::CompositionOrigin::Composed { sources, op } => {
+                assert_eq!(sources.len(), 2);
+                assert_eq!(op, super::ComposeOp::Lca);
+                assert!(sources.contains(&f.chain_hash()));
+                assert!(sources.contains(&w.chain_hash()));
+            }
+            _ => panic!("Expected Composed, got {:?}", origin),
+        }
+    }
+
+    #[test]
+    fn lca_to_node_state_works() {
+        let f = fire();
+        let w = water();
+        let ns = super::lca_to_node_state(&[(&f, 1), (&w, 1)]);
+        assert!(ns.is_some());
+        let ns = ns.unwrap();
+        assert!(ns.maturity.is_formula());
+        assert!(matches!(ns.origin, super::CompositionOrigin::Composed { .. }));
     }
 }

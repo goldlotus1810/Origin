@@ -10,7 +10,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use crate::response_template::{render, ResponseParams};
+use crate::response_template::{render, detect_language, Lang, ResponseParams};
 use agents::encoder::ContentInput;
 use agents::gate::GateVerdict;
 use agents::learning::{LearningLoop, ProcessResult};
@@ -38,7 +38,11 @@ use agents::leo::{LeoAI, ProgOutput};
 use agents::chief::{Chief, ChiefKind};
 use agents::worker::Worker;
 use agents::skill::{ExecContext, Skill};
-use agents::domain_skills::{ClusterSkill, SimilaritySkill, GeneralizationSkill};
+use agents::domain_skills::{
+    ClusterSkill, SimilaritySkill, GeneralizationSkill,
+    IngestSkill, DeltaSkill, HebbianSkill, CuratorSkill,
+    MergeSkill, PruneSkill, TemporalPatternSkill, InverseRenderSkill,
+};
 use crate::router::MessageRouter;
 use memory::proposal::{AlertLevel, RegistryGate};
 
@@ -172,6 +176,21 @@ struct RecentText {
     names: alloc::vec::Vec<String>,
 }
 
+/// Extract first integer from text (e.g., "đặt nhiệt độ 25" → 25).
+fn extract_number(s: &str) -> Option<i32> {
+    let mut num_str = String::new();
+    let mut found = false;
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            num_str.push(c);
+            found = true;
+        } else if found {
+            break;
+        }
+    }
+    if found { num_str.parse().ok() } else { None }
+}
+
 /// Extract text content from OlangExpr for SecurityGate checking.
 fn olang_expr_text(expr: &OlangExpr) -> String {
     match expr {
@@ -259,7 +278,7 @@ impl HomeRuntime {
         let mut rt = Self {
             learning,
             parser: OlangParser::new(),
-            dream: DreamCycle::new(DreamConfig::default()),
+            dream: DreamCycle::new(DreamConfig::for_conversation()),
             alias_to_cp: build_alias_map(file_bytes),
             registry: boot_result.registry,
             self_model: SelfModel::new(),
@@ -1526,6 +1545,15 @@ impl HomeRuntime {
                      ○{compile rust stats} — compile to Rust\n\
                      ○{compile wasm 1 + 2} — compile to WASM\n\
                      ○{similar term1 term2} — compare 2 concepts\n\
+                     ○{delta term1 term2}  — show differences\n\
+                     ○{hebbian term1 term2} — check Hebbian weight\n\
+                     ○{merge term1 term2}  — merge concepts\n\
+                     ○{ingest text}        — encode text → chain\n\
+                     ○{fit edge=0.8 circ=0.9 aspect=1.0} — SDF fitting\n\
+                     ○{prune}             — clean low-confidence STM\n\
+                     ○{curate}            — rank knowledge quality\n\
+                     ○{temporal}          — detect temporal patterns\n\
+                     ○{read text}         — BookReader → learn\n\
                      ○{if fire { stats }}  — conditional\n\
                      ○{loop 3 { stats }}   — loop N times\n\
                      ○{fn test { stats }}  — function definition\n\
@@ -1982,6 +2010,236 @@ impl HomeRuntime {
                     text,
                     tone: ResponseTone::Engaged,
                     fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            _ if cmd.starts_with("ingest ") => {
+                // ○{ingest <text>} — IngestSkill: text → MolecularChain
+                let text = &cmd[7..];
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                ctx.set(String::from("text"), text.to_string());
+                let result = IngestSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { chain, note, .. } => {
+                        let count = ctx.get("ingested_count").unwrap_or("0");
+                        let hash = chain.chain_hash();
+                        format!("Ingest ○ {} chars → chain {:016X}\n  {}", count, hash, note)
+                    }
+                    _ => String::from("Ingest ○ không đủ dữ liệu."),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            _ if cmd.starts_with("delta ") => {
+                // ○{delta term1 term2} — DeltaSkill: differences between concepts
+                let args: alloc::vec::Vec<&str> = cmd[6..].split_whitespace().collect();
+                if args.len() < 2 {
+                    return Response {
+                        text: String::from("Cần 2 terms: ○{delta term1 term2}"),
+                        tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System,
+                    };
+                }
+                let chain_a = self.resolve_term(args[0]);
+                let chain_b = self.resolve_term(args[1]);
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                ctx.push_input(chain_a);
+                ctx.push_input(chain_b);
+                let result = DeltaSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let count = ctx.get("delta_count").unwrap_or("?");
+                        format!("Delta ○\n  {} ↔ {}: {} molecules differ\n  {}", args[0], args[1], count, note)
+                    }
+                    _ => format!("Delta ○ không thể so sánh {} và {}.", args[0], args[1]),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            _ if cmd.starts_with("hebbian ") => {
+                // ○{hebbian term1 term2} — HebbianSkill: check/strengthen connection
+                let args: alloc::vec::Vec<&str> = cmd[8..].split_whitespace().collect();
+                if args.len() < 2 {
+                    return Response {
+                        text: String::from("Cần 2 terms: ○{hebbian term1 term2}"),
+                        tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System,
+                    };
+                }
+                let chain_a = self.resolve_term(args[0]);
+                let chain_b = self.resolve_term(args[1]);
+                let ha = chain_a.chain_hash();
+                let hb = chain_b.chain_hash();
+                // Get current Silk weight
+                let current_w = self.learning.graph().learned_weight(ha, hb);
+                let fire_count = self.learning.graph().edges_from(ha).len() as u32;
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                ctx.push_input(chain_a);
+                ctx.push_input(chain_b);
+                ctx.set(String::from("current_weight"), format!("{:.4}", current_w));
+                ctx.set(String::from("fire_count"), format!("{}", fire_count));
+                let result = HebbianSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        format!("Hebbian ○\n  {} ↔ {}: w={:.4} → {}\n  fire={} {}",
+                            args[0], args[1], current_w,
+                            ctx.get("new_weight").unwrap_or("?"),
+                            fire_count, note)
+                    }
+                    _ => format!("Hebbian ○ không đủ dữ liệu cho {} ↔ {}.", args[0], args[1]),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            _ if cmd.starts_with("merge ") => {
+                // ○{merge term1 term2} — MergeSkill: merge two concept clusters
+                let args: alloc::vec::Vec<&str> = cmd[6..].split_whitespace().collect();
+                if args.len() < 2 {
+                    return Response {
+                        text: String::from("Cần 2 terms: ○{merge term1 term2}"),
+                        tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System,
+                    };
+                }
+                let chain_a = self.resolve_term(args[0]);
+                let chain_b = self.resolve_term(args[1]);
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                ctx.push_input(chain_a);
+                ctx.push_input(chain_b);
+                let result = MergeSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { chain, note, .. } => {
+                        let hash = chain.chain_hash();
+                        let label = self.registry.alias_for_hash(hash).unwrap_or("(merged)");
+                        format!("Merge ○\n  {} + {} → {} ({:016X})\n  {}", args[0], args[1], label, hash, note)
+                    }
+                    _ => format!("Merge ○ không thể merge {} và {}.", args[0], args[1]),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            _ if cmd.starts_with("fit ") => {
+                // ○{fit edge=0.8 circ=0.9 aspect=1.0} — InverseRenderSkill: SDF fitting
+                let params = &cmd[4..];
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                // Parse key=value pairs
+                for part in params.split_whitespace() {
+                    if let Some((k, v)) = part.split_once('=') {
+                        match k {
+                            "edge" => ctx.set(String::from("edge_ratio"), v.to_string()),
+                            "circ" => ctx.set(String::from("circularity"), v.to_string()),
+                            "aspect" => ctx.set(String::from("aspect_ratio"), v.to_string()),
+                            _ => {}
+                        }
+                    }
+                }
+                let result = InverseRenderSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let sdf_type = ctx.get("sdf_type").unwrap_or("?");
+                        let conf = ctx.get("sdf_confidence").unwrap_or("?");
+                        format!("Fit ○\n  SDF: {} (confidence {})\n  {}", sdf_type, conf, note)
+                    }
+                    _ => String::from("Fit ○ cần ít nhất edge=, circ=, aspect= parameters."),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            "prune" => {
+                // ○{prune} — PruneSkill: remove low-confidence STM entries
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                // Feed all STM observations as input
+                for obs in self.learning.stm().all().iter() {
+                    ctx.push_input(obs.chain.clone());
+                }
+                let before = ctx.input_chains.len();
+                let result = PruneSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let kept = ctx.get("kept_count").unwrap_or("?");
+                        let removed = ctx.get("pruned_count").unwrap_or("?");
+                        format!("Prune ○\n  Before: {} → Kept: {}, Removed: {}\n  {}", before, kept, removed, note)
+                    }
+                    _ => String::from("Prune ○ STM rỗng — không có gì để prune."),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            "curate" => {
+                // ○{curate} — CuratorSkill: rank knowledge quality
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                for obs in self.learning.stm().all().iter() {
+                    ctx.push_input(obs.chain.clone());
+                }
+                let result = CuratorSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let sorted = ctx.get("sorted_count").unwrap_or("?");
+                        format!("Curate ○\n  Ranked: {} items\n  {}", sorted, note)
+                    }
+                    _ => String::from("Curate ○ không đủ dữ liệu."),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            "temporal" => {
+                // ○{temporal} — TemporalPatternSkill: detect patterns in STM timestamps
+                let emotion = self.learning.context().last_emotion();
+                let mut ctx = ExecContext::new(ts, emotion, self.learning.context().fx());
+                let all_obs = self.learning.stm().all();
+                if all_obs.len() < 3 {
+                    return Response {
+                        text: String::from("Temporal ○ cần ít nhất 3 observations."),
+                        tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System,
+                    };
+                }
+                for obs in all_obs.iter() {
+                    ctx.push_input(obs.chain.clone());
+                }
+                let ts_list: alloc::vec::Vec<String> = all_obs.iter().map(|o| format!("{}", o.timestamp)).collect();
+                ctx.set(String::from("timestamps"), ts_list.join(","));
+                let result = TemporalPatternSkill.execute(&mut ctx);
+                let text = match result {
+                    agents::skill::SkillResult::Ok { note, .. } => {
+                        let mut lines = alloc::vec![format!("Temporal ○")];
+                        if let Some(period) = ctx.get("temporal_period") {
+                            lines.push(format!("  Period: {}ms", period));
+                        }
+                        if let Some(p) = ctx.get("temporal_periodicity") {
+                            lines.push(format!("  Periodicity: {}", p));
+                        }
+                        if let Some(peak) = ctx.get("temporal_peak_hour") {
+                            lines.push(format!("  Peak hour: {}h", peak));
+                        }
+                        lines.push(format!("  {}", note));
+                        lines.join("\n")
+                    }
+                    _ => String::from("Temporal ○ không đủ dữ liệu để phân tích."),
+                };
+                Response { text, tone: ResponseTone::Engaged, fx: 0.0, kind: ResponseKind::System }
+            }
+
+            _ if cmd.starts_with("read ") => {
+                // ○{read <text>} — BookReader → learn sentences → STM → Silk → KnowTree
+                let text = &cmd[5..];
+                if text.trim().is_empty() {
+                    return Response {
+                        text: String::from("○{read <text>} — cần nội dung để đọc."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let stored = self.read_book(text, ts);
+                Response {
+                    text: format!("Read ○ {} sentences learned.", stored),
+                    tone: ResponseTone::Engaged,
+                    fx: self.learning.context().fx(),
                     kind: ResponseKind::System,
                 }
             }
@@ -2841,6 +3099,10 @@ impl HomeRuntime {
         let mut action = decide_action(&est, cur_v);
         let fx = self.learning.context().fx();
         let tone = self.learning.context().tone();
+        let lang = match &input {
+            ContentInput::Text { content, .. } => detect_language(content),
+            _ => Lang::Vi,
+        };
 
         // ── T7b: Reference resolution — "bà ấy", "anh ta"... ─────────────
         // Nếu Observe vì unresolved_ref → thử resolve từ recent_texts
@@ -2896,6 +3158,21 @@ impl HomeRuntime {
                 // ── ConfirmLearnQR: "cái này đúng" → promote last STM → QR ──
                 if action == IntentAction::ConfirmLearnQR {
                     return self.confirm_learn_qr(ts);
+                }
+
+                // ── HomeControl: route command to HomeChief via ISL ────────
+                if action == IntentAction::HomeControl {
+                    let cmd_text = match &input {
+                        ContentInput::Text { content, .. } => content.as_str(),
+                        _ => "",
+                    };
+                    let result_text = self.dispatch_home_control(cmd_text, ts);
+                    return Response {
+                        text: result_text,
+                        tone,
+                        fx,
+                        kind: ResponseKind::Natural,
+                    };
                 }
 
                 // ── Knowledge recall + contradiction ──────────────────────
@@ -2992,6 +3269,7 @@ impl HomeRuntime {
                         fx,
                         context: recall,
                         original: observe_original,
+                        language: lang,
                     });
                     return Response {
                         text,
@@ -3028,6 +3306,7 @@ impl HomeRuntime {
                     fx,
                     context: recall,
                     original,
+                    language: lang,
                 });
 
                 // ── T7e: Instinct enrichment — bản năng làm giàu response ──
@@ -3092,6 +3371,7 @@ impl HomeRuntime {
                     fx,
                     context: None,
                     original: None,
+                    language: lang,
                 });
                 Response {
                     text,
@@ -3232,7 +3512,7 @@ impl HomeRuntime {
 
         // 2. STM observations có fire_count >= 3 → ĐN sẵn sàng QR
         //    (Dream sẽ promote QR — đây chỉ là persist ĐN để không mất)
-        for obs in self.learning.stm().all() {
+        for obs in self.learning.stm().all().iter() {
             let hash = obs.chain.chain_hash();
             let fire_count = graph.edges_from(hash).len() as u32;
             if fire_count >= 3 {
@@ -3298,6 +3578,91 @@ impl HomeRuntime {
             self.knowtree.store_chapter(&chains, None, ts);
         }
         stored
+    }
+
+    // ── HomeControl → ISL → Chief ─────────────────────────────────────────────
+
+    /// Dispatch home control command to HomeChief via ISL.
+    ///
+    /// Parse command text → find target Chief → send ActuatorCmd via ISL.
+    /// Returns response text confirming the dispatch.
+    fn dispatch_home_control(&mut self, cmd_text: &str, ts: i64) -> String {
+        let lo = cmd_text.to_lowercase();
+
+        // Determine command byte and value from natural language
+        let (cmd_byte, value, description) = if lo.contains("tắt") || lo.contains("turn off") || lo.contains("off") {
+            (0x00_u8, 0x00_u8, "tắt")
+        } else if lo.contains("bật") || lo.contains("mở") || lo.contains("turn on") || lo.contains("on") {
+            (0x01, 0xFF, "bật")
+        } else if lo.contains("nhiệt độ") || lo.contains("temperature") {
+            // Extract number if present
+            let val = extract_number(&lo).unwrap_or(22) as u8;
+            (0x02, val, "đặt nhiệt độ")
+        } else {
+            (0x01, 0xFF, "điều khiển")
+        };
+
+        // Find HomeChief (group=1) and send ActuatorCmd
+        let home_chief_idx = self.chiefs.iter().position(|c| c.kind == ChiefKind::Home);
+        if let Some(idx) = home_chief_idx {
+            // If Chief has workers → forward to first alive worker
+            let worker_addr = self.chiefs[idx].workers.values()
+                .find(|w| w.alive)
+                .map(|w| w.addr);
+
+            if let Some(target) = worker_addr {
+                self.chiefs[idx].forward_command(target, cmd_byte, value);
+                // Tick router to process the command
+                let _tick = self.router.tick(
+                    &mut self.workers,
+                    &mut self.chiefs,
+                    &mut self.leo,
+                    ts,
+                );
+                format!("○ Đã {} — lệnh gửi đến Worker {:?}.", description, target)
+            } else {
+                // No workers yet — send ISL to Chief inbox for when workers connect
+                let msg = isl::message::ISLMessage::actuator(
+                    isl::address::ISLAddress::new(0, 0, 0, 0), // from Runtime
+                    self.chiefs[idx].addr,
+                    cmd_byte,
+                    value,
+                );
+                let frame = isl::message::ISLFrame::bare(msg);
+                self.chiefs[idx].receive_frame(frame, ts);
+                format!(
+                    "○ Đã {} — lệnh gửi đến HomeChief (chưa có Worker kết nối).",
+                    description
+                )
+            }
+        } else {
+            format!("○ Không tìm thấy HomeChief — hệ thống chưa sẵn sàng.")
+        }
+    }
+
+    // ── Term resolution — alias/text → MolecularChain ────────────────────────
+
+    /// Resolve a term (alias or raw text) to a MolecularChain.
+    ///
+    /// 1. Try Registry alias lookup
+    /// 2. Fallback: encode each char → LCA
+    fn resolve_term(&self, term: &str) -> olang::molecular::MolecularChain {
+        self.registry.lookup_name(term)
+            .and_then(|h| {
+                let entry = self.registry.lookup_hash(h)?;
+                Some(olang::encoder::encode_codepoint(entry.chain_hash as u32))
+            })
+            .unwrap_or_else(|| {
+                let chains: alloc::vec::Vec<_> = term.chars()
+                    .map(|c| olang::encoder::encode_codepoint(c as u32))
+                    .filter(|ch| !ch.is_empty())
+                    .collect();
+                if chains.is_empty() {
+                    olang::encoder::encode_codepoint('?' as u32)
+                } else {
+                    olang::lca::lca_many(&chains)
+                }
+            })
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
@@ -6485,7 +6850,7 @@ mod bootstrap_tests {
         let mut rt = HomeRuntime::new(0xC003);
         let src = r#"
             fn double(x) { return x * 2; }
-            let sum = 0;
+            let mut sum = 0;
             for i in 0..5 {
                 sum = sum + double(i);
             }

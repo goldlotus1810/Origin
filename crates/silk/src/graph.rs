@@ -122,6 +122,9 @@ pub struct SilkGraph {
     index: SilkIndex,
     /// Slim Hebbian links — learned co-activations (sorted by key)
     learned: Vec<HebbianLink>,
+    /// Silk dọc: child_hash → parent_hash (5460 pointers = 43 KB).
+    /// Mỗi node tại Lx là ĐẠI DIỆN cho 1 nhóm ở Lx-1.
+    parent_map: alloc::collections::BTreeMap<u64, u64>,
 }
 
 impl SilkGraph {
@@ -131,6 +134,7 @@ impl SilkGraph {
             edges: Vec::new(),
             index: SilkIndex::new(),
             learned: Vec::new(),
+            parent_map: alloc::collections::BTreeMap::new(),
         }
     }
 
@@ -149,6 +153,47 @@ impl SilkGraph {
     /// Index a node into the implicit 5D buckets.
     pub fn index_node(&mut self, hash: u64, mol: &MolSummary) {
         self.index.index_node(hash, mol);
+    }
+
+    // ── Parent map (Silk dọc) ───────────────────────────────────────────────
+
+    /// Đăng ký parent — gọi khi Dream promote hoặc seeder tạo L1+.
+    pub fn register_parent(&mut self, child_hash: u64, parent_hash: u64) {
+        self.parent_map.insert(child_hash, parent_hash);
+    }
+
+    /// Parent của node (None nếu root).
+    pub fn parent_of(&self, hash: u64) -> Option<u64> {
+        self.parent_map.get(&hash).copied()
+    }
+
+    /// Tất cả children của parent.
+    pub fn children_of(&self, parent_hash: u64) -> Vec<u64> {
+        self.parent_map
+            .iter()
+            .filter(|(_, &p)| p == parent_hash)
+            .map(|(&c, _)| c)
+            .collect()
+    }
+
+    /// Layer = số bước từ node đến root (đi ngược parent chain).
+    /// Root (không có parent) → layer 0.
+    pub fn layer_of(&self, hash: u64) -> u8 {
+        let mut current = hash;
+        let mut depth = 0u8;
+        while let Some(parent) = self.parent_of(current) {
+            depth += 1;
+            current = parent;
+            if depth > 16 {
+                break; // safety limit
+            }
+        }
+        depth
+    }
+
+    /// Số parent pointers đã đăng ký.
+    pub fn parent_count(&self) -> usize {
+        self.parent_map.len()
     }
 
     // ── HebbianLink access ──────────────────────────────────────────────────
@@ -766,6 +811,7 @@ impl SilkGraph {
     pub fn memory_usage(&self) -> usize {
         let edge_size = core::mem::size_of::<SilkEdge>();
         self.edges.capacity() * edge_size
+            + self.parent_map.len() * 16 // BTreeMap: ~16 bytes per entry (key + value + overhead)
     }
 
     // ── Internal ─────────────────────────────────────────────────────────────
@@ -795,6 +841,7 @@ impl Default for SilkGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     fn emo(v: f32, a: f32) -> EmotionTag {
         EmotionTag::new(v, a, 0.5, 0.5)
@@ -1167,5 +1214,47 @@ mod tests {
         let score_partial = g.cluster_score_partial(0xA, 0xB, 1);
 
         assert!(score_5d > score_partial, "5D similarity adds chain_sim component: {} > {}", score_5d, score_partial);
+    }
+
+    // ── Parent map (Silk dọc) ────────────────────────────────────────────
+
+    #[test]
+    fn parent_map_basic() {
+        let mut g = SilkGraph::new();
+        g.register_parent(0xA, 0xB);
+        assert_eq!(g.parent_of(0xA), Some(0xB));
+        assert_eq!(g.children_of(0xB), vec![0xA]);
+        assert_eq!(g.layer_of(0xA), 1);
+        assert_eq!(g.parent_count(), 1);
+    }
+
+    #[test]
+    fn parent_chain_depth() {
+        let mut g = SilkGraph::new();
+        g.register_parent(0xA, 0xB);
+        g.register_parent(0xB, 0xC);
+        g.register_parent(0xC, 0xD);
+        assert_eq!(g.layer_of(0xA), 3);
+        assert_eq!(g.layer_of(0xB), 2);
+        assert_eq!(g.layer_of(0xC), 1);
+        assert_eq!(g.layer_of(0xD), 0); // root
+    }
+
+    #[test]
+    fn no_parent_is_root() {
+        let g = SilkGraph::new();
+        assert_eq!(g.parent_of(0xDEAD), None);
+        assert_eq!(g.layer_of(0xDEAD), 0);
+    }
+
+    #[test]
+    fn children_multiple() {
+        let mut g = SilkGraph::new();
+        g.register_parent(0xA, 0xF);
+        g.register_parent(0xB, 0xF);
+        g.register_parent(0xC, 0xF);
+        let mut children = g.children_of(0xF);
+        children.sort();
+        assert_eq!(children, vec![0xA, 0xB, 0xC]);
     }
 }

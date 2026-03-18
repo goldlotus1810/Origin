@@ -1151,8 +1151,23 @@ fn is_command(s: &str) -> bool {
             | "reboot"
             | "status"
             | "help"
-    ) || s.starts_with("compile ")
+    ) || s == "trace"
+        || s == "prune"
+        || s == "curate"
+        || s == "temporal"
+        || s.starts_with("compile ")
         || s.starts_with("similar ")
+        || s.starts_with("delta ")
+        || s.starts_with("hebbian ")
+        || s.starts_with("merge ")
+        || s.starts_with("ingest ")
+        || s.starts_with("fit ")
+        || s.starts_with("typeof ")
+        || s.starts_with("inspect ")
+        || s.starts_with("assert ")
+        || s.starts_with("explain ")
+        || s.starts_with("why ")
+        || s.starts_with("read ")
         || is_math_command(s)
         || is_constant_command(s)
         || is_leo_command(s)
