@@ -119,21 +119,24 @@ Emotion LÀ 2 TRONG 5 CHIỀU của node (V + A).
 | Tầng | Tên | Số lượng | Trạng thái |
 |------|-----|---------|-----------|
 | Base | 37 kênh (8S+8R+8V+8A+5T) | 37 | **SilkIndex ✅ implemented** |
-| Compound | 31 mẫu (C(5,1)+...+C(5,5)) | 31 | **Chưa implement** |
-| Precise | ~5400 kênh (= số L0 nodes) | ~5400 | **Chưa implement** |
+| Compound | 31 mẫu (C(5,1)+...+C(5,5)) | 31 | **✅ CompoundKind enum implemented** |
+| Precise | ~5400 kênh (= số L0 nodes) | ~5400 | **SPEC — chưa implement** |
 
 2 hướng Silk:
 
 | Hướng | Tên | Lưu trữ | Trạng thái |
 |-------|-----|---------|-----------|
 | Ngang | Silk tự do (implicit, cùng tầng) | 0 bytes | **SilkIndex ✅** |
-| Dọc | Silk đại diện (parent pointer) | 5460 × 8B = 43 KB | **Chưa implement** |
+| Dọc | Silk đại diện (parent pointer) | 5460 × 8B = 43 KB | **✅ parent_map implemented** |
 
 ---
 
-## 5 Gaps giữa thiết kế và code
+## 8 Gaps giữa thiết kế và code — ALL RESOLVED ✅
 
-### Gap #1 — Silk dọc (parent pointer) chưa có
+> **Phiên M:** Tất cả 8 gaps đã được implement. Xem MASTER.md § Node & Silk.
+> **Phiên N:** Silk restore_learned() + Hebbian persist/restore qua origin.olang.
+
+### Gap #1 — Silk dọc (parent pointer) ~~chưa có~~ ✅ RESOLVED
 
 **Thiết kế:**
 ```
@@ -151,28 +154,24 @@ L7→L6:     1 pointer
 Tổng: 5460 × 8B = 43 KB
 ```
 
-**Code thực tế (`graph.rs:118-125`):**
+**Code thực tế — ✅ IMPLEMENTED (graph.rs):**
 ```rust
 pub struct SilkGraph {
     edges: Vec<SilkEdge>,
     index: SilkIndex,
     learned: Vec<HebbianLink>,
-    // ❌ Không có parent_map
+    parent_map: BTreeMap<u64, u64>,  // ✅ child → parent
 }
+// Methods: register_parent(), parent_of(), children_of(), layer_of()
+// Phiên N: + restore_learned(), learned_links_from(), all_learned()
+//          + Hebbian persist/restore qua origin.olang RT_HEBBIAN
 ```
 
-**Hệ quả:**
-- Không thể query "concept cha của node X"
-- `co_activate_same_layer()` nhận layer từ caller — không có nguồn sự thật independent
-- Dream clustering không biết 2 nodes có cùng tầng không
-- Cross-layer Silk (`co_activate_cross_layer()`) không có cấu trúc dọc để anchor
-- Truy vấn O(1) qua parent pointer (thiết kế gốc) — impossible
-
-**Effort:** Trung bình | **Impact:** Cao — nền tảng cho tất cả layer-aware operations
+**Status:** ✅ RESOLVED — parent_map implemented, tested, Hebbian persist/restore wired
 
 ---
 
-### Gap #2 — 31 compound patterns chưa implement
+### Gap #2 — 31 compound patterns ~~chưa implement~~ ✅ RESOLVED
 
 **Thiết kế:**
 ```
@@ -220,17 +219,16 @@ pub struct ImplicitSilk {
 }
 ```
 
-**Thiếu gì:**
-- Enum `CompoundPattern` với 31 variants
-- Method `classify_compound(shared_dims) -> CompoundPattern`
-- Method `compound_name(pattern) -> &str` (tên tự nhiên)
-- Integration vào Dream clustering và response rendering
+**Status:** ✅ RESOLVED — CompoundKind enum with all 31 variants implemented in index.rs.
+- `compound_kind()` classifies based on which 5 dimensions match
+- `shared_count()` returns count of shared dimensions
+- Full test coverage
 
 **Effort:** Nhỏ-Trung bình | **Impact:** Trung bình — giàu ngữ nghĩa cho response + Dream
 
 ---
 
-### Gap #3 — Dream bỏ qua 5D similarity
+### Gap #3 — Dream ~~bỏ qua~~ 5D similarity ✅ RESOLVED
 
 **Thiết kế:** Dream dùng Silk implicit (5D comparison) để cluster nodes giống nhau.
 
@@ -283,31 +281,31 @@ MolSummary::similarity() ≈ 0.10-0.20 (delta-based, V zone match)
 Blended score cao hơn → khả năng cluster tăng
 ```
 
+**Status:** ✅ RESOLVED — Dream cluster_score() uses MolSummary::similarity() + implicit_silk() bonus.
+- `cluster_score()` (dream.rs:328) uses `MolSummary::similarity()` for 5D-aware comparison
+- `implicit_silk()` bonus from shared dimensions (dream.rs:377)
+- Hebbian weight bidirectional (dream.rs:384)
+
 **Effort:** Trung bình | **Impact:** Cao — unblock Dream clustering
 
 ---
 
-### Gap #4 — Dream không kiểm tra layer
+### Gap #4 — Dream ~~không kiểm tra~~ layer ✅ RESOLVED
 
 **Thiết kế (QT⑪):** Silk chỉ ở Ln-1 — tự do giữa lá cùng tầng.
 
 **Code thực tế:** Dream clustering không filter observations theo layer. Tất cả observations được cluster chung, bất kể layer.
 
-**Verification (`dream.rs`):**
-- Không gọi `co_activate_same_layer()` (cần layer param)
-- Không gọi `co_activate_cross_layer()` (cần layer + fire_count)
-- `Observation` struct (`learning.rs:50-59`) không có field `layer`
-
-**Hệ quả:**
-- Dream có thể cluster L0 node với L2 node → vi phạm QT⑪
-- Khi promote cluster → LCA không biết input thuộc layer nào → output layer sai
-- Kết hợp Gap #1 (no parent pointer): Dream hoàn toàn blind về cấu trúc tầng
+**Status:** ✅ RESOLVED — Observation.layer field added, Dream clusters by layer.
+- `Observation.layer` field in learning.rs (line 61-63)
+- Dream clusters `by_layer: BTreeMap<u8, Vec>` (dream.rs:302) — never clusters L0 with L2
+- Default layer: 0 (L0)
 
 **Effort:** Nhỏ | **Impact:** Trung bình — correctness cho Dream clustering
 
 ---
 
-### Gap #5 — `unified_neighbors()` không được dùng
+### Gap #5 — `unified_neighbors()` ~~không được dùng~~ ✅ RESOLVED
 
 **Thiết kế:** unified_neighbors() kết hợp implicit Silk + Hebbian + structural edges → ranked neighbors.
 
@@ -322,13 +320,15 @@ pub fn unified_neighbors(&self, hash: u64, mol: Option<&MolSummary>) -> Vec<Silk
 - Learning (`learning.rs`) → dùng `co_activate_mol()` thay thế
 - Runtime (`origin.rs`) → không gọi trực tiếp
 
-**Hiện tại `unified_neighbors()` chỉ được gọi trong tests.**
+**Status:** ✅ RESOLVED — unified_neighbors() wired into Dream.
+- Dream uses `unified_neighbors()` (dream.rs:250) for neighbor_bonus
+- Strong neighbors (weight ≥ 0.5) boost QR confidence by 5% each (max 30%)
 
-**Effort:** Nhỏ | **Impact:** Trung bình — method tốt, chưa được wire
+**Effort:** Nhỏ | **Impact:** Trung bình — method tốt, now wired
 
 ---
 
-### Gap #6 — Molecule không phân biệt "công thức" và "giá trị"
+### Gap #6 — Molecule ~~không phân biệt~~ "công thức" và "giá trị" ✅ RESOLVED
 
 **Thiết kế (Nguyên lý 1):**
 ```
@@ -354,16 +354,25 @@ Molecule là **5 giá trị tĩnh u8**. Không có cơ chế phân biệt "byte 
 - Khi Maturity = Mature, Molecule struct **không thay đổi gì**
 - Không có mechanism "thay công thức bằng hằng số" trong Molecule
 
-**Hệ quả:**
-- Mọi Molecule đều "chín" từ lúc tạo → không thể biết node nào còn tiềm năng
-- Dream evaluate Maturity nhưng Molecule không reflect sự thay đổi
-- LeoAI `program()` tạo Molecule mới nhưng không đánh dấu "đây là công thức chưa evaluate"
+**Status:** ✅ RESOLVED via NodeState wrapper (molecular.rs:354-361):
+```rust
+pub struct NodeState {
+    pub chain: MolecularChain,
+    pub fire_count: u32,
+    pub maturity: Maturity,        // Formula → Evaluating → Mature
+    pub mol_summary: Option<MolSummary>,
+    pub origin: CompositionOrigin, // Innate/Composed/Evolved
+}
+```
+- Maturity tracks lifecycle: Formula → Evaluating → Mature
+- CompositionOrigin tracks "how was this node created?"
+- from_innate(), from_composed(), from_evolved() factory methods
 
 **Effort:** Trung bình | **Impact:** Cao — nền tảng triết lý "Molecule = công thức"
 
 ---
 
-### Gap #7 — LCA không lưu nguồn gốc composition
+### Gap #7 — LCA ~~không lưu~~ nguồn gốc composition ✅ RESOLVED
 
 **Thiết kế (Nguyên lý 1):**
 ```
@@ -389,17 +398,24 @@ LCA tạo composite Molecule bằng weighted average → **kết quả mất ngu
 - **KHÔNG lưu** "Molecule này = compose(X, Y, Z)"
 - Không track parent L0 formulas, không track composition operation
 
-**Hệ quả:**
-- Không thể trace "concept này sinh ra từ L0 nào?"
-- Không thể re-evaluate composition khi L0 formula thay đổi
-- Evolve chỉ mutate byte, không biết đang mutate phần nào của composition
-- Mất khả năng "tính lại được bất cứ lúc nào" mà thiết kế hứa
+**Status:** ✅ RESOLVED via CompositionOrigin (molecular.rs:399):
+```rust
+pub enum CompositionOrigin {
+    Innate(u32),                           // from codepoint
+    Composed { sources: Vec<u64>, op },    // from LCA
+    Evolved { from: u64, dim, value },     // from evolution
+    Unknown,                               // fallback
+}
+```
+- `lca_with_origin()` returns (LcaResult, CompositionOrigin::Composed)
+- `evolve()` returns EvolveResult with CompositionOrigin::Evolved
+- Full traceability: "concept này sinh từ L0 nào?"
 
 **Effort:** Trung bình-Lớn | **Impact:** Cao — khả năng tái tạo tri thức từ công thức
 
 ---
 
-### Gap #8 — Maturity không wire vào Molecule lifecycle
+### Gap #8 — Maturity ~~không wire~~ vào Molecule lifecycle ✅ RESOLVED
 
 **Thiết kế:**
 ```
@@ -421,10 +437,11 @@ Dream.run()   → DreamResult.matured_nodes = Vec<u64>                          
 QR promote    → append-only, signed, permanent                                      ← có nhưng không check maturity
 ```
 
-**Hệ quả:**
-- Node có thể promote QR mà chưa Mature (maturity check bị bypass)
-- Dream cluster score không factor in maturity state
-- Molecule struct không biết mình đang ở state nào
+**Status:** ✅ RESOLVED — advance() wired with real Hebbian weight.
+- `advance(fire_count, weight, fib_threshold)` now receives non-zero weight
+- Dream calls advance() with Hebbian weight (dream.rs:244)
+- STM persist/restore includes maturity byte (RT_STM record)
+- Weight=0 bug FIXED
 
 **Effort:** Nhỏ-Trung bình | **Impact:** Cao — correctness cho Dream + QR promote
 
