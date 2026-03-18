@@ -61,7 +61,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 0.1 | Test lexer.ol trên Rust VM | `PLAN_0_1` | B1,B2,B3 | CLAIMED | `claude/review-and-fix-project-erPD8` | erPD8 | All blockers DONE, bắt đầu 2026-03-18 |
+| 0.1 | Test lexer.ol trên Rust VM | `PLAN_0_1` | B1,B2,B3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | tokenize("let x = 42;")→6 tokens, tokenize("fn f(x){...}")→13 tokens. 2442 tests pass. |
 | 0.2 | Test parser.ol + module import | `PLAN_0_2` | 0.1 | FREE | — | — | — |
 | 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | FREE | — | — | — |
 | 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | FREE | — | — | — |
@@ -135,4 +135,10 @@ Khi Session A xong 0.3:
             lib.rs: cfg_attr(not(std), no_std) cho conditional std support.
             2 tests mới (load_from_file, load_module_not_found).
             PLAN_0_1 UNBLOCKED — tất cả B1+B2+B3 đã xong.
+2026-03-18  0.1 DONE (session erPD8): lexer.ol chạy trên Rust VM.
+            Fixes: while loop lowering (Jmp thay Loop), return_jumps cho
+            inlined functions, if-without-else stack fix, pub fn first-pass,
+            true/false literals, split_array_chain 0xFD tag skip.
+            tokenize("let x = 42;")→6 tokens, tokenize("fn f(x){...}")→13.
+            2442 workspace tests pass, 0 clippy errors.
 ```
