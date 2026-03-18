@@ -328,7 +328,111 @@ pub fn unified_neighbors(&self, hash: u64, mol: Option<&MolSummary>) -> Vec<Silk
 
 ---
 
+### Gap #6 — Molecule không phân biệt "công thức" và "giá trị"
+
+**Thiết kế (Nguyên lý 1):**
+```
+Molecule = 5 CÔNG THỨC, không phải 5 giá trị.
+Chưa có input → TIỀM NĂNG    Có input → GIÁ TRỊ CỤ THỂ    Đủ → node CHÍN
+```
+
+**Code thực tế (`molecular.rs:18-26`):**
+```rust
+pub struct Molecule {
+    pub shape: u8,
+    pub relation: u8,
+    pub emotion: EmotionDim,  // { valence: u8, arousal: u8 }
+    pub time: u8,
+}
+```
+
+Molecule là **5 giá trị tĩnh u8**. Không có cơ chế phân biệt "byte này là công thức tiềm năng" vs "byte này đã được evaluate thành giá trị thật".
+
+**Maturity tồn tại nhưng TÁCH RỜI Molecule:**
+- `Maturity` enum (`molecular.rs:286-342`) có 3 states: Formula → Evaluating → Mature
+- Nhưng Maturity nằm trong `Observation`, KHÔNG nằm trong Molecule
+- Khi Maturity = Mature, Molecule struct **không thay đổi gì**
+- Không có mechanism "thay công thức bằng hằng số" trong Molecule
+
+**Hệ quả:**
+- Mọi Molecule đều "chín" từ lúc tạo → không thể biết node nào còn tiềm năng
+- Dream evaluate Maturity nhưng Molecule không reflect sự thay đổi
+- LeoAI `program()` tạo Molecule mới nhưng không đánh dấu "đây là công thức chưa evaluate"
+
+**Effort:** Trung bình | **Impact:** Cao — nền tảng triết lý "Molecule = công thức"
+
+---
+
+### Gap #7 — LCA không lưu nguồn gốc composition
+
+**Thiết kế (Nguyên lý 1):**
+```
+"Insulin" = compose(f_protein, f_signal, f_regulate)
+          = [ref_L0_1: 2B] [ref_L0_2: 2B] [ref_L0_3: 2B] [op: 1B]
+          = 7 bytes ← CÔNG THỨC, không phải giá trị
+```
+
+**Code thực tế (`lca.rs:40-222`):**
+```rust
+pub fn lca_weighted(pairs: &[(&MolecularChain, u32)]) -> MolecularChain {
+    // Weighted average of 5D values
+    // → Molecule mới = BLEND trực tiếp
+    // → KHÔNG lưu "blend từ đâu"
+}
+```
+
+LCA tạo composite Molecule bằng weighted average → **kết quả mất nguồn gốc**.
+
+**FormulaTable (`molecular.rs:1035-1168`) có dictionary nhưng:**
+- `FormulaTable` = `Vec<Molecule>` + reverse lookup
+- Lưu Molecule → u16 index (dedup)
+- **KHÔNG lưu** "Molecule này = compose(X, Y, Z)"
+- Không track parent L0 formulas, không track composition operation
+
+**Hệ quả:**
+- Không thể trace "concept này sinh ra từ L0 nào?"
+- Không thể re-evaluate composition khi L0 formula thay đổi
+- Evolve chỉ mutate byte, không biết đang mutate phần nào của composition
+- Mất khả năng "tính lại được bất cứ lúc nào" mà thiết kế hứa
+
+**Effort:** Trung bình-Lớn | **Impact:** Cao — khả năng tái tạo tri thức từ công thức
+
+---
+
+### Gap #8 — Maturity không wire vào Molecule lifecycle
+
+**Thiết kế:**
+```
+Dream = đánh giá công thức nào đã "chín" đủ
+  Node chưa đủ data → giữ công thức → chờ thêm input
+  Khi đủ → node CHÍN → thay công thức bằng hằng số
+```
+
+**Code thực tế:**
+- `Maturity::advance()` (`molecular.rs:315`) tính state transition từ fire_count + weight
+- Nhưng `advance()` được gọi ở:
+  - `learning.rs:84` với `weight=0.0` ← **BUG đã document**: weight=0.0 → Mature UNREACHABLE
+  - `dream.rs:142-157` với Hebbian weight → **đúng**, nhưng kết quả chỉ cập nhật Observation, không cập nhật Molecule
+
+**Wire points thiếu (đã note trong CLAUDE.md nhưng chưa implement):**
+```
+STM.push()    → Observation.maturity = advance(fire_count, weight, fib_threshold)  ← có nhưng weight=0
+Dream.run()   → DreamResult.matured_nodes = Vec<u64>                               ← có struct, chưa wire
+QR promote    → append-only, signed, permanent                                      ← có nhưng không check maturity
+```
+
+**Hệ quả:**
+- Node có thể promote QR mà chưa Mature (maturity check bị bypass)
+- Dream cluster score không factor in maturity state
+- Molecule struct không biết mình đang ở state nào
+
+**Effort:** Nhỏ-Trung bình | **Impact:** Cao — correctness cho Dream + QR promote
+
+---
+
 ## Thay đổi đề xuất
+
+### Silk Changes
 
 ### Thay đổi 1 — Thêm parent_map vào SilkGraph (Gap #1)
 
@@ -588,9 +692,157 @@ Chỗ nên gọi:
 
 ---
 
+### Node Changes
+
+### Thay đổi 6 — Molecule mang Maturity state (Gap #6 + #8)
+
+**File:** `crates/olang/src/mol/molecular.rs`
+
+Thêm maturity vào Molecule hoặc tạo wrapper:
+
+```rust
+/// Node = Molecule + lifecycle state.
+/// Molecule vẫn là 5 bytes tĩnh, nhưng NodeState track "đã chín chưa".
+pub struct NodeState {
+    pub mol: Molecule,
+    pub maturity: Maturity,
+    pub origin: CompositionOrigin,  // Thay đổi 7
+}
+```
+
+**Hoặc** (lightweight hơn — thêm 1 byte vào tagged wire format):
+```rust
+// Tagged format v0.06: [presence_mask:1B][maturity:1B][non-default values:0-5B]
+// maturity byte: 0x00=Formula, 0x01=Evaluating, 0x02=Mature
+```
+
+**Wire points cần sửa:**
+1. `learning.rs:84` — `advance()` phải nhận Hebbian weight thật, không phải 0.0
+2. `dream.rs` — khi promote, check `maturity == Mature` trước khi tạo QR proposal
+3. `registry.rs` — `insert_with_kind()` ghi maturity state
+
+**Tests:**
+```rust
+#[test]
+fn molecule_maturity_lifecycle() {
+    let mut ns = NodeState::new(encode_codepoint(0x1F525).first().unwrap());
+    assert_eq!(ns.maturity, Maturity::Formula);
+
+    ns.maturity = ns.maturity.advance(3, 0.0, 5); // fire=3, weight=0, fib=5
+    assert_eq!(ns.maturity, Maturity::Evaluating); // fire < fib → evaluating
+
+    ns.maturity = ns.maturity.advance(5, 0.9, 5); // fire=5, weight=0.9, fib=5
+    assert_eq!(ns.maturity, Maturity::Mature); // fire ≥ fib && weight ≥ 0.854
+}
+```
+
+---
+
+### Thay đổi 7 — Lưu nguồn gốc composition (Gap #7)
+
+**File:** `crates/olang/src/mol/molecular.rs`
+
+```rust
+/// Track nguồn gốc composition — "node này sinh ra từ đâu?"
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompositionOrigin {
+    /// L0 node — sinh từ encode_codepoint(), không có parent formula
+    Innate(u32),  // Unicode codepoint
+
+    /// Composite — sinh từ LCA của nhiều sources
+    Composed {
+        sources: Vec<u64>,  // chain_hash của các parent nodes
+        op: ComposeOp,      // LCA / Fuse / Evolve
+    },
+
+    /// Evolved — mutate từ 1 node khác
+    Evolved {
+        source: u64,        // chain_hash gốc
+        dim: u8,            // chiều nào bị mutate (0-4)
+        old_val: u8,
+        new_val: u8,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ComposeOp { Lca, Fuse, Program }
+```
+
+**Wire points:**
+1. `lca.rs` — `lca_weighted()` trả thêm `CompositionOrigin::Composed { sources, op: Lca }`
+2. `molecular.rs` — `evolve()` trả thêm `CompositionOrigin::Evolved { ... }`
+3. `vm.rs` — `Fuse` opcode ghi `CompositionOrigin::Composed { op: Fuse }`
+4. `FormulaTable` — mở rộng entry thành `(Molecule, Option<CompositionOrigin>)`
+
+**Lợi ích:**
+- Trace "Insulin sinh từ protein + signal + regulate"
+- Re-evaluate khi L0 thay đổi (nếu cần)
+- Evolve biết đang mutate phần nào của composition
+- Dream biết 2 nodes có chung source → cluster bonus
+
+**Tests:**
+```rust
+#[test]
+fn composition_origin_lca() {
+    let fire = encode_codepoint(0x1F525);
+    let water = encode_codepoint(0x1F4A7);
+    let (parent, origin) = lca_with_origin(&fire, &water);
+
+    match origin {
+        CompositionOrigin::Composed { sources, op } => {
+            assert_eq!(sources.len(), 2);
+            assert_eq!(op, ComposeOp::Lca);
+        }
+        _ => panic!("Expected Composed"),
+    }
+}
+
+#[test]
+fn composition_origin_evolve() {
+    let fire = encode_codepoint(0x1F525).first().unwrap();
+    let (evolved, origin) = fire.evolve_with_origin(0, 0x01); // Shape → Line
+
+    match origin {
+        CompositionOrigin::Evolved { dim: 0, old_val, new_val: 0x01, .. } => {
+            assert_ne!(old_val, 0x01);
+        }
+        _ => panic!("Expected Evolved"),
+    }
+}
+```
+
+---
+
+### Thay đổi 8 — Fix Maturity advance weight=0 bug (Gap #8)
+
+**File:** `crates/agents/src/pipeline/learning.rs`
+
+```rust
+// ❌ HIỆN TẠI (line 84):
+obs.maturity = obs.maturity.advance(obs.fire_count, 0.0, fib_threshold);
+//                                                  ^^^
+//                                    weight=0.0 → Mature UNREACHABLE
+
+// ✅ SỬA:
+let weight = graph.assoc_weight(hash, hash)
+    .max(self.prev_hash.map_or(0.0, |ph| graph.assoc_weight(ph, hash)));
+obs.maturity = obs.maturity.advance(obs.fire_count, weight, fib_threshold);
+```
+
+**File:** `crates/memory/src/dream.rs` — gate QR promote on maturity:
+```rust
+// Trước khi tạo proposal:
+if best_obs.maturity != Maturity::Mature {
+    continue; // Skip — chưa đủ chín
+}
+```
+
+---
+
 ## Thứ tự thực hiện
 
 ```
+Silk:
 1. Thay đổi 1 — Parent pointer (nền tảng, Gap #1)
    → Không break API hiện tại, chỉ thêm field + methods
    → Seeder cần wire register_parent() khi tạo L1+ nodes
@@ -608,6 +860,19 @@ Chỗ nên gọi:
 
 5. Thay đổi 5 — Wire unified_neighbors (nhỏ, Gap #5)
    → Sau khi #1-#4 ổn định
+
+Node:
+6. Thay đổi 8 — Fix weight=0 bug (nhỏ, Gap #8)
+   → Quick fix — 1 dòng sửa + 1 gate check
+   → Unblock Maturity pipeline
+
+7. Thay đổi 6 — NodeState wrapper (trung bình, Gap #6+#8)
+   → Molecule + Maturity + Origin thành 1 unit
+   → Wire vào Registry, STM, Dream
+
+8. Thay đổi 7 — CompositionOrigin (trung bình-lớn, Gap #7)
+   → Mở rộng LCA, evolve, FormulaTable
+   → Sau khi #6 ổn định — cần NodeState trước
 ```
 
 ---
@@ -641,14 +906,17 @@ Spec này bổ sung cho SPEC_MATURITY_PIPELINE.md:
 
 | SPEC_MATURITY | SPEC_NODE_SILK | Liên quan |
 |---|---|---|
-| #3 Maturity pipeline | Gap #3 Dream 5D | Dream cần cả Maturity + 5D để cluster đúng |
+| #3 Maturity pipeline | Gap #6 + #8 Molecule lifecycle | Maturity phải wire vào Molecule, không tách rời |
 | #4 Dream threshold | Gap #3 Dream 5D | implicit Silk bonus tăng cluster score → giảm cần hạ threshold |
 | #5 Silk parent pointer | Gap #1 Parent map | Cùng vấn đề, spec này chi tiết hơn |
 | — | Gap #2 Compound patterns | Mới — chưa có trong SPEC_MATURITY |
 | — | Gap #4 Layer awareness | Mới — Dream không filter layer |
 | — | Gap #5 unified_neighbors | Mới — method tốt chưa được wire |
+| — | Gap #7 CompositionOrigin | Mới — LCA không track nguồn gốc |
 
-**Khuyến nghị:** Implement Gap #1 (parent pointer) và Gap #3 (Dream 5D) cùng lúc với SPEC_MATURITY Thay đổi 1-2, vì chúng touch cùng files và bổ trợ nhau.
+**Khuyến nghị:**
+- Silk: Implement Gap #1 (parent pointer) và Gap #3 (Dream 5D) cùng lúc với SPEC_MATURITY Thay đổi 1-2
+- Node: Fix Gap #8 (weight=0 bug) TRƯỚC — nhỏ nhất, unblock Maturity pipeline ngay
 
 ---
 
