@@ -2,6 +2,7 @@
 name    = "hal"
 version.workspace = true
 edition.workspace = true
+description = "HAL — Hardware Abstraction Layer, platform probe, capability gate"
 
 [lib]
 path = "src/lib.rs"

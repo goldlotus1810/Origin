@@ -26,6 +26,8 @@ footer { padding: 12px 20px; border-top: 1px solid #1e1e1e; display: flex; gap: 
 #send { background: #1a2e1a; border: 1px solid #2a4a2a; color: #8a8; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }
 #send:hover { background: #2a4a2a; }
 .fx-display { font-size: 11px; color: #444; padding: 4px 20px; }
+.stats-bar { font-size: 10px; color: #555; padding: 2px 20px; display: flex; gap: 16px; }
+.stats-bar span { color: #666; }
 </style>
 </head>
 <body>
@@ -37,6 +39,7 @@ footer { padding: 12px 20px; border-top: 1px solid #1e1e1e; display: flex; gap: 
 <div class="tone-bar"><div class="tone-fill" id="tone-fill" style="width:50%"></div></div>
 <div id="chat"></div>
 <div class="fx-display">f(x) = <span id="fx">0.000</span> · tone: <span id="tone">engaged</span></div>
+<div class="stats-bar">STM: <span id="stm">0</span> · Silk: <span id="silk-edges">0</span> edges · Nodes: <span id="silk-nodes">0</span> · Registry: <span id="reg">0</span></div>
 <footer>
   <input id="input" placeholder="chat thường hoặc ○{lửa ∘ nước} ..." autofocus>
   <button id="send">→</button>
@@ -102,7 +105,14 @@ class HomeOSSimulator {
   }
   get fx() { return this._fx; }
   get turns() { return this._turn; }
+  get stm_len() { return this._history.length; }
+  get silk_edge_count() { return 0; }
+  get silk_node_count() { return 0; }
+  get registry_len() { return 0; }
   tone() { return 'engaged'; }
+  read_book(text) { this._history.push('[book]'); return 1; }
+  dream() { return JSON.stringify({text:'Dream [sim]',tone:'engaged',fx:0,kind:'system',turn:this._turn}); }
+  stats() { return JSON.stringify({text:'Stats [sim]',tone:'engaged',fx:0,kind:'system',turn:this._turn}); }
 }
 
 // ─── App ───────────────────────────────────────────────────────────────
@@ -112,6 +122,10 @@ const fxEl   = document.getElementById('fx');
 const toneEl = document.getElementById('tone');
 const toneFill = document.getElementById('tone-fill');
 const status = document.getElementById('status');
+const stmEl  = document.getElementById('stm');
+const silkEl = document.getElementById('silk-edges');
+const nodesEl = document.getElementById('silk-nodes');
+const regEl  = document.getElementById('reg');
 
 let os = null;
 
@@ -172,9 +186,18 @@ async function send() {
     addMsg(resp.kind === 'crisis' ? 'crisis' : resp.kind, resp.text,
       `turn=${resp.turn} · tone=${resp.tone}`);
     updateFx(resp.fx, resp.tone);
+    updateStats();
   } catch(e) {
     addMsg('system', `Error: ${e.message}`);
   }
+}
+
+function updateStats() {
+  if (!os) return;
+  stmEl.textContent = os.stm_len;
+  silkEl.textContent = os.silk_edge_count;
+  nodesEl.textContent = os.silk_node_count;
+  regEl.textContent = os.registry_len;
 }
 
 document.getElementById('send').onclick = send;

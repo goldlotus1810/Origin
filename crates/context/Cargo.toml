@@ -2,6 +2,7 @@
 name    = "context"
 version.workspace = true
 edition.workspace = true
+description = "Emotion pipeline — EmotionTag V/A/D/I, ConversationCurve, Intent"
 
 [lib]
 path = "src/lib.rs"

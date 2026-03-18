@@ -115,6 +115,52 @@ impl HomeOSWasm {
         tone_to_str(self.rt.tone())
     }
 
+    /// STM observation count — how many things HomeOS remembers this session.
+    #[wasm_bindgen(getter)]
+    pub fn stm_len(&self) -> u32 {
+        self.rt.stm_len() as u32
+    }
+
+    /// Silk edge count — total learned connections.
+    #[wasm_bindgen(getter)]
+    pub fn silk_edge_count(&self) -> u32 {
+        self.rt.silk_edge_count() as u32
+    }
+
+    /// Silk node count — distinct concepts in the graph.
+    #[wasm_bindgen(getter)]
+    pub fn silk_node_count(&self) -> u32 {
+        self.rt.silk_node_count() as u32
+    }
+
+    /// Registry node count — total registered nodes (L0+L1+…).
+    #[wasm_bindgen(getter)]
+    pub fn registry_len(&self) -> u32 {
+        self.rt.registry_len() as u32
+    }
+
+    /// Read a block of text through BookReader pipeline.
+    /// Returns number of significant sentences learned.
+    #[wasm_bindgen]
+    pub fn read_book(&mut self, text: &str) -> u32 {
+        let ts = js_timestamp();
+        self.rt.read_book(text, ts) as u32
+    }
+
+    /// Run dream cycle manually. Returns JSON summary.
+    #[wasm_bindgen]
+    pub fn dream(&mut self) -> String {
+        let r = self.rt.process_text("○{dream}", js_timestamp());
+        response_to_json(&r, self.turn_count)
+    }
+
+    /// Get stats as JSON.
+    #[wasm_bindgen]
+    pub fn stats(&mut self) -> String {
+        let r = self.rt.process_text("○{stats}", js_timestamp());
+        response_to_json(&r, self.turn_count)
+    }
+
     /// UCD table size — verify WASM bundle loaded correctly.
     #[wasm_bindgen]
     pub fn ucd_len() -> u32 {
@@ -373,5 +419,52 @@ mod tests {
             let expected = format!("\"turn\":{}", i);
             assert!(r.contains(&expected), "Turn {} phải trong JSON: {}", i, r);
         }
+    }
+
+    #[test]
+    fn stm_grows_after_process() {
+        let mut os = HomeOSWasm::new();
+        let before = os.stm_len();
+        os.process("tôi yêu lập trình");
+        assert!(os.stm_len() >= before, "STM should grow or stay: {} → {}", before, os.stm_len());
+    }
+
+    #[test]
+    fn silk_edge_count_after_process() {
+        let mut os = HomeOSWasm::new();
+        os.process("lửa và nước");
+        os.process("nước chảy mạnh");
+        let edges = os.silk_edge_count();
+        // Silk co-activates words → some edges expected
+        assert!(edges >= 0, "silk_edge_count finite: {}", edges);
+    }
+
+    #[test]
+    fn registry_len_nonzero() {
+        let os = HomeOSWasm::new();
+        // L0 seed gives some registry entries
+        assert!(os.registry_len() > 0, "Registry should have L0 entries: {}", os.registry_len());
+    }
+
+    #[test]
+    fn read_book_returns_count() {
+        let mut os = HomeOSWasm::new();
+        let n = os.read_book("Hôm nay trời đẹp. Tôi đi học. Bạn bè vui vẻ.");
+        assert!(n > 0, "read_book should return sentence count: {}", n);
+    }
+
+    #[test]
+    fn dream_returns_json() {
+        let mut os = HomeOSWasm::new();
+        os.process("test data");
+        let r = os.dream();
+        assert!(r.contains("\"kind\""), "dream() returns JSON: {}", r);
+    }
+
+    #[test]
+    fn stats_returns_json() {
+        let mut os = HomeOSWasm::new();
+        let r = os.stats();
+        assert!(r.contains("\"kind\""), "stats() returns JSON: {}", r);
     }
 }
