@@ -689,6 +689,11 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
         Expr::BitNot(inner) => {
             validate_expr(inner, scope, errors);
         }
+        Expr::Slice { object, start, end } => {
+            validate_expr(object, scope, errors);
+            if let Some(s) = start { validate_expr(s, scope, errors); }
+            if let Some(e) = end { validate_expr(e, scope, errors); }
+        }
     }
 }
 
@@ -760,6 +765,7 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::FStr { .. } => ChainKind::Unknown,
         Expr::BitShl(..) | Expr::BitShr(..) | Expr::BitAnd(..)
         | Expr::BitXor(..) | Expr::BitNot(..) => ChainKind::Numeric,
+        Expr::Slice { .. } => ChainKind::Unknown,
     }
 }
 
@@ -1911,6 +1917,9 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "None" => Some("__opt_none"),
                 "Ok" => Some("__res_ok"),
                 "Err" => Some("__res_err"),
+                // Phase 5 B11: Set/Deque constructors
+                "Set" => Some("__set_new"),
+                "Deque" => Some("__deque_new"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -2147,6 +2156,22 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             lower_expr(array, ctx);
             lower_expr(index, ctx);
             ctx.emit(Op::Call("__array_get".into()));
+        }
+
+        Expr::Slice { object, start, end } => {
+            // Push object, push start (default 0), push end (default max), call __array_slice
+            lower_expr(object, ctx);
+            if let Some(s) = start {
+                lower_expr(s, ctx);
+            } else {
+                ctx.emit(Op::PushNum(0.0));
+            }
+            if let Some(e) = end {
+                lower_expr(e, ctx);
+            } else {
+                ctx.emit(Op::PushNum(u32::MAX as f64));
+            }
+            ctx.emit(Op::Call("__str_slice".into()));
         }
 
         Expr::Dict(fields) => {
@@ -2462,6 +2487,24 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "unwrap" => Some("__opt_unwrap"),
                 "unwrap_or" => Some("__opt_unwrap_or"),
                 "map_err" => Some("__res_map_err"),
+                "opt_map" => Some("__opt_map"),
+                "res_map" => Some("__res_map"),
+                // Phase 5 A12: Additional iterator methods
+                "zip" => Some("__iter_zip"),
+                "flat_map" => Some("__iter_flat_map"),
+                // Phase 5 B11: Set methods
+                "insert" => Some("__set_insert"),
+                "difference" => Some("__set_difference"),
+                "union" => Some("__set_union"),
+                "intersection" => Some("__set_intersection"),
+                "to_array" => Some("__set_to_array"),
+                // Phase 5 B11: Deque methods
+                "push_back" => Some("__deque_push_back"),
+                "push_front" => Some("__deque_push_front"),
+                "pop_front" => Some("__deque_pop_front"),
+                "pop_back" => Some("__deque_pop_back"),
+                "peek_front" => Some("__deque_peek_front"),
+                "peek_back" => Some("__deque_peek_back"),
                 // Phase 3 B6: Byte operations
                 "to_bytes" => Some("__to_bytes"),
                 "from_bytes" => Some("__from_bytes"),

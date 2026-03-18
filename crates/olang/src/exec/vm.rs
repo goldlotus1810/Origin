@@ -2299,6 +2299,446 @@ impl OlangVM {
                                 let _ = stack.push(iter_a);
                             }
                         }
+                        // ── Phase 5 A12: Additional iterator methods ──────
+                        "__iter_zip" => {
+                            // Stack: [iter_a, iter_b] → array of [a_i, b_i] pairs
+                            let iter_b = vm_pop!(stack, events);
+                            let iter_a = vm_pop!(stack, events);
+                            let elems_a = {
+                                let parts = split_iter_chain(&iter_a);
+                                if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
+                                    split_array_chain(&parts[1])
+                                } else { split_array_chain(&iter_a) }
+                            };
+                            let elems_b = {
+                                let parts = split_iter_chain(&iter_b);
+                                if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
+                                    split_array_chain(&parts[1])
+                                } else { split_array_chain(&iter_b) }
+                            };
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            let len = elems_a.len().min(elems_b.len());
+                            for i in 0..len {
+                                if i > 0 { result.0.push(sep); }
+                                // Each pair is a 2-element sub-array: [a_i, b_i]
+                                result.0.extend(elems_a[i].0.iter().copied());
+                                result.0.push(sep);
+                                result.0.extend(elems_b[i].0.iter().copied());
+                            }
+                            let tag = string_to_chain("__ITER__");
+                            let isep = iter_sep();
+                            let mut iter_result = MolecularChain(Vec::new());
+                            iter_result.0.extend(tag.0.iter().copied());
+                            iter_result.0.push(isep);
+                            iter_result.0.extend(result.0.iter().copied());
+                            let _ = stack.push(iter_result);
+                        }
+                        "__iter_flat_map" => {
+                            // Stack: [iter_or_array, closure] → flatten mapped results
+                            let closure_marker = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = {
+                                let parts = split_iter_chain(&arr);
+                                if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
+                                    split_array_chain(&parts[1])
+                                } else { split_array_chain(&arr) }
+                            };
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            let mut count = 0usize;
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for elem in &elements {
+                                        let mapped = call_closure_inline(
+                                            prog, body_pc, core::slice::from_ref(elem),
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                        // Flatten: split mapped result and add each sub-element
+                                        let sub_elems = split_array_chain(&mapped);
+                                        for sub in &sub_elems {
+                                            if count > 0 { result.0.push(sep); }
+                                            result.0.extend(sub.0.iter().cloned());
+                                            count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            let _ = stack.push(result);
+                        }
+                        // ── Phase 5 B11: Set builtins ────────────────────────
+                        "__set_new" => {
+                            // Create empty set: tagged chain "__SET__" + separator + elements
+                            let tag = string_to_chain("__SET__");
+                            let _ = stack.push(tag);
+                        }
+                        "__set_insert" => {
+                            // Stack: [set, value]
+                            let value = vm_pop!(stack, events);
+                            let set = vm_pop!(stack, events);
+                            let isep = iter_sep();
+                            let set_str = chain_to_string(&set).unwrap_or_default();
+                            if set_str == "__SET__" || set_str.starts_with("__SET__") {
+                                // Parse existing elements
+                                let parts = split_iter_chain(&set);
+                                let mut elements: Vec<MolecularChain> = Vec::new();
+                                if parts.len() >= 2 {
+                                    elements = split_array_chain(&parts[1]);
+                                }
+                                // Check uniqueness
+                                let exists = elements.iter().any(|e| e.0 == value.0);
+                                if !exists {
+                                    elements.push(value);
+                                }
+                                // Rebuild set
+                                let tag = string_to_chain("__SET__");
+                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let mut result = MolecularChain(Vec::new());
+                                result.0.extend(tag.0.iter().copied());
+                                result.0.push(isep);
+                                for (i, e) in elements.iter().enumerate() {
+                                    if i > 0 { result.0.push(sep); }
+                                    result.0.extend(e.0.iter().copied());
+                                }
+                                let _ = stack.push(result);
+                            } else {
+                                let _ = stack.push(set);
+                            }
+                        }
+                        "__set_contains" => {
+                            // Stack: [set, value] → 1.0 or 0.0
+                            let value = vm_pop!(stack, events);
+                            let set = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&set);
+                            let found = if parts.len() >= 2 {
+                                let elements = split_array_chain(&parts[1]);
+                                elements.iter().any(|e| e.0 == value.0)
+                            } else { false };
+                            let _ = stack.push(MolecularChain::from_number(if found { 1.0 } else { 0.0 }));
+                        }
+                        "__set_remove" => {
+                            // Stack: [set, value] → new set without value
+                            let value = vm_pop!(stack, events);
+                            let set = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&set);
+                            if parts.len() >= 2 {
+                                let elements = split_array_chain(&parts[1]);
+                                let filtered: Vec<_> = elements.into_iter().filter(|e| e.0 != value.0).collect();
+                                let tag = string_to_chain("__SET__");
+                                let isep = iter_sep();
+                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let mut result = MolecularChain(Vec::new());
+                                result.0.extend(tag.0.iter().copied());
+                                result.0.push(isep);
+                                for (i, e) in filtered.iter().enumerate() {
+                                    if i > 0 { result.0.push(sep); }
+                                    result.0.extend(e.0.iter().copied());
+                                }
+                                let _ = stack.push(result);
+                            } else {
+                                let _ = stack.push(set);
+                            }
+                        }
+                        "__set_len" => {
+                            let set = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&set);
+                            let len = if parts.len() >= 2 {
+                                let elements = split_array_chain(&parts[1]);
+                                elements.len()
+                            } else { 0 };
+                            let _ = stack.push(MolecularChain::from_number(len as f64));
+                        }
+                        "__set_union" => {
+                            // Stack: [set_a, set_b] → union
+                            let set_b = vm_pop!(stack, events);
+                            let set_a = vm_pop!(stack, events);
+                            let parts_a = split_iter_chain(&set_a);
+                            let parts_b = split_iter_chain(&set_b);
+                            let elems_a = if parts_a.len() >= 2 { split_array_chain(&parts_a[1]) } else { Vec::new() };
+                            let elems_b = if parts_b.len() >= 2 { split_array_chain(&parts_b[1]) } else { Vec::new() };
+                            let mut union_elems = elems_a;
+                            for e in elems_b {
+                                if !union_elems.iter().any(|x| x.0 == e.0) {
+                                    union_elems.push(e);
+                                }
+                            }
+                            let tag = string_to_chain("__SET__");
+                            let isep = iter_sep();
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(isep);
+                            for (i, e) in union_elems.iter().enumerate() {
+                                if i > 0 { result.0.push(sep); }
+                                result.0.extend(e.0.iter().copied());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__set_intersection" => {
+                            let set_b = vm_pop!(stack, events);
+                            let set_a = vm_pop!(stack, events);
+                            let parts_a = split_iter_chain(&set_a);
+                            let parts_b = split_iter_chain(&set_b);
+                            let elems_a = if parts_a.len() >= 2 { split_array_chain(&parts_a[1]) } else { Vec::new() };
+                            let elems_b = if parts_b.len() >= 2 { split_array_chain(&parts_b[1]) } else { Vec::new() };
+                            let inter: Vec<_> = elems_a.into_iter().filter(|a| elems_b.iter().any(|b| b.0 == a.0)).collect();
+                            let tag = string_to_chain("__SET__");
+                            let isep = iter_sep();
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(isep);
+                            for (i, e) in inter.iter().enumerate() {
+                                if i > 0 { result.0.push(sep); }
+                                result.0.extend(e.0.iter().copied());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__set_difference" => {
+                            let set_b = vm_pop!(stack, events);
+                            let set_a = vm_pop!(stack, events);
+                            let parts_a = split_iter_chain(&set_a);
+                            let parts_b = split_iter_chain(&set_b);
+                            let elems_a = if parts_a.len() >= 2 { split_array_chain(&parts_a[1]) } else { Vec::new() };
+                            let elems_b = if parts_b.len() >= 2 { split_array_chain(&parts_b[1]) } else { Vec::new() };
+                            let diff: Vec<_> = elems_a.into_iter().filter(|a| !elems_b.iter().any(|b| b.0 == a.0)).collect();
+                            let tag = string_to_chain("__SET__");
+                            let isep = iter_sep();
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(isep);
+                            for (i, e) in diff.iter().enumerate() {
+                                if i > 0 { result.0.push(sep); }
+                                result.0.extend(e.0.iter().copied());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__set_to_array" => {
+                            let set = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&set);
+                            if parts.len() >= 2 {
+                                let _ = stack.push(parts[1].clone());
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        // ── Phase 5 B11: Deque builtins ──────────────────────
+                        "__deque_new" => {
+                            let tag = string_to_chain("__DEQUE__");
+                            let _ = stack.push(tag);
+                        }
+                        "__deque_push_back" => {
+                            // Stack: [deque, value]
+                            let value = vm_pop!(stack, events);
+                            let deque = vm_pop!(stack, events);
+                            let isep = iter_sep();
+                            let parts = split_iter_chain(&deque);
+                            let mut elements: Vec<MolecularChain> = if parts.len() >= 2 {
+                                split_array_chain(&parts[1])
+                            } else { Vec::new() };
+                            elements.push(value);
+                            let tag = string_to_chain("__DEQUE__");
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(isep);
+                            for (i, e) in elements.iter().enumerate() {
+                                if i > 0 { result.0.push(sep); }
+                                result.0.extend(e.0.iter().copied());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__deque_push_front" => {
+                            let value = vm_pop!(stack, events);
+                            let deque = vm_pop!(stack, events);
+                            let isep = iter_sep();
+                            let parts = split_iter_chain(&deque);
+                            let mut elements: Vec<MolecularChain> = if parts.len() >= 2 {
+                                split_array_chain(&parts[1])
+                            } else { Vec::new() };
+                            elements.insert(0, value);
+                            let tag = string_to_chain("__DEQUE__");
+                            let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            result.0.push(isep);
+                            for (i, e) in elements.iter().enumerate() {
+                                if i > 0 { result.0.push(sep); }
+                                result.0.extend(e.0.iter().copied());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__deque_pop_front" => {
+                            let deque = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&deque);
+                            if parts.len() >= 2 {
+                                let mut elements = split_array_chain(&parts[1]);
+                                if elements.is_empty() {
+                                    let _ = stack.push(string_to_chain("Option::None"));
+                                } else {
+                                    let front = elements.remove(0);
+                                    // Push updated deque back, then the popped value
+                                    let tag = string_to_chain("__DEQUE__");
+                                    let isep = iter_sep();
+                                    let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                    let mut result = MolecularChain(Vec::new());
+                                    result.0.extend(tag.0.iter().copied());
+                                    result.0.push(isep);
+                                    for (i, e) in elements.iter().enumerate() {
+                                        if i > 0 { result.0.push(sep); }
+                                        result.0.extend(e.0.iter().copied());
+                                    }
+                                    let _ = stack.push(result); // updated deque (caller must re-assign)
+                                    let _ = stack.push(front);  // popped value on top
+                                }
+                            } else {
+                                let _ = stack.push(string_to_chain("Option::None"));
+                            }
+                        }
+                        "__deque_pop_back" => {
+                            let deque = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&deque);
+                            if parts.len() >= 2 {
+                                let mut elements = split_array_chain(&parts[1]);
+                                if elements.is_empty() {
+                                    let _ = stack.push(string_to_chain("Option::None"));
+                                } else {
+                                    let back = elements.pop().unwrap();
+                                    let tag = string_to_chain("__DEQUE__");
+                                    let isep = iter_sep();
+                                    let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                    let mut result = MolecularChain(Vec::new());
+                                    result.0.extend(tag.0.iter().copied());
+                                    result.0.push(isep);
+                                    for (i, e) in elements.iter().enumerate() {
+                                        if i > 0 { result.0.push(sep); }
+                                        result.0.extend(e.0.iter().copied());
+                                    }
+                                    let _ = stack.push(result);
+                                    let _ = stack.push(back);
+                                }
+                            } else {
+                                let _ = stack.push(string_to_chain("Option::None"));
+                            }
+                        }
+                        "__deque_len" => {
+                            let deque = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&deque);
+                            let len = if parts.len() >= 2 { split_array_chain(&parts[1]).len() } else { 0 };
+                            let _ = stack.push(MolecularChain::from_number(len as f64));
+                        }
+                        "__deque_peek_front" => {
+                            let deque = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&deque);
+                            if parts.len() >= 2 {
+                                let elements = split_array_chain(&parts[1]);
+                                if let Some(front) = elements.first() {
+                                    let _ = stack.push(front.clone());
+                                } else {
+                                    let _ = stack.push(string_to_chain("Option::None"));
+                                }
+                            } else {
+                                let _ = stack.push(string_to_chain("Option::None"));
+                            }
+                        }
+                        "__deque_peek_back" => {
+                            let deque = vm_pop!(stack, events);
+                            let parts = split_iter_chain(&deque);
+                            if parts.len() >= 2 {
+                                let elements = split_array_chain(&parts[1]);
+                                if let Some(back) = elements.last() {
+                                    let _ = stack.push(back.clone());
+                                } else {
+                                    let _ = stack.push(string_to_chain("Option::None"));
+                                }
+                            } else {
+                                let _ = stack.push(string_to_chain("Option::None"));
+                            }
+                        }
+                        // ── Phase 5 B12: String slice ────────────────────────
+                        "__str_slice" => {
+                            // Stack: [string_or_array, start, end]
+                            // Works for both strings and arrays
+                            let end_chain = vm_pop!(stack, events);
+                            let start_chain = vm_pop!(stack, events);
+                            let val = vm_pop!(stack, events);
+                            let start = start_chain.to_number().unwrap_or(0.0) as usize;
+                            let end = end_chain.to_number().unwrap_or(u32::MAX as f64) as usize;
+                            // Try as string first
+                            if let Some(s) = chain_to_string(&val) {
+                                let chars: Vec<char> = s.chars().collect();
+                                let actual_end = end.min(chars.len());
+                                let actual_start = start.min(actual_end);
+                                let sliced: String = chars[actual_start..actual_end].iter().collect();
+                                let _ = stack.push(string_to_chain(&sliced));
+                            } else {
+                                // Array slice
+                                let elements = split_array_chain(&val);
+                                let actual_end = end.min(elements.len());
+                                let actual_start = start.min(actual_end);
+                                let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                let mut result = MolecularChain(Vec::new());
+                                for (j, elem) in elements[actual_start..actual_end].iter().enumerate() {
+                                    if j > 0 { result.0.push(sep); }
+                                    result.0.extend(elem.0.iter().cloned());
+                                }
+                                let _ = stack.push(result);
+                            }
+                        }
+                        // ── Phase 5 A11: Option/Result .map() ────────────────
+                        "__opt_map" => {
+                            // Stack: [option_value, closure]
+                            let closure_marker = vm_pop!(stack, events);
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
+                            if tag.ends_with("::None") || tag == "None" || val.is_empty() {
+                                let _ = stack.push(string_to_chain("Option::None"));
+                            } else {
+                                let payload = if parts.len() >= 2 { parts[1].clone() } else { val.clone() };
+                                if let Some(mol) = closure_marker.first() {
+                                    if mol.shape == 0xFF {
+                                        let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
+                                        let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
+                                        let some_tag = string_to_chain("Option::Some");
+                                        let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                        let mut result = MolecularChain(Vec::new());
+                                        result.0.extend(some_tag.0.iter().cloned());
+                                        result.0.push(sep);
+                                        result.0.extend(mapped.0.iter().cloned());
+                                        let _ = stack.push(result);
+                                    } else { let _ = stack.push(val); }
+                                } else { let _ = stack.push(val); }
+                            }
+                        }
+                        "__res_map" => {
+                            // Stack: [result_value, closure]
+                            let closure_marker = vm_pop!(stack, events);
+                            let val = vm_pop!(stack, events);
+                            let parts = split_array_chain(&val);
+                            let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { String::new() };
+                            if tag.ends_with("::Ok") || tag == "Ok" {
+                                let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
+                                if let Some(mol) = closure_marker.first() {
+                                    if mol.shape == 0xFF {
+                                        let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
+                                        let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
+                                        let ok_tag = string_to_chain("Result::Ok");
+                                        let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                        let mut result = MolecularChain(Vec::new());
+                                        result.0.extend(ok_tag.0.iter().cloned());
+                                        result.0.push(sep);
+                                        result.0.extend(mapped.0.iter().cloned());
+                                        let _ = stack.push(result);
+                                    } else { let _ = stack.push(val); }
+                                } else { let _ = stack.push(val); }
+                            } else {
+                                let _ = stack.push(val); // Err passthrough
+                            }
+                        }
                         // ── Phase 5 A10: ? error propagation ──────────────
                         "__try_unwrap" => {
                             // Stack: [enum_value]
@@ -2437,20 +2877,26 @@ impl OlangVM {
                         }
                         "__res_map_err" => {
                             // Stack: [result_value, closure]
-                            // If Err → apply closure to error payload; if Ok → passthrough
-                            let closure = vm_pop!(stack, events);
+                            // If Err → apply closure to error payload, re-wrap as Err; if Ok → passthrough
+                            let closure_marker = vm_pop!(stack, events);
                             let val = vm_pop!(stack, events);
                             let parts = split_array_chain(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { String::new() };
                             if tag.ends_with("::Err") || tag == "Err" {
-                                // Apply closure to error payload
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
-                                let _ = stack.push(payload);
-                                let _ = stack.push(closure);
-                                // Let CallClosure handle it — push mapped result back as Err
-                                // For simplicity: just push Err(payload) — closure application needs VM loop
-                                // TODO: full closure application requires recursive VM call
-                                let _ = stack.push(val); // passthrough for now
+                                if let Some(mol) = closure_marker.first() {
+                                    if mol.shape == 0xFF {
+                                        let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
+                                        let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
+                                        let err_tag = string_to_chain("Result::Err");
+                                        let sep = Molecule { shape: 0, relation: 0, emotion: EmotionDim { valence: 0, arousal: 0 }, time: 0 };
+                                        let mut result = MolecularChain(Vec::new());
+                                        result.0.extend(err_tag.0.iter().cloned());
+                                        result.0.push(sep);
+                                        result.0.extend(mapped.0.iter().cloned());
+                                        let _ = stack.push(result);
+                                    } else { let _ = stack.push(val); }
+                                } else { let _ = stack.push(val); }
                             } else {
                                 let _ = stack.push(val); // Ok passthrough
                             }

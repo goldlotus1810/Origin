@@ -406,6 +406,9 @@ pub enum Expr {
     /// `expr?` — try propagation: unwrap Ok/Some, early return Err/None
     TryPropagate(Box<Expr>),
 
+    /// Slice: `arr[start..end]`, `arr[start..]`, `arr[..end]`
+    Slice { object: Box<Expr>, start: Option<Box<Expr>>, end: Option<Box<Expr>> },
+
     /// Tuple literal: `(a, b, c)` — used for multiple return values
     Tuple(Vec<Expr>),
 
@@ -1549,14 +1552,46 @@ impl<'a> Parser<'a> {
                     self.expect(&Token::RParen)?;
                     Expr::Call { name, args }
                 }
-                // Check for array indexing: name[idx]
+                // Check for array indexing or slice: name[idx] or name[start..end]
                 else if self.check(&Token::LBracket) {
                     self.advance();
-                    let index = self.parse_expr()?;
-                    self.expect(&Token::RBracket)?;
-                    Expr::Index {
-                        array: Box::new(Expr::Ident(name)),
-                        index: Box::new(index),
+                    // Check for [..end] (start omitted)
+                    if self.check(&Token::DotDot) {
+                        self.advance();
+                        let end = if self.check(&Token::RBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expr()?))
+                        };
+                        self.expect(&Token::RBracket)?;
+                        Expr::Slice {
+                            object: Box::new(Expr::Ident(name)),
+                            start: None,
+                            end,
+                        }
+                    } else {
+                        let first = self.parse_expr()?;
+                        // Check for [start..end] or [start..]
+                        if self.check(&Token::DotDot) {
+                            self.advance();
+                            let end = if self.check(&Token::RBracket) {
+                                None
+                            } else {
+                                Some(Box::new(self.parse_expr()?))
+                            };
+                            self.expect(&Token::RBracket)?;
+                            Expr::Slice {
+                                object: Box::new(Expr::Ident(name)),
+                                start: Some(Box::new(first)),
+                                end,
+                            }
+                        } else {
+                            self.expect(&Token::RBracket)?;
+                            Expr::Index {
+                                array: Box::new(Expr::Ident(name)),
+                                index: Box::new(first),
+                            }
+                        }
                     }
                 } else {
                     Expr::Ident(name)
