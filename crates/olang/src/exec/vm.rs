@@ -339,7 +339,9 @@ pub fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     }
     let mut result = Vec::new();
     let mut current = Vec::new();
-    for mol in &chain.0 {
+    // Skip the 0xFD tag molecule used by __array_push to track element count
+    let start = if !chain.0.is_empty() && chain.0[0].shape == 0xFD { 1 } else { 0 };
+    for mol in &chain.0[start..] {
         if mol.shape == 0 && mol.relation == 0
             && mol.emotion.valence == 0 && mol.emotion.arousal == 0
             && mol.time == 0
@@ -484,15 +486,41 @@ fn call_closure_inline(
                     "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                         let b = local_stack.pop().unwrap_or_default();
                         let a = local_stack.pop().unwrap_or_default();
-                        let fa = a.to_number().unwrap_or(0.0);
-                        let fb = b.to_number().unwrap_or(0.0);
-                        let result = match fname.as_str() {
-                            "__cmp_lt" => fa < fb,
-                            "__cmp_gt" => fa > fb,
-                            "__cmp_le" => fa <= fb,
-                            "__cmp_ge" => fa >= fb,
-                            "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
-                            _ => false,
+                        let result = if let (Some(sa), Some(sb)) =
+                            (chain_to_string(&a), chain_to_string(&b))
+                        {
+                            if a.to_number().is_none() || b.to_number().is_none() {
+                                match fname.as_str() {
+                                    "__cmp_lt" => sa < sb,
+                                    "__cmp_gt" => sa > sb,
+                                    "__cmp_le" => sa <= sb,
+                                    "__cmp_ge" => sa >= sb,
+                                    "__cmp_ne" => sa != sb,
+                                    _ => false,
+                                }
+                            } else {
+                                let fa = a.to_number().unwrap_or(0.0);
+                                let fb = b.to_number().unwrap_or(0.0);
+                                match fname.as_str() {
+                                    "__cmp_lt" => fa < fb,
+                                    "__cmp_gt" => fa > fb,
+                                    "__cmp_le" => fa <= fb,
+                                    "__cmp_ge" => fa >= fb,
+                                    "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                    _ => false,
+                                }
+                            }
+                        } else {
+                            let fa = a.to_number().unwrap_or(0.0);
+                            let fb = b.to_number().unwrap_or(0.0);
+                            match fname.as_str() {
+                                "__cmp_lt" => fa < fb,
+                                "__cmp_gt" => fa > fb,
+                                "__cmp_le" => fa <= fb,
+                                "__cmp_ge" => fa >= fb,
+                                "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                _ => false,
+                            }
                         };
                         let _ = local_stack.push(if result {
                             MolecularChain::from_number(1.0)
@@ -758,15 +786,44 @@ impl OlangVM {
                         "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
-                            let na = a.to_number().unwrap_or(0.0);
-                            let nb = b.to_number().unwrap_or(0.0);
-                            let truthy = match name.as_str() {
-                                "__cmp_lt" => na < nb,
-                                "__cmp_gt" => na > nb,
-                                "__cmp_le" => na <= nb,
-                                "__cmp_ge" => na >= nb,
-                                "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
-                                _ => false,
+                            // Try string comparison first (both must be string chains)
+                            let truthy = if let (Some(sa), Some(sb)) =
+                                (chain_to_string(&a), chain_to_string(&b))
+                            {
+                                // Both are strings AND at least one is non-numeric
+                                // (avoid treating "42" as string when comparing numbers)
+                                if a.to_number().is_none() || b.to_number().is_none() {
+                                    match name.as_str() {
+                                        "__cmp_lt" => sa < sb,
+                                        "__cmp_gt" => sa > sb,
+                                        "__cmp_le" => sa <= sb,
+                                        "__cmp_ge" => sa >= sb,
+                                        "__cmp_ne" => sa != sb,
+                                        _ => false,
+                                    }
+                                } else {
+                                    let na = a.to_number().unwrap_or(0.0);
+                                    let nb = b.to_number().unwrap_or(0.0);
+                                    match name.as_str() {
+                                        "__cmp_lt" => na < nb,
+                                        "__cmp_gt" => na > nb,
+                                        "__cmp_le" => na <= nb,
+                                        "__cmp_ge" => na >= nb,
+                                        "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
+                                        _ => false,
+                                    }
+                                }
+                            } else {
+                                let na = a.to_number().unwrap_or(0.0);
+                                let nb = b.to_number().unwrap_or(0.0);
+                                match name.as_str() {
+                                    "__cmp_lt" => na < nb,
+                                    "__cmp_gt" => na > nb,
+                                    "__cmp_le" => na <= nb,
+                                    "__cmp_ge" => na >= nb,
+                                    "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
+                                    _ => false,
+                                }
                             };
                             // true → non-empty chain (1.0), false → empty chain
                             // Jz checks is_empty() so empty = falsy
@@ -987,6 +1044,16 @@ impl OlangVM {
                             let arr = vm_pop!(stack, events);
                             if arr.is_empty() {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
+                            } else if !arr.0.is_empty() && arr.0[0].shape == 0xFD {
+                                // Tagged array (from push): count is stored in tag molecule
+                                let count = arr.0[0].emotion.valence as f64;
+                                let _ = stack.push(MolecularChain::from_number(count));
+                            } else if !arr.0.is_empty()
+                                && arr.0[0].shape == 0x02 && arr.0[0].relation == 0x01
+                                && arr.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01)
+                            {
+                                // Pure string chain: length = number of characters
+                                let _ = stack.push(MolecularChain::from_number(arr.0.len() as f64));
                             } else {
                                 let count = split_array_chain(&arr).len();
                                 let _ = stack.push(MolecularChain::from_number(count as f64));
@@ -1024,7 +1091,16 @@ impl OlangVM {
                             let elem = vm_pop!(stack, events);
                             let mut arr = vm_pop!(stack, events);
                             let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            if !arr.is_empty() {
+                            // Track element count via prefix tag (shape=0xFD)
+                            if arr.is_empty() {
+                                // First element: add array tag with count=1
+                                arr.0.push(Molecule::raw(0xFD, 0, 1, 0, 0));
+                            } else if !arr.0.is_empty() && arr.0[0].shape == 0xFD {
+                                // Increment count in existing tag
+                                arr.0[0].emotion.valence = arr.0[0].emotion.valence.saturating_add(1);
+                                arr.0.push(sep);
+                            } else {
+                                // Legacy array without tag — just append
                                 arr.0.push(sep);
                             }
                             arr.0.extend(elem.0.iter().cloned());
@@ -1446,17 +1522,16 @@ impl OlangVM {
                             let _ = stack.push(MolecularChain(mols));
                         }
                         "__str_substr" => {
-                            // Stack: [string, start, length]
-                            let len_chain = vm_pop!(stack, events);
+                            // Stack: [string, start, end]
+                            // substr(s, start, end) → s[start..end]
+                            let end_chain = vm_pop!(stack, events);
                             let start_chain = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
                             let start = start_chain.to_number().unwrap_or(0.0) as usize;
-                            let len = len_chain.to_number().unwrap_or(0.0) as usize;
-                            let mols: Vec<Molecule> = s.0.iter()
-                                .skip(start)
-                                .take(len)
-                                .copied()
-                                .collect();
+                            let end = end_chain.to_number().unwrap_or(0.0) as usize;
+                            let end = end.min(s.0.len());
+                            let start = start.min(end);
+                            let mols: Vec<Molecule> = s.0[start..end].to_vec();
                             let _ = stack.push(MolecularChain(mols));
                         }
                         // ── Math builtins ──────────────────────────────────
@@ -3852,15 +3927,41 @@ impl OlangVM {
                                             "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                                                 let b = vm_pop!(stack, events);
                                                 let a = vm_pop!(stack, events);
-                                                let fa = a.to_number().unwrap_or(0.0);
-                                                let fb = b.to_number().unwrap_or(0.0);
-                                                let result = match fname.as_str() {
-                                                    "__cmp_lt" => fa < fb,
-                                                    "__cmp_gt" => fa > fb,
-                                                    "__cmp_le" => fa <= fb,
-                                                    "__cmp_ge" => fa >= fb,
-                                                    "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
-                                                    _ => false,
+                                                let result = if let (Some(sa), Some(sb)) =
+                                                    (chain_to_string(&a), chain_to_string(&b))
+                                                {
+                                                    if a.to_number().is_none() || b.to_number().is_none() {
+                                                        match fname.as_str() {
+                                                            "__cmp_lt" => sa < sb,
+                                                            "__cmp_gt" => sa > sb,
+                                                            "__cmp_le" => sa <= sb,
+                                                            "__cmp_ge" => sa >= sb,
+                                                            "__cmp_ne" => sa != sb,
+                                                            _ => false,
+                                                        }
+                                                    } else {
+                                                        let fa = a.to_number().unwrap_or(0.0);
+                                                        let fb = b.to_number().unwrap_or(0.0);
+                                                        match fname.as_str() {
+                                                            "__cmp_lt" => fa < fb,
+                                                            "__cmp_gt" => fa > fb,
+                                                            "__cmp_le" => fa <= fb,
+                                                            "__cmp_ge" => fa >= fb,
+                                                            "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                                            _ => false,
+                                                        }
+                                                    }
+                                                } else {
+                                                    let fa = a.to_number().unwrap_or(0.0);
+                                                    let fb = b.to_number().unwrap_or(0.0);
+                                                    match fname.as_str() {
+                                                        "__cmp_lt" => fa < fb,
+                                                        "__cmp_gt" => fa > fb,
+                                                        "__cmp_le" => fa <= fb,
+                                                        "__cmp_ge" => fa >= fb,
+                                                        "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                                        _ => false,
+                                                    }
                                                 };
                                                 let _ = stack.push(if result {
                                                     MolecularChain::from_number(1.0)
