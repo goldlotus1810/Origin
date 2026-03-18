@@ -29,6 +29,29 @@ EMOTICON    ~1760    Valence+A    "Cảm thế nào" (0x00..0xFF × 2)
 MUSICAL     ~416     Time         "Thay đổi thế nào" (Static → Instant)
 ```
 
+### Node = Molecule + Maturity + Origin
+
+```
+NodeState {
+    mol: Molecule,               // 5D coordinate (5 bytes)
+    maturity: Maturity,          // Formula → Evaluating → Mature
+    origin: CompositionOrigin,   // Innate | Composed | Evolved
+}
+```
+
+### Silk = hệ quả tự nhiên của 5D
+
+```
+3 tầng ngang (implicit, 0 bytes):
+  Base:     37 kênh (8S+8R+8V+8A+5T)     → SilkIndex
+  Compound: 31 mẫu C(5,k) k=1..5         → CompoundKind enum
+  Precise:  ~5400 kênh (= L0 nodes)       → SPEC
+
+Silk dọc (parent pointer, 43KB):
+  parent_map: BTreeMap<u64, u64>           → 5460 child→parent pointers
+  register_parent() · parent_of() · children_of() · layer_of()
+```
+
 ---
 
 ## Cấu Trúc
@@ -36,13 +59,13 @@ MUSICAL     ~416     Time         "Thay đổi thế nào" (Static → Instant)
 ```
 crates/
 ├── ucd/         Unicode → Molecule lookup (5424 entries)         23 tests
-├── olang/       Core: Molecule · LCA · Registry · VM · Compact  838 tests
-├── silk/        Hebbian learning · EmotionTag edges · Walk        88 tests
+├── olang/       Core: Molecule · LCA · Registry · VM · Compact 1088 tests
+├── silk/        Hebbian learning · Silk 3-layer · parent_map       85 tests
 ├── context/     Emotion V/A/D/I · ConversationCurve · Intent    168 tests
-├── agents/      Encoder · Learning · Gate · Instinct · Leo      282 tests
-├── memory/      STM · DreamCycle · Proposals · AAM               65 tests
+├── agents/      Encoder · Learning · Gate · Instinct · Leo      284 tests
+├── memory/      STM · DreamCycle · Proposals · AAM               32 tests
 ├── runtime/     HomeRuntime · ○{} Parser · Router               273 tests
-├── hal/         Hardware Abstraction · Tier · FFI · Security     85 tests
+├── hal/         Hardware Abstraction · Tier · FFI · Security     68 tests
 ├── isl/         Inter-System Link (AES-256-GCM)                  31 tests
 ├── vsdf/        18 SDF · FFR Fibonacci · Physics · Scene        123 tests
 ├── wasm/        WebAssembly · WebSocket-ISL bridge               32 tests
@@ -55,7 +78,7 @@ tools/
 └── bench/       Performance benchmarks
 ```
 
-**~82,000 lines Rust · 2,063 tests · 0 clippy warnings · 0 external deps · no_std core**
+**~82,000 lines Rust · 2,348 tests · 0 clippy warnings · 0 external deps · no_std core**
 
 ---
 
@@ -65,7 +88,7 @@ tools/
 # Build
 cargo build --workspace
 
-# Test (2,063 tests)
+# Test (2,348 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
@@ -139,4 +162,4 @@ Chi tiết: xem [CLAUDE.md](CLAUDE.md).
 
 ---
 
-*Unicode 18.0 · Rust · no_std core · ~82K LoC · 2,063 tests · 0 external deps · 2026*
+*Unicode 18.0 · Rust · no_std core · ~82K LoC · 2,348 tests · 0 external deps · 2026*
