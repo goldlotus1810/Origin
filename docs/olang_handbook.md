@@ -829,16 +829,42 @@ pub struct Config { ... }          // Struct cong khai
 
 ## 13. Molecular — Linh hon Olang
 
-### Molecule = 5 bytes = 1 diem 5D
+### Molecule = 5 CONG THUC, khong phai 5 gia tri
 
 ```
-Molecule [Shape][Relation][Valence][Arousal][Time]
+Molecule KHONG luu gia tri tinh. Molecule luu CONG THUC.
 
-  Shape    = "Trong nhu the nao"   (8 primitives: Sphere, Capsule, Box, Cone, Torus, Union, Intersect, Subtract)
-  Relation = "Lien ket the nao"    (8 bases: Member, Subset, Equiv, Ortho, Compose, Causes, Similar, Derived)
-  Valence  = "Cam xuc tich cuc/tieu cuc"  (0x00=tieu cuc, 0x80=trung tinh, 0xFF=tich cuc)
-  Arousal  = "Cuong do cam xuc"    (0x00=binh tinh, 0xFF=kich dong)
-  Time     = "Thay doi the nao"    (Static, Slow, Medium, Fast, Instant)
+Moi chieu = (index: f(x)) = tham chieu den 1 cong thuc goc L0:
+
+  Shape    = (index: f_s(inputs...))   ← cong thuc hinh dang
+  Relation = (index: f_r(inputs...))   ← cong thuc quan he
+  Valence  = (index: f_v(inputs...))   ← cong thuc cam xuc
+  Arousal  = (index: f_a(inputs...))   ← cong thuc cuong do
+  Time     = (index: f_t(inputs...))   ← cong thuc thoi gian
+
+Vong doi cong thuc:
+  Chua co input  → TIEM NANG   (cong thuc chua evaluate)
+  Co input       → GIA TRI     (the vao cong thuc → gia tri cu the)
+  Du gia tri     → CHIN        (thay cong thuc bang hang so → promote QR)
+
+5400 L0 node = 5400 CONG THUC GOC = 5400 KENH SILK
+Moi concept = TO HOP cac cong thuc L0:
+  "Insulin" = compose(f_protein, f_signal, f_regulate)
+            = [ref_L0_1] [ref_L0_2] [ref_L0_3] [op]
+            = CONG THUC, khong phai gia tri
+```
+
+### 5 chieu — 8 ho co ban moi chieu
+
+```
+Shape    (8 primitives):  Sphere, Capsule, Box, Cone, Torus, Union, Intersect, Subtract
+Relation (8 bases):       Member, Subset, Equiv, Ortho, Compose, Causes, Similar, Derived
+Valence  (0x00..0xFF):    0x00=tieu cuc, 0x80=trung tinh, 0xFF=tich cuc
+Arousal  (0x00..0xFF):    0x00=binh tinh, 0xFF=kich dong
+Time     (5 loai):        Static, Slow, Medium, Fast, Instant
+
+2 node cung (index: f(x)) tren chieu nao = Silk tren chieu do.
+Silk KHONG CAN LUU — chi can SO SANH index.
 ```
 
 ### Molecular Literal
@@ -855,24 +881,42 @@ let default_mol = { S=1 };     // chi dinh Shape, con lai la mac dinh
 // { V=192 A=192 T=4 } -> chi 4 bytes
 ```
 
-### Compose (LCA)
+### Compose (LCA) — To hop cong thuc
 
 ```olang
 let parent = fire ∘ water;
 // Tim Lowest Common Ancestor — "to tien chung" trong cay tri thuc
 // fire va water deu la "elements" -> parent ≈ elements
+
+// LCA = lay cong thuc A va cong thuc B → sinh cong thuc C moi
+// C chua co gia tri — CHO du lieu thuc
 ```
 
-### Evolution — Dot bien 1 chieu tao loai moi
+### Evolution — Thay 1 BIEN trong cong thuc → loai moi
 
 ```olang
 // Molecule.evolve(dim, new_value) -> loai moi
-// Chi thay 1/5 chieu -> chain_hash moi -> concept moi
+// Giu nguyen 4 cong thuc, chi THAY 1 cong thuc
+// → chain_hash moi → concept moi
 
 // Vi du: lua -> cac bien the
-// fire.evolve(Valence, 0x40)   -> "lua nhe"    (giam cam xuc)
-// fire.evolve(Time, Instant)   -> "chay no"     (thoi gian cuc nhanh)
-// fire.evolve(Shape, Line)     -> "tia lua"     (hinh dang thay doi)
+// fire.evolve(Valence, 0x40)   -> "lua nhe"    (thay f_v → cong thuc moi)
+// fire.evolve(Time, Instant)   -> "chay no"     (thay f_t → cuc nhanh)
+// fire.evolve(Shape, Line)     -> "tia lua"     (thay f_s → hinh dang moi)
+```
+
+### Maturity — Vong doi cong thuc
+
+```olang
+// Moi node di qua 3 giai doan:
+//   Formula    → moi tao, chua co input that (5 cong thuc tiem nang)
+//   Evaluating → fire_count >= fib(depth), dang tich luy evidence
+//   Mature     → weight >= 0.854 && fire_count >= fib(depth), san sang QR
+
+// Dream = danh gia cong thuc nao da "chin"
+//   STM day cong thuc chua evaluate
+//   Dream di qua → the gia tri vao → node chin → promote QR
+//   Node chua du data → giu cong thuc → cho them input
 ```
 
 ### Molecular Constraints (rang buoc chieu)
