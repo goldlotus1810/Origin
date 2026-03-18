@@ -17,7 +17,7 @@ use crate::encoder::encode_codepoint;
 use crate::lca::lca;
 use crate::molecular::MolecularChain;
 use crate::reader::{OlangReader, ParseError};
-use crate::registry::Registry;
+use crate::registry::{NodeKind, Registry};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BootResult
@@ -1090,12 +1090,15 @@ pub struct SystemManifest {
 
 impl SystemManifest {
     /// Scan registry → phân loại tất cả nodes.
+    ///
+    /// Ưu tiên NodeKind đã lưu trong Registry (chính xác) trước,
+    /// chỉ fallback classify_by_alias() cho Knowledge (generic).
     pub fn scan(registry: &Registry) -> Self {
         let mut entries = Vec::new();
 
         for layer in 0u8..16 {
             for reg_entry in registry.entries_in_layer(layer) {
-                let category = classify_node(reg_entry.chain_hash, layer, registry);
+                let category = category_from_kind(reg_entry.kind, reg_entry.chain_hash, layer, registry);
                 entries.push(ManifestEntry {
                     hash: reg_entry.chain_hash,
                     layer,
@@ -1153,7 +1156,25 @@ impl SystemManifest {
     }
 }
 
+/// Chuyển NodeKind (Registry) → NodeCategory (Manifest).
+///
+/// NodeKind chính xác hơn alias guessing vì được set lúc insert.
+/// Chỉ fallback sang classify_by_alias() khi NodeKind = Knowledge (generic).
+fn category_from_kind(kind: NodeKind, hash: u64, layer: u8, registry: &Registry) -> NodeCategory {
+    match kind {
+        NodeKind::Alphabet => NodeCategory::Axiom,
+        NodeKind::Emotion => NodeCategory::Emotion,
+        NodeKind::Device | NodeKind::Sensor => NodeCategory::Device,
+        NodeKind::Agent => NodeCategory::Agent,
+        NodeKind::Skill => NodeCategory::Skill,
+        NodeKind::Memory | NodeKind::Program | NodeKind::System => NodeCategory::Knowledge,
+        // Knowledge is generic — try alias-based refinement
+        NodeKind::Knowledge => classify_node(hash, layer, registry),
+    }
+}
+
 /// Phân loại node dựa trên alias name patterns + layer + UCD data.
+/// Fallback khi NodeKind = Knowledge (generic, chưa phân loại cụ thể).
 fn classify_node(hash: u64, layer: u8, registry: &Registry) -> NodeCategory {
     // L0 axioms: origin, empty, compose, member
     if layer == 0 {
