@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use crate::molecular::MolecularChain;
 use crate::writer::{
     HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_CURVE, RT_EDGE, RT_HEBBIAN, RT_KNOWTREE, RT_NODE,
-    RT_NODE_KIND, RT_STM, VERSION, VERSION_V03, VERSION_V04,
+    RT_NODE_KIND, RT_SLIM_KNOWTREE, RT_STM, VERSION, VERSION_V03, VERSION_V04,
 };
 
 /// Read a little-endian u64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
@@ -144,6 +144,17 @@ pub struct ParsedKnowTree {
     pub file_offset: u64,
 }
 
+/// SlimKnowTree node record đã parse — spec-compliant format.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedSlimKnowTree {
+    pub hash: u64,
+    pub tagged: Vec<u8>,
+    pub layer: u8,
+    pub timestamp: i64,
+    pub file_offset: u64,
+}
+
 /// ConversationCurve turn record đã parse.
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
@@ -220,6 +231,7 @@ impl<'a> OlangReader<'a> {
         let mut stm_records: Vec<ParsedStm> = Vec::new();
         let mut hebbian_records: Vec<ParsedHebbian> = Vec::new();
         let mut knowtree_records: Vec<ParsedKnowTree> = Vec::new();
+        let mut slim_knowtree_records: Vec<ParsedSlimKnowTree> = Vec::new();
         let mut curve_records: Vec<ParsedCurve> = Vec::new();
 
         let mut pos = HEADER_SIZE;
@@ -433,6 +445,25 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_SLIM_KNOWTREE => {
+                    // [hash:8][tagged_len:1][tagged:1-6][layer:1][ts:8]
+                    if pos + 8 + 1 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let hash = read_u64_le(self.data, pos); pos += 8;
+                    let tagged_len = self.data[pos] as usize; pos += 1;
+                    if tagged_len == 0 || tagged_len > 32 || pos + tagged_len + 1 + 8 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let tagged = self.data[pos..pos + tagged_len].to_vec(); pos += tagged_len;
+                    let layer = self.data[pos]; pos += 1;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    slim_knowtree_records.push(ParsedSlimKnowTree {
+                        hash, tagged, layer, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 RT_CURVE => {
                     // [valence:4][fx_dn:4][ts:8] = 16
                     if pos + 16 > self.data.len() {
@@ -464,6 +495,7 @@ impl<'a> OlangReader<'a> {
             stm_records,
             hebbian_records,
             knowtree_records,
+            slim_knowtree_records,
             curve_records,
             amended_offsets,
             created_at: self.created_at,
@@ -499,6 +531,7 @@ impl<'a> OlangReader<'a> {
         let mut stm_records: Vec<ParsedStm> = Vec::new();
         let mut hebbian_records: Vec<ParsedHebbian> = Vec::new();
         let mut knowtree_records: Vec<ParsedKnowTree> = Vec::new();
+        let mut slim_knowtree_records: Vec<ParsedSlimKnowTree> = Vec::new();
         let mut curve_records: Vec<ParsedCurve> = Vec::new();
 
         let mut pos = HEADER_SIZE;
@@ -725,6 +758,27 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_SLIM_KNOWTREE => {
+                    // [hash:8][tagged_len:1][tagged:1-6][layer:1][ts:8]
+                    if pos + 8 + 1 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let hash = read_u64_le(self.data, pos); pos += 8;
+                    let tagged_len = self.data[pos] as usize; pos += 1;
+                    if tagged_len == 0 || tagged_len > 32 || pos + tagged_len + 1 + 8 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let tagged = self.data[pos..pos + tagged_len].to_vec(); pos += tagged_len;
+                    let layer = self.data[pos]; pos += 1;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    slim_knowtree_records.push(ParsedSlimKnowTree {
+                        hash, tagged, layer, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 RT_CURVE => {
                     if pos + 16 > self.data.len() {
                         error = Some(ParseError::Truncated);
@@ -748,7 +802,7 @@ impl<'a> OlangReader<'a> {
 
         let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len()
             + node_kinds.len() + stm_records.len() + hebbian_records.len()
-            + knowtree_records.len() + curve_records.len();
+            + knowtree_records.len() + slim_knowtree_records.len() + curve_records.len();
         let amended_offsets: alloc::collections::BTreeSet<u64> =
             amends.iter().map(|a| a.target_offset).collect();
         let file = ParsedFile {
@@ -760,6 +814,7 @@ impl<'a> OlangReader<'a> {
             stm_records,
             hebbian_records,
             knowtree_records,
+            slim_knowtree_records,
             curve_records,
             amended_offsets,
             created_at: self.created_at,
@@ -791,8 +846,10 @@ pub struct ParsedFile {
     pub stm_records: Vec<ParsedStm>,
     /// HebbianLink records — restore Silk learned weights on boot.
     pub hebbian_records: Vec<ParsedHebbian>,
-    /// KnowTree CompactNode records — restore L2+ knowledge on boot.
+    /// KnowTree CompactNode records — restore L2+ knowledge on boot (legacy 0x08).
     pub knowtree_records: Vec<ParsedKnowTree>,
+    /// SlimKnowTree node records — spec-compliant format (0x0A).
+    pub slim_knowtree_records: Vec<ParsedSlimKnowTree>,
     /// ConversationCurve turn records — replay to reconstruct curve on boot.
     pub curve_records: Vec<ParsedCurve>,
     /// Offsets đã bị amend — dùng để filter records.
