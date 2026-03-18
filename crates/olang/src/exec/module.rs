@@ -24,6 +24,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::ir::OlangProgram;
+use crate::syntax::Stmt;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Symbol — exported item from a module
@@ -487,6 +488,121 @@ impl ModuleLoader {
     pub fn is_loaded(&self, path: &str) -> bool {
         self.cache.contains(path)
     }
+
+    /// Load a module from source code: parse → compile → extract exports → cache.
+    ///
+    /// `requester` is the module requesting the import (for cycle detection).
+    /// Returns the compiled module's public symbol names.
+    pub fn load_from_source(
+        &mut self,
+        module_path: &str,
+        source: &str,
+        requester: Option<&str>,
+    ) -> Result<Vec<String>, ModuleError> {
+        // Already cached?
+        if let Some(cached) = self.cache.get(module_path) {
+            return Ok(cached.public_symbols().iter().map(|s| s.to_string()).collect());
+        }
+
+        // Circular import check
+        self.begin_loading(module_path)?;
+
+        // Record dependency if there's a requester
+        if let Some(req) = requester {
+            self.deps.add_dependency(req, module_path)
+                .map_err(|e| ModuleError::new(&alloc::format!("{}", e)))?;
+        }
+
+        // Parse
+        let stmts = crate::syntax::parse(source)
+            .map_err(|e| ModuleError::new(&alloc::format!("Parse error: {:?}", e)))?;
+
+        // Extract exports from AST
+        let exports = extract_exports(&stmts);
+
+        // Compile
+        let program = crate::semantic::lower(&stmts);
+
+        // Build CompiledModule
+        let mut module = CompiledModule {
+            path: module_path.into(),
+            program,
+            exports,
+            dependencies: Vec::new(),
+        };
+
+        // Record dependencies from `use` statements in the module
+        for stmt in &stmts {
+            if let Stmt::Use { module: dep, .. } = stmt {
+                module.dependencies.push(dep.clone());
+            }
+        }
+
+        let pub_names = module.public_symbols().iter().map(|s| s.to_string()).collect();
+
+        self.finish_loading(module_path);
+        self.cache.insert(module);
+
+        Ok(pub_names)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// extract_exports — scan AST for pub items
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Extract exported (public) symbols from a parsed AST.
+/// Scans for `Stmt::Pub(inner)` wrappers around fn/struct/enum/trait definitions.
+pub fn extract_exports(stmts: &[Stmt]) -> Vec<ModuleSymbol> {
+    let mut exports = Vec::new();
+    for stmt in stmts {
+        match stmt {
+            Stmt::Pub(inner) => {
+                if let Some(sym) = stmt_to_symbol(inner, Visibility::Public) {
+                    exports.push(sym);
+                }
+            }
+            // Non-pub top-level items are private
+            other => {
+                if let Some(sym) = stmt_to_symbol(other, Visibility::Private) {
+                    exports.push(sym);
+                }
+            }
+        }
+    }
+    exports
+}
+
+/// Convert a statement to a ModuleSymbol if it's a named definition.
+fn stmt_to_symbol(stmt: &Stmt, vis: Visibility) -> Option<ModuleSymbol> {
+    match stmt {
+        Stmt::FnDef { name, params, .. } => Some(ModuleSymbol {
+            name: name.clone(),
+            vis,
+            kind: SymbolKind::Function(params.len()),
+        }),
+        Stmt::StructDef { name, fields, .. } => Some(ModuleSymbol {
+            name: name.clone(),
+            vis,
+            kind: SymbolKind::Struct(fields.iter().map(|f| f.name.clone()).collect()),
+        }),
+        Stmt::EnumDef { name, variants, .. } => Some(ModuleSymbol {
+            name: name.clone(),
+            vis,
+            kind: SymbolKind::Enum(variants.iter().map(|v| v.name.clone()).collect()),
+        }),
+        Stmt::TraitDef { name, methods, .. } => Some(ModuleSymbol {
+            name: name.clone(),
+            vis,
+            kind: SymbolKind::Trait(methods.iter().map(|m| m.name.clone()).collect()),
+        }),
+        Stmt::Let { name, .. } => Some(ModuleSymbol {
+            name: name.clone(),
+            vis,
+            kind: SymbolKind::Constant,
+        }),
+        _ => None,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -813,5 +929,136 @@ mod tests {
         });
         let sym = m.get_export("MyStruct").unwrap();
         assert_eq!(sym.kind, SymbolKind::Struct(alloc::vec!["x".into(), "y".into()]));
+    }
+
+    // ── A13: extract_exports tests ──────────────────────────────────────
+
+    #[test]
+    fn extract_exports_pub_fn() {
+        let source = "pub fn add(a, b) { a + b; }\nfn helper() { 1; }";
+        let stmts = crate::syntax::parse(source).unwrap();
+        let exports = extract_exports(&stmts);
+        assert_eq!(exports.len(), 2);
+        // pub fn → Public
+        let add = exports.iter().find(|s| s.name == "add").unwrap();
+        assert_eq!(add.vis, Visibility::Public);
+        assert_eq!(add.kind, SymbolKind::Function(2));
+        // non-pub fn → Private
+        let helper = exports.iter().find(|s| s.name == "helper").unwrap();
+        assert_eq!(helper.vis, Visibility::Private);
+    }
+
+    #[test]
+    fn extract_exports_pub_struct() {
+        let source = "pub struct Point { x, y }\nstruct Internal { data }";
+        let stmts = crate::syntax::parse(source).unwrap();
+        let exports = extract_exports(&stmts);
+        let point = exports.iter().find(|s| s.name == "Point").unwrap();
+        assert_eq!(point.vis, Visibility::Public);
+        assert!(matches!(&point.kind, SymbolKind::Struct(f) if f.len() == 2));
+        let internal = exports.iter().find(|s| s.name == "Internal").unwrap();
+        assert_eq!(internal.vis, Visibility::Private);
+    }
+
+    #[test]
+    fn extract_exports_pub_enum() {
+        let source = "pub enum Color { Red, Green, Blue }";
+        let stmts = crate::syntax::parse(source).unwrap();
+        let exports = extract_exports(&stmts);
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].vis, Visibility::Public);
+        assert!(matches!(&exports[0].kind, SymbolKind::Enum(v) if v.len() == 3));
+    }
+
+    #[test]
+    fn extract_exports_mixed() {
+        let source = "pub fn api() { 1; }\nlet x = 5;\npub let VERSION = 1;";
+        let stmts = crate::syntax::parse(source).unwrap();
+        let exports = extract_exports(&stmts);
+        let api = exports.iter().find(|s| s.name == "api").unwrap();
+        assert_eq!(api.vis, Visibility::Public);
+        let x = exports.iter().find(|s| s.name == "x").unwrap();
+        assert_eq!(x.vis, Visibility::Private);
+        let ver = exports.iter().find(|s| s.name == "VERSION").unwrap();
+        assert_eq!(ver.vis, Visibility::Public);
+    }
+
+    // ── A13: load_from_source tests ─────────────────────────────────────
+
+    #[test]
+    fn load_from_source_basic() {
+        let mut loader = ModuleLoader::new(alloc::vec![]);
+        let source = "pub fn greet(name) { name; }\nfn internal() { 1; }";
+        let result = loader.load_from_source("greeting", source, None);
+        assert!(result.is_ok());
+        let pub_names = result.unwrap();
+        assert!(pub_names.contains(&"greet".to_string()));
+        assert!(!pub_names.contains(&"internal".to_string()));
+        assert!(loader.is_loaded("greeting"));
+    }
+
+    #[test]
+    fn load_from_source_cached() {
+        let mut loader = ModuleLoader::new(alloc::vec![]);
+        let source = "pub fn f() { 1; }";
+        loader.load_from_source("mod_a", source, None).unwrap();
+        // Loading again returns cached result
+        let result = loader.load_from_source("mod_a", source, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn load_from_source_circular_detection() {
+        let mut loader = ModuleLoader::new(alloc::vec![]);
+        // Manually put "b" on loading stack to simulate it's being loaded
+        loader.begin_loading("b").unwrap();
+        // Now try to load "b" again (simulates circular import)
+        let result = loader.load_from_source("b", "pub fn f() { 1; }", Some("a"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("Circular"));
+        loader.finish_loading("b");
+    }
+
+    #[test]
+    fn load_from_source_with_dep_tracking() {
+        let mut loader = ModuleLoader::new(alloc::vec![]);
+        let source_a = "pub fn do_a() { 1; }";
+        let source_b = "pub fn do_b() { 1; }";
+        loader.load_from_source("mod_a", source_a, None).unwrap();
+        // mod_b depends on mod_a (requester = "app" loading mod_b)
+        loader.load_from_source("mod_b", source_b, Some("app")).unwrap();
+        // No cycle — this is fine
+        assert!(loader.is_loaded("mod_a"));
+        assert!(loader.is_loaded("mod_b"));
+    }
+
+    #[test]
+    fn load_from_source_selective_import_validation() {
+        let mut loader = ModuleLoader::new(alloc::vec![]);
+        let source = "pub fn api() { 1; }\nfn secret() { 2; }";
+        loader.load_from_source("mymod", source, None).unwrap();
+        // Public symbol → ok
+        let result = loader.resolve_imports("mymod", &["api".into()]);
+        assert!(result.is_ok());
+        // Private symbol → error
+        let result = loader.resolve_imports("mymod", &["secret".into()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("private"));
+    }
+
+    #[test]
+    fn load_from_source_parse_error() {
+        let mut loader = ModuleLoader::new(alloc::vec![]);
+        let bad_source = "fn {{{ invalid";
+        let result = loader.load_from_source("bad", bad_source, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("Parse error"));
+    }
+
+    #[test]
+    fn resolve_path_examples() {
+        assert_eq!(ModuleLoader::resolve_path("silk.graph"), "silk/graph.ol");
+        assert_eq!(ModuleLoader::resolve_path("std.collections"), "std/collections.ol");
+        assert_eq!(ModuleLoader::resolve_path("math"), "math.ol");
     }
 }

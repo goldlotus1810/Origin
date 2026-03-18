@@ -157,6 +157,8 @@ pub struct HomeRuntime {
     /// None = REPL/test mode (chỉ log events).
     /// Some = wired to real hardware via PlatformBridge.
     platform: Option<alloc::boxed::Box<dyn hal::ffi::PlatformBridge>>,
+    /// Module loader — resolves, caches, and tracks module dependencies
+    module_loader: olang::module::ModuleLoader,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -285,6 +287,7 @@ impl HomeRuntime {
             boot_errors: boot_result.errors,
             trace_enabled: false,
             platform: None,
+            module_loader: olang::module::ModuleLoader::new(alloc::vec!["stdlib".into(), ".".into()]),
         };
 
         // ── Run bootstrap programs — firmware trên VM ─────────────────────
@@ -1011,20 +1014,33 @@ impl HomeRuntime {
                     output_text.push_str(&resp.text);
                 }
                 VmEvent::UseModule { name } => {
-                    // Try to load module file via HAL platform
-                    if let Some(ref platform) = self.platform {
-                        // Try paths: name.olang, name
+                    // Check if already loaded in ModuleLoader cache
+                    if self.module_loader.is_loaded(&name) {
+                        // Already loaded — skip
+                    } else if let Some(ref platform) = self.platform {
+                        // Resolve module path: silk.graph → silk/graph.ol
+                        let file_path = olang::module::ModuleLoader::resolve_path(&name);
                         let paths = [
-                            format!("{}.olang", name),
+                            file_path.clone(),
+                            format!("{}.olang", name.replace('.', "/")),
                             name.clone(),
                         ];
                         let mut loaded = false;
                         for path in &paths {
                             if let Some(data) = platform.read_file(path) {
                                 if let Ok(source) = core::str::from_utf8(&data) {
-                                    let resp = self.run_program(source, ts);
-                                    if !resp.text.is_empty() && resp.kind != ResponseKind::Blocked {
-                                        output_text.push_str(&resp.text);
+                                    // Use ModuleLoader for proper caching + cycle detection
+                                    match self.module_loader.load_from_source(&name, source, None) {
+                                        Ok(_pub_symbols) => {
+                                            // Execute the module program
+                                            let resp = self.run_program(source, ts);
+                                            if !resp.text.is_empty() && resp.kind != ResponseKind::Blocked {
+                                                output_text.push_str(&resp.text);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            output_text.push_str(&format!("[module error: {}] ", e));
+                                        }
                                     }
                                     loaded = true;
                                     break;
@@ -1036,6 +1052,51 @@ impl HomeRuntime {
                         }
                     } else {
                         output_text.push_str(&format!("[no platform for module '{}'] ", name));
+                    }
+                }
+                VmEvent::UseModuleSelective { name, imports } => {
+                    // Load module if not cached, then validate selective imports
+                    if !self.module_loader.is_loaded(&name) {
+                        if let Some(ref platform) = self.platform {
+                            let file_path = olang::module::ModuleLoader::resolve_path(&name);
+                            let paths = [
+                                file_path.clone(),
+                                format!("{}.olang", name.replace('.', "/")),
+                                name.clone(),
+                            ];
+                            let mut loaded = false;
+                            for path in &paths {
+                                if let Some(data) = platform.read_file(path) {
+                                    if let Ok(source) = core::str::from_utf8(&data) {
+                                        match self.module_loader.load_from_source(&name, source, None) {
+                                            Ok(_) => {
+                                                let resp = self.run_program(source, ts);
+                                                if !resp.text.is_empty() && resp.kind != ResponseKind::Blocked {
+                                                    output_text.push_str(&resp.text);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                output_text.push_str(&format!("[module error: {}] ", e));
+                                            }
+                                        }
+                                        loaded = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !loaded {
+                                output_text.push_str(&format!("[module '{}' not found] ", name));
+                            }
+                        }
+                    }
+                    // Validate selective imports (pub/private enforcement)
+                    match self.module_loader.resolve_imports(&name, &imports) {
+                        Ok(_symbols) => {
+                            // Symbols validated — they're accessible in caller's scope
+                        }
+                        Err(e) => {
+                            output_text.push_str(&format!("[import error: {}] ", e));
+                        }
                     }
                 }
                 _ => {} // Other events handled silently

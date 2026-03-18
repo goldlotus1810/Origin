@@ -354,6 +354,11 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // Module declarations are valid at top level
         }
 
+        Stmt::Pub(inner) => {
+            // Validate the inner statement
+            validate_stmt(inner, scope, errors);
+        }
+
         Stmt::FieldAssign { object, fields: _, value } => {
             validate_expr(value, scope, errors);
             if !scope.is_defined(object) {
@@ -778,7 +783,8 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         | Stmt::ImplBlock { .. } | Stmt::TraitDef { .. }
         | Stmt::ImplTrait { .. }
         | Stmt::Spawn { .. }
-        | Stmt::Select { .. } => ChainKind::Void,
+        | Stmt::Select { .. }
+        | Stmt::Pub(_) => ChainKind::Void,
         Stmt::Return(Some(expr)) => infer_expr_kind(expr),
         Stmt::Return(None) => ChainKind::Void,
     }
@@ -1370,6 +1376,11 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             // Module declaration — register module path
             ctx.emit(Op::Load(path.clone()));
             ctx.emit(Op::Call("__mod_decl".into()));
+        }
+
+        Stmt::Pub(inner) => {
+            // pub is visibility metadata; lower the inner statement as-is
+            lower_stmt(inner, ctx);
         }
 
         Stmt::Return(expr) => {
@@ -2433,6 +2444,16 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "pad_left" => Some("__str_pad_left"),
                 "pad_right" => Some("__str_pad_right"),
                 "char_at" => Some("__str_char_at"),
+                // Phase 5 A12: Iterator methods
+                "iter" => Some("__iter_new"),
+                "next" => Some("__iter_next"),
+                "collect" => Some("__iter_collect"),
+                "take" => Some("__iter_take"),
+                "skip" => Some("__iter_skip"),
+                "sum" => Some("__iter_sum"),
+                "min" => Some("__iter_min"),
+                "max" => Some("__iter_max"),
+                "chain" => Some("__iter_chain"),
                 // Phase 5 A11: Option/Result methods
                 "is_some" => Some("__opt_is_some"),
                 "is_none" => Some("__opt_is_none"),
@@ -4774,30 +4795,38 @@ mod tests {
 
     #[test]
     fn pub_fn_parses() {
-        // pub fn should parse (pub is consumed, fn proceeds normally)
+        // pub fn should parse into Stmt::Pub(FnDef)
         let src = "pub fn connect(gw) { return gw; }";
         let stmts = parse(src).unwrap();
         assert_eq!(stmts.len(), 1);
-        if let Stmt::FnDef { name, params, .. } = &stmts[0] {
-            assert_eq!(name, "connect");
-            assert_eq!(params.len(), 1);
+        if let Stmt::Pub(inner) = &stmts[0] {
+            if let Stmt::FnDef { name, params, .. } = inner.as_ref() {
+                assert_eq!(name, "connect");
+                assert_eq!(params.len(), 1);
+            } else {
+                panic!("expected FnDef inside Pub");
+            }
         } else {
-            panic!("expected FnDef");
+            panic!("expected Pub wrapper");
         }
     }
 
     #[test]
     fn pub_struct_parses() {
-        // pub struct should parse
+        // pub struct should parse into Stmt::Pub(StructDef)
         let src = "pub struct Node { pub id: Num, data: Str }";
         let stmts = parse(src).unwrap();
         assert_eq!(stmts.len(), 1);
-        if let Stmt::StructDef { name, fields, .. } = &stmts[0] {
-            assert_eq!(name, "Node");
-            assert!(fields[0].is_pub);
-            assert!(!fields[1].is_pub);
+        if let Stmt::Pub(inner) = &stmts[0] {
+            if let Stmt::StructDef { name, fields, .. } = inner.as_ref() {
+                assert_eq!(name, "Node");
+                assert!(fields[0].is_pub);
+                assert!(!fields[1].is_pub);
+            } else {
+                panic!("expected StructDef inside Pub");
+            }
         } else {
-            panic!("expected StructDef");
+            panic!("expected Pub wrapper");
         }
     }
 
@@ -6859,5 +6888,225 @@ mod tests {
         let outputs = result.outputs();
         assert!(!outputs.is_empty());
         assert_eq!(outputs[0].to_number(), Some(0.0));
+    }
+
+    // ── Phase 5 A12: Iterator protocol tests ────────────────────────────────
+
+    #[test]
+    fn iter_filter_map_collect() {
+        // [1,2,3,4,5].iter().filter(|x| x > 2).map(|x| x * 10).collect()
+        let src = r#"
+            let arr = [1, 2, 3, 4, 5];
+            let result = arr.iter().filter(|x| x > 2).map(|x| x * 10).collect();
+            emit result;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "iter().filter().map().collect() should produce output");
+        // Should be [30, 40, 50]
+        let elements = crate::vm::split_array_chain(&outputs[0]);
+        assert_eq!(elements.len(), 3, "expected 3 elements, got {}", elements.len());
+        assert_eq!(elements[0].to_number(), Some(30.0));
+        assert_eq!(elements[1].to_number(), Some(40.0));
+        assert_eq!(elements[2].to_number(), Some(50.0));
+    }
+
+    #[test]
+    fn iter_map_collect() {
+        let src = r#"
+            let arr = [10, 20, 30];
+            let result = arr.iter().map(|x| x + 1).collect();
+            emit result;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let elements = crate::vm::split_array_chain(&outputs[0]);
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0].to_number(), Some(11.0));
+        assert_eq!(elements[1].to_number(), Some(21.0));
+        assert_eq!(elements[2].to_number(), Some(31.0));
+    }
+
+    #[test]
+    fn iter_filter_collect() {
+        let src = r#"
+            let arr = [1, 2, 3, 4, 5];
+            let result = arr.iter().filter(|x| x > 3).collect();
+            emit result;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let elements = crate::vm::split_array_chain(&outputs[0]);
+        assert_eq!(elements.len(), 2);
+        assert_eq!(elements[0].to_number(), Some(4.0));
+        assert_eq!(elements[1].to_number(), Some(5.0));
+    }
+
+    #[test]
+    fn iter_take_collect() {
+        let src = r#"
+            let arr = [10, 20, 30, 40, 50];
+            let result = arr.iter().take(3).collect();
+            emit result;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let elements = crate::vm::split_array_chain(&outputs[0]);
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0].to_number(), Some(10.0));
+        assert_eq!(elements[2].to_number(), Some(30.0));
+    }
+
+    #[test]
+    fn iter_skip_collect() {
+        let src = r#"
+            let arr = [10, 20, 30, 40, 50];
+            let result = arr.iter().skip(2).collect();
+            emit result;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let elements = crate::vm::split_array_chain(&outputs[0]);
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0].to_number(), Some(30.0));
+        assert_eq!(elements[2].to_number(), Some(50.0));
+    }
+
+    #[test]
+    fn iter_sum() {
+        let src = r#"
+            let arr = [1, 2, 3, 4, 5];
+            emit arr.iter().sum();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(15.0));
+    }
+
+    #[test]
+    fn iter_next() {
+        let src = r#"
+            let arr = [42, 99];
+            let it = arr.iter();
+            let first = it.next();
+            emit first.is_some();
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        assert_eq!(outputs[0].to_number(), Some(1.0));
+    }
+
+    // ── Phase 5 A13: Module resolution tests ────────────────────────────────
+
+    #[test]
+    fn pub_fn_parsed_as_pub_wrapper() {
+        let src = "pub fn greet(name) { emit name; }";
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Pub(inner) if matches!(**inner, Stmt::FnDef { .. })));
+    }
+
+    #[test]
+    fn pub_struct_parsed_as_pub_wrapper() {
+        let src = "pub struct Vec2 { x, y }";
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::Pub(inner) if matches!(**inner, Stmt::StructDef { .. })));
+    }
+
+    #[test]
+    fn pub_fn_lowers_same_as_fn() {
+        // pub fn should produce the same IR as fn (pub is metadata only)
+        let src_pub = "pub fn add(a, b) { emit a + b; }";
+        let src_plain = "fn add(a, b) { emit a + b; }";
+        let prog_pub = lower(&parse(src_pub).unwrap());
+        let prog_plain = lower(&parse(src_plain).unwrap());
+        assert_eq!(prog_pub.ops.len(), prog_plain.ops.len());
+    }
+
+    #[test]
+    fn use_module_lowers_to_call() {
+        let src = r#"use silk.graph;"#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_load = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "silk.graph"));
+        let has_call = prog.ops.iter().any(|op| matches!(op, Op::Call(s) if s == "__use_module"));
+        assert!(has_load, "Should emit Load for module path");
+        assert!(has_call, "Should emit Call __use_module");
+    }
+
+    #[test]
+    fn use_selective_lowers_to_call() {
+        let src = r#"use silk.graph.{SilkGraph, co_activate};"#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_module_load = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "silk.graph"));
+        let has_selective = prog.ops.iter().any(|op| matches!(op, Op::Call(s) if s == "__use_module_selective"));
+        assert!(has_module_load);
+        assert!(has_selective);
+    }
+
+    #[test]
+    fn mod_decl_lowers_to_call() {
+        let src = r#"module silk.graph;"#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_load = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "silk.graph"));
+        let has_call = prog.ops.iter().any(|op| matches!(op, Op::Call(s) if s == "__mod_decl"));
+        assert!(has_load);
+        assert!(has_call);
+    }
+
+    #[test]
+    fn pub_enum_parsed() {
+        let src = "pub enum Option { Some(T), None }";
+        let stmts = parse(src).unwrap();
+        assert!(matches!(&stmts[0], Stmt::Pub(inner) if matches!(**inner, Stmt::EnumDef { .. })));
+    }
+
+    #[test]
+    fn module_with_pub_and_private() {
+        let src = r#"
+            mod mylib;
+            pub fn public_api(x) { x + 1; }
+            fn private_helper(x) { x * 2; }
+            pub struct Config { host, port }
+        "#;
+        let stmts = parse(src).unwrap();
+        let exports = crate::module::extract_exports(&stmts);
+        let public_names: Vec<&str> = exports.iter()
+            .filter(|s| s.vis == crate::module::Visibility::Public)
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(public_names.contains(&"public_api"));
+        assert!(public_names.contains(&"Config"));
+        assert!(!public_names.contains(&"private_helper"));
     }
 }

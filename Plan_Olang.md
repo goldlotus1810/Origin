@@ -918,10 +918,10 @@ Phase   AI-A (Language Core)              AI-B (Runtime & Ecosystem)
         A9. Compiler self-hosting    ✅   B9. Migration scaffolding   ✅
                                           B10. Test framework         ✅
 ──────────────────────────────────────────────────────────────────────
-  5     A10. ? error propagation          B11. Set + Deque builtins
-        A11. Builtin Option/Result        B12. String slice + method chain
-        A12. Iterator protocol + lazy     B13. Stdlib .ol modules
-        A13. Module resolution            B14. Compiler backends hoàn thiện
+  5     A10. ? error propagation     ✅   B11. Set + Deque builtins
+        A11. Builtin Option/Result  ✅   B12. String slice + method chain
+        A12. Iterator protocol+lazy ✅   B13. Stdlib .ol modules
+        A13. Module resolution      ✅   B14. Compiler backends hoàn thiện
 ```
 
 ### Dependencies Phase 5

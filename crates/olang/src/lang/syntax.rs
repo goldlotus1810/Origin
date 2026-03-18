@@ -172,6 +172,9 @@ pub enum Stmt {
 
     /// `select { msg from rx => { ... }, timeout N => { ... } }` — multi-channel wait
     Select { arms: Vec<SelectArm> },
+
+    /// `pub fn/struct/enum/trait ...` — public visibility wrapper
+    Pub(Box<Stmt>),
 }
 
 /// Arm trong select statement.
@@ -605,8 +608,9 @@ impl<'a> Parser<'a> {
             Token::Trait => self.parse_trait_def(),
             Token::Pub => {
                 self.advance(); // consume 'pub'
-                // pub struct / pub fn / pub enum / pub trait — skip pub, parse inner
-                self.parse_stmt()
+                // pub struct / pub fn / pub enum / pub trait — wrap inner
+                let inner = self.parse_stmt()?;
+                Ok(Stmt::Pub(Box::new(inner)))
             }
             Token::Spawn => self.parse_spawn(),
             Token::Select => self.parse_select(),
