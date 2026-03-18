@@ -94,6 +94,7 @@ struct TraitInfo {
 struct TraitMethodInfo {
     name: String,
     param_count: usize, // excluding `self`
+    has_default: bool,   // true if trait provides default implementation
 }
 
 /// Scope: theo dõi biến cục bộ và hàm.
@@ -184,6 +185,7 @@ pub fn validate(stmts: &[Stmt]) -> Vec<SemError> {
                         } else {
                             m.params.len() - 1
                         },
+                        has_default: m.default_body.is_some(),
                     })
                     .collect(),
             });
@@ -251,12 +253,21 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             scope.exit();
         }
 
-        Stmt::FnDef { name, params, body } => {
+        Stmt::FnDef { name, params, body, trait_bounds, .. } => {
             // Check no duplicate params
             for (i, p) in params.iter().enumerate() {
                 if params[..i].contains(p) {
                     errors.push(SemError::new(&alloc::format!(
                         "Duplicate parameter '{p}' in function '{name}'"
+                    )));
+                }
+            }
+            // Validate trait bounds: each bound must reference a defined trait
+            for (param, bound) in trait_bounds {
+                if scope.lookup_trait(bound).is_none() {
+                    errors.push(SemError::new(&alloc::format!(
+                        "Trait bound `{}` on type param `{}` in function `{}` is not defined",
+                        bound, param, name
                     )));
                 }
             }
@@ -405,9 +416,13 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             for m in methods {
                 validate_stmt(m, scope, errors);
             }
-            // Trait conformance check: all required methods must be implemented
+            // Trait conformance check: required methods (without default) must be implemented
             if let Some(trait_info) = scope.lookup_trait(trait_name).cloned() {
                 for required in &trait_info.methods {
+                    // Methods with default bodies are optional
+                    if required.has_default {
+                        continue;
+                    }
                     let found = methods.iter().any(|m| {
                         if let Stmt::FnDef { name, params, .. } = m {
                             // Method params include "self", so subtract 1
@@ -751,31 +766,78 @@ fn string_to_key_chain(s: &str) -> crate::molecular::MolecularChain {
 pub fn lower(stmts: &[Stmt]) -> OlangProgram {
     let mut ctx = LowerCtx::new();
 
-    // First pass: collect function definitions + impl methods
+    // First pass: collect function definitions, impl methods, and trait defaults
     for stmt in stmts {
-        if let Stmt::FnDef { name, params, body } = stmt {
+        if let Stmt::FnDef { name, params, body, .. } = stmt {
             ctx.fns.push(FnDef {
                 name: name.clone(),
                 params: params.clone(),
                 body: body.clone(),
             });
         }
-        // Collect impl methods as mangled functions
-        let methods = match stmt {
-            Stmt::ImplBlock { target, methods } => Some((target, methods)),
-            Stmt::ImplTrait { target, methods, .. } => Some((target, methods)),
-            _ => None,
-        };
-        if let Some((target, methods)) = methods {
-            for m in methods {
-                if let Stmt::FnDef { name: method_name, params, body } = m {
-                    let full_name = alloc::format!("__{}_{}", target, method_name);
-                    ctx.fns.push(FnDef {
-                        name: full_name,
-                        params: params.clone(),
-                        body: body.clone(),
-                    });
+        // Collect trait definitions with default method bodies
+        if let Stmt::TraitDef { name: trait_name, methods: trait_methods, .. } = stmt {
+            let mut default_names = Vec::new();
+            for tm in trait_methods {
+                if let Some(body) = &tm.default_body {
+                    default_names.push((tm.name.clone(), tm.params.clone(), body.clone()));
                 }
+            }
+            if !default_names.is_empty() {
+                ctx.trait_defaults.push(TraitDefault {
+                    trait_name: trait_name.clone(),
+                    defaults: default_names,
+                });
+            }
+        }
+        // Collect impl methods as mangled functions
+        let (target, methods, trait_name) = match stmt {
+            Stmt::ImplBlock { target, methods } => (target, methods, None),
+            Stmt::ImplTrait { target, methods, trait_name } => (target, methods, Some(trait_name)),
+            _ => continue,
+        };
+        // Register trait→type mapping
+        if let Some(t_name) = trait_name {
+            ctx.trait_impls.push(TraitImplInfo {
+                trait_name: t_name.clone(),
+                target: target.clone(),
+            });
+        }
+        {
+            // Fill in default methods from trait that are not overridden
+            let mut implemented_methods: Vec<String> = Vec::new();
+            for m in methods.iter() {
+                if let Stmt::FnDef { name: method_name, .. } = m {
+                    implemented_methods.push(method_name.clone());
+                }
+            }
+            if let Some(t_name) = trait_name {
+                // Find defaults for this trait
+                for td in &ctx.trait_defaults.clone() {
+                    if td.trait_name == *t_name {
+                        for (def_name, def_params, def_body) in &td.defaults {
+                            if !implemented_methods.contains(def_name) {
+                                // Register default implementation
+                                let full_name = alloc::format!("__{}_{}", target, def_name);
+                                ctx.fns.push(FnDef {
+                                    name: full_name,
+                                    params: def_params.clone(),
+                                    body: def_body.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for m in methods {
+            if let Stmt::FnDef { name: method_name, params, body, .. } = m {
+                let full_name = alloc::format!("__{}_{}", target, method_name);
+                ctx.fns.push(FnDef {
+                    name: full_name,
+                    params: params.clone(),
+                    body: body.clone(),
+                });
             }
         }
     }
@@ -796,12 +858,32 @@ struct FnDef {
     body: Vec<Stmt>,
 }
 
+/// Track which trait has default method implementations.
+#[derive(Clone)]
+struct TraitDefault {
+    trait_name: String,
+    /// (method_name, params, body) for each default method
+    defaults: Vec<(String, Vec<String>, Vec<Stmt>)>,
+}
+
+/// Track which type implements which trait (for runtime dispatch).
+#[derive(Clone)]
+#[allow(dead_code)]
+struct TraitImplInfo {
+    trait_name: String,
+    target: String,
+}
+
 struct LowerCtx {
     prog: OlangProgram,
     /// Local variable scope stack
     locals: Vec<String>,
     /// Function definitions
     fns: Vec<FnDef>,
+    /// Trait default method implementations
+    trait_defaults: Vec<TraitDefault>,
+    /// Trait→Type impl mappings
+    trait_impls: Vec<TraitImplInfo>,
     /// Break targets: Jmp placeholders to patch past loop end
     break_jumps: Vec<Vec<usize>>,
     /// Continue targets: Jmp placeholders to patch to ScopeEnd
@@ -820,6 +902,8 @@ impl LowerCtx {
             prog: OlangProgram::new("olang"),
             locals: Vec::new(),
             fns: Vec::new(),
+            trait_defaults: Vec::new(),
+            trait_impls: Vec::new(),
             break_jumps: Vec::new(),
             continue_jumps: Vec::new(),
             call_id: 0,
@@ -1479,11 +1563,10 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::Call("__enum_def".into()));
         }
 
-        Stmt::ImplBlock { target, methods } | Stmt::ImplTrait { target, methods, .. } => {
-            // Register methods as functions with mangled names: __Type__method
-            // These are stored in the function table and called via __method_call
+        Stmt::ImplBlock { target, methods } => {
+            // Register methods as functions with mangled names: __Type_method
             for m in methods {
-                if let Stmt::FnDef { name: method_name, params, body } = m {
+                if let Stmt::FnDef { name: method_name, params, body, .. } = m {
                     let full_name = alloc::format!("__{}_{}", target, method_name);
                     ctx.fns.push(FnDef {
                         name: full_name,
@@ -1495,10 +1578,36 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 }
             }
         }
+        Stmt::ImplTrait { target, methods, trait_name } => {
+            // Register methods as mangled functions
+            for m in methods {
+                if let Stmt::FnDef { name: method_name, params, body, .. } = m {
+                    let full_name = alloc::format!("__{}_{}", target, method_name);
+                    ctx.fns.push(FnDef {
+                        name: full_name,
+                        params: params.clone(),
+                        body: body.clone(),
+                    });
+                } else {
+                    lower_stmt(m, ctx);
+                }
+            }
+            // Emit runtime trait→type registration
+            ctx.emit(Op::Push(crate::vm::string_to_chain(trait_name)));
+            ctx.emit(Op::Push(crate::vm::string_to_chain(target)));
+            ctx.emit(Op::Call("__trait_impl_register".into()));
+        }
 
-        Stmt::TraitDef { .. } => {
-            // Trait definitions are metadata only — no runtime code emitted.
-            // Validation happens at semantic level.
+        Stmt::TraitDef { name, methods, .. } => {
+            // Emit trait registration for runtime dispatch.
+            // Push method names as array, then call __trait_def.
+            for m in methods {
+                ctx.emit(Op::Push(crate::vm::string_to_chain(&m.name)));
+            }
+            ctx.emit(Op::PushNum(methods.len() as f64));
+            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
+            ctx.emit(Op::Call("__trait_def".into()));
         }
 
         Stmt::Spawn { body } => {
@@ -4697,5 +4806,599 @@ mod tests {
         assert!(stmts.len() >= 4);
         let prog = lower(&stmts);
         assert!(prog.ops.len() > 0);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Phase 2 AI-A: Trait System (A4) + Generics (A5) Tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── A4: Trait System ──────────────────────────────────────────────────
+
+    #[test]
+    fn trait_default_method_parse() {
+        // Trait with default body
+        let src = r#"
+            trait Display {
+                fn show(self) { return 1; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::TraitDef { name, methods, .. } => {
+                assert_eq!(name, "Display");
+                assert_eq!(methods.len(), 1);
+                assert!(methods[0].default_body.is_some(), "should have default body");
+            }
+            _ => panic!("Expected TraitDef"),
+        }
+    }
+
+    #[test]
+    fn trait_mixed_required_and_default() {
+        // Trait with both required and default methods
+        let src = r#"
+            trait Serializable {
+                fn serialize(self);
+                fn format(self) { return 0; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::TraitDef { methods, .. } => {
+                assert_eq!(methods.len(), 2);
+                assert!(methods[0].default_body.is_none(), "serialize should be required");
+                assert!(methods[1].default_body.is_some(), "format should have default");
+            }
+            _ => panic!("Expected TraitDef"),
+        }
+    }
+
+    #[test]
+    fn trait_conformance_skips_default_methods() {
+        // impl can omit methods that have defaults
+        let src = r#"
+            trait Printable {
+                fn name(self);
+                fn label(self) { return 0; }
+            }
+            impl Printable for Item {
+                fn name(self) { return 1; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Should allow omitting default method, got: {:?}", errors);
+    }
+
+    #[test]
+    fn trait_conformance_still_requires_non_default() {
+        // impl must provide methods without defaults
+        let src = r#"
+            trait Printable {
+                fn name(self);
+                fn label(self) { return 0; }
+            }
+            impl Printable for Item {
+                fn label(self) { return 2; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("missing method `name`"));
+    }
+
+    #[test]
+    fn trait_default_method_used_at_runtime() {
+        // Default method should be callable without explicit impl
+        let src = r#"
+            trait Describable {
+                fn label(self) { return 42; }
+            }
+            struct Widget { id: Num }
+            impl Describable for Widget {}
+            emit Widget::label(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "default method should produce output");
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON, "default method should return 42, got {}", v);
+    }
+
+    #[test]
+    fn trait_default_overridden() {
+        // Explicit impl overrides default
+        let src = r#"
+            trait Describable {
+                fn label(self) { return 42; }
+            }
+            struct Widget { id: Num }
+            impl Describable for Widget {
+                fn label(self) { return 99; }
+            }
+            emit Widget::label(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 99.0).abs() < f64::EPSILON, "overridden method should return 99, got {}", v);
+    }
+
+    #[test]
+    fn trait_def_emits_registration() {
+        // TraitDef should emit __trait_def call
+        let src = r#"
+            trait Walkable {
+                fn walk(self);
+                fn run(self);
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_trait_def = prog.ops.iter().any(|op| {
+            matches!(op, Op::Call(name) if name == "__trait_def")
+        });
+        assert!(has_trait_def, "TraitDef should emit __trait_def call");
+    }
+
+    #[test]
+    fn trait_impl_emits_registration() {
+        // ImplTrait should emit __trait_impl_register
+        let src = r#"
+            trait Runnable {
+                fn run(self);
+            }
+            struct Task { id: Num }
+            impl Runnable for Task {
+                fn run(self) { return 1; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_register = prog.ops.iter().any(|op| {
+            matches!(op, Op::Call(name) if name == "__trait_impl_register")
+        });
+        assert!(has_register, "ImplTrait should emit __trait_impl_register");
+    }
+
+    #[test]
+    fn trait_check_runtime() {
+        // __trait_check should work at VM level
+        let src = r#"
+            trait Drawable {
+                fn draw(self);
+            }
+            struct Circle { r: Num }
+            impl Drawable for Circle {
+                fn draw(self) { return 1; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn trait_with_multiple_impls() {
+        // Multiple types can implement the same trait
+        let src = r#"
+            trait Shape {
+                fn area(self);
+            }
+            struct Circle { r: Num }
+            struct Square { side: Num }
+            impl Shape for Circle {
+                fn area(self) { return 314; }
+            }
+            impl Shape for Square {
+                fn area(self) { return 100; }
+            }
+            emit Circle::area(0);
+            emit Square::area(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+        let v1 = outputs[0].to_number().unwrap();
+        let v2 = outputs[1].to_number().unwrap();
+        assert!((v1 - 314.0).abs() < f64::EPSILON);
+        assert!((v2 - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn trait_multiple_methods() {
+        // Trait with multiple methods all implemented
+        let src = r#"
+            trait Animal {
+                fn speak(self);
+                fn walk(self);
+            }
+            struct Dog {}
+            impl Animal for Dog {
+                fn speak(self) { return 1; }
+                fn walk(self) { return 2; }
+            }
+            emit Dog::speak(0);
+            emit Dog::walk(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 2);
+    }
+
+    #[test]
+    fn trait_default_with_self_access() {
+        // Default method that uses self parameter
+        let src = r#"
+            trait Named {
+                fn tag(self) { return 77; }
+            }
+            struct Node { id: Num }
+            impl Named for Node {}
+            emit Node::tag(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 77.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn trait_impl_for_validates_correctly() {
+        // All required methods present → no errors
+        let src = r#"
+            trait Convertible {
+                fn to_num(self);
+                fn to_str(self);
+            }
+            impl Convertible for Data {
+                fn to_num(self) { return 0; }
+                fn to_str(self) { return 0; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Full impl should have no errors: {:?}", errors);
+    }
+
+    #[test]
+    fn trait_param_count_mismatch() {
+        // Method with wrong param count
+        let src = r#"
+            trait Addable {
+                fn add(self, other);
+            }
+            impl Addable for Num {
+                fn add(self) { return 0; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert_eq!(errors.len(), 1, "Should detect param count mismatch");
+        assert!(errors[0].message.contains("missing method `add`"));
+    }
+
+    #[test]
+    fn trait_empty_body() {
+        // Trait with no methods
+        let src = r#"
+            trait Marker {}
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty());
+        match &stmts[0] {
+            Stmt::TraitDef { methods, .. } => assert!(methods.is_empty()),
+            _ => panic!("Expected TraitDef"),
+        }
+    }
+
+    #[test]
+    fn trait_with_type_params() {
+        // Trait with generic type parameters
+        let src = r#"
+            trait Container[T] {
+                fn get(self);
+                fn set(self, value);
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::TraitDef { name, type_params, methods, .. } => {
+                assert_eq!(name, "Container");
+                assert_eq!(type_params, &["T"]);
+                assert_eq!(methods.len(), 2);
+            }
+            _ => panic!("Expected TraitDef"),
+        }
+    }
+
+    #[test]
+    fn trait_multiple_type_params() {
+        let src = r#"
+            trait Mapper[K, V] {
+                fn map(self, key);
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::TraitDef { type_params, .. } => {
+                assert_eq!(type_params, &["K", "V"]);
+            }
+            _ => panic!("Expected TraitDef"),
+        }
+    }
+
+    // ── A5: Generics ──────────────────────────────────────────────────────
+
+    #[test]
+    fn generic_fn_parse() {
+        // fn name[T](param: T) { body }
+        let src = "fn identity[T](x) { return x; }";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::FnDef { name, type_params, trait_bounds, params, .. } => {
+                assert_eq!(name, "identity");
+                assert_eq!(type_params, &["T"]);
+                assert!(trait_bounds.is_empty());
+                assert_eq!(params, &["x"]);
+            }
+            _ => panic!("Expected FnDef"),
+        }
+    }
+
+    #[test]
+    fn generic_fn_multiple_params() {
+        let src = "fn pair[A, B](a, b) { return a; }";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::FnDef { type_params, .. } => {
+                assert_eq!(type_params, &["A", "B"]);
+            }
+            _ => panic!("Expected FnDef"),
+        }
+    }
+
+    #[test]
+    fn generic_fn_with_trait_bound() {
+        // fn name[T: Skill](x: T) { body }
+        let src = r#"
+            trait Skill {
+                fn execute(self);
+            }
+            fn run_skill[T: Skill](s) { return 1; }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[1] {
+            Stmt::FnDef { name, type_params, trait_bounds, .. } => {
+                assert_eq!(name, "run_skill");
+                assert_eq!(type_params, &["T"]);
+                assert_eq!(trait_bounds, &[("T".to_string(), "Skill".to_string())]);
+            }
+            _ => panic!("Expected FnDef"),
+        }
+    }
+
+    #[test]
+    fn generic_fn_trait_bound_validates() {
+        // Trait bound on undefined trait → error
+        let src = "fn process[T: NonExistent](x) { return x; }";
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("not defined"));
+    }
+
+    #[test]
+    fn generic_fn_trait_bound_valid() {
+        // Trait bound on defined trait → no error
+        let src = r#"
+            trait Hashable {
+                fn hash(self);
+            }
+            fn compute[T: Hashable](x) { return 1; }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Valid trait bound should not error: {:?}", errors);
+    }
+
+    #[test]
+    fn generic_fn_runs() {
+        // Generic function should execute normally (type erasure at runtime)
+        let src = r#"
+            fn identity[T](x) { return x; }
+            emit identity(42);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn generic_fn_with_bound_runs() {
+        // Generic function with trait bound runs (bound is semantic-only)
+        let src = r#"
+            trait Sizeable {
+                fn size(self);
+            }
+            fn measure[T: Sizeable](x) { return x + 1; }
+            emit measure(10);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 11.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn generic_struct_with_bound_parse() {
+        // struct Container[T: Sized] { ... } should parse
+        let src = "struct Box[T: Sized] { value }";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::StructDef { name, type_params, .. } => {
+                assert_eq!(name, "Box");
+                assert_eq!(type_params, &["T"]);
+            }
+            _ => panic!("Expected StructDef"),
+        }
+    }
+
+    #[test]
+    fn generic_fn_no_params() {
+        // fn with no type params should have empty type_params
+        let src = "fn simple(x) { return x; }";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::FnDef { type_params, trait_bounds, .. } => {
+                assert!(type_params.is_empty());
+                assert!(trait_bounds.is_empty());
+            }
+            _ => panic!("Expected FnDef"),
+        }
+    }
+
+    #[test]
+    fn generic_multiple_bounds() {
+        // Multiple type params with different bounds
+        let src = r#"
+            trait Readable { fn read(self); }
+            trait Writable { fn write(self); }
+            fn transfer[R: Readable, W: Writable](src, dst) { return 1; }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Multiple valid bounds: {:?}", errors);
+        match &stmts[2] {
+            Stmt::FnDef { type_params, trait_bounds, .. } => {
+                assert_eq!(type_params, &["R", "W"]);
+                assert_eq!(trait_bounds.len(), 2);
+                assert_eq!(trait_bounds[0], ("R".to_string(), "Readable".to_string()));
+                assert_eq!(trait_bounds[1], ("W".to_string(), "Writable".to_string()));
+            }
+            _ => panic!("Expected FnDef"),
+        }
+    }
+
+    #[test]
+    fn generic_mixed_bounded_and_free() {
+        // Mix of bounded and unbounded type params
+        let src = r#"
+            trait Ordered { fn cmp(self, other); }
+            fn sort[T: Ordered, U](items, extra) { return items; }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Mixed bounds: {:?}", errors);
+        match &stmts[1] {
+            Stmt::FnDef { type_params, trait_bounds, .. } => {
+                assert_eq!(type_params, &["T", "U"]);
+                assert_eq!(trait_bounds.len(), 1);
+                assert_eq!(trait_bounds[0].0, "T");
+                assert_eq!(trait_bounds[0].1, "Ordered");
+            }
+            _ => panic!("Expected FnDef"),
+        }
+    }
+
+    // ── Combined trait + generics tests ──────────────────────────────────
+
+    #[test]
+    fn trait_and_generics_combined() {
+        // Full trait + generics + impl flow
+        let src = r#"
+            trait Processor[T] {
+                fn process(self);
+            }
+            struct StringProc {}
+            impl Processor for StringProc {
+                fn process(self) { return 42; }
+            }
+            fn run[T: Processor](proc) { return proc; }
+            emit StringProc::process(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Combined flow: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let v = outputs[0].to_number().unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn trait_default_and_override_complex() {
+        // Multiple methods, some default, some overridden
+        let src = r#"
+            trait Formatter {
+                fn header(self) { return 10; }
+                fn body(self);
+                fn footer(self) { return 30; }
+            }
+            struct HtmlFormatter {}
+            impl Formatter for HtmlFormatter {
+                fn body(self) { return 20; }
+                fn footer(self) { return 99; }
+            }
+            emit HtmlFormatter::header(0);
+            emit HtmlFormatter::body(0);
+            emit HtmlFormatter::footer(0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Complex defaults: {:?}", errors);
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+        let outputs = result.outputs();
+        assert_eq!(outputs.len(), 3, "expected 3 outputs, got {}", outputs.len());
+        let v1 = outputs[0].to_number().unwrap();
+        let v2 = outputs[1].to_number().unwrap();
+        let v3 = outputs[2].to_number().unwrap();
+        assert!((v1 - 10.0).abs() < f64::EPSILON, "header (default) = 10, got {}", v1);
+        assert!((v2 - 20.0).abs() < f64::EPSILON, "body = 20, got {}", v2);
+        assert!((v3 - 99.0).abs() < f64::EPSILON, "footer (overridden) = 99, got {}", v3);
     }
 }

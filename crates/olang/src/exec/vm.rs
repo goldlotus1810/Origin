@@ -1677,6 +1677,72 @@ impl OlangVM {
                             }
                             events.push(VmEvent::LookupAlias(mangled));
                         }
+                        // ── Trait builtins ──────────────────────────────────
+                        "__trait_def" => {
+                            // Stack: [methods_array, name_chain]
+                            // Register trait definition
+                            let name_chain = vm_pop!(stack, events);
+                            let methods = vm_pop!(stack, events);
+                            let name = chain_to_string(&name_chain).unwrap_or_default();
+                            let key = alloc::format!("__trait_{}", name);
+                            let scope = scopes.last_mut().unwrap();
+                            scope.push((key, methods));
+                        }
+                        "__trait_impl_register" => {
+                            // Stack: [trait_name_chain, type_name_chain]
+                            // Register that type implements trait
+                            let type_chain = vm_pop!(stack, events);
+                            let trait_chain = vm_pop!(stack, events);
+                            let trait_name = chain_to_string(&trait_chain).unwrap_or_default();
+                            let type_name = chain_to_string(&type_chain).unwrap_or_default();
+                            // Store as "__impl_TraitName_TypeName" = 1
+                            let key = alloc::format!("__impl_{}_{}", trait_name, type_name);
+                            let scope = scopes.last_mut().unwrap();
+                            scope.push((key, MolecularChain::from_number(1.0)));
+                            // Also store in "__impls_TraitName" list
+                            let list_key = alloc::format!("__impls_{}", trait_name);
+                            let found = scopes.iter().flat_map(|s| s.iter())
+                                .find(|(k, _)| k == &list_key)
+                                .map(|(_, v)| v.clone());
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let type_entry = string_to_chain(&type_name);
+                            let mut list = found.unwrap_or_else(MolecularChain::empty);
+                            if !list.is_empty() {
+                                list.0.push(sep);
+                            }
+                            list.0.extend(type_entry.0.iter().copied());
+                            let scope = scopes.last_mut().unwrap();
+                            scope.push((list_key, list));
+                        }
+                        "__trait_check" => {
+                            // Stack: [value, trait_name_chain]
+                            // Check if value's type implements the trait
+                            let trait_chain = vm_pop!(stack, events);
+                            let value = vm_pop!(stack, events);
+                            let trait_name = chain_to_string(&trait_chain).unwrap_or_default();
+                            // Get type from __type tag
+                            let elements = split_array_chain(&value);
+                            let type_key = string_to_chain("__type");
+                            let mut type_name = String::new();
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == type_key.0 {
+                                    type_name = chain_to_string(&elements[i + 1]).unwrap_or_default();
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            // Check impl registration
+                            let impl_key = alloc::format!("__impl_{}_{}", trait_name, type_name);
+                            let is_impl = scopes.iter().flat_map(|s| s.iter())
+                                .any(|(k, _)| k == &impl_key);
+                            let result = if is_impl { 1.0 } else { 0.0 };
+                            let _ = stack.push(MolecularChain::from_number(result));
+                        }
                         // ── Channel builtins ──────────────────────────────
                         "__channel_new" => {
                             // Create a new channel, push its ID as a number
