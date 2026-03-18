@@ -259,7 +259,7 @@ impl HomeRuntime {
         let mut rt = Self {
             learning,
             parser: OlangParser::new(),
-            dream: DreamCycle::new(DreamConfig::default()),
+            dream: DreamCycle::new(DreamConfig::for_conversation()),
             alias_to_cp: build_alias_map(file_bytes),
             registry: boot_result.registry,
             self_model: SelfModel::new(),

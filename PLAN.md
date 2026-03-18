@@ -61,99 +61,152 @@ Phase 6 (Molecular Types):    ✅ COMPLETE
 
 ---
 
-## Tiếp Theo — Chia việc
+## Audit Chi Tiết — 2026-03-18
 
-### Priority HIGH
-
-#### A. Parser 6 commands — NHỎ (SPEC_MATURITY #2)
+### A. Parser 6 commands — RẤT NHỎ (SPEC_MATURITY #2)
 ```
 Vấn đề:  typeof/explain/why/trace/inspect/assert bị bỏ qua bởi is_command()
-          handle_command() ĐÃ CÓ code xử lý — chỉ thiếu routing
-File:     crates/runtime/src/core/parser.rs
-Effort:   NHỎ — thêm 6 từ vào is_command()
-AI:       AI Runtime
+          handle_command() ĐÃ CÓ code xử lý 100% — chỉ thiếu routing
+          VM events đã defined + xử lý: TraceStep, InspectChain, AssertFailed,
+          TypeInfo, WhyConnection, ExplainOrigin
+          Help text đã liệt kê đủ 6 commands
+
+File:     crates/runtime/src/core/parser.rs — is_command() dòng 1136-1159
+Fix:      Thêm "trace" vào matches! + thêm is_reasoning_command() helper:
+          s.starts_with("typeof ") || s.starts_with("inspect ")
+          || s.starts_with("assert ") || s.starts_with("explain ")
+          || s.starts_with("why ")
+Effort:   ~10 dòng code
 ```
 
-#### B. DreamConfig::for_conversation() — NHỎ (SPEC_MATURITY #4)
+### B. DreamConfig::for_conversation() — NHỎ (SPEC_MATURITY #4)
 ```
 Vấn đề:  cluster_score ≈ 0.10 << threshold 0.6 → 0 clusters mọi phiên
-          Dream không bao giờ cluster được trong hội thoại thông thường
-File:     crates/memory/src/dream.rs
-Effort:   NHỎ — thêm preset method + wire vào HomeRuntime::new()
-Fix:      DreamConfig::for_conversation() { threshold=0.30, min=2, depth=2 }
-AI:       AI Runtime
+          DreamConfig chỉ có default() (threshold=0.6) và with_weights()
+          Không có preset cho conversation context
+
+File 1:   crates/memory/src/dream.rs — thêm method for_conversation()
+          DreamConfig::for_conversation() { threshold=0.30, min=2, depth=2 }
+File 2:   crates/runtime/src/core/origin.rs — dòng 262
+          DreamConfig::default() → DreamConfig::for_conversation()
+Effort:   ~15 dòng code
 ```
 
-#### C. Agent hierarchy wire — LỚN (SPEC_MATURITY #6)
+### C. Agent hierarchy wire — LỚN (SPEC_MATURITY #6)
 ```
 Vấn đề:  Chiefs boot nhưng idle, 0 messages, 0 Workers spawned
-          Không có HomeControl intent → command không route đến Chief
-Files:    crates/context/src/emotion/affect.rs (IntentKind)
-          crates/runtime/src/core/origin.rs (routing)
-          crates/agents/src/hierarchy/chief.rs (process_task)
-Effort:   LỚN — 3 bước: HomeControl intent → ISL routing → Mock Workers
-AI:       AI Runtime
+          IntentKind::Command được detect (keywords sẵn) nhưng decide_action()
+          fall-through → Proceed (xử lý như Chat bình thường)
+          Không có routing từ Command intent → Chief qua ISL
+
+Audit:
+  ✅ IntentKind::Command — detect đúng ("tắt đèn", "turn off", ...)
+  ✅ Chief.receive_frame() — sẵn sàng nhận ISL
+  ✅ Chief.forward_command() — sẵn sàng gửi ActuatorCmd cho Worker
+  ✅ MessageRouter — Phase 1/2/3 routing đã wire
+  ✅ ISL MsgType::ActuatorCmd — protocol sẵn
+  ❌ decide_action() — Command falls through → Proceed (dòng 721)
+  ❌ Runtime dispatch — không có code gửi ISL đến Chief
+
+3 bước:
+  1. IntentAction::HomeControl { cmd } — variant mới trong context/intent.rs
+  2. decide_action() match Command → return HomeControl — context/intent.rs dòng 691
+  3. Runtime xử lý HomeControl → ISL message đến Chief — runtime/origin.rs
+
+Files:    crates/context/src/analysis/intent.rs (IntentAction + decide_action)
+          crates/runtime/src/core/origin.rs (dispatch to Chief)
+Effort:   ~100-150 dòng code, cần test integration
 ```
 
-### Priority MEDIUM
+### D. SystemManifest NodeKind — NHỎ-TB
+```
+Vấn đề:  82% nodes unclassified
+          classify_node() → find_alias() quét bảng tĩnh ALIAS_CODEPOINTS (~70 entries)
+          L1+ nodes tạo từ learning không có trong bảng tĩnh → Uncategorized
 
-#### D. SystemManifest — đọc NodeKind thay vì đoán
-```
-Vấn đề:  82% nodes unclassified vì classify từ alias name
-Effort:   NHỎ
-AI:       AI Runtime
-```
-
-#### E. Book Reader — wire vào runtime
-```
-Mục tiêu: ○{read ...} → BookReader → learn → STM → Silk
-Effort:   TRUNG BÌNH
-AI:       AI Runtime
+File:     crates/olang/src/system/startup.rs — dòng 1157-1268
+Fix:      Registry cần expose reverse lookup (chain_hash → alias)
+          Hoặc insert_with_kind() lúc seed → classify từ NodeKind thay vì alias
+Effort:   ~50 dòng code
 ```
 
-#### F. Multi-language Response
+### E. Book Reader wire — TRUNG BÌNH
 ```
-Mục tiêu: Detect input language → response cùng ngôn ngữ
-Effort:   TRUNG BÌNH
-AI:       AI Runtime
+Vấn đề:  BookReader hoàn chỉnh (read → SentenceRecord → emotion)
+          LearningLoop.learn_text() 5 tầng đã wire
+          NHƯNG: parser không có "read" command → ○{read ...} bị bỏ qua
+
+File 1:   crates/runtime/src/core/parser.rs — thêm "read" vào is_command()
+File 2:   crates/runtime/src/core/origin.rs — handle_command() route "read" →
+          BookReader.read(text) → filter top_significant() → learn_text() per sentence
+File 3:   crates/agents/src/pipeline/book.rs — đã sẵn sàng, không cần sửa
+Effort:   ~60-80 dòng code
 ```
 
-### Priority LOW
-
+### F. Multi-language Response — TRUNG BÌNH-LỚN
 ```
-G.  WASM Browser Demo
-H.  API documentation cho core crates
-I.  Domain Skills on-demand execution
-J.  Compiler end-to-end pipeline (source → output file)
-K.  HAL kết nối thiết bị thật
+Vấn đề:  100% responses hardcoded Vietnamese
+          Chỉ crisis_text_with_region("vi"/"en") có 2 ngôn ngữ
+          ResponseParams không có language field
+          Không có language detection
+
+Files:    crates/runtime/src/output/response_template.rs — toàn bộ
+          crates/runtime/src/core/origin.rs — truyền lang vào render()
+Fix:
+  1. Language detection function (keyword-based hoặc Unicode range)
+  2. ResponseParams.language: String field
+  3. Dịch 10+ template functions sang ít nhất en + vi
+  4. Runtime: detect → store in ConversationCurve → pass to render()
+Effort:   ~200-300 dòng code (phần lớn là dịch template)
 ```
 
 ---
 
-## Phân Việc Giữa AI
+## Phân Việc Giữa 2 AI
 
-| Task | AI Runtime | AI Olang | Effort | Priority |
-|------|-----------|----------|--------|----------|
-| A. Parser 6 commands | ✅ Làm | — | NHỎ | HIGH |
-| B. DreamConfig::for_conversation() | ✅ Làm | — | NHỎ | HIGH |
-| C. Agent hierarchy wire | ✅ Làm | — | LỚN | HIGH |
-| D. SystemManifest NodeKind | ✅ Làm | — | NHỎ | MEDIUM |
-| E. Book Reader wire | ✅ Làm | — | TRUNG BÌNH | MEDIUM |
-| F. Multi-language Response | ✅ Làm | — | TRUNG BÌNH | MEDIUM |
-| G-K. Low priority | ✅ Làm | ⚠️ J (compiler) | NHỎ-LỚN | LOW |
-
-**AI Olang:** Phase 6 xong. Chỉ quay lại nếu cần mở rộng compiler (task J) hoặc ngôn ngữ mới.
-
-**AI Runtime:** Tất cả việc còn lại thuộc runtime/agents/memory/context — 100% scope AI Runtime.
-
-### Thứ tự khuyến nghị
-
+### AI 1 — Quick fixes (A + B + D)
 ```
-A (vài dòng) → B (nhỏ) → D (nhỏ) → E (trung bình) → F (trung bình) → C (lớn)
-     5 min        15 min     30 min      1-2h             1-2h           3-5h
+Scope:    3 tasks nhỏ, ít conflict, có thể làm 1 phiên
+Files:    parser.rs (A), dream.rs (B), origin.rs 1 dòng (B), startup.rs (D)
+Effort:   ~1-2h tổng
+Thứ tự:   A → B → D
+
+Lưu ý:
+  - A chạm parser.rs → làm TRƯỚC E (cùng file)
+  - B chạm origin.rs 1 dòng (đổi DreamConfig init) → conflict nhỏ
+  - D isolated trong olang/system/startup.rs → 0 conflict
 ```
 
-A+B+D có thể làm trong 1 phiên. C nên làm riêng vì phức tạp.
+### AI 2 — Complex wiring (C + E + F)
+```
+Scope:    3 tasks lớn, liên quan nhau, cần sửa nhiều trong origin.rs
+Files:    intent.rs (C), origin.rs (C+E+F), parser.rs (E),
+          response_template.rs (F), book.rs (E — chỉ đọc)
+Effort:   ~5-8h tổng
+Thứ tự:   E → F → C
+
+Lưu ý:
+  - E cần parser.rs → AI 1 phải merge A trước
+  - C là task lớn nhất, nên làm cuối khi E+F đã ổn
+  - F có thể làm song song với C (khác function trong origin.rs)
+```
+
+### Quy tắc merge
+```
+1. AI 1 làm xong A+B+D → merge vào main TRƯỚC
+2. AI 2 pull main → bắt đầu E+F+C
+3. Conflict zone duy nhất: origin.rs (B thay 1 dòng, C+E+F thêm logic)
+   → AI 1 merge trước = tránh conflict
+```
+
+### Priority LOW (sau khi A-F xong)
+```
+G.  WASM Browser Demo           — AI nào rảnh
+H.  API documentation           — AI nào rảnh
+I.  Domain Skills on-demand     — AI Runtime
+J.  Compiler end-to-end         — AI Olang (nếu cần)
+K.  HAL kết nối thiết bị thật   — AI Runtime
+```
 
 ---
 

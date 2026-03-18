@@ -53,6 +53,23 @@ pub struct DreamConfig {
 }
 
 impl DreamConfig {
+    /// Preset cho conversation context: threshold thấp hơn (0.30),
+    /// min cluster nhỏ hơn (2), depth nông (2).
+    ///
+    /// Hội thoại thông thường tạo ít observations với chain_sim thấp,
+    /// cần threshold thấp hơn để Dream cluster được.
+    pub fn for_conversation() -> Self {
+        Self {
+            scan_top_n: 32,
+            cluster_threshold: 0.30,
+            min_cluster_size: 2,
+            tree_depth: 2,
+            alpha: 0.3,
+            beta: 0.4,
+            gamma: 0.3,
+        }
+    }
+
     /// Tạo DreamConfig với custom α, β, γ.
     ///
     /// Tự normalize nếu tổng ≠ 1.0.
