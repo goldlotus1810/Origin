@@ -134,6 +134,69 @@ tools/
 
 ---
 
+## Silk Architecture — Horizontal + Vertical
+
+### Horizontal Silk (implicit, 0 bytes)
+```
+37 base channels: 8 Shape + 8 Relation + 8 Valence zone + 8 Arousal zone + 5 Time
+SilkIndex → implicit_silk(A, B) → shared_dims, strength, shared_count
+
+Strength = number of shared dimensions:
+  1 dim shared = 0.20 (loosely related)
+  2 dims       = 0.40 (clearly related)
+  3 dims       = 0.60 (near identical)
+  4 dims       = 0.80 (almost same concept)
+  5 dims       = 1.00 (same node)
+
+31 compound patterns: C(5,1)+C(5,2)+C(5,3)+C(5,4)+C(5,5) = 5+10+10+5+1
+  S+V       = "looks similar + feels similar" → visual metaphor
+  R+V       = "relates similar + feels similar" → moral analog
+  V+A       = "same emotional state" → empathy link
+  AllButS   = "different shape, everything else same" → deep metaphor
+```
+
+**Status:** SilkIndex 37 buckets ✅ | implicit_silk() ✅ | CompoundKind enum ❌ (Gap #2)
+
+### Vertical Silk (parent pointer, 43 KB)
+```
+L1→L0:  5400 pointers  (each UCD atom → L1 representative)
+L2→L1:    37 pointers
+L3→L2:    12 pointers
+L4→L3:     5 pointers
+L5→L4:     3 pointers
+L6→L5:     2 pointers
+L7→L6:     1 pointer
+─────────────────────
+Total: 5460 × 8B = 43 KB
+
+Query: O(1) via parent chain traversal
+  "🔥 related to ∈?" → compare 5D + check shared parent at L1
+```
+
+**Status:** parent_map in SilkGraph ❌ (Gap #1 — SPEC_NODE_SILK)
+
+---
+
+## Node Maturity Lifecycle
+
+```
+Molecule = FORMULA, not static value.
+Each dimension = a function f(inputs...) waiting for data.
+
+  Formula     → node created, no real input yet (5 potential functions)
+  Evaluating  → fire_count ≥ fib(depth), accumulating evidence
+  Mature      → weight ≥ 0.854 && fire_count ≥ fib(depth), ready for QR
+
+  STM.push() increments fire_count → advance(fire_count, weight, fib_threshold)
+  Dream.run() detects mature nodes → report in DreamResult.matured_nodes
+  QR promote  → append-only, signed, permanent knowledge
+```
+
+**Status:** Maturity enum ✅ | advance() ✅ | Wire to STM ❌ | Wire to Dream ❌
+**Bug:** advance(weight=0.0) → Mature unreachable (SPEC_MATURITY_PIPELINE)
+
+---
+
 ## Key Subsystems
 
 ### Emotion Pipeline (5 layers of learning from text)
@@ -217,4 +280,4 @@ Compact:     DeltaMolecule (1-6B vs 5B) + ChainDictionary (dedup)
 
 ---
 
-*HomeOS · ~82K LoC Rust · 2,063 tests · 0 clippy warnings · 0 external deps · no_std core*
+*HomeOS · ~82K LoC Rust · 2,227 tests · 0 clippy warnings · 0 external deps · no_std core*
