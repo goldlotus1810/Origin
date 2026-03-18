@@ -556,6 +556,9 @@ pub enum Token {
     /// `|>` — pipe operator (Julia-style: output feeds into next)
     PipeArrow,
 
+    /// `??` — unwrap with default value (Option/Result)
+    DoubleQuestion,
+
     // ── End ──
     /// End of input
     Eof,
@@ -686,6 +689,10 @@ impl<'a> Lexer<'a> {
             }
             '?' => {
                 self.chars.next();
+                if let Some(&(_, '?')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::DoubleQuestion;
+                }
                 return Token::Wild;
             }
             '|' => {
