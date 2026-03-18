@@ -236,6 +236,10 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::SpawnEnd => "} /* spawn end */".into(),
         Op::Closure(params, body_len) => format!("/* closure({},{}) */", params, body_len),
         Op::CallClosure(arity) => format!("/* call_closure({}) */", arity),
+        Op::ChanNew => "{ uint64_t _id = olang_chan_new(); push(&s, _id); }".into(),
+        Op::ChanSend => "{ Chain v = pop(&s); Chain ch = pop(&s); olang_chan_send(ch, v); push(&s, 1); }".into(),
+        Op::ChanRecv => "{ Chain ch = pop(&s); push(&s, olang_chan_recv(ch)); }".into(),
+        Op::Select(n) => format!("/* select({}) */", n),
     })
 }
 
@@ -372,6 +376,10 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::SpawnEnd => "} // spawn end".into(),
         Op::Closure(params, body_len) => format!("// closure({}, {})", params, body_len),
         Op::CallClosure(arity) => format!("// call_closure({})", arity),
+        Op::ChanNew => "stack.push(unsafe { olang_chan_new() });".into(),
+        Op::ChanSend => "{ let v = stack.pop().unwrap_or(0); let ch = stack.pop().unwrap_or(0); unsafe { olang_chan_send(ch, v); } stack.push(1); }".into(),
+        Op::ChanRecv => "{ let ch = stack.pop().unwrap_or(0); stack.push(unsafe { olang_chan_recv(ch) }); }".into(),
+        Op::Select(n) => format!("// select({})", n),
     })
 }
 
@@ -457,6 +465,10 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
         Op::SpawnEnd => format!("/* spawn end */ _pc = {};", next),
         Op::Closure(params, body_len) => format!("/* closure({},{}) */ _pc = {};", params, body_len, next),
         Op::CallClosure(arity) => format!("/* call_closure({}) */ _pc = {};", arity, next),
+        Op::ChanNew => format!("stack.push(unsafe {{ olang_chan_new() }}); _pc = {};", next),
+        Op::ChanSend => format!("{{ let v = stack.pop().unwrap_or(0); let ch = stack.pop().unwrap_or(0); unsafe {{ olang_chan_send(ch, v); }} stack.push(1); }} _pc = {};", next),
+        Op::ChanRecv => format!("{{ let ch = stack.pop().unwrap_or(0); stack.push(unsafe {{ olang_chan_recv(ch) }}); }} _pc = {};", next),
+        Op::Select(n) => format!("/* select({}) */ _pc = {};", n, next),
     })
 }
 
@@ -621,6 +633,10 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         Op::SpawnEnd => ";; spawn end".into(),
         Op::Closure(params, body_len) => format!(";; closure({}, {})", params, body_len),
         Op::CallClosure(arity) => format!(";; call_closure({})", arity),
+        Op::ChanNew => "(call $chan_new)  ;; chan_new".into(),
+        Op::ChanSend => "(local.set $b) (local.set $a) (local.get $a) (local.get $b) (call $chan_send) (drop)  ;; chan_send".into(),
+        Op::ChanRecv => "(local.set $a) (local.get $a) (call $chan_recv)  ;; chan_recv".into(),
+        Op::Select(n) => format!(";; select({})", n),
     })
 }
 
@@ -706,6 +722,14 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; closure({}, {})", next, params, body_len),
         Op::CallClosure(arity) =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; call_closure({})", next, arity),
+        Op::ChanNew =>
+            format!("(call $chan_new) (local.set $pc (i32.const {})) (br $dispatch) ;; chan_new", next),
+        Op::ChanSend =>
+            format!("(local.set $b) (local.set $a) (local.get $a) (local.get $b) (call $chan_send) (drop) (local.set $pc (i32.const {})) (br $dispatch) ;; chan_send", next),
+        Op::ChanRecv =>
+            format!("(local.set $a) (local.get $a) (call $chan_recv) (local.set $pc (i32.const {})) (br $dispatch) ;; chan_recv", next),
+        Op::Select(n) =>
+            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; select({})", next, n),
     })
 }
 

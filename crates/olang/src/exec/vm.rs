@@ -389,7 +389,7 @@ fn call_closure_inline(
         }
         match op {
             Op::Store(name) => {
-                let val = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                let val = local_stack.pop().unwrap_or_default();
                 if let Some(scope) = scopes.last_mut() {
                     if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
                         entry.1 = val;
@@ -410,8 +410,8 @@ fn call_closure_inline(
                 match fname.as_str() {
                     "__hyp_add" | "__hyp_sub" | "__hyp_mul" | "__hyp_div"
                     | "__hyp_mod" | "__phys_add" | "__phys_sub" => {
-                        let b = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
-                        let a = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                        let b = local_stack.pop().unwrap_or_default();
+                        let a = local_stack.pop().unwrap_or_default();
                         let fa = a.to_number().unwrap_or(0.0);
                         let fb = b.to_number().unwrap_or(0.0);
                         let result = match fname.as_str() {
@@ -425,8 +425,8 @@ fn call_closure_inline(
                         let _ = local_stack.push(MolecularChain::from_number(result));
                     }
                     "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
-                        let b = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
-                        let a = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                        let b = local_stack.pop().unwrap_or_default();
+                        let a = local_stack.pop().unwrap_or_default();
                         let fa = a.to_number().unwrap_or(0.0);
                         let fb = b.to_number().unwrap_or(0.0);
                         let result = match fname.as_str() {
@@ -449,8 +449,8 @@ fn call_closure_inline(
                 }
             }
             Op::Lca => {
-                let b = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
-                let a = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                let b = local_stack.pop().unwrap_or_default();
+                let a = local_stack.pop().unwrap_or_default();
                 let _ = local_stack.push(lca(&a, &b));
             }
             Op::Pop => { let _ = local_stack.pop(); }
@@ -1586,7 +1586,7 @@ impl OlangVM {
                                         if i > 0 { result.0.push(sep); }
                                         // Execute closure with elem as argument
                                         let mapped = call_closure_inline(
-                                            prog, body_pc, &[elem.clone()],
+                                            prog, body_pc, core::slice::from_ref(elem),
                                             &scopes, &mut steps, self.max_steps,
                                         );
                                         result.0.extend(mapped.0.iter().cloned());
@@ -1614,7 +1614,7 @@ impl OlangVM {
                                         | ((mol.emotion.arousal as usize) << 8);
                                     for elem in &elements {
                                         let keep = call_closure_inline(
-                                            prog, body_pc, &[elem.clone()],
+                                            prog, body_pc, core::slice::from_ref(elem),
                                             &scopes, &mut steps, self.max_steps,
                                         );
                                         if !keep.is_empty() {
@@ -1662,7 +1662,7 @@ impl OlangVM {
                                         | ((mol.emotion.arousal as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
-                                            prog, body_pc, &[elem.clone()],
+                                            prog, body_pc, core::slice::from_ref(elem),
                                             &scopes, &mut steps, self.max_steps,
                                         );
                                         if !r.is_empty() { found = true; break; }
@@ -1688,7 +1688,7 @@ impl OlangVM {
                                         | ((mol.emotion.arousal as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
-                                            prog, body_pc, &[elem.clone()],
+                                            prog, body_pc, core::slice::from_ref(elem),
                                             &scopes, &mut steps, self.max_steps,
                                         );
                                         if r.is_empty() { all_pass = false; break; }
@@ -1714,7 +1714,7 @@ impl OlangVM {
                                         | ((mol.emotion.arousal as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
-                                            prog, body_pc, &[elem.clone()],
+                                            prog, body_pc, core::slice::from_ref(elem),
                                             &scopes, &mut steps, self.max_steps,
                                         );
                                         if !r.is_empty() {
@@ -1760,7 +1760,7 @@ impl OlangVM {
                                         | ((mol.emotion.arousal as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
-                                            prog, body_pc, &[elem.clone()],
+                                            prog, body_pc, core::slice::from_ref(elem),
                                             &scopes, &mut steps, self.max_steps,
                                         );
                                         if !r.is_empty() { count += 1; }
@@ -2556,6 +2556,46 @@ impl OlangVM {
                     } else {
                         let _ = stack.push(MolecularChain::empty());
                     }
+                }
+
+                // ── First-class channel opcodes ──────────────────────
+                Op::ChanNew => {
+                    let id = next_channel_id;
+                    next_channel_id += 1;
+                    channels.push(Vec::new());
+                    let _ = stack.push(MolecularChain::from_number(id as f64));
+                }
+
+                Op::ChanSend => {
+                    // Stack: [channel_id, value] → send value into channel
+                    let value = vm_pop!(stack, events);
+                    let ch_chain = vm_pop!(stack, events);
+                    let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                    if ch_id >= 1 && ch_id <= channels.len() {
+                        channels[ch_id - 1].push(value);
+                    }
+                    let _ = stack.push(MolecularChain::from_number(1.0));
+                }
+
+                Op::ChanRecv => {
+                    // Stack: [channel_id] → pop first message or empty
+                    let ch_chain = vm_pop!(stack, events);
+                    let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                    if ch_id >= 1 && ch_id <= channels.len() && !channels[ch_id - 1].is_empty() {
+                        let msg = channels[ch_id - 1].remove(0);
+                        let _ = stack.push(msg);
+                    } else {
+                        let _ = stack.push(MolecularChain::empty());
+                    }
+                }
+
+                Op::Select(_arm_count) => {
+                    // Select: cooperative channel multiplexing.
+                    // The Select opcode itself is a marker — the lowered code
+                    // after it contains ChanRecv + body for each arm sequentially.
+                    // In cooperative (non-preemptive) mode, we just let the
+                    // sequential arms execute. The VM records the arm_count as
+                    // metadata for future preemptive scheduling.
                 }
 
                 Op::Halt => {

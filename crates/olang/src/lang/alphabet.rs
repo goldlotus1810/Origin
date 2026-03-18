@@ -358,6 +358,12 @@ pub enum Keyword {
     Channel,
     /// `mod` — module declaration
     Mod,
+    /// `select` — multi-channel wait
+    Select,
+    /// `timeout` — timeout arm in select
+    Timeout,
+    /// `from` — channel receive in select arm
+    From,
 }
 
 /// Check xem string có phải keyword không.
@@ -388,6 +394,9 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "spawn" => Some(Keyword::Spawn),
         "channel" => Some(Keyword::Channel),
         "module" => Some(Keyword::Mod),
+        "select" => Some(Keyword::Select),
+        "timeout" => Some(Keyword::Timeout),
+        "from" => Some(Keyword::From),
         _ => None,
     }
 }
@@ -548,6 +557,12 @@ pub enum Token {
     Channel,
     /// `mod` — module declaration
     ModKw,
+    /// `select` — multi-channel wait
+    Select,
+    /// `timeout` — timeout arm in select
+    Timeout,
+    /// `from` — channel receive in select arm
+    From,
     /// `::` — path separator (enum variants, module paths)
     ColonColon,
     /// `[`
@@ -934,6 +949,9 @@ impl<'a> Lexer<'a> {
                 Keyword::Spawn => Token::Spawn,
                 Keyword::Channel => Token::Channel,
                 Keyword::Mod => Token::ModKw,
+                Keyword::Select => Token::Select,
+                Keyword::Timeout => Token::Timeout,
+                Keyword::From => Token::From,
             };
         }
 

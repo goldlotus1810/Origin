@@ -103,6 +103,8 @@ pub struct DreamResult {
     pub approved: usize,
     /// Proposals bị reject/pending
     pub rejected: usize,
+    /// chain_hash của nodes vừa đủ điều kiện Mature
+    pub matured_nodes: Vec<u64>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +137,28 @@ impl DreamCycle {
         let top = stm.top_n(self.config.scan_top_n);
         let scanned = top.len();
 
+        // ── 1a. Collect matured nodes ───────────────────────────────────────
+        let fib_threshold = fib(self.config.tree_depth);
+        let matured_nodes: Vec<u64> = top
+            .iter()
+            .filter(|obs| {
+                // Đã mature (set trong STM push) hoặc đủ fire_count cho Mature
+                if obs.maturity.is_mature() {
+                    return true;
+                }
+                // Dream context: dùng Hebbian weight từ Silk graph
+                let ha = obs.chain.chain_hash();
+                let weight = graph.assoc_weight(ha, ha).max(
+                    // Tìm max weight từ bất kỳ neighbor nào
+                    graph.neighbors(ha).iter().fold(0.0f32, |max_w, &nb| {
+                        max_w.max(graph.assoc_weight(ha, nb)).max(graph.assoc_weight(nb, ha))
+                    })
+                );
+                obs.maturity.advance(obs.fire_count, weight, fib_threshold).is_mature()
+            })
+            .map(|obs| obs.chain.chain_hash())
+            .collect();
+
         if scanned < self.config.min_cluster_size {
             return DreamResult {
                 scanned,
@@ -142,6 +166,7 @@ impl DreamCycle {
                 proposals: Vec::new(),
                 approved: 0,
                 rejected: 0,
+                matured_nodes,
             };
         }
 
@@ -213,6 +238,7 @@ impl DreamCycle {
             proposals,
             approved: approved_count,
             rejected: rejected_count,
+            matured_nodes,
         }
     }
 
@@ -554,6 +580,65 @@ mod tests {
         );
     }
 
+    // ── Maturity detection ────────────────────────────────────────────────────
+
+    #[test]
+    fn dream_detects_mature_nodes() {
+        let mut stm = ShortTermMemory::new(512);
+        let chain_a = encode_codepoint(0x1F525);
+        let chain_b = encode_codepoint(0x1F4A7);
+        for i in 0..10 {
+            stm.push(chain_a.clone(), EmotionTag::NEUTRAL, i as i64 * 1000);
+        }
+        stm.push(chain_b.clone(), EmotionTag::NEUTRAL, 11000);
+
+        // Silk co-activation nhiều lần → weight >= 0.854 (PROMOTE_WEIGHT)
+        let mut graph = SilkGraph::new();
+        for _ in 0..50 {
+            graph.co_activate(
+                chain_a.chain_hash(),
+                chain_b.chain_hash(),
+                EmotionTag::new(0.5, 0.5, 0.5, 0.5),
+                0.9,
+                0,
+            );
+        }
+
+        let dream = DreamCycle::new(DreamConfig {
+            tree_depth: 2,
+            ..Default::default()
+        });
+        let result = dream.run(&stm, &graph, 12000);
+        assert!(!result.matured_nodes.is_empty(), "fire_count=10 + high Hebbian weight → phải có mature nodes");
+    }
+
+    #[test]
+    fn dream_no_mature_nodes_when_fire_low() {
+        let mut stm = ShortTermMemory::new(512);
+        let chain = encode_codepoint(0x1F525);
+        stm.push(chain.clone(), EmotionTag::NEUTRAL, 0);
+        let graph = SilkGraph::new();
+        let dream = DreamCycle::new(DreamConfig {
+            tree_depth: 5,
+            ..Default::default()
+        });
+        let result = dream.run(&stm, &graph, 1000);
+        assert!(result.matured_nodes.is_empty(), "fire_count=1 << fib(5)=8 → không mature");
+    }
+
+    #[test]
+    fn dream_result_has_matured_nodes_field() {
+        let result = DreamResult {
+            scanned: 0,
+            clusters_found: 0,
+            proposals: alloc::vec![],
+            approved: 0,
+            rejected: 0,
+            matured_nodes: alloc::vec![0xDEADu64],
+        };
+        assert_eq!(result.matured_nodes.len(), 1);
+    }
+
     // ── Aggregate emotion ─────────────────────────────────────────────────────
 
     #[test]
@@ -565,6 +650,7 @@ mod tests {
             timestamp: 1000,
             fire_count: 1,
             mol_summary: None,
+            maturity: olang::molecular::Maturity::Formula,
         };
         let obs2 = Observation {
             chain: chain.clone(),
@@ -572,6 +658,7 @@ mod tests {
             timestamp: 2000,
             fire_count: 1,
             mol_summary: None,
+            maturity: olang::molecular::Maturity::Formula,
         };
         let result = aggregate_emotion(&[&obs1, &obs2]);
         assert!(

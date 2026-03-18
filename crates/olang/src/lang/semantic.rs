@@ -454,6 +454,36 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
                 validate_stmt(s, scope, errors);
             }
         }
+        Stmt::Select { arms } => {
+            if arms.is_empty() {
+                errors.push(SemError::new("select block has no arms"));
+            }
+            let timeout_count = arms.iter().filter(|a| matches!(a, crate::syntax::SelectArm::Timeout { .. })).count();
+            if timeout_count > 1 {
+                errors.push(SemError::new("select block has multiple timeout arms (max 1)"));
+            }
+            for arm in arms {
+                match arm {
+                    crate::syntax::SelectArm::Recv { var, channel, body } => {
+                        validate_expr(channel, scope, errors);
+                        scope.enter();
+                        scope.locals.push(var.clone());
+                        for s in body {
+                            validate_stmt(s, scope, errors);
+                        }
+                        scope.exit();
+                    }
+                    crate::syntax::SelectArm::Timeout { duration, body } => {
+                        validate_expr(duration, scope, errors);
+                        scope.enter();
+                        for s in body {
+                            validate_stmt(s, scope, errors);
+                        }
+                        scope.exit();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -725,7 +755,8 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         | Stmt::StructDef { .. } | Stmt::EnumDef { .. }
         | Stmt::ImplBlock { .. } | Stmt::TraitDef { .. }
         | Stmt::ImplTrait { .. }
-        | Stmt::Spawn { .. } => ChainKind::Void,
+        | Stmt::Spawn { .. }
+        | Stmt::Select { .. } => ChainKind::Void,
         Stmt::Return(Some(expr)) => infer_expr_kind(expr),
         Stmt::Return(None) => ChainKind::Void,
     }
@@ -1619,6 +1650,45 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             }
             ctx.emit(Op::ScopeEnd);
             ctx.emit(Op::SpawnEnd);
+        }
+
+        Stmt::Select { arms } => {
+            // Lower select: emit Select opcode then each arm
+            // Strategy: try each channel in order, first with data wins.
+            // If none ready + timeout arm → wait.
+            //
+            // Lowering:
+            //   Select(arm_count)
+            //   For each Recv arm:
+            //     push channel_id → ChanRecv → store var → body
+            //   For Timeout arm:
+            //     push duration → body
+            ctx.emit(Op::Select(arms.len() as u8));
+            ctx.emit(Op::ScopeBegin);
+            for arm in arms {
+                match arm {
+                    crate::syntax::SelectArm::Recv { var, channel, body } => {
+                        // Push channel expr → ChanRecv → store into var
+                        lower_expr(channel, ctx);
+                        ctx.emit(Op::ChanRecv);
+                        ctx.emit(Op::Store(var.clone()));
+                        // Execute body
+                        for s in body {
+                            lower_stmt(s, ctx);
+                        }
+                    }
+                    crate::syntax::SelectArm::Timeout { duration, body } => {
+                        // Push timeout duration (used by VM Select handler)
+                        lower_expr(duration, ctx);
+                        ctx.emit(Op::Pop); // VM Select handles timeout separately
+                        // Execute timeout body
+                        for s in body {
+                            lower_stmt(s, ctx);
+                        }
+                    }
+                }
+            }
+            ctx.emit(Op::ScopeEnd);
         }
     }
 }
