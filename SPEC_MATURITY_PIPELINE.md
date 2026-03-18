@@ -8,18 +8,128 @@
 
 ---
 
-## Bối cảnh
+## Nguồn gốc thiết kế — `old/2026-03-18/node va silk.md`
 
-File `old/2026-03-18/node va silk.md` xác định:
+File này là nền tảng triết học của toàn bộ spec. Những ý tưởng cốt lõi:
 
-> *"DNA không lưu CƠ THỂ. DNA lưu CÔNG THỨC TẠO cơ thể."*  
-> *"Khi chưa có input → công thức = TIỀM NĂNG. Khi có input → thế vào → GIÁ TRỊ CỤ THỂ. Khi đủ giá trị → node CHÍN."*
+### Molecule = công thức, không phải giá trị
+
+> *"Thay vì lưu DATA (pixel, byte, string), Olang lưu BẢN CHẤT"*
+
+Hiện tại `Molecule` lưu 5 giá trị tĩnh:
+```
+🔥 = [Sphere, Causes, 0xC0, 0xC0, Fast]  ← 5 bytes GIÁ TRỊ
+```
+
+Thiết kế đúng: mỗi chiều là một **hàm** (công thức), không phải hằng số:
+```
+Shape    = f_s(inputs...)    ← công thức hình dạng
+Relation = f_r(inputs...)    ← công thức quan hệ
+Valence  = f_v(inputs...)    ← công thức cảm xúc
+Arousal  = f_a(inputs...)    ← công thức cường độ
+Time     = f_t(inputs...)    ← công thức thời gian
+
+Khi chưa có input  → công thức = TIỀM NĂNG  (Maturity::Formula)
+Khi có input       → thế vào  → GIÁ TRỊ CỤ THỂ (Maturity::Evaluating)
+Khi đủ giá trị     → node CHÍN → thay công thức bằng hằng số (Maturity::Mature)
+```
+
+Đây chính là lý do `Maturity` enum tồn tại — nhưng chưa được wire vào pipeline.
+
+### Silk = hệ quả tự nhiên của 5D, không phải dữ liệu
+
+> *"Silk KHÔNG PHẢI graph riêng. Silk LÀ CẤU TRÚC TỰ NHIÊN của không gian 5D."*
+
+Node A và Node B chia sẻ cùng base value trên bất kỳ chiều nào → Silk **tự tồn tại**. Không cần lưu edge. Không cần ai tạo.
+
+```
+🔥 lửa  = [Sphere, Causes, V=0xC0, A=0xC0, Fast]
+😡 giận = [Sphere, Causes, V=0xC0, A=0xC0, Fast]
+→ 5/5 chiều giống → GẦN NHƯ CÙNG NODE
+→ Đây là lý do "giận dữ" và "lửa" là ẩn dụ phổ quát trong mọi ngôn ngữ
+```
+
+**37 kênh Silk cơ bản** (đã implement trong `SilkIndex`):
+- Shape: 8 loại (Sphere, Capsule, Box, Cone, Torus, Union, Intersect, Subtract)
+- Relation: 8 loại (Member, Subset, Equiv, Ortho, Compose, Causes, Similar, DerivedFrom)
+- Valence: 8 vùng (chia 256 thành 8 zone)
+- Arousal: 8 vùng
+- Time: 5 loại (Static, Slow, Medium, Fast, Instant)
+
+**31 mẫu compound** (chưa implement):
+- 1 chiều chung: C(5,1) = 5 mẫu → "liên quan nhẹ"
+- 2 chiều chung: C(5,2) = 10 mẫu → "liên quan rõ"
+- 3 chiều chung: C(5,3) = 10 mẫu → "gần giống"
+- 4 chiều chung: C(5,4) = 5 mẫu → "gần như cùng khái niệm"
+- 5 chiều chung: C(5,5) = 1 mẫu → "cùng node"
+
+37 kênh × 31 mẫu = **1147 kiểu quan hệ có nghĩa** — đủ mô tả bất kỳ mối quan hệ nào.
+
+### Silk dọc — parent pointer liên tầng
+
+> *"Kết nối tầng trên → qua NodeLx đại diện (Fib[n+2] threshold)"*
+
+```
+L0: 5400 nodes  ─── Silk tự do (horizontal, 0 bytes)
+     │ parent pointer (vertical, 8 bytes/node)
+L1:   37 nodes  ─── Silk tự do
+     │
+L2:   12 nodes
+     │
+...
+L7:    1 node (○)
+```
+
+Tổng: **5460 parent pointers × 8 bytes = 43 KB** cho toàn bộ mạng Silk dọc.  
+Hiện tại: `SilkGraph` **không có** field này. `SilkIndex` chỉ có 37 horizontal buckets.
+
+### Sức mạnh kết nối = số chiều chung
+
+```rust
+strength(A, B) = Σ match(dim) × precision(dim)
+
+match(dim)     = 1.0 nếu cùng base, 0.0 nếu khác
+precision(dim) = 1.0 nếu cùng variant, 0.5 nếu chỉ cùng base
+```
+
+Hiện tại `MolSummary::similarity()` tính gần đúng theo delta — đúng tinh thần nhưng chưa tách biệt `match` và `precision` rõ ràng như thiết kế.
+
+### Node chín từ data thật — vòng đời đầy đủ
+
+```
+Dream = "ngủ để hiểu"
+  STM đầy công thức chưa evaluate (Formula nodes)
+  Dream đi qua → thế giá trị vào → node chín → promote QR
+  Node chưa đủ data → giữ công thức → chờ thêm input
+
+Programming (LeoAI) = TẠO CÔNG THỨC MỚI
+  program("emit A ∘ B;")
+  = lấy công thức A, lấy công thức B
+  = TỔ HỢP thành công thức C
+  = C là node mới — chưa có giá trị — CHỜ dữ liệu (Formula)
+
+Evolve = THAY 1 BIẾN trong công thức
+  🔥.evolve(Valence, 0x40) → "lửa nhẹ"
+  = giữ nguyên f_s, f_r, f_a, f_t, chỉ thay f_v → loài mới
+```
+
+### Trạng thái hiện tại so với thiết kế
+
+| Thiết kế (node va silk.md) | Hiện tại (phiên K) | Gap |
+|---|---|---|
+| Molecule = 5 công thức | Molecule = 5 giá trị tĩnh | Lớn — cần spec riêng |
+| Silk implicit 37 kênh | `SilkIndex` 37 buckets ✅ | Xong |
+| 31 mẫu compound | Chưa có | Trung bình |
+| Silk dọc 5460 parent ptr | Chưa có | Vấn đề #5 |
+| Maturity Formula→Mature | Enum có, chưa wire | **Spec này** |
+| Node chín từ Dream | Dream 0 clusters | Vấn đề #3+#4 |
+| Strength = match × precision | Similarity delta-based | Gần đúng |
+
+---
+
+## Bối cảnh kỹ thuật
 
 Enum `Maturity` (`Formula → Evaluating → Mature`) đã tồn tại trong `crates/olang/src/mol/molecular.rs` với logic `advance()` đúng, nhưng **chưa được wire vào bất kỳ pipeline nào**. `Observation` không track maturity, `DreamResult` không trả về nodes nào đã chín.
-
-### Vấn đề gốc rễ (từ audit 8 files old/2026-03-18/)
-
-Đọc toàn bộ tài liệu cũ cho thấy **6 vấn đề hệ thống** tồn tại qua nhiều phiên (A→K), được nhắc lại trong 6-7/8 files nhưng chưa sửa. Spec này giải quyết vấn đề số 3 (Maturity pipeline). Các vấn đề còn lại được liệt kê chi tiết ở cuối.
 
 ---
 
@@ -47,7 +157,7 @@ pub struct Observation {
 
 ### Sửa `ShortTermMemory::push()`
 
-**Khi tìm thấy observation đã có** (tăng `fire_count`), cập nhật maturity ngay sau khi tăng:
+**Khi tìm thấy observation đã có** (tăng `fire_count`):
 ```rust
 obs.fire_count += 1;
 // fib(2) = 2 — threshold cho STM (depth=2)
@@ -56,7 +166,7 @@ obs.maturity = obs.maturity.advance(obs.fire_count, 0.0, fib_threshold);
 // blend emotion như cũ...
 ```
 
-**Khi tạo Observation mới** (push lần đầu), thêm field:
+**Khi tạo Observation mới** (push lần đầu):
 ```rust
 Observation {
     chain: chain.clone(),
@@ -222,7 +332,7 @@ Nếu test cũ trong `dream.rs` fail vì thiếu field `matured_nodes` → thêm
 
 ## Bản đồ vấn đề toàn hệ thống (audit old/2026-03-18/)
 
-Đọc 8 files trong `old/2026-03-18/` cho thấy 6 vấn đề hệ thống tồn tại qua nhiều phiên (A→K). Được nhắc lại trong 6-7/8 files nhưng không phiên nào sửa được vì mỗi phiên AI mới lại ưu tiên thêm tính năng mới thay vì sửa mặt tiền. Spec này giải quyết #3.
+Đọc 8 files trong `old/2026-03-18/` cho thấy 6 vấn đề hệ thống tồn tại qua nhiều phiên (A→K). Mỗi phiên AI mới lại ưu tiên thêm tính năng thay vì sửa mặt tiền — đây là lý do các vấn đề lặp lại.
 
 ---
 
@@ -240,27 +350,27 @@ Nếu test cũ trong `dream.rs` fail vì thiếu field `matured_nodes` → thêm
 
 **Gốc rễ — 3 tầng:**
 
-1. **Instinct output bị bỏ qua.** `LeoAI.run_instincts()` chạy đủ 7 bản năng và trả về kết quả — Causality phát hiện "mất việc → buồn", Abstraction tạo LCA("buồn", "mất việc") = "mất mát", Analogy tìm được các khái niệm tương đồng. Nhưng `render_response()` trong `origin.rs` không đọc các kết quả này — chỉ dùng V/A score từ ConversationCurve để chọn tone, sau đó lookup trong `response_template.rs`.
+1. **Instinct output bị bỏ qua.** `LeoAI.run_instincts()` chạy đủ 7 bản năng — Causality phát hiện "mất việc → buồn", Abstraction tạo LCA("buồn", "mất việc") = "mất mát". Nhưng `render_response()` không đọc kết quả này — chỉ dùng V/A score để chọn tone rồi lookup template.
 
-2. **Silk walk kết quả không dùng.** `SilkGraph.unified_neighbors()` đã tìm được các nodes liên quan qua 5D similarity và Hebbian links — nhưng kết quả walk này không được đưa vào response text. Response không nhắc đến bất kỳ entity nào user đã nói.
+2. **Silk walk kết quả không dùng.** `SilkGraph.unified_neighbors()` tìm được related nodes qua 5D similarity và Hebbian links — nhưng không được đưa vào response text. Response không nhắc đến bất kỳ entity nào user đã nói.
 
-3. **Template quá thưa.** `response_template.rs` có ~10 câu phân theo 6 tone (Supportive, Gentle, Reinforcing, Celebratory, Pause, Engaged). Mỗi tone chỉ có 1-2 câu, không có slot nào cho nội dung động.
+3. **Template quá thưa.** `response_template.rs` có ~10 câu phân theo 6 tone, mỗi tone 1-2 câu, không có slot cho nội dung động.
 
 **Hướng sửa:**
 ```rust
-// Trong origin.rs, hàm render_response() — thêm 3 nguồn dữ liệu:
+// Trong origin.rs, hàm render_response():
 
-// 1. Lấy topic từ Silk walk (top 2 related nodes)
+// 1. Topic từ Silk walk (top related nodes)
 let related = silk_graph.unified_neighbors(input_hash, Some(&mol_summary));
 let topic_hint = related.first().map(|n| registry.lookup_alias(n.hash));
 
-// 2. Lấy insight từ instinct output
+// 2. Insight từ instinct output
 let causal_hint = instinct_results.iter()
     .find(|r| matches!(r.kind, InsightKind::Causal { .. }));
 
-// 3. Compose response với nội dung thật
+// 3. Compose response phản ánh nội dung thật
 // Thay vì: "Bạn đang tìm hiểu để làm gì?"
-// Thành:   "Nghe như [topic_hint] đang ảnh hưởng [cảm xúc] của bạn."
+// Thành:   "Nghe như [topic_hint] đang ảnh hưởng đến bạn."
 ```
 
 ---
@@ -281,13 +391,10 @@ let causal_hint = instinct_results.iter()
 ○{assert fire}    → lỗi "chưa registry"
 ```
 
-**Gốc rễ:** `is_command()` trong `parser.rs` chỉ nhận: `dream`, `stats`, `health`, `seed`, `shutdown`, `reboot`, `status`, `help` + math commands + leo commands. 6 lệnh debug/reasoning thiếu trong danh sách này nên parser route chúng sang text query → alias lookup → fail vì không tìm được alias.
-
-Paradox: `handle_command()` trong `origin.rs` **đã có** code xử lý đầy đủ cho cả 6 lệnh này — chỉ thiếu routing từ parser đến đó.
+**Gốc rễ:** `is_command()` thiếu 6 keywords. `handle_command()` **đã có** code xử lý — chỉ thiếu routing từ parser đến đó.
 
 **Hướng sửa:**
 ```rust
-// Trong parser.rs, hàm is_command() — thêm 6 dòng:
 fn is_command(s: &str) -> bool {
     matches!(s,
         "dream" | "stats" | "health" | "seed" | "help" | ...
@@ -305,9 +412,9 @@ fn is_command(s: &str) -> bool {
 
 ### #3 — Maturity pipeline ← spec này
 
-Xem chi tiết ở các section Thay đổi 1-3 ở trên.
+Xem chi tiết ở phần "Thay đổi 1-3" ở trên và phần "Nguồn gốc thiết kế" về Molecule = công thức.
 
-**Tóm tắt:** `Maturity` enum + `advance()` đã có nhưng không wire. `Observation` không track trạng thái. `DreamResult` không báo cáo nodes chín. Node không biết mình là công thức hay đã có giá trị thật.
+**Tóm tắt:** `Maturity` enum + `advance()` đã có nhưng không wire. `Observation` không track trạng thái. `DreamResult` không báo cáo nodes chín. Vòng đời Formula → Evaluating → Mature chưa chạy trong thực tế.
 
 ---
 
@@ -319,41 +426,41 @@ Xem chi tiết ở các section Thay đổi 1-3 ở trên.
 
 **Triệu chứng:**
 ```
-Dream cycle chạy → scanned: 2, clusters: 0, proposals: 0, approved: 0
-Dream cycle chạy → scanned: 1, clusters: 0, proposals: 0, approved: 0
+Dream cycle → scanned: 2, clusters: 0, proposals: 0
+Dream cycle → scanned: 1, clusters: 0, proposals: 0
 → Không phiên nào Dream học được gì
 ```
 
 **Gốc rễ — số học:**
-
 ```
-Pipeline học 1 observation/turn (process_one gọi stm.push 1 lần)
-Sau 5 turns → STM có 5 observations (nếu 5 câu khác nhau hoàn toàn)
-                      hoặc 1-2 (nếu câu lặp lại → fire_count tăng, không thêm entry)
+Pipeline học 1 observation/turn
+Sau 5 turns → STM có tối đa 5 observations
 
 DreamConfig::default():
-  min_cluster_size = 3     → cần ít nhất 3 observations cùng chủ đề
-  cluster_threshold = 0.6  → cần score >= 0.6 để nhóm
+  min_cluster_size = 3     → cần >= 3 observations cùng chủ đề
+  cluster_threshold = 0.6  → cần score >= 0.6
 
 cluster_score = 0.3×chain_sim + 0.4×hebbian_weight + 0.3×fire_ratio
 
-Vấn đề: chain_sim giữa câu "tôi buồn" và "mất việc" thấp (<0.3)
-         hebbian_weight mới tạo = 0.1 (khởi đầu yếu)
-         → score ≈ 0.3×0.2 + 0.4×0.1 + 0.3×0 = 0.10 << 0.6
+Thực tế:
+  chain_sim("tôi buồn", "mất việc") ≈ 0.20  (khác chủ đề)
+  hebbian_weight mới tạo = 0.10              (khởi đầu yếu)
+  fire_ratio ≈ 0
+
+  score ≈ 0.3×0.20 + 0.4×0.10 + 0.3×0 = 0.10  << ngưỡng 0.6
 
 → KHÔNG BAO GIỜ cluster được trong hội thoại thông thường
 ```
 
 **Hướng sửa:**
 ```rust
-// Thêm vào DreamConfig (dream.rs):
 impl DreamConfig {
-    /// Preset cho hội thoại thật — threshold thấp hơn default.
+    /// Preset cho hội thoại thật — threshold thực tế hơn default.
     pub fn for_conversation() -> Self {
         Self {
             scan_top_n: 32,
-            cluster_threshold: 0.30,  // giảm từ 0.6 → 0.30
-            min_cluster_size: 2,      // giảm từ 3 → 2
+            cluster_threshold: 0.30,  // từ 0.6 → 0.30
+            min_cluster_size: 2,      // từ 3 → 2
             tree_depth: 2,            // fib(2)=2, dễ promote hơn
             alpha: 0.4,               // tăng weight cho chain_sim
             beta: 0.3,
@@ -361,39 +468,38 @@ impl DreamConfig {
         }
     }
 }
-
-// Trong HomeRuntime::new() hoặc boot sequence:
-// Dùng DreamConfig::for_conversation() thay vì DreamConfig::default()
+// Dùng DreamConfig::for_conversation() trong HomeRuntime::new()
 ```
 
 ---
 
 ### #5 — Silk dọc (parent pointer) chưa có
 
-**Được nhắc trong:** silk_architecture.md, node va silk.md  
+**Được nhắc trong:** `old/2026-03-18/node va silk.md`, `old/2026-03-18/silk_architecture.md`  
 **File cần sửa:** `crates/silk/src/graph.rs`  
-**Effort:** Trung bình | **Impact:** Cao (nền tảng cho layer-aware queries)
+**Effort:** Trung bình | **Impact:** Cao
 
-**Triệu chứng:**
-- Không thể query "cho tôi biết concept cha của node này ở L2"
+**Thiết kế từ node va silk.md:**
+
+> *"Silk đại diện (liên tầng): node Lx là ĐẠI DIỆN cho 1 nhóm ở Lx-1. Mỗi node chỉ cần 1 pointer đến parent. 5460 pointers × 8 bytes = 43 KB — toàn bộ mạng Silk dọc."*
+
+```
+L1 → L0: 5400 pointers  (mỗi UCD atom trỏ lên L1 representative)
+L2 → L1:   37 pointers
+L3 → L2:   12 pointers
+L4 → L3:    5 pointers
+L5 → L4:    3 pointers
+L6 → L5:    2 pointers
+L7 → L6:    1 pointer
+─────────────────────
+Tổng:    5460 × 8B = 43 KB
+```
+
+**Triệu chứng thiếu:**
+- Không thể query "concept cha của node này ở tầng trên"
+- `co_activate_same_layer()` nhận layer từ caller nhưng không có nguồn sự thật độc lập
 - Dream clustering không biết 2 nodes có cùng tầng không
-- `co_activate_same_layer()` nhận layer từ caller nhưng không có nguồn sự thật
-
-**Gốc rễ:**
-
-`silk_architecture.md` mô tả rõ cấu trúc dọc:
-```
-L7: ○ (1 node)
-L6: [Unity] (1 node)      ← parent của L5
-L5: [H]═══[V] (2 nodes)   ← parent của L4
-...
-L1: 37 nodes              ← parent của L0 buckets
-L0: 5400 UCD atoms
-
-5460 parent pointers = 43 KB tổng — mỗi node có 1 pointer lên tầng trên
-```
-
-Hiện tại `SilkGraph` không có field này. `SilkIndex` chỉ có 37 horizontal buckets theo base value, không có chiều dọc.
+- Cross-layer Silk (QT12) không có cấu trúc để enforce
 
 **Hướng sửa:**
 ```rust
@@ -402,23 +508,19 @@ pub struct SilkGraph {
     edges: Vec<SilkEdge>,
     index: SilkIndex,
     learned: Vec<HebbianLink>,
-    // ← THÊM:
-    parent_map: alloc::collections::BTreeMap<u64, u64>, // child_hash → parent_hash
+    parent_map: alloc::collections::BTreeMap<u64, u64>, // child → parent
 }
 
 impl SilkGraph {
-    /// Đăng ký quan hệ cha-con giữa 2 tầng.
-    /// Gọi khi Dream promote node lên layer cao hơn.
+    /// Đăng ký quan hệ cha-con — gọi khi Dream promote node lên tầng trên.
     pub fn register_parent(&mut self, child_hash: u64, parent_hash: u64) {
         self.parent_map.insert(child_hash, parent_hash);
     }
 
-    /// Lấy parent của node tại tầng trên.
     pub fn parent_of(&self, hash: u64) -> Option<u64> {
         self.parent_map.get(&hash).copied()
     }
 
-    /// Lấy tất cả children của một parent node.
     pub fn children_of(&self, parent_hash: u64) -> alloc::vec::Vec<u64> {
         self.parent_map
             .iter()
@@ -426,10 +528,20 @@ impl SilkGraph {
             .map(|(&c, _)| c)
             .collect()
     }
+
+    /// Layer của node — đi ngược parent chain đếm tầng.
+    pub fn layer_of(&self, hash: u64) -> u8 {
+        let mut current = hash;
+        let mut depth = 0u8;
+        while let Some(parent) = self.parent_of(current) {
+            depth += 1;
+            current = parent;
+            if depth > 16 { break; } // an toàn
+        }
+        depth
+    }
 }
 ```
-
-Khi boot, build parent_map từ Registry layer info. Khi Dream promote node → gọi `register_parent()`.
 
 ---
 
@@ -441,36 +553,32 @@ Khi boot, build parent_map từ Registry layer info. Khi Dream promote node → 
 
 **Triệu chứng:**
 ```
-Router Ticks:     2-4 mỗi phiên
-Worker→Chief:     0
-Chief→LeoAI:      0
-Chief↔Chief:      0
-Workers:          0 (không bao giờ được spawn)
-ISL messages:     0 forwarded
+Router Ticks:  2-4 mỗi phiên
+Worker→Chief:  0
+Chief→LeoAI:   0
+Workers:       0 (không bao giờ được spawn)
+ISL messages:  0 forwarded
 ```
 
 **Gốc rễ — 3 tầng:**
 
-1. **Không có trigger.** Router.tick() được gọi mỗi turn nhưng không có message nào để forward vì không ai tạo message. Chiefs không tự generate message. Workers chưa được spawn.
+1. **Không có trigger.** Router.tick() chạy nhưng không có message nào để forward. Chiefs không tự generate message. Workers chưa được spawn.
 
-2. **Intent routing thiếu.** Khi user nói "bật đèn phòng khách", `estimate_intent()` phân loại là `Chat` hoặc `Command` — không có `HomeControl` intent. Không có code nào route HomeControl → HomeChief.
+2. **Intent routing thiếu.** Khi user nói "bật đèn phòng khách", `estimate_intent()` phân loại là `Chat` — không có `HomeControl` intent. Không có code nào route đến HomeChief.
 
-3. **HAL chưa kết nối thiết bị thật.** `hal::detect::platform()` nhận biết x86/ARM/RISC-V đúng nhưng không có driver thật nào phía sau. Workers cần hardware events để biết có gì để làm.
+3. **HAL chưa kết nối thiết bị.** `hal::detect::platform()` nhận biết platform đúng nhưng không có driver thật nào phía sau.
 
-**Hướng sửa (theo thứ tự):**
+**Hướng sửa — 3 bước theo thứ tự:**
 
-Bước A — thêm `HomeControl` intent và route đến HomeChief:
+Bước A — thêm `HomeControl` intent:
 ```rust
-// Trong context/analysis/intent.rs — thêm variant:
+// context/analysis/intent.rs:
 pub enum IntentAction {
-    Chat,
-    Learn,
-    Command,
-    Crisis,
+    Chat, Learn, Command, Crisis,
     HomeControl { device_hint: Option<String> },  // ← THÊM
 }
 
-// Trong origin.rs — thêm routing:
+// origin.rs — route đến HomeChief:
 if let IntentAction::HomeControl { device_hint } = &intent {
     let msg = ISLMessage::new(LEO_ADDR, HOME_CHIEF_ADDR, MsgType::Task, ...);
     self.router.send(msg);
@@ -479,17 +587,16 @@ if let IntentAction::HomeControl { device_hint } = &intent {
 
 Bước B — Mock Workers cho test:
 ```rust
-// Trong origin.rs boot sequence:
+// origin.rs boot sequence:
 let mock_light_worker = Worker::new("mock_light", WorkerKind::Device);
 self.register_worker(mock_light_worker);
 ```
 
-Bước C — Wire Chiefs xử lý ISL message:
+Bước C — Wire Chief xử lý ISL message:
 ```rust
-// Trong chief.rs — implement process_task():
+// chief.rs:
 fn process_task(&mut self, msg: &ISLMessage) -> Option<ISLMessage> {
-    // Phân tích task, dispatch đến Worker phù hợp
-    // Trả về response ISL message
+    // dispatch đến Worker phù hợp, trả về response
 }
 ```
 
@@ -509,4 +616,4 @@ fn process_task(&mut self, msg: &ISLMessage) -> Option<ISLMessage> {
 ---
 
 *HomeOS · 2026-03-18 · Maturity pipeline · Formula → Evaluating → Mature*  
-*Cập nhật sau audit old/2026-03-18/ — 6 vấn đề hệ thống với chi tiết đầy đủ*
+*Cập nhật sau audit old/2026-03-18/ — thiết kế từ node va silk.md + 6 vấn đề chi tiết*
