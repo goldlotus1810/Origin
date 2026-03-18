@@ -1,7 +1,16 @@
 //! # ucd — Unicode Character Database
 //!
-//! Lookup codepoint → Molecule bytes từ bảng tĩnh generated lúc compile.
+//! Lookup codepoint → Molecule bytes + formula từ bảng tĩnh generated lúc compile.
 //! Không cần file UCD lúc runtime. Chạy no_std.
+//!
+//! ## Mỗi entry mang 5 công thức (f_s, f_r, f_v, f_a, f_t):
+//! ```text
+//! Shape    = f_s(cp, name, block) → u8   // "trông như thế nào"
+//! Relation = f_r(cp, name, block) → u8   // "liên kết thế nào"
+//! Valence  = f_v(cp, name)        → u8   // "cảm thế nào"
+//! Arousal  = f_a(cp, name)        → u8   // "cường độ thế nào"
+//! Time     = f_t(cp, name, block) → u8   // "thay đổi thế nào"
+//! ```
 //!
 //! ## 3 cách decode (tốc độ tăng dần):
 //! - `lookup(cp)` → UcdEntry — forward lookup O(log n)
@@ -142,6 +151,78 @@ pub fn is_sdf_primitive(cp: u32) -> bool {
 #[inline]
 pub fn is_relation_primitive(cp: u32) -> bool {
     RELATION_PRIMITIVES.iter().any(|&(p, _)| p == cp)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Formula API — molecule tự giải thích
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 5 chiều — dùng với formula_name()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dimension {
+    /// Shape — "trông như thế nào"
+    Shape,
+    /// Relation — "liên kết thế nào"
+    Relation,
+    /// Valence — "cảm thế nào"
+    Valence,
+    /// Arousal — "cường độ thế nào"
+    Arousal,
+    /// Time — "thay đổi thế nào"
+    Time,
+}
+
+/// Tra formula description cho 1 chiều.
+///
+/// ```text
+/// formula_name(Dimension::Shape, entry.fs)
+///   → "f_s: cp ∈ [1F300,1FAFF] → Sphere (pictograph round)"
+/// ```
+#[inline]
+pub fn formula_name(dim: Dimension, rule_id: u8) -> &'static str {
+    let table = match dim {
+        Dimension::Shape => FORMULA_NAMES_S,
+        Dimension::Relation => FORMULA_NAMES_R,
+        Dimension::Valence => FORMULA_NAMES_V,
+        Dimension::Arousal => FORMULA_NAMES_A,
+        Dimension::Time => FORMULA_NAMES_T,
+    };
+    let idx = rule_id as usize;
+    if idx < table.len() {
+        table[idx]
+    } else {
+        "f_?: unknown rule"
+    }
+}
+
+/// Formula rule ID cho shape chiều của codepoint.
+#[inline]
+pub fn formula_s(cp: u32) -> u8 {
+    lookup(cp).map(|e| e.fs).unwrap_or(19) // 19 = default Sphere
+}
+
+/// Formula rule ID cho relation chiều của codepoint.
+#[inline]
+pub fn formula_r(cp: u32) -> u8 {
+    lookup(cp).map(|e| e.fr).unwrap_or(20) // 20 = default Member
+}
+
+/// Formula rule ID cho valence chiều của codepoint.
+#[inline]
+pub fn formula_v(cp: u32) -> u8 {
+    lookup(cp).map(|e| e.fv).unwrap_or(42) // 42 = default neutral
+}
+
+/// Formula rule ID cho arousal chiều của codepoint.
+#[inline]
+pub fn formula_a(cp: u32) -> u8 {
+    lookup(cp).map(|e| e.fa).unwrap_or(42) // 42 = default moderate
+}
+
+/// Formula rule ID cho time chiều của codepoint.
+#[inline]
+pub fn formula_t(cp: u32) -> u8 {
+    lookup(cp).map(|e| e.ft).unwrap_or(32) // 32 = default Medium
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,5 +499,114 @@ mod tests {
             "HASH COLLISION: {total} entries → {unique} unique hashes ({:.1}% collision).",
             (1.0 - unique as f64 / total as f64) * 100.0
         );
+    }
+
+    // ── Formula tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn formula_fire_has_rules() {
+        let e = lookup(0x1F525).expect("🔥 FIRE");
+        // FIRE is a pictograph → Sphere
+        assert_eq!(e.fs, 16, "FIRE shape formula = pictograph→Sphere");
+        // FIRE is a pictograph → Member
+        assert_eq!(e.fr, 18, "FIRE relation formula = pictograph→Member");
+        // FIRE name contains "FIRE" → 0xFF
+        assert_eq!(e.fv, 8, "FIRE valence formula = name⊃FIRE→0xFF");
+        // FIRE name contains "FIRE" → 0xFF
+        assert_eq!(e.fa, 9, "FIRE arousal formula = name⊃FIRE→0xFF");
+        // FIRE name contains "FIRE" → Fast
+        assert_eq!(e.ft, 12, "FIRE time formula = name⊃FIRE→Fast");
+    }
+
+    #[test]
+    fn formula_sphere_primitive() {
+        let e = lookup(0x25CF).expect("● BLACK CIRCLE");
+        assert_eq!(e.fs, 0, "● shape formula = SDF primitive match");
+    }
+
+    #[test]
+    fn formula_member_primitive() {
+        let e = lookup(0x2208).expect("∈ ELEMENT OF");
+        assert_eq!(e.fr, 0, "∈ relation formula = REL primitive match");
+    }
+
+    #[test]
+    fn formula_name_lookup() {
+        let desc = formula_name(Dimension::Shape, 16);
+        assert!(
+            desc.contains("Sphere") && desc.contains("pictograph"),
+            "Shape rule 16 should mention Sphere and pictograph, got: {}",
+            desc
+        );
+    }
+
+    #[test]
+    fn formula_name_all_dimensions() {
+        // Ensure formula_name doesn't panic for any stored rule
+        for e in UCD_TABLE {
+            let _ = formula_name(Dimension::Shape, e.fs);
+            let _ = formula_name(Dimension::Relation, e.fr);
+            let _ = formula_name(Dimension::Valence, e.fv);
+            let _ = formula_name(Dimension::Arousal, e.fa);
+            let _ = formula_name(Dimension::Time, e.ft);
+        }
+    }
+
+    #[test]
+    fn formula_name_unknown_returns_fallback() {
+        let desc = formula_name(Dimension::Shape, 255);
+        assert!(desc.contains("unknown"), "Unknown rule should return fallback");
+    }
+
+    #[test]
+    fn formula_convenience_fns() {
+        assert_eq!(formula_s(0x1F525), 16); // FIRE → pictograph→Sphere
+        assert_eq!(formula_r(0x1F525), 18); // FIRE → pictograph→Member
+        assert_eq!(formula_v(0x1F525), 8);  // FIRE → name FIRE→0xFF
+        assert_eq!(formula_a(0x1F525), 9);  // FIRE → name FIRE→0xFF
+        assert_eq!(formula_t(0x1F525), 12); // FIRE → name FIRE→Fast
+    }
+
+    #[test]
+    fn formula_unknown_cp_defaults() {
+        assert_eq!(formula_s(0x0041), 19); // 'A' → default Sphere
+        assert_eq!(formula_r(0x0041), 20); // 'A' → default Member
+        assert_eq!(formula_v(0x0041), 42); // 'A' → default neutral
+        assert_eq!(formula_a(0x0041), 42); // 'A' → default moderate
+        assert_eq!(formula_t(0x0041), 32); // 'A' → default Medium
+    }
+
+    #[test]
+    fn formula_arrow_rules() {
+        let e = lookup(0x2192).expect("→ RIGHTWARDS ARROW");
+        assert_eq!(e.fs, 9, "→ shape = Arrow→Cone");
+        assert_eq!(e.fr, 0, "→ relation = REL primitive (Causes)");
+        assert_eq!(e.ft, 11, "→ time = Arrow→Instant");
+    }
+
+    #[test]
+    fn every_entry_has_valid_formula() {
+        for e in UCD_TABLE {
+            assert!(
+                (e.fs as usize) < FORMULA_NAMES_S.len(),
+                "cp 0x{:05X} has invalid fs={}", e.cp, e.fs
+            );
+            assert!(
+                (e.fr as usize) < FORMULA_NAMES_R.len(),
+                "cp 0x{:05X} has invalid fr={}", e.cp, e.fr
+            );
+            assert!(
+                (e.fv as usize) < FORMULA_NAMES_V.len(),
+                "cp 0x{:05X} has invalid fv={}", e.cp, e.fv
+            );
+            assert!(
+                (e.fa as usize) < FORMULA_NAMES_A.len(),
+                "cp 0x{:05X} has invalid fa={}", e.cp, e.fa
+            );
+            assert!(
+                (e.ft as usize) < FORMULA_NAMES_T.len(),
+                "cp 0x{:05X} has invalid ft={}", e.cp, e.ft
+            );
+        }
     }
 }

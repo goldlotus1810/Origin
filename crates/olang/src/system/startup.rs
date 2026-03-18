@@ -60,6 +60,8 @@ pub struct BootResult {
     pub hebbian_records: Vec<crate::reader::ParsedHebbian>,
     /// KnowTree compact nodes đã load từ file — restore vào KnowTree.
     pub knowtree_records: Vec<crate::reader::ParsedKnowTree>,
+    /// SlimKnowTree node records (0x0A) — restore vào SlimKnowTree.
+    pub slim_knowtree_records: Vec<crate::reader::ParsedSlimKnowTree>,
     /// ConversationCurve turn records — replay to reconstruct curve.
     pub curve_records: Vec<crate::reader::ParsedCurve>,
 }
@@ -142,6 +144,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     let mut stm_records = Vec::new();
     let mut hebbian_records = Vec::new();
     let mut knowtree_records = Vec::new();
+    let mut slim_knowtree_records = Vec::new();
     let mut curve_records = Vec::new();
     let file_had_data = if let Some(bytes) = file_bytes {
         if !bytes.is_empty() {
@@ -151,6 +154,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
                     stm_records = loaded.stm_records;
                     hebbian_records = loaded.hebbian_records;
                     knowtree_records = loaded.knowtree_records;
+                    slim_knowtree_records = loaded.slim_knowtree_records;
                     curve_records = loaded.curve_records;
                     stage = BootStage::Loaded;
                     true
@@ -219,6 +223,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         stm_records,
         hebbian_records,
         knowtree_records,
+        slim_knowtree_records,
         curve_records,
     }
 }
@@ -803,6 +808,7 @@ struct LoadedData {
     stm_records: Vec<crate::reader::ParsedStm>,
     hebbian_records: Vec<crate::reader::ParsedHebbian>,
     knowtree_records: Vec<crate::reader::ParsedKnowTree>,
+    slim_knowtree_records: Vec<crate::reader::ParsedSlimKnowTree>,
     curve_records: Vec<crate::reader::ParsedCurve>,
 }
 
@@ -853,6 +859,7 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<LoadedData, 
         stm_records: parsed.stm_records,
         hebbian_records: parsed.hebbian_records,
         knowtree_records: parsed.knowtree_records,
+        slim_knowtree_records: parsed.slim_knowtree_records,
         curve_records: parsed.curve_records,
     })
 }
