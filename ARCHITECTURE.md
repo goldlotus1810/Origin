@@ -134,32 +134,59 @@ tools/
 
 ---
 
-## Silk Architecture — Horizontal + Vertical
+## Silk Architecture — 3 Tầng × 2 Hướng
 
-### Horizontal Silk (implicit, 0 bytes)
+> Silk = hệ quả toán học tự nhiên của không gian 5D, không phải edge list.
+> Emotion KHÔNG phải metadata trên edge — Emotion LÀ 2 TRONG 5 CHIỀU của node (V + A).
+> "Cùng cảm xúc" = cùng công thức V hoặc A = TỰ ĐỘNG Silk.
+
+### 3 Tầng Silk
+
+| Tầng | Tên | Cách hoạt động | Số lượng | Status |
+|------|-----|----------------|---------|--------|
+| Base | 37 kênh (8S+8R+8V+8A+5T) | Cùng base value = cùng "nhóm máu" | 37 | ✅ SilkIndex |
+| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều cùng lúc = kiểu quan hệ | 31 | ❌ CompoundKind enum |
+| Precise | ~5400 kênh | Cùng variant chính xác = match hoàn hảo | ~5400 | ❌ chưa implement |
+
 ```
-37 base channels: 8 Shape + 8 Relation + 8 Valence zone + 8 Arousal zone + 5 Time
-SilkIndex → implicit_silk(A, B) → shared_dims, strength, shared_count
+Công thức sức mạnh kết nối:
+  strength(A, B) = Σ match(dim) × precision(dim)
+  match(dim)     = 1 nếu cùng base, 0 nếu khác
+  precision(dim) = 1.0 nếu cùng variant, 0.5 nếu chỉ cùng base
 
-Strength = number of shared dimensions:
-  1 dim shared = 0.20 (loosely related)
-  2 dims       = 0.40 (clearly related)
-  3 dims       = 0.60 (near identical)
-  4 dims       = 0.80 (almost same concept)
-  5 dims       = 1.00 (same node)
-
-31 compound patterns: C(5,1)+C(5,2)+C(5,3)+C(5,4)+C(5,5) = 5+10+10+5+1
-  S+V       = "looks similar + feels similar" → visual metaphor
-  R+V       = "relates similar + feels similar" → moral analog
-  V+A       = "same emotional state" → empathy link
-  AllButS   = "different shape, everything else same" → deep metaphor
+37 kênh × 31 mẫu = 1147 KIỂU quan hệ có nghĩa
 ```
 
-**Status:** SilkIndex 37 buckets ✅ | implicit_silk() ✅ | CompoundKind enum ❌ (Gap #2)
+### 31 Compound Patterns
 
-### Vertical Silk (parent pointer, 43 KB)
 ```
-L1→L0:  5400 pointers  (each UCD atom → L1 representative)
+1 chiều chung:  C(5,1) =  5 mẫu → "liên quan nhẹ"
+2 chiều chung:  C(5,2) = 10 mẫu → "liên quan rõ"
+3 chiều chung:  C(5,3) = 10 mẫu → "gần giống"
+4 chiều chung:  C(5,4) =  5 mẫu → "gần như cùng"
+5 chiều chung:  C(5,5) =  1 mẫu → "cùng node"
+
+Ví dụ:
+  S+V       = "trông giống + cảm giống"         → ẩn dụ thị giác
+  R+V       = "quan hệ giống + cảm giống"       → moral analog
+  V+A       = "cùng trạng thái cảm xúc"         → empathy link
+  S+R+V     = "hình + quan hệ + cảm xúc giống"  → gần như cùng khái niệm
+  AllButS   = "khác hình, giống HẾT còn lại"    → ẩn dụ sâu
+```
+
+### 2 Hướng Silk
+
+| Hướng | Tên | Lưu trữ | Status |
+|-------|-----|---------|--------|
+| Ngang | Silk tự do (implicit, cùng tầng) | 0 bytes | ✅ SilkIndex |
+| Dọc | Silk đại diện (parent pointer) | 5460 × 8B = 43 KB | ❌ chưa implement |
+
+### Vertical Silk — Parent Pointer (43 KB)
+```
+Mỗi node tại Lx là ĐẠI DIỆN cho 1 nhóm ở Lx-1.
+Mỗi node chỉ cần 1 pointer đến parent.
+
+L1→L0:  5400 pointers
 L2→L1:    37 pointers
 L3→L2:    12 pointers
 L4→L3:     5 pointers
@@ -167,33 +194,86 @@ L5→L4:     3 pointers
 L6→L5:     2 pointers
 L7→L6:     1 pointer
 ─────────────────────
-Total: 5460 × 8B = 43 KB
+Tổng: 5460 × 8B = 43 KB
 
-Query: O(1) via parent chain traversal
+Truy vấn O(1): 2 lookup đại diện + 1 so sánh 5D
   "🔥 related to ∈?" → compare 5D + check shared parent at L1
 ```
 
-**Status:** parent_map in SilkGraph ❌ (Gap #1 — SPEC_NODE_SILK)
+### Hebbian = Phát hiện cái đã có, không Tạo cái mới
+```
+Silk fire together, wire together — không phải vì ai nối chúng lại,
+mà vì chúng đã ở cùng vị trí trong không gian 5D từ đầu.
+co_activate() PHÁT HIỆN quan hệ implicit, không TẠO mới.
+```
 
 ---
 
-## Node Maturity Lifecycle
+## Node = Molecule + Lifecycle
+
+### Nguyên lý: Molecule = Công thức, không phải Giá trị
 
 ```
-Molecule = FORMULA, not static value.
-Each dimension = a function f(inputs...) waiting for data.
+Mỗi byte trong Molecule = THAM CHIẾU đến công thức gốc L0:
+  Shape    = f_s(inputs...)    ← công thức hình dạng
+  Relation = f_r(inputs...)    ← công thức quan hệ
+  Valence  = f_v(inputs...)    ← công thức cảm xúc
+  Arousal  = f_a(inputs...)    ← công thức cường độ
+  Time     = f_t(inputs...)    ← công thức thời gian
 
-  Formula     → node created, no real input yet (5 potential functions)
-  Evaluating  → fire_count ≥ fib(depth), accumulating evidence
-  Mature      → weight ≥ 0.854 && fire_count ≥ fib(depth), ready for QR
+  Chưa có input → TIỀM NĂNG    Có input → GIÁ TRỊ CỤ THỂ    Đủ → node CHÍN
 
-  STM.push() increments fire_count → advance(fire_count, weight, fib_threshold)
-  Dream.run() detects mature nodes → report in DreamResult.matured_nodes
-  QR promote  → append-only, signed, permanent knowledge
+Hệ quả:
+  Dream    = đánh giá công thức nào đã "chín" → promote QR
+  LeoAI    = tổ hợp công thức A ∘ B → công thức C mới
+  evolve() = thay 1 biến trong công thức → loài mới
+  16GB     = 100M concept × 7 bytes công thức = 700 MB (vs TB nếu lưu giá trị)
+```
+
+### Node Maturity Lifecycle
+
+```
+  Formula     → node mới, chưa có input thật (5 công thức tiềm năng)
+  Evaluating  → fire_count > 0, đang tích lũy evidence
+  Mature      → weight ≥ 0.854 && fire_count ≥ fib(depth), sẵn sàng QR
+
+Wire points:
+  STM.push()    → advance(fire_count, weight, fib_threshold)
+  Dream.run()   → DreamResult.matured_nodes = Vec<u64>
+  QR promote    → append-only, signed, permanent
 ```
 
 **Status:** Maturity enum ✅ | advance() ✅ | Wire to STM ❌ | Wire to Dream ❌
 **Bug:** advance(weight=0.0) → Mature unreachable (SPEC_MATURITY_PIPELINE)
+
+### Node Complete Lifecycle
+```
+encode_codepoint(cp)
+    → MolecularChain (5 bytes)
+    → OlangWriter.append_node()      ← GHI FILE TRƯỚC (QT9)
+    → Registry.insert_with_kind()    ← cập nhật RAM SAU
+    → Observation (fire_count=1, maturity=Formula)
+    → Silk.co_activate()
+
+Repeated co-activation:
+    fire_count++ → maturity: Formula → Evaluating
+    Hebbian weight ≥ 0.854 + fire_count ≥ Fib[depth] → Mature
+
+DreamCycle.run():
+    cluster similar Observations (cùng layer — QT⑪)
+    LCA(cluster) → new MolecularChain
+    DreamProposal → AAM.review() → Approved
+    → QR write (is_qr=true, ED25519 signed, append-only forever)
+```
+
+### Composition Origin (SPEC — chưa implement)
+```
+L0 node  → Innate(codepoint)           — từ encode_codepoint()
+Composite → Composed{sources, op}       — từ LCA / Fuse / Program
+Evolved  → Evolved{source, dim, old, new} — từ evolve()
+
+Lợi ích: trace "concept này sinh từ L0 nào?", re-evaluate khi L0 thay đổi
+```
 
 ---
 

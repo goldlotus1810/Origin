@@ -48,8 +48,10 @@
 ⚠️ Compiler targets — code exists, no end-to-end pipeline
 ⚠️ Book reader — code exists, not wired to runtime
 ⚠️ Domain skills (15) — structs exist, only instincts call them
-⚠️ Maturity pipeline — enum+advance() exist, NOT wired to STM/Dream
-⚠️ Silk parent pointer — thiết kế 43KB vertical Silk, chưa implement
+⚠️ Maturity pipeline — enum+advance() exist, NOT wired (advance weight=0 BUG)
+⚠️ Silk vertical — 3 tầng thiết kế (Base✅/Compound❌/Precise❌), parent 43KB ❌
+⚠️ Molecule = giá trị tĩnh — thiết kế nói "công thức", nhưng code là 5 bytes u8
+⚠️ CompositionOrigin — LCA blend mất nguồn gốc, không trace được L0 sources
 ```
 
 ### SPEC AUDIT — 6 Vấn Đề Hệ Thống (phiên L):
@@ -62,10 +64,30 @@
 #6 Agent hierarchy dead    — Chiefs idle, 0 Workers, 0 ISL messages           [HIGH, LARGE effort]
 ```
 
+### Node & Silk — 8 Gaps chi tiết (SPEC_NODE_SILK):
+```
+Gap #1  Silk dọc (parent pointer)     — parent_map chưa có trong SilkGraph     [HIGH, MEDIUM]
+Gap #2  31 compound patterns          — CompoundKind enum chưa implement       [MED, SMALL-MED]
+Gap #3  Dream bỏ qua 5D similarity    — dùng byte-level thay vì MolSummary    [HIGH, MEDIUM]
+Gap #4  Dream không kiểm tra layer    — Observation thiếu field layer          [MED, SMALL]
+Gap #5  unified_neighbors() chưa wire — method tốt, chỉ dùng trong tests      [MED, SMALL]
+Gap #6  Molecule = giá trị, không công thức — Maturity tách rời Molecule       [HIGH, MEDIUM]
+Gap #7  LCA không lưu nguồn gốc      — CompositionOrigin chưa có             [HIGH, MED-LARGE]
+Gap #8  Maturity advance weight=0     — BUG: Mature unreachable               [HIGH, SMALL]
+```
+
+### Silk thiết kế vs thực tế:
+```
+3 tầng:  Base 37 kênh ✅ | Compound 31 mẫu ❌ | Precise ~5400 ❌
+2 hướng: Ngang (implicit) ✅ | Dọc (parent 43KB) ❌
+Hebbian = phát hiện cái đã có, không tạo mới ✅
+```
+
 ### SPEC FILES:
 ```
 SPEC_MATURITY_PIPELINE.md  — Wire Maturity vào Dream (covers #3, #4, maps #1-#6)
-SPEC_NODE_SILK.md          — 5 Gaps: parent pointer, compound, Dream 5D, layer, unified_neighbors
+SPEC_NODE_SILK.md          — 8 Gaps: parent pointer, compound, Dream 5D, layer,
+                              unified_neighbors, Molecule=formula, CompositionOrigin, weight=0 bug
 ```
 
 ---

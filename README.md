@@ -31,6 +31,32 @@ MUSICAL     ~416     Time         "Thay đổi thế nào" (Static → Instant)
 
 ---
 
+## Node & Silk
+
+Mỗi byte trong Molecule = **công thức**, không phải giá trị tĩnh:
+
+```
+Molecule [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5D
+    ├── SDF      → công thức hình dạng (hữu hình — render được)
+    ├── Spline   → công thức biến đổi (vô hình — 6 temporal curves)
+    └── Silk     → công thức quan hệ (kết nối — 0 bytes implicit)
+```
+
+**Silk** = hệ quả tự nhiên của 5D, không phải edge list:
+
+| Tầng | Kênh | Ý nghĩa |
+|------|------|---------|
+| Base | 37 (8S+8R+8V+8A+5T) | Cùng "nhóm máu" trên 1 chiều |
+| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều → 1147 kiểu quan hệ |
+| Vertical | 5460 pointers = 43KB | Parent-child giữa các tầng |
+
+```
+Node lifecycle: Formula → Evaluating → Mature → QR (append-only, signed)
+evolve(dim, val): thay 1/5 chiều → loài mới (e.g. 🔥 → "lửa nhẹ")
+```
+
+---
+
 ## Cấu Trúc
 
 ```
@@ -55,7 +81,7 @@ tools/
 └── bench/       Performance benchmarks
 ```
 
-**~82,000 lines Rust · 2,063 tests · 0 clippy warnings · 0 external deps · no_std core**
+**~82,000 lines Rust · 2,227 tests · 0 clippy warnings · 0 external deps · no_std core**
 
 ---
 
@@ -65,7 +91,7 @@ tools/
 # Build
 cargo build --workspace
 
-# Test (2,063 tests)
+# Test (2,227 tests)
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
@@ -139,4 +165,4 @@ Chi tiết: xem [CLAUDE.md](CLAUDE.md).
 
 ---
 
-*Unicode 18.0 · Rust · no_std core · ~82K LoC · 2,063 tests · 0 external deps · 2026*
+*Unicode 18.0 · Rust · no_std core · ~82K LoC · 2,227 tests · 0 external deps · 2026*
