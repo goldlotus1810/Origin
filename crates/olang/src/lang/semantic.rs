@@ -2010,6 +2010,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "str_concat" => Some("__str_concat"),
                 "to_string" => Some("__to_string"),
                 "to_number" => Some("__to_number"),
+                "to_num" => Some("__to_number"),    // alias for bootstrap lexer.ol
                 "print" => Some("__print"),
                 "println" => Some("__println"),
                 "abs" => Some("__hyp_abs"),
@@ -2335,6 +2336,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 CmpOp::Le => "__cmp_le",
                 CmpOp::Ge => "__cmp_ge",
                 CmpOp::Ne => "__cmp_ne",
+                CmpOp::Eq => "__eq",
             };
             ctx.emit(Op::Call(builtin.into()));
         }
@@ -2700,6 +2702,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 // Conversion
                 "to_string" => Some("__to_string"),
                 "to_number" => Some("__to_number"),
+                "to_num" => Some("__to_number"),    // alias for bootstrap lexer.ol
                 "is_empty" => Some("__is_empty"),
                 // Channel methods
                 "send" => Some("__channel_send"),
@@ -3224,10 +3227,10 @@ mod tests {
 
     #[test]
     fn lower_truth_assertion() {
-        // QT3: == = proven truth
+        // QT3: == now lowers as CmpOp::Eq → __eq (correct precedence in || chains)
         let stmts = parse("fire == water").unwrap();
         let prog = lower(&stmts);
-        assert!(prog.ops.contains(&Op::Call("__assert_truth".into())));
+        assert!(prog.ops.contains(&Op::Call("__eq".into())));
     }
 
     #[test]

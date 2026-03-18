@@ -1260,11 +1260,23 @@ impl OlangVM {
                             let _ = stack.push(MolecularChain::from_number(result));
                         }
                         "__eq" => {
-                            // Deep equality: compare two chains molecule by molecule
+                            // Equality: numeric comparison with epsilon, or deep chain compare
+                            // Returns non-empty (1.0) for true, empty for false
+                            // (consistent with __cmp_* builtins — Jz checks is_empty())
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
-                            let result = if a.0 == b.0 { 1.0 } else { 0.0 };
-                            let _ = stack.push(MolecularChain::from_number(result));
+                            let is_equal = if let (Some(na), Some(nb)) =
+                                (a.to_number(), b.to_number())
+                            {
+                                (na - nb).abs() < f64::EPSILON
+                            } else {
+                                a.0 == b.0
+                            };
+                            if is_equal {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
                         }
                         // ── String builtins ────────────────────────────────
                         "__str_split" => {

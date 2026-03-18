@@ -26,6 +26,7 @@ Nguyên nhân: parser gặp `union TokenKind {`
 | `alphabet.rs:373-404` có `"struct"` → `Keyword::Struct` | Thêm `"type"` → `Keyword::Struct` |
 | `alphabet.rs:373-404` có `"enum"` → `Keyword::Enum` | Thêm `"union"` → `Keyword::Enum` |
 
+**Status: DONE** (branch claude/review-and-fix-project-erPD8)
 **Fix: 2 dòng code** trong `keyword_from_str()`:
 ```rust
 "union" => Some(Keyword::Enum),    // Olang dùng "union", Rust parser dùng "enum"
@@ -69,6 +70,7 @@ pub fn load(&mut self, module_path: &str, requester: Option<&str>)
 |------------|-----|
 | `semantic.rs:2011` maps `"to_number"` → `"__to_number"` ✅ | Thêm alias `"to_num"` → `"__to_number"` |
 
+**Status: DONE** (branch claude/review-and-fix-project-erPD8)
 **Fix: 1 dòng** trong semantic.rs builtin mapping:
 ```rust
 "to_num" => Some("__to_number"),
