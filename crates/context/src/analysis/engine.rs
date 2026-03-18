@@ -183,6 +183,11 @@ impl ContextEngine {
         &self.curve
     }
 
+    /// ConversationCurve (mutable) — for restore from origin.olang.
+    pub fn curve_mut(&mut self) -> &mut ConversationCurve {
+        &mut self.curve
+    }
+
     /// Snapshots (read-only).
     pub fn snapshots(&self) -> &[ContextSnapshot] {
         &self.snapshots

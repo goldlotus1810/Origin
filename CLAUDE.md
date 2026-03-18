@@ -531,12 +531,18 @@ fn execute(&self, ctx: &mut ExecContext) -> SkillResult { ... }
 ## File Format
 
 ```
-origin.olang — append-only binary
-  Header: [○LNG] [0x03] [created_ts:8]  = 13 bytes
+origin.olang — append-only binary (BỘ NHỚ DUY NHẤT, RAM = cache tạm)
+  Header: [○LNG] [0x05] [created_ts:8]  = 13 bytes
   Records:
-    0x01 = Node  [chain_hash:8] [layer:1] [is_qr:1] [ts:8]
-    0x02 = Edge  [from:8] [to:8] [rel:1] [ts:8]
-    0x03 = Alias [chain_hash:8] [lang:2] [name_len:2] [name:N]
+    0x01 = Node      [tagged_chain][layer:1][is_qr:1][ts:8]
+    0x02 = Edge      [from:8][to:8][rel:1][ts:8]
+    0x03 = Alias     [name_len:1][name:N][chain_hash:8][ts:8]
+    0x04 = Amend     [target_offset:8][reason_len:1][reason:N][ts:8]
+    0x05 = NodeKind  [chain_hash:8][kind:1][ts:8]
+    0x06 = STM       [chain_hash:8][V:4][A:4][D:4][I:4][fire:4][mat:1][layer:1][ts:8]
+    0x07 = Hebbian   [from:8][to:8][weight:1][fire:2][ts:8]
+    0x08 = KnowTree  [data_len:2][compact_bytes:N][ts:8]
+    0x09 = Curve     [valence:4][fx_dn:4][ts:8]
 
 origin.olang.weights  — Hebbian weights (append-only)
 origin.olang.registry — chain index (rebuild được từ origin.olang)

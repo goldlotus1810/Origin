@@ -54,6 +54,14 @@ pub struct BootResult {
     pub pending_writes: Vec<u8>,
     /// Số seed nodes đã ghi bổ sung (QT8).
     pub seeds_written: usize,
+    /// STM observations đã load từ file — restore vào ShortTermMemory.
+    pub stm_records: Vec<crate::reader::ParsedStm>,
+    /// HebbianLink đã load từ file — restore vào SilkGraph.learned.
+    pub hebbian_records: Vec<crate::reader::ParsedHebbian>,
+    /// KnowTree compact nodes đã load từ file — restore vào KnowTree.
+    pub knowtree_records: Vec<crate::reader::ParsedKnowTree>,
+    /// ConversationCurve turn records — replay to reconstruct curve.
+    pub curve_records: Vec<crate::reader::ParsedCurve>,
 }
 
 /// Stage boot đã đạt được.
@@ -131,11 +139,19 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
 
     // Stage 4: Load từ file
     let mut edges = Vec::new();
+    let mut stm_records = Vec::new();
+    let mut hebbian_records = Vec::new();
+    let mut knowtree_records = Vec::new();
+    let mut curve_records = Vec::new();
     let file_had_data = if let Some(bytes) = file_bytes {
         if !bytes.is_empty() {
             match load_from_bytes(bytes, &mut registry) {
-                Ok(loaded_edges) => {
-                    edges = loaded_edges;
+                Ok(loaded) => {
+                    edges = loaded.edges;
+                    stm_records = loaded.stm_records;
+                    hebbian_records = loaded.hebbian_records;
+                    knowtree_records = loaded.knowtree_records;
+                    curve_records = loaded.curve_records;
                     stage = BootStage::Loaded;
                     true
                 }
@@ -200,6 +216,10 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         edges,
         pending_writes,
         seeds_written,
+        stm_records,
+        hebbian_records,
+        knowtree_records,
+        curve_records,
     }
 }
 
@@ -777,7 +797,16 @@ fn write_missing_seeds(
 // Load từ file bytes
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<Vec<BootEdge>, ParseError> {
+/// All persisted data loaded from origin.olang.
+struct LoadedData {
+    edges: Vec<BootEdge>,
+    stm_records: Vec<crate::reader::ParsedStm>,
+    hebbian_records: Vec<crate::reader::ParsedHebbian>,
+    knowtree_records: Vec<crate::reader::ParsedKnowTree>,
+    curve_records: Vec<crate::reader::ParsedCurve>,
+}
+
+fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<LoadedData, ParseError> {
     let reader = OlangReader::new(bytes)?;
     let parsed = reader.parse_all()?;
 
@@ -819,7 +848,13 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<Vec<BootEdge
         })
         .collect();
 
-    Ok(edges)
+    Ok(LoadedData {
+        edges,
+        stm_records: parsed.stm_records,
+        hebbian_records: parsed.hebbian_records,
+        knowtree_records: parsed.knowtree_records,
+        curve_records: parsed.curve_records,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

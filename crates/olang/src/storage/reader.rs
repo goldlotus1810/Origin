@@ -9,8 +9,8 @@ use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
 use crate::writer::{
-    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_EDGE, RT_NODE, RT_NODE_KIND, VERSION, VERSION_V03,
-    VERSION_V04,
+    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_CURVE, RT_EDGE, RT_HEBBIAN, RT_KNOWTREE, RT_NODE,
+    RT_NODE_KIND, RT_STM, VERSION, VERSION_V03, VERSION_V04,
 };
 
 /// Read a little-endian u64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
@@ -27,6 +27,24 @@ fn read_u64_le(data: &[u8], pos: usize) -> u64 {
 #[inline]
 fn read_i64_le(data: &[u8], pos: usize) -> i64 {
     read_u64_le(data, pos) as i64
+}
+
+/// Read a little-endian f32 from a slice at offset. Caller must ensure pos+4 ≤ data.len().
+#[inline]
+fn read_f32_le(data: &[u8], pos: usize) -> f32 {
+    f32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
+}
+
+/// Read a little-endian u32 from a slice at offset. Caller must ensure pos+4 ≤ data.len().
+#[inline]
+fn read_u32_le(data: &[u8], pos: usize) -> u32 {
+    u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
+}
+
+/// Read a little-endian u16 from a slice at offset. Caller must ensure pos+2 ≤ data.len().
+#[inline]
+fn read_u16_le(data: &[u8], pos: usize) -> u16 {
+    u16::from_le_bytes([data[pos], data[pos + 1]])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,6 +103,53 @@ pub struct ParsedAmend {
     pub target_offset: u64,
     /// Lý do amend.
     pub reason: String,
+    pub timestamp: i64,
+    pub file_offset: u64,
+}
+
+/// STM Observation record đã parse.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedStm {
+    pub chain_hash: u64,
+    pub valence: f32,
+    pub arousal: f32,
+    pub dominance: f32,
+    pub intensity: f32,
+    pub fire_count: u32,
+    pub maturity: u8,
+    pub layer: u8,
+    pub timestamp: i64,
+    pub file_offset: u64,
+}
+
+/// HebbianLink record đã parse.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedHebbian {
+    pub from_hash: u64,
+    pub to_hash: u64,
+    pub weight: u8,
+    pub fire_count: u16,
+    pub timestamp: i64,
+    pub file_offset: u64,
+}
+
+/// KnowTree CompactNode record đã parse.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedKnowTree {
+    pub data: Vec<u8>,
+    pub timestamp: i64,
+    pub file_offset: u64,
+}
+
+/// ConversationCurve turn record đã parse.
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedCurve {
+    pub valence: f32,
+    pub fx_dn: f32,
     pub timestamp: i64,
     pub file_offset: u64,
 }
@@ -152,6 +217,10 @@ impl<'a> OlangReader<'a> {
         let mut aliases: Vec<ParsedAlias> = Vec::new();
         let mut amends: Vec<ParsedAmend> = Vec::new();
         let mut node_kinds: Vec<ParsedNodeKind> = Vec::new();
+        let mut stm_records: Vec<ParsedStm> = Vec::new();
+        let mut hebbian_records: Vec<ParsedHebbian> = Vec::new();
+        let mut knowtree_records: Vec<ParsedKnowTree> = Vec::new();
+        let mut curve_records: Vec<ParsedCurve> = Vec::new();
 
         let mut pos = HEADER_SIZE;
 
@@ -309,6 +378,75 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_STM => {
+                    // [chain_hash:8][v:4][a:4][d:4][i:4][fire:4][mat:1][layer:1][ts:8] = 38
+                    if pos + 38 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let hash = read_u64_le(self.data, pos); pos += 8;
+                    let v = read_f32_le(self.data, pos); pos += 4;
+                    let a = read_f32_le(self.data, pos); pos += 4;
+                    let d = read_f32_le(self.data, pos); pos += 4;
+                    let i = read_f32_le(self.data, pos); pos += 4;
+                    let fc = read_u32_le(self.data, pos); pos += 4;
+                    let mat = self.data[pos]; pos += 1;
+                    let layer = self.data[pos]; pos += 1;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    stm_records.push(ParsedStm {
+                        chain_hash: hash, valence: v, arousal: a,
+                        dominance: d, intensity: i, fire_count: fc,
+                        maturity: mat, layer, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
+                RT_HEBBIAN => {
+                    // [from:8][to:8][weight:1][fire:2][ts:8] = 27
+                    if pos + 27 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let from = read_u64_le(self.data, pos); pos += 8;
+                    let to = read_u64_le(self.data, pos); pos += 8;
+                    let w = self.data[pos]; pos += 1;
+                    let fc = read_u16_le(self.data, pos); pos += 2;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    hebbian_records.push(ParsedHebbian {
+                        from_hash: from, to_hash: to, weight: w,
+                        fire_count: fc, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
+                RT_KNOWTREE => {
+                    // [data_len:2][data:N][ts:8]
+                    if pos + 2 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let data_len = read_u16_le(self.data, pos) as usize; pos += 2;
+                    if pos + data_len + 8 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let data = self.data[pos..pos + data_len].to_vec(); pos += data_len;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    knowtree_records.push(ParsedKnowTree {
+                        data, timestamp: ts, file_offset: record_offset,
+                    });
+                }
+
+                RT_CURVE => {
+                    // [valence:4][fx_dn:4][ts:8] = 16
+                    if pos + 16 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let v = read_f32_le(self.data, pos); pos += 4;
+                    let dn = read_f32_le(self.data, pos); pos += 4;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    curve_records.push(ParsedCurve {
+                        valence: v, fx_dn: dn, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 other => return Err(ParseError::UnknownRecordType(other)),
             }
         }
@@ -323,6 +461,10 @@ impl<'a> OlangReader<'a> {
             aliases,
             amends,
             node_kinds,
+            stm_records,
+            hebbian_records,
+            knowtree_records,
+            curve_records,
             amended_offsets,
             created_at: self.created_at,
         })
@@ -354,6 +496,10 @@ impl<'a> OlangReader<'a> {
         let mut aliases: Vec<ParsedAlias> = Vec::new();
         let mut amends: Vec<ParsedAmend> = Vec::new();
         let mut node_kinds: Vec<ParsedNodeKind> = Vec::new();
+        let mut stm_records: Vec<ParsedStm> = Vec::new();
+        let mut hebbian_records: Vec<ParsedHebbian> = Vec::new();
+        let mut knowtree_records: Vec<ParsedKnowTree> = Vec::new();
+        let mut curve_records: Vec<ParsedCurve> = Vec::new();
 
         let mut pos = HEADER_SIZE;
         let mut error = None;
@@ -523,6 +669,76 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_STM => {
+                    if pos + 38 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let hash = read_u64_le(self.data, pos); pos += 8;
+                    let v = read_f32_le(self.data, pos); pos += 4;
+                    let a = read_f32_le(self.data, pos); pos += 4;
+                    let d = read_f32_le(self.data, pos); pos += 4;
+                    let i = read_f32_le(self.data, pos); pos += 4;
+                    let fc = read_u32_le(self.data, pos); pos += 4;
+                    let mat = self.data[pos]; pos += 1;
+                    let layer = self.data[pos]; pos += 1;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    stm_records.push(ParsedStm {
+                        chain_hash: hash, valence: v, arousal: a,
+                        dominance: d, intensity: i, fire_count: fc,
+                        maturity: mat, layer, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
+                RT_HEBBIAN => {
+                    if pos + 27 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let from = read_u64_le(self.data, pos); pos += 8;
+                    let to = read_u64_le(self.data, pos); pos += 8;
+                    let w = self.data[pos]; pos += 1;
+                    let fc = read_u16_le(self.data, pos); pos += 2;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    hebbian_records.push(ParsedHebbian {
+                        from_hash: from, to_hash: to, weight: w,
+                        fire_count: fc, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
+                RT_KNOWTREE => {
+                    if pos + 2 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let data_len = read_u16_le(self.data, pos) as usize; pos += 2;
+                    if pos + data_len + 8 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let data = self.data[pos..pos + data_len].to_vec(); pos += data_len;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    knowtree_records.push(ParsedKnowTree {
+                        data, timestamp: ts, file_offset: record_offset,
+                    });
+                }
+
+                RT_CURVE => {
+                    if pos + 16 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let v = read_f32_le(self.data, pos); pos += 4;
+                    let dn = read_f32_le(self.data, pos); pos += 4;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    curve_records.push(ParsedCurve {
+                        valence: v, fx_dn: dn, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 other => {
                     error = Some(ParseError::UnknownRecordType(other));
                     break;
@@ -531,7 +747,8 @@ impl<'a> OlangReader<'a> {
         }
 
         let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len()
-            + node_kinds.len();
+            + node_kinds.len() + stm_records.len() + hebbian_records.len()
+            + knowtree_records.len() + curve_records.len();
         let amended_offsets: alloc::collections::BTreeSet<u64> =
             amends.iter().map(|a| a.target_offset).collect();
         let file = ParsedFile {
@@ -540,6 +757,10 @@ impl<'a> OlangReader<'a> {
             aliases,
             amends,
             node_kinds,
+            stm_records,
+            hebbian_records,
+            knowtree_records,
+            curve_records,
             amended_offsets,
             created_at: self.created_at,
         };
@@ -566,6 +787,14 @@ pub struct ParsedFile {
     pub amends: Vec<ParsedAmend>,
     /// NodeKind records (v0.05+) — gán NodeKind cho nodes.
     pub node_kinds: Vec<ParsedNodeKind>,
+    /// STM Observation records — restore ShortTermMemory on boot.
+    pub stm_records: Vec<ParsedStm>,
+    /// HebbianLink records — restore Silk learned weights on boot.
+    pub hebbian_records: Vec<ParsedHebbian>,
+    /// KnowTree CompactNode records — restore L2+ knowledge on boot.
+    pub knowtree_records: Vec<ParsedKnowTree>,
+    /// ConversationCurve turn records — replay to reconstruct curve on boot.
+    pub curve_records: Vec<ParsedCurve>,
     /// Offsets đã bị amend — dùng để filter records.
     pub amended_offsets: alloc::collections::BTreeSet<u64>,
     /// Timestamp khi file được tạo.
@@ -847,5 +1076,85 @@ mod tests {
             info.error,
             Some(ParseError::UnknownRecordType(0xFE))
         ));
+    }
+
+    // ── New record types roundtrip tests ──────────────────────────────────
+
+    #[test]
+    fn roundtrip_stm_record() {
+        let pf = roundtrip(|w| {
+            w.append_stm(0xDEAD_BEEF, -0.5, 0.7, 0.3, 0.8, 5, 0x01, 1, 4000);
+        });
+        assert_eq!(pf.stm_records.len(), 1);
+        let s = &pf.stm_records[0];
+        assert_eq!(s.chain_hash, 0xDEAD_BEEF);
+        assert!((s.valence - (-0.5)).abs() < 0.001);
+        assert!((s.arousal - 0.7).abs() < 0.001);
+        assert!((s.dominance - 0.3).abs() < 0.001);
+        assert!((s.intensity - 0.8).abs() < 0.001);
+        assert_eq!(s.fire_count, 5);
+        assert_eq!(s.maturity, 0x01);
+        assert_eq!(s.layer, 1);
+        assert_eq!(s.timestamp, 4000);
+    }
+
+    #[test]
+    fn roundtrip_hebbian_record() {
+        let pf = roundtrip(|w| {
+            w.append_hebbian(0xAAAA, 0xBBBB, 200, 42, 5000);
+        });
+        assert_eq!(pf.hebbian_records.len(), 1);
+        let h = &pf.hebbian_records[0];
+        assert_eq!(h.from_hash, 0xAAAA);
+        assert_eq!(h.to_hash, 0xBBBB);
+        assert_eq!(h.weight, 200);
+        assert_eq!(h.fire_count, 42);
+        assert_eq!(h.timestamp, 5000);
+    }
+
+    #[test]
+    fn roundtrip_knowtree_record() {
+        let data = [0x01u8, 0x02, 0x03, 0x04, 0x05];
+        let pf = roundtrip(|w| {
+            w.append_knowtree(&data, 6000).unwrap();
+        });
+        assert_eq!(pf.knowtree_records.len(), 1);
+        let k = &pf.knowtree_records[0];
+        assert_eq!(k.data, data);
+        assert_eq!(k.timestamp, 6000);
+    }
+
+    #[test]
+    fn roundtrip_curve_record() {
+        let pf = roundtrip(|w| {
+            w.append_curve(-0.3, 0.15, 7000);
+        });
+        assert_eq!(pf.curve_records.len(), 1);
+        let c = &pf.curve_records[0];
+        assert!((c.valence - (-0.3)).abs() < 0.001);
+        assert!((c.fx_dn - 0.15).abs() < 0.001);
+        assert_eq!(c.timestamp, 7000);
+    }
+
+    #[test]
+    fn roundtrip_mixed_all_record_types() {
+        let chain = encode_codepoint(0x1F525);
+        let hash = chain.chain_hash();
+        let pf = roundtrip(|w| {
+            w.append_node(&chain, 0, false, 1000).unwrap();
+            w.append_edge(hash, 0xDEAD, 0x01, 1001);
+            w.append_alias("fire", hash, 1002).unwrap();
+            w.append_stm(hash, -0.5, 0.7, 0.3, 0.8, 1, 0x00, 0, 1003);
+            w.append_hebbian(hash, 0xDEAD, 128, 3, 1004);
+            w.append_knowtree(&[0x42], 1005).unwrap();
+            w.append_curve(-0.2, 0.1, 1006);
+        });
+        assert_eq!(pf.node_count(), 1);
+        assert_eq!(pf.edge_count(), 1);
+        assert_eq!(pf.alias_count(), 1);
+        assert_eq!(pf.stm_records.len(), 1);
+        assert_eq!(pf.hebbian_records.len(), 1);
+        assert_eq!(pf.knowtree_records.len(), 1);
+        assert_eq!(pf.curve_records.len(), 1);
     }
 }

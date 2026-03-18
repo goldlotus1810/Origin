@@ -219,6 +219,41 @@ impl SilkGraph {
             .unwrap_or(0.0)
     }
 
+    /// All HebbianLinks originating from a hash — for persistence.
+    pub fn learned_links_from(&self, hash: u64) -> Vec<&HebbianLink> {
+        self.learned.iter().filter(|l| l.from_hash == hash).collect()
+    }
+
+    /// All HebbianLinks — for persistence/boot.
+    pub fn all_learned(&self) -> &[HebbianLink] {
+        &self.learned
+    }
+
+    /// Restore a HebbianLink from persisted data — insert without Hebbian formula.
+    pub fn restore_learned(&mut self, from: u64, to: u64, weight: u8, fire_count: u16) {
+        let key = (from, to);
+        match self.learned.binary_search_by_key(&key, |l| l.key()) {
+            Ok(idx) => {
+                // Update existing — take max weight (append-only, last record wins)
+                let link = &mut self.learned[idx];
+                if weight > link.weight {
+                    link.weight = weight;
+                }
+                if fire_count > link.fire_count {
+                    link.fire_count = fire_count;
+                }
+            }
+            Err(idx) => {
+                self.learned.insert(idx, HebbianLink {
+                    from_hash: from,
+                    to_hash: to,
+                    weight,
+                    fire_count,
+                });
+            }
+        }
+    }
+
     /// Strengthen or create a HebbianLink (slim co-activation).
     ///
     /// This is the NEW preferred way to learn connections:

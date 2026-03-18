@@ -1344,6 +1344,40 @@ impl TieredStore {
         }
     }
 
+    /// Restore a pre-decoded CompactNode from origin.olang — boot path.
+    ///
+    /// QT8: origin.olang = bộ nhớ duy nhất, RAM = cache.
+    pub fn restore_node(&mut self, node: CompactNode) {
+        let hash = node.hash;
+        let layer = node.layer;
+        let page_id = self.current_page_for_layer(layer);
+
+        let mut page = self
+            .take_page(page_id)
+            .unwrap_or_else(|| CompactPage::new(page_id, layer));
+
+        if page.is_full() {
+            self.flush_page(page);
+            self.next_page_id += 1;
+            page = CompactPage::new(self.next_page_id, layer);
+        }
+
+        page.push_node(node);
+        self.total_nodes += 1;
+
+        self.ensure_index(layer);
+        for idx in &mut self.indexes {
+            if idx.layer == layer {
+                idx.insert(hash, page.page_id);
+                break;
+            }
+        }
+
+        if let Some(evicted) = self.cache.put(page.page_id, page) {
+            self.flush_page(evicted);
+        }
+    }
+
     /// Lookup node by hash.
     pub fn lookup(&mut self, hash: u64, layer: u8) -> Option<&CompactNode> {
         // 1. Check index for page_id
