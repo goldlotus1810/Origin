@@ -209,6 +209,8 @@ pub enum VmError {
     DivisionByZero,
     /// Runtime error with custom message (panic, assert failures, etc.)
     RuntimeError(String),
+    /// Phase 6G: Molecular constraint violation at function call site
+    ConstraintViolation(String),
 }
 
 impl core::fmt::Display for VmError {
@@ -222,6 +224,7 @@ impl core::fmt::Display for VmError {
             Self::MaxCallDepthExceeded => write!(f, "Max call depth exceeded — too many nested scopes"),
             Self::DivisionByZero => write!(f, "Division by zero"),
             Self::RuntimeError(msg) => write!(f, "{}", msg),
+            Self::ConstraintViolation(msg) => write!(f, "Constraint violation: {}", msg),
         }
     }
 }
@@ -860,6 +863,105 @@ impl OlangVM {
                                 let _ = stack.push(MolecularChain::empty());
                             }
                         }
+                        // Phase 6: Molecular constraint pattern matching
+                        // Stack: [subject, constraint0, constraint1, ..., constraintN-1, count]
+                        // Each constraint = PushMol(dim_byte, op_byte, value, 0, 0)
+                        // dim_byte: S=1 R=2 V=3 A=4 T=5
+                        // op_byte: Eq=0 Gt=1 Lt=2 Ge=3 Le=4 Any=5
+                        "__match_mol_constraint" => {
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            // Pop constraint molecules
+                            let mut constraints = Vec::new();
+                            for _ in 0..count {
+                                constraints.push(vm_pop!(stack, events));
+                            }
+                            constraints.reverse(); // order: first constraint first
+                            // Pop subject
+                            let actual = vm_pop!(stack, events);
+                            let matches = if actual.is_empty() {
+                                false
+                            } else {
+                                let mol = &actual.0[0];
+                                constraints.iter().all(|c| {
+                                    if c.is_empty() { return true; }
+                                    let cm = &c.0[0];
+                                    let dim_val = match cm.shape {
+                                        1 => mol.shape,
+                                        2 => mol.relation,
+                                        3 => mol.emotion.valence,
+                                        4 => mol.emotion.arousal,
+                                        5 => mol.time,
+                                        _ => return true,
+                                    };
+                                    let threshold = cm.emotion.valence; // value stored in V position
+                                    match cm.relation { // op stored in R position
+                                        0 => dim_val == threshold,     // Eq
+                                        1 => dim_val > threshold,      // Gt
+                                        2 => dim_val < threshold,      // Lt
+                                        3 => dim_val >= threshold,     // Ge
+                                        4 => dim_val <= threshold,     // Le
+                                        5 => true,                     // Any
+                                        _ => true,
+                                    }
+                                })
+                            };
+                            if matches {
+                                let _ = stack.push(actual); // truthy
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+
+                        // Phase 6G: Runtime constraint check for function parameters
+                        // Stack: [value, constraint0, ..., constraintN-1, count]
+                        // Same encoding as __match_mol_constraint
+                        // If constraint fails → emit VmError
+                        "__check_constraint" => {
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut constraints = Vec::new();
+                            for _ in 0..count {
+                                constraints.push(vm_pop!(stack, events));
+                            }
+                            constraints.reverse();
+                            let actual = vm_pop!(stack, events);
+                            if !actual.is_empty() {
+                                let mol = &actual.0[0];
+                                for c in &constraints {
+                                    if c.is_empty() { continue; }
+                                    let cm = &c.0[0];
+                                    let dim_name = match cm.shape {
+                                        1 => "S", 2 => "R", 3 => "V", 4 => "A", 5 => "T", _ => "?",
+                                    };
+                                    let dim_val = match cm.shape {
+                                        1 => mol.shape, 2 => mol.relation,
+                                        3 => mol.emotion.valence, 4 => mol.emotion.arousal,
+                                        5 => mol.time, _ => continue,
+                                    };
+                                    let threshold = cm.emotion.valence;
+                                    let ok = match cm.relation {
+                                        0 => dim_val == threshold,
+                                        1 => dim_val > threshold,
+                                        2 => dim_val < threshold,
+                                        3 => dim_val >= threshold,
+                                        4 => dim_val <= threshold,
+                                        5 => true,
+                                        _ => true,
+                                    };
+                                    if !ok {
+                                        let op_str = match cm.relation {
+                                            0 => "=", 1 => ">", 2 => "<", 3 => ">=", 4 => "<=", _ => "?",
+                                        };
+                                        events.push(VmEvent::Error(VmError::ConstraintViolation(
+                                            alloc::format!("Constraint failed: {}={} but expected {}{}{}", dim_name, dim_val, dim_name, op_str, threshold)
+                                        )));
+                                    }
+                                }
+                            }
+                            let _ = stack.push(actual); // pass through
+                        }
+
                         "__array_new" => {
                             // Stack: [... elem0, elem1, ..., elemN-1, count]
                             // Pop count first (on top), then elements in reverse order

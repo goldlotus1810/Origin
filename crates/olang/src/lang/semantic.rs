@@ -75,11 +75,26 @@ impl SemError {
 // Scope — quản lý biến và hàm
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Phase 6F: Effect classification derived from Relation dimension.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EffectKind {
+    /// No side effects — pure computation
+    Pure,
+    /// Has output effects (emit statements)
+    Emits,
+    /// Has causal/state effects (Relation::Causes)
+    Causes,
+}
+
 /// Function definition cho scope tracking.
 #[derive(Debug, Clone)]
 struct FnInfo {
     name: String,
     param_count: usize,
+    /// Molecular constraints per parameter (Phase 6B — constraint propagation)
+    constraints: Vec<Option<crate::syntax::MolConstraint>>,
+    /// Phase 6F: inferred or declared effect kind
+    effect: EffectKind,
 }
 
 /// Trait definition cho conformance checking.
@@ -97,10 +112,33 @@ struct TraitMethodInfo {
     has_default: bool,   // true if trait provides default implementation
 }
 
+/// Phase 6D: Value semantics derived from Time dimension.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ValueSemantics {
+    /// Default — no molecular type info, standard clone behavior
+    Copy,
+    /// Time=Static → Copy-on-Write (immutable sharing, copy on mutation)
+    CoW,
+    /// Time=Fast/Instant → Move (ownership transfer, use-after-move is error)
+    Move,
+    /// Time=Medium/Slow → Share (reference-counted, multiple readers)
+    Share,
+}
+
+/// Local variable entry with mutability and value semantics tracking.
+struct LocalVar {
+    name: String,
+    mutable: bool,
+    /// Phase 6D: value semantics (Move, CoW, Share, Copy)
+    semantics: ValueSemantics,
+    /// Phase 6D: whether this variable has been moved
+    moved: bool,
+}
+
 /// Scope: theo dõi biến cục bộ và hàm.
 struct Scope {
-    /// Stack of local variable names (pushed on enter, popped on exit)
-    locals: Vec<String>,
+    /// Stack of local variable entries (pushed on enter, popped on exit)
+    locals: Vec<LocalVar>,
     /// Defined functions
     fns: Vec<FnInfo>,
     /// Defined traits
@@ -130,17 +168,67 @@ impl Scope {
     }
 
     fn define_local(&mut self, name: &str) {
-        self.locals.push(name.to_string());
+        self.locals.push(LocalVar { name: name.to_string(), mutable: false, semantics: ValueSemantics::Copy, moved: false });
+    }
+
+    fn define_local_mut(&mut self, name: &str, mutable: bool) {
+        self.locals.push(LocalVar { name: name.to_string(), mutable, semantics: ValueSemantics::Copy, moved: false });
+    }
+
+    /// Phase 6D: Define a local with specific value semantics derived from Time dimension.
+    fn define_local_with_semantics(&mut self, name: &str, mutable: bool, semantics: ValueSemantics) {
+        self.locals.push(LocalVar { name: name.to_string(), mutable, semantics, moved: false });
     }
 
     fn is_defined(&self, name: &str) -> bool {
-        self.locals.iter().any(|n| n == name)
+        self.locals.iter().any(|v| v.name == name)
+    }
+
+    fn is_mutable(&self, name: &str) -> bool {
+        self.locals.iter().rev().find(|v| v.name == name).map_or(false, |v| v.mutable)
+    }
+
+    /// Phase 6D: Mark a variable as moved (use-after-move produces error).
+    fn mark_moved(&mut self, name: &str) {
+        if let Some(v) = self.locals.iter_mut().rev().find(|v| v.name == name) {
+            v.moved = true;
+        }
+    }
+
+    /// Phase 6D: Check if a variable has been moved.
+    fn is_moved(&self, name: &str) -> bool {
+        self.locals.iter().rev().find(|v| v.name == name).map_or(false, |v| v.moved)
+    }
+
+    /// Phase 6D: Get the value semantics of a variable.
+    fn get_semantics(&self, name: &str) -> ValueSemantics {
+        self.locals.iter().rev().find(|v| v.name == name).map_or(ValueSemantics::Copy, |v| v.semantics)
     }
 
     fn define_fn(&mut self, name: &str, param_count: usize) {
         self.fns.push(FnInfo {
             name: name.to_string(),
             param_count,
+            constraints: Vec::new(),
+            effect: EffectKind::Pure,
+        });
+    }
+
+    fn define_fn_with_constraints(&mut self, name: &str, param_count: usize, constraints: Vec<Option<crate::syntax::MolConstraint>>) {
+        self.fns.push(FnInfo {
+            name: name.to_string(),
+            param_count,
+            constraints,
+            effect: EffectKind::Pure,
+        });
+    }
+
+    fn define_fn_with_effect(&mut self, name: &str, param_count: usize, constraints: Vec<Option<crate::syntax::MolConstraint>>, effect: EffectKind) {
+        self.fns.push(FnInfo {
+            name: name.to_string(),
+            param_count,
+            constraints,
+            effect,
         });
     }
 
@@ -169,8 +257,13 @@ pub fn validate(stmts: &[Stmt]) -> Vec<SemError> {
 
     // First pass: collect function and trait definitions
     for stmt in stmts {
-        if let Stmt::FnDef { name, params, .. } = stmt {
-            scope.define_fn(name, params.len());
+        if let Stmt::FnDef { name, params, body, param_constraints, .. } = stmt {
+            let constraints: Vec<Option<crate::syntax::MolConstraint>> = params.iter().map(|p| {
+                param_constraints.iter().find(|fp| fp.name == *p).and_then(|fp| fp.constraint.clone())
+            }).collect();
+            // Phase 6F: infer effect kind from function body
+            let effect = infer_effect_kind(body);
+            scope.define_fn_with_effect(name, params.len(), constraints, effect);
         }
         if let Stmt::TraitDef { name, methods, .. } = stmt {
             scope.define_trait(TraitInfo {
@@ -203,9 +296,11 @@ pub fn validate(stmts: &[Stmt]) -> Vec<SemError> {
 
 fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
     match stmt {
-        Stmt::Let { name, value } => {
+        Stmt::Let { name, value, mutable } => {
             validate_expr(value, scope, errors);
-            scope.define_local(name);
+            // Phase 6D: infer value semantics from Time dimension of molecular literals
+            let sem = infer_value_semantics(value);
+            scope.define_local_with_semantics(name, *mutable, sem);
         }
 
         Stmt::LetDestructure { names, value } => {
@@ -300,7 +395,7 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
                 )));
             }
             scope.enter();
-            scope.locals.push(var.clone());
+            scope.define_local(var);
             for s in body {
                 validate_stmt(s, scope, errors);
             }
@@ -318,7 +413,7 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
         Stmt::ForEach { var, iter, body } => {
             validate_expr(iter, scope, errors);
             scope.enter();
-            scope.locals.push(var.clone());
+            scope.define_local(var);
             for s in body {
                 validate_stmt(s, scope, errors);
             }
@@ -335,6 +430,12 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             if !scope.is_defined(name) {
                 errors.push(SemError::new(&alloc::format!(
                     "Assignment to undeclared variable '{}' (use 'let' to declare first)",
+                    name
+                )));
+            } else if !scope.is_mutable(name) {
+                // Phase 6C: immutability by default
+                errors.push(SemError::new(&alloc::format!(
+                    "Cannot assign to immutable variable '{}' (use 'let mut' to make it mutable)",
                     name
                 )));
             }
@@ -385,6 +486,7 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
         Stmt::Match { subject, arms } => {
             validate_expr(subject, scope, errors);
             let mut has_wildcard = false;
+            let mut has_mol_constraint = false;
             for (i, arm) in arms.iter().enumerate() {
                 if has_wildcard {
                     errors.push(SemError::new(&alloc::format!(
@@ -394,11 +496,20 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
                 if arm.pattern == crate::syntax::MatchPattern::Wildcard {
                     has_wildcard = true;
                 }
+                if matches!(arm.pattern, crate::syntax::MatchPattern::MolConstraintPattern { .. }) {
+                    has_mol_constraint = true;
+                }
                 scope.enter();
                 for s in &arm.body {
                     validate_stmt(s, scope, errors);
                 }
                 scope.exit();
+            }
+            // Phase 6E: warn if match uses ○{ } constraint patterns without wildcard fallback
+            if has_mol_constraint && !has_wildcard {
+                errors.push(SemError::new(
+                    "Non-exhaustive match: ○{ } constraint patterns do not cover all 5D space. Add a wildcard '_' arm"
+                ));
             }
         }
 
@@ -472,7 +583,7 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
                     crate::syntax::SelectArm::Recv { var, channel, body } => {
                         validate_expr(channel, scope, errors);
                         scope.enter();
-                        scope.locals.push(var.clone());
+                        scope.define_local(var);
                         for s in body {
                             validate_stmt(s, scope, errors);
                         }
@@ -492,11 +603,58 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
     }
 }
 
+/// Phase 6F: Infer effect kind from a function body.
+fn infer_effect_kind(body: &[Stmt]) -> EffectKind {
+    for stmt in body {
+        match stmt {
+            Stmt::Emit(_) => return EffectKind::Emits,
+            Stmt::If { then_block, else_block, .. } => {
+                let then_effect = infer_effect_kind(then_block);
+                if then_effect != EffectKind::Pure {
+                    return then_effect;
+                }
+                if let Some(eb) = else_block {
+                    let else_effect = infer_effect_kind(eb);
+                    if else_effect != EffectKind::Pure {
+                        return else_effect;
+                    }
+                }
+            }
+            Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::ForIn { body, .. } => {
+                let effect = infer_effect_kind(body);
+                if effect != EffectKind::Pure {
+                    return effect;
+                }
+            }
+            _ => {}
+        }
+    }
+    EffectKind::Pure
+}
+
+/// Phase 6D: Infer value semantics from Time dimension of a molecular literal.
+fn infer_value_semantics(expr: &Expr) -> ValueSemantics {
+    if let Expr::MolLiteral { time, .. } = expr {
+        match time {
+            Some(t) if *t == 1 => ValueSemantics::CoW,   // Static
+            Some(t) if *t == 4 || *t == 5 => ValueSemantics::Move, // Fast or Instant
+            Some(t) if *t == 2 || *t == 3 => ValueSemantics::Share, // Slow or Medium
+            _ => ValueSemantics::Copy, // default (Medium) or unspecified
+        }
+    } else {
+        ValueSemantics::Copy
+    }
+}
+
 fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
     match expr {
-        Expr::Ident(_) => {
-            // Identifiers: could be local var or registry alias.
-            // We don't error on undefined — registry lookup happens at runtime.
+        Expr::Ident(name) => {
+            // Phase 6D: use-after-move check
+            if scope.is_moved(name) {
+                errors.push(SemError::new(&alloc::format!(
+                    "Use of moved value '{}' (Time=Fast/Instant implies move semantics)", name
+                )));
+            }
         }
 
         Expr::Int(_) | Expr::Float(_) => {}
@@ -532,6 +690,12 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             // Note: undefined function is not an error — could be a registry alias + call
             for arg in args {
                 validate_expr(arg, scope, errors);
+                // Phase 6D: mark Move-semantic variables as moved when passed to functions
+                if let Expr::Ident(arg_name) = arg {
+                    if scope.get_semantics(arg_name) == ValueSemantics::Move {
+                        scope.mark_moved(arg_name);
+                    }
+                }
             }
         }
 
@@ -833,11 +997,12 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
 
     // First pass: collect function definitions, impl methods, and trait defaults
     for stmt in stmts {
-        if let Stmt::FnDef { name, params, body, .. } = stmt {
+        if let Stmt::FnDef { name, params, body, param_constraints, .. } = stmt {
             ctx.fns.push(FnDef {
                 name: name.clone(),
                 params: params.clone(),
                 body: body.clone(),
+                param_constraints: param_constraints.clone(),
             });
         }
         // Collect trait definitions with default method bodies
@@ -888,6 +1053,7 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
                                     name: full_name,
                                     params: def_params.clone(),
                                     body: def_body.clone(),
+                                    param_constraints: Vec::new(),
                                 });
                             }
                         }
@@ -896,12 +1062,13 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
             }
         }
         for m in methods {
-            if let Stmt::FnDef { name: method_name, params, body, .. } = m {
+            if let Stmt::FnDef { name: method_name, params, body, param_constraints, .. } = m {
                 let full_name = alloc::format!("__{}_{}", target, method_name);
                 ctx.fns.push(FnDef {
                     name: full_name,
                     params: params.clone(),
                     body: body.clone(),
+                    param_constraints: param_constraints.clone(),
                 });
             }
         }
@@ -921,6 +1088,8 @@ struct FnDef {
     name: String,
     params: Vec<String>,
     body: Vec<Stmt>,
+    /// Molecular constraints per parameter (Phase 6B — constraint propagation at call site)
+    param_constraints: Vec<crate::syntax::FnParam>,
 }
 
 /// Track which trait has default method implementations.
@@ -1060,7 +1229,7 @@ fn infer_type_names(expr: &Expr, _ctx: &LowerCtx) -> Vec<String> {
 
 fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
     match stmt {
-        Stmt::Let { name, value } => {
+        Stmt::Let { name, value, .. } => {
             lower_expr(value, ctx);
             ctx.emit(Op::Store(name.clone()));
             ctx.locals.push(name.clone());
@@ -1588,6 +1757,49 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.patch_jump(jz_pos, next);
                         ctx.emit(Op::Pop);
                     }
+                    crate::syntax::MatchPattern::MolConstraintPattern { constraint } => {
+                        // Phase 6: ○{ V>0x80 } constraint pattern matching
+                        // DUP subject, then call __match_mol_constraint with constraint encoding
+                        ctx.emit(Op::Dup);
+                        // Encode constraints as a chain: each DimConstraint → molecule
+                        // dim_byte: S=1 R=2 V=3 A=4 T=5
+                        // op_byte:  Eq=0 Gt=1 Lt=2 Ge=3 Le=4 Any=5
+                        // value: the threshold byte
+                        // Encode as PushMol(dim_byte, op_byte, value, 0, 0) per constraint
+                        let count = constraint.dims.len();
+                        for dc in &constraint.dims {
+                            let dim_byte = match dc.dim {
+                                'S' => 1u8, 'R' => 2, 'V' => 3, 'A' => 4, 'T' => 5, _ => 0,
+                            };
+                            let op_byte = match dc.op {
+                                crate::syntax::MolCmpOp::Eq => 0u8,
+                                crate::syntax::MolCmpOp::Gt => 1,
+                                crate::syntax::MolCmpOp::Lt => 2,
+                                crate::syntax::MolCmpOp::Ge => 3,
+                                crate::syntax::MolCmpOp::Le => 4,
+                                crate::syntax::MolCmpOp::Any => 5,
+                            };
+                            ctx.emit(Op::PushMol(dim_byte, op_byte, dc.value as u8, 0, 0));
+                        }
+                        ctx.emit(Op::PushNum(count as f64));
+                        ctx.emit(Op::Call("__match_mol_constraint".into()));
+                        let jz_pos = ctx.current_pos();
+                        ctx.emit(Op::Jz(0));
+                        ctx.emit(Op::Pop);
+
+                        let saved = ctx.locals.len();
+                        for s_stmt in &arm.body {
+                            lower_stmt(s_stmt, ctx);
+                        }
+                        ctx.locals.truncate(saved);
+
+                        end_jumps.push(ctx.current_pos());
+                        ctx.emit(Op::Jmp(0));
+
+                        let next = ctx.current_pos();
+                        ctx.patch_jump(jz_pos, next);
+                        ctx.emit(Op::Pop);
+                    }
                 }
             }
 
@@ -1636,12 +1848,13 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         Stmt::ImplBlock { target, methods } => {
             // Register methods as functions with mangled names: __Type_method
             for m in methods {
-                if let Stmt::FnDef { name: method_name, params, body, .. } = m {
+                if let Stmt::FnDef { name: method_name, params, body, param_constraints, .. } = m {
                     let full_name = alloc::format!("__{}_{}", target, method_name);
                     ctx.fns.push(FnDef {
                         name: full_name,
                         params: params.clone(),
                         body: body.clone(),
+                        param_constraints: param_constraints.clone(),
                     });
                 } else {
                     lower_stmt(m, ctx);
@@ -1651,12 +1864,13 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         Stmt::ImplTrait { target, methods, trait_name } => {
             // Register methods as mangled functions
             for m in methods {
-                if let Stmt::FnDef { name: method_name, params, body, .. } = m {
+                if let Stmt::FnDef { name: method_name, params, body, param_constraints, .. } = m {
                     let full_name = alloc::format!("__{}_{}", target, method_name);
                     ctx.fns.push(FnDef {
                         name: full_name,
                         params: params.clone(),
                         body: body.clone(),
+                        param_constraints: param_constraints.clone(),
                     });
                 } else {
                     lower_stmt(m, ctx);
@@ -1967,6 +2181,33 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     ctx.emit(Op::LoadLocal(unique_name.clone()));
                     ctx.emit(Op::Store(orig.clone()));
                     ctx.locals.push(orig.clone());
+                }
+
+                // Phase 6B: Emit runtime constraint checks for constrained parameters
+                for fp in &fn_def.param_constraints {
+                    if let Some(ref constraint) = fp.constraint {
+                        // Load the parameter value onto stack
+                        ctx.emit(Op::LoadLocal(fp.name.clone()));
+                        // Push each dimension constraint as a PushMol encoding
+                        for dc in &constraint.dims {
+                            let dim_byte = match dc.dim {
+                                'S' => 0u8, 'R' => 1, 'V' => 2, 'A' => 3, 'T' => 4, _ => 0,
+                            };
+                            let op_byte = match dc.op {
+                                crate::syntax::MolCmpOp::Eq => 0u8,
+                                crate::syntax::MolCmpOp::Gt => 1,
+                                crate::syntax::MolCmpOp::Lt => 2,
+                                crate::syntax::MolCmpOp::Ge => 3,
+                                crate::syntax::MolCmpOp::Le => 4,
+                                crate::syntax::MolCmpOp::Any => 5,
+                            };
+                            let val = dc.value as u8;
+                            ctx.emit(Op::PushMol(dim_byte, op_byte, val, 0, 0));
+                        }
+                        // Push constraint count
+                        ctx.emit(Op::PushNum(constraint.dims.len() as f64));
+                        ctx.emit(Op::Call("__check_constraint".into()));
+                    }
                 }
 
                 // Lower function body (inside inline context)
@@ -3344,17 +3585,127 @@ mod tests {
 
     #[test]
     fn validate_assign_declared_ok() {
+        // Phase 6C: `let mut` required for reassignment
+        let stmts = parse("let mut x = 1; x = 2;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Assign to declared mut var should be valid: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_assign_immutable_error() {
         let stmts = parse("let x = 1; x = 2;").unwrap();
         let errors = validate(&stmts);
-        assert!(errors.is_empty(), "Assign to declared var should be valid: {:?}", errors);
+        assert!(!errors.is_empty(), "Assign to immutable var should produce error");
+        assert!(errors[0].message.contains("immutable"));
     }
 
     #[test]
     fn lower_assign_produces_store_update() {
-        let stmts = parse("let x = 1; x = 2;").unwrap();
+        let stmts = parse("let mut x = 1; x = 2;").unwrap();
         let prog = lower(&stmts);
         let has_store_update = prog.ops.iter().any(|op| matches!(op, Op::StoreUpdate(_)));
         assert!(has_store_update, "Assign should produce StoreUpdate opcode");
+    }
+
+    // ── Phase 6F: Effect system ────────────────────────────────────────────
+
+    #[test]
+    fn infer_effect_pure_function() {
+        let body = alloc::vec![Stmt::Return(Some(Expr::Int(42)))];
+        assert_eq!(infer_effect_kind(&body), EffectKind::Pure);
+    }
+
+    #[test]
+    fn infer_effect_emitting_function() {
+        let body = alloc::vec![Stmt::Emit(Expr::Int(42))];
+        assert_eq!(infer_effect_kind(&body), EffectKind::Emits);
+    }
+
+    #[test]
+    fn infer_effect_nested_emit() {
+        let body = alloc::vec![Stmt::If {
+            cond: Expr::Int(1),
+            then_block: alloc::vec![Stmt::Emit(Expr::Int(1))],
+            else_block: None,
+        }];
+        assert_eq!(infer_effect_kind(&body), EffectKind::Emits);
+    }
+
+    // ── Phase 6E: Exhaustive ○{ } match ─────────────────────────────────────
+
+    #[test]
+    fn validate_mol_match_exhaustive_warning() {
+        // match with ○{ } patterns but no wildcard → warning
+        let src = r#"
+            let x = { S=1 R=1 V=128 A=128 T=3 };
+            match x {
+                ○{ V>128 } => { emit 1; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(!errors.is_empty(), "Non-exhaustive mol match should warn");
+        assert!(errors.iter().any(|e| e.message.contains("exhaustive")),
+            "Should mention exhaustive, got: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_mol_match_with_wildcard_ok() {
+        // match with ○{ } patterns AND wildcard → no warning
+        let src = r#"
+            let x = { S=1 R=1 V=128 A=128 T=3 };
+            match x {
+                ○{ V>128 } => { emit 1; }
+                _ => { emit 0; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Exhaustive mol match should be ok: {:?}", errors);
+    }
+
+    // ── Phase 6D: Time-based value semantics ────────────────────────────────
+
+    #[test]
+    fn validate_use_after_move_error() {
+        // Time=4 (Fast) → Move semantics → use after passing to fn is error
+        let src = "fn consume(x) { emit x; } let m = { T=4 }; consume(m); emit m;";
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(!errors.is_empty(), "Use-after-move should produce error");
+        assert!(errors.iter().any(|e| e.message.contains("moved")),
+            "Error should mention 'moved', got: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_share_semantics_ok() {
+        // Time=3 (Medium) → Share semantics → reuse after passing is fine
+        let src = "fn use_it(x) { emit x; } let m = { T=3 }; use_it(m); emit m;";
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Share-semantic var should be reusable: {:?}", errors);
+    }
+
+    // ── Phase 6B: Constraint propagation ────────────────────────────────────
+
+    #[test]
+    fn lower_constrained_fn_emits_check() {
+        // Function with ○{ V>128 } constraint should emit __check_constraint at call site
+        let src = "fn high_v(x: ○{ V>128 }) { emit x; } high_v(5);";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_check = prog.ops.iter().any(|op| matches!(op, Op::Call(name) if name == "__check_constraint"));
+        assert!(has_check, "Constrained function call should emit __check_constraint, ops: {:?}", prog.ops);
+    }
+
+    #[test]
+    fn lower_unconstrained_fn_no_check() {
+        // Function without constraints should NOT emit __check_constraint
+        let src = r#"fn add(x, y) { return x + y; } emit add(1, 2);"#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let has_check = prog.ops.iter().any(|op| matches!(op, Op::Call(name) if name == "__check_constraint"));
+        assert!(!has_check, "Unconstrained function call should not emit __check_constraint");
     }
 
     // ── Return ───────────────────────────────────────────────────────────────
@@ -3385,8 +3736,8 @@ mod tests {
 
     #[test]
     fn e2e_assign_in_while_loop() {
-        // let x = 0; while x < 3 { emit x; x = x + 1; }
-        let stmts = parse("let x = 0; while x < 3 { emit x; x = x + 1; }").unwrap();
+        // let mut x = 0; while x < 3 { emit x; x = x + 1; }
+        let stmts = parse("let mut x = 0; while x < 3 { emit x; x = x + 1; }").unwrap();
         let errors = validate(&stmts);
         assert!(errors.is_empty(), "validation errors: {:?}", errors);
         let prog = lower(&stmts);
@@ -3500,7 +3851,7 @@ mod tests {
     fn parse_dict_literal() {
         let stmts = parse("let d = { name: 42, age: 10 };").unwrap();
         match &stmts[0] {
-            Stmt::Let { name, value } => {
+            Stmt::Let { name, value, .. } => {
                 assert_eq!(name, "d");
                 match value {
                     Expr::Dict(fields) => {
@@ -3773,7 +4124,7 @@ mod tests {
 
     #[test]
     fn e2e_for_each() {
-        let stmts = parse("let arr = [10, 20, 30]; let sum = 0; for x in arr { sum = sum + x; } emit sum;").unwrap();
+        let stmts = parse("let arr = [10, 20, 30]; let mut sum = 0; for x in arr { sum = sum + x; } emit sum;").unwrap();
         let errors = validate(&stmts);
         assert!(errors.is_empty(), "errors: {:?}", errors);
         let prog = lower(&stmts);
@@ -3992,8 +4343,8 @@ mod tests {
     fn e2e_complex_program_fibonacci() {
         // Test a real program: compute fibonacci(7)
         let src = r#"
-            let a = 0;
-            let b = 1;
+            let mut a = 0;
+            let mut b = 1;
             for i in 0..7 {
                 let temp = a + b;
                 a = b;
@@ -4243,7 +4594,7 @@ mod tests {
     fn e2e_real_program_fizzbuzz() {
         // FizzBuzz — a real program users would actually write
         let src = r#"
-            let i = 1;
+            let mut i = 1;
             while i < 16 {
                 if mod(i, 15) == 0 {
                     emit "FizzBuzz";
@@ -4287,7 +4638,7 @@ mod tests {
         // Sum all elements of an array — common real-world pattern
         let src = r#"
             let arr = [10, 20, 30, 40, 50];
-            let total = 0;
+            let mut total = 0;
             for i in 0..5 {
                 total = total + arr[i];
             }
@@ -4416,7 +4767,7 @@ mod tests {
         // for-each iteration over array
         let src = r#"
             let arr = [10, 20, 30];
-            let sum = 0;
+            let mut sum = 0;
             for x in arr {
                 sum = sum + x;
             }

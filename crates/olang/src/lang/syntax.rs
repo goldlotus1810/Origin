@@ -59,8 +59,8 @@ use crate::alphabet::{ArithOp, Lexer, PhysOp, RelOp, Token};
 #[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]
 pub enum Stmt {
-    /// `let name = expr;` hoặc `name ≔ expr;`
-    Let { name: String, value: Expr },
+    /// `let name = expr;` or `let mut name = expr;`
+    Let { name: String, value: Expr, mutable: bool },
 
     /// `let { a, b } = expr;` — destructure dict/record into variables
     LetDestructure { names: Vec<String>, value: Expr },
@@ -87,6 +87,8 @@ pub enum Stmt {
         type_params: Vec<String>,
         /// Trait bounds: `fn name[T: Skill, U: Iterator](...)`
         trait_bounds: Vec<(String, String)>,
+        /// Molecular constraints per parameter (Phase 6)
+        param_constraints: Vec<FnParam>,
     },
 
     /// Expression statement
@@ -256,6 +258,53 @@ pub enum MatchPattern {
     Wildcard,
     /// Enum variant: `Color::Red` or `Option::Some(x)`
     EnumPattern { enum_name: String, variant: String, bindings: Vec<String> },
+    /// Molecular constraint pattern: ○{ V>0x80, A>0x80 }
+    MolConstraintPattern { constraint: MolConstraint },
+}
+
+/// Molecular constraint comparison operator for ○{ } patterns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MolCmpOp {
+    /// `=` — exact match
+    Eq,
+    /// `>` — greater than
+    Gt,
+    /// `<` — less than
+    Lt,
+    /// `>=` — greater than or equal
+    Ge,
+    /// `<=` — less than or equal
+    Le,
+    /// `*` — any value (wildcard)
+    Any,
+}
+
+/// A single dimension constraint in ○{ S=SDF, V>0x40 }.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DimConstraint {
+    /// Dimension name: S, R, V, A, T
+    pub dim: char,
+    /// Comparison operator
+    pub op: MolCmpOp,
+    /// Value (0-255 for byte dims, named constants resolved later)
+    pub value: u32,
+}
+
+/// Molecular constraint: ○{ S=SDF, V>0x40, A>0x80 }
+/// Used as function parameter type annotation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MolConstraint {
+    /// List of dimension constraints
+    pub dims: Vec<DimConstraint>,
+}
+
+/// Function parameter with optional molecular constraint.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnParam {
+    /// Parameter name
+    pub name: String,
+    /// Optional molecular constraint: `param: ○{ V>0x80 }`
+    pub constraint: Option<MolConstraint>,
 }
 
 /// Comparison operator.
@@ -631,6 +680,13 @@ impl<'a> Parser<'a> {
     /// `let name = expr;`
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'let'
+        // Check for `let mut`
+        let mutable = if self.check(&Token::Mut) {
+            self.advance();
+            true
+        } else {
+            false
+        };
         // Check for destructuring: let { a, b } = expr;
         if self.check(&Token::LBrace) {
             self.advance(); // consume {
@@ -653,7 +709,7 @@ impl<'a> Parser<'a> {
         self.expect(&Token::Eq)?;
         let value = self.parse_expr()?;
         self.expect(&Token::Semi)?;
-        Ok(Stmt::Let { name, value })
+        Ok(Stmt::Let { name, value, mutable })
     }
 
     /// `emit expr;`
@@ -731,13 +787,13 @@ impl<'a> Parser<'a> {
         // Parse optional generic type params: fn name[T, U: Trait](...)
         let (type_params, trait_bounds) = self.parse_generic_params()?;
         self.expect(&Token::LParen)?;
-        let params = self.parse_params()?;
+        let (params, param_constraints) = self.parse_params_with_constraints()?;
         self.expect(&Token::RParen)?;
         let body = self.parse_block()?;
         if self.check(&Token::Semi) {
             self.advance();
         }
-        Ok(Stmt::FnDef { name, params, body, type_params, trait_bounds })
+        Ok(Stmt::FnDef { name, params, body, type_params, trait_bounds, param_constraints })
     }
 
     /// `match expr { pattern => { body }, ... }`
@@ -764,13 +820,19 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Match { subject, arms })
     }
 
-    /// Parse match pattern: TypeName, MolLiteral, or Wildcard
+    /// Parse match pattern: TypeName, MolLiteral, MolConstraint, or Wildcard
     fn parse_match_pattern(&mut self) -> Result<MatchPattern, ParseError> {
         match self.peek() {
             // _ → wildcard
             Token::Ident(s) if s == "_" => {
                 self.advance();
                 Ok(MatchPattern::Wildcard)
+            }
+            // ○{ V>0x80 } → molecular constraint pattern
+            Token::Circle => {
+                self.advance(); // consume ○
+                let constraint = self.parse_mol_constraint()?;
+                Ok(MatchPattern::MolConstraintPattern { constraint })
             }
             // { S=1 R=2 ... } → molecular literal pattern
             Token::LBrace => {
@@ -1199,7 +1261,7 @@ impl<'a> Parser<'a> {
                         if self.check(&Token::Semi) {
                             self.advance();
                         }
-                        return Ok(Stmt::FnDef { name, params, body, type_params: Vec::new(), trait_bounds: Vec::new() });
+                        return Ok(Stmt::FnDef { name, params, body, type_params: Vec::new(), trait_bounds: Vec::new(), param_constraints: Vec::new() });
                     }
                 }
             }
@@ -1211,7 +1273,7 @@ impl<'a> Parser<'a> {
         // Regular define: name ≔ expr;
         let value = self.parse_expr()?;
         self.expect(&Token::Semi)?;
-        Ok(Stmt::Let { name, value })
+        Ok(Stmt::Let { name, value, mutable: false })
     }
 
     /// `cond ⇒ { then } (⊥ { else })?`
@@ -1274,17 +1336,52 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
-    fn parse_params(&mut self) -> Result<Vec<String>, ParseError> {
+    /// Parse parameters with optional molecular constraints.
+    /// `fn f(x: ○{ V>0x80 }, y)` → (["x", "y"], [FnParam{x, Some(constraint)}, FnParam{y, None}])
+    fn parse_params_with_constraints(&mut self) -> Result<(Vec<String>, Vec<FnParam>), ParseError> {
         let mut params = Vec::new();
+        let mut fn_params = Vec::new();
         if !self.check(&Token::RParen) {
-            // Accept `self` as first parameter
-            if self.check(&Token::SelfKw) {
+            // Accept `self` or `mut self` as first parameter
+            if self.check(&Token::Mut) {
+                self.advance(); // consume 'mut'
+                if self.check(&Token::SelfKw) {
+                    self.advance();
+                    params.push("self".into());
+                    fn_params.push(FnParam { name: "self".into(), constraint: None });
+                    if self.check(&Token::Comma) { self.advance(); }
+                } else {
+                    // `mut` followed by non-self ident — just a param name
+                    let name = self.expect_ident()?;
+                    params.push(name.clone());
+                    fn_params.push(FnParam { name, constraint: None });
+                    if self.check(&Token::Comma) { self.advance(); }
+                }
+            } else if self.check(&Token::SelfKw) {
                 self.advance();
                 params.push("self".into());
+                fn_params.push(FnParam { name: "self".into(), constraint: None });
                 if self.check(&Token::Comma) { self.advance(); }
             }
             while !self.check(&Token::RParen) && !self.at_eof() {
-                params.push(self.expect_ident()?);
+                let name = self.expect_ident()?;
+                // Check for `: ○{ ... }` constraint annotation
+                let constraint = if self.check(&Token::Colon) {
+                    self.advance(); // consume ':'
+                    if self.check(&Token::Circle) {
+                        // ○{ ... } molecular constraint
+                        self.advance(); // consume ○
+                        Some(self.parse_mol_constraint()?)
+                    } else {
+                        // Type name (existing behavior) — skip for now
+                        let _type_name = self.expect_ident()?;
+                        None
+                    }
+                } else {
+                    None
+                };
+                params.push(name.clone());
+                fn_params.push(FnParam { name, constraint });
                 if self.check(&Token::Comma) {
                     self.advance();
                 } else {
@@ -1292,7 +1389,47 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(params)
+        Ok((params, fn_params))
+    }
+
+    /// Parse molecular constraint: `{ S=SDF, V>0x40, A>0x80 }`
+    /// Called after consuming `○`.
+    fn parse_mol_constraint(&mut self) -> Result<MolConstraint, ParseError> {
+        self.expect(&Token::LBrace)?;
+        let mut dims = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let dim_name = self.expect_ident()?;
+            let dim = match dim_name.as_str() {
+                "S" | "shape" => 'S',
+                "R" | "relation" => 'R',
+                "V" | "valence" => 'V',
+                "A" | "arousal" => 'A',
+                "T" | "time" => 'T',
+                _ => return Err(ParseError::new(
+                    &alloc::format!("Unknown constraint dimension '{}'. Use S, R, V, A, or T", dim_name)
+                )),
+            };
+            // Parse operator: =, >, <, >=, <=, or * (any)
+            let op = match self.peek() {
+                Token::Eq => { self.advance(); MolCmpOp::Eq }
+                Token::Gt => { self.advance(); MolCmpOp::Gt }
+                Token::Lt => { self.advance(); MolCmpOp::Lt }
+                Token::Ge => { self.advance(); MolCmpOp::Ge }
+                Token::Le => { self.advance(); MolCmpOp::Le }
+                Token::Arith(ArithOp::Mul) => { self.advance(); MolCmpOp::Any }
+                _ => return Err(ParseError::new("Expected constraint operator: =, >, <, >=, <=, or *")),
+            };
+            // Parse value (skip for Any)
+            let value = if op == MolCmpOp::Any {
+                0
+            } else {
+                self.expect_int()?
+            };
+            dims.push(DimConstraint { dim, op, value });
+            if self.check(&Token::Comma) { self.advance(); }
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(MolConstraint { dims })
     }
 
     // ── Expression parsing (precedence: primary → arith → compose → rel) ──
@@ -2171,6 +2308,7 @@ mod tests {
                     Box::new(Expr::Ident("fire".into())),
                     Box::new(Expr::Ident("water".into())),
                 ),
+                mutable: false,
             }]
         );
     }
@@ -2233,6 +2371,7 @@ mod tests {
                     Box::new(Expr::Ident("fire".into())),
                     Box::new(Expr::Ident("water".into())),
                 ),
+                mutable: false,
             }]
         );
     }
@@ -2300,6 +2439,7 @@ mod tests {
                 ))],
                 type_params: vec![],
                 trait_bounds: vec![],
+                param_constraints: vec![],
             }]
         );
     }

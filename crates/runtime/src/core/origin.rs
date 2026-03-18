@@ -6485,7 +6485,7 @@ mod bootstrap_tests {
         let mut rt = HomeRuntime::new(0xC003);
         let src = r#"
             fn double(x) { return x * 2; }
-            let sum = 0;
+            let mut sum = 0;
             for i in 0..5 {
                 sum = sum + double(i);
             }
