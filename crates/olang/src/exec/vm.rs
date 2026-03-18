@@ -199,6 +199,8 @@ pub enum VmError {
     MaxStepsExceeded,
     MaxCallDepthExceeded,
     DivisionByZero,
+    /// Runtime error with custom message (panic, assert failures, etc.)
+    RuntimeError(String),
 }
 
 impl core::fmt::Display for VmError {
@@ -211,6 +213,7 @@ impl core::fmt::Display for VmError {
             Self::MaxStepsExceeded => write!(f, "Max steps exceeded ({}) — program too long", STEPS_MAX),
             Self::MaxCallDepthExceeded => write!(f, "Max call depth exceeded — too many nested scopes"),
             Self::DivisionByZero => write!(f, "Division by zero"),
+            Self::RuntimeError(msg) => write!(f, "{}", msg),
         }
     }
 }
@@ -2485,6 +2488,78 @@ impl OlangVM {
                         "__math_phi" => {
                             // Golden ratio φ = (1 + √5) / 2
                             let _ = stack.push(MolecularChain::from_number(1.618_033_988_749_895));
+                        }
+
+                        // ── Phase 4 B8: Platform detection ──────────────────
+                        "__platform_arch" => {
+                            let arch_str = if cfg!(target_arch = "x86_64") { "x86_64" }
+                                else if cfg!(target_arch = "x86") { "x86" }
+                                else if cfg!(target_arch = "aarch64") { "aarch64" }
+                                else if cfg!(target_arch = "arm") { "arm" }
+                                else if cfg!(target_arch = "riscv64") { "riscv64" }
+                                else if cfg!(target_arch = "riscv32") { "riscv32" }
+                                else if cfg!(target_arch = "mips") { "mips" }
+                                else if cfg!(target_arch = "wasm32") { "wasm32" }
+                                else { "unknown" };
+                            let _ = stack.push(string_to_chain(arch_str));
+                        }
+                        "__platform_os" => {
+                            let os_str = if cfg!(target_os = "linux") { "linux" }
+                                else if cfg!(target_os = "macos") { "macos" }
+                                else if cfg!(target_os = "windows") { "windows" }
+                                else if cfg!(target_os = "none") { "bare" }
+                                else { "unknown" };
+                            let _ = stack.push(string_to_chain(os_str));
+                        }
+                        "__platform_memory" => {
+                            // Returns 0 — Runtime can inject actual value
+                            let _ = stack.push(MolecularChain::from_number(0.0));
+                        }
+
+                        // ── Phase 4 B10: Test framework builtins ────────────
+                        "__panic" => {
+                            let msg_chain = vm_pop!(stack, events);
+                            let msg = chain_to_string(&msg_chain)
+                                .unwrap_or_else(|| format_chain_display(&msg_chain));
+                            events.push(VmEvent::Error(VmError::RuntimeError(
+                                alloc::format!("panic: {}", msg)
+                            )));
+                            break;
+                        }
+                        "__assert_eq" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            if a.chain_hash() != b.chain_hash() {
+                                let a_str = format_chain_display(&a);
+                                let b_str = format_chain_display(&b);
+                                events.push(VmEvent::Error(VmError::RuntimeError(
+                                    alloc::format!("assert_eq failed: {} != {}", a_str, b_str)
+                                )));
+                                break;
+                            }
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        "__assert_ne" => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            if a.chain_hash() == b.chain_hash() {
+                                let a_str = format_chain_display(&a);
+                                events.push(VmEvent::Error(VmError::RuntimeError(
+                                    alloc::format!("assert_ne failed: both are {}", a_str)
+                                )));
+                                break;
+                            }
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        "__assert_true" => {
+                            let val = vm_pop!(stack, events);
+                            if val.is_empty() {
+                                events.push(VmEvent::Error(VmError::RuntimeError(
+                                    "assert_true failed: value is empty/falsy".into()
+                                )));
+                                break;
+                            }
+                            let _ = stack.push(MolecularChain::from_number(1.0));
                         }
 
                         _ => {

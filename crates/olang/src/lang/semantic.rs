@@ -1812,6 +1812,15 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "fib" => Some("__math_fib"),
                 "PI" => Some("__math_pi"),
                 "PHI" => Some("__math_phi"),
+                // Phase 4 B8: IO + Platform stdlib
+                "platform_arch" => Some("__platform_arch"),
+                "platform_os" => Some("__platform_os"),
+                "platform_memory" => Some("__platform_memory"),
+                "panic" => Some("__panic"),
+                // Phase 4 B10: Test framework
+                "assert_eq" => Some("__assert_eq"),
+                "assert_ne" => Some("__assert_ne"),
+                "assert_true" => Some("__assert_true"),
                 _ => None,
             };
             if let Some(builtin_name) = builtin {
@@ -6270,5 +6279,219 @@ mod tests {
         assert!(!outputs.is_empty());
         let val = outputs[0].to_number().unwrap_or(-999.0);
         assert!(val.abs() < f64::EPSILON, "fib(10) - fib(8) - fib(9) = 0, got {}", val);
+    }
+
+    // ── Phase 4 B8: Platform detection ─────────────────────────────────────
+
+    #[test]
+    fn platform_arch_returns_string() {
+        let src = "emit platform_arch();";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        // Should be one of the known architectures
+        let valid = ["x86_64", "x86", "aarch64", "arm", "riscv64", "riscv32", "mips", "wasm32", "unknown"];
+        assert!(valid.contains(&s.as_str()), "platform_arch() = '{}' not in known list", s);
+    }
+
+    #[test]
+    fn platform_os_returns_string() {
+        let src = "emit platform_os();";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        let valid = ["linux", "macos", "windows", "bare", "unknown"];
+        assert!(valid.contains(&s.as_str()), "platform_os() = '{}' not in known list", s);
+    }
+
+    #[test]
+    fn platform_memory_returns_number() {
+        let src = "emit platform_memory();";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        // VM returns 0, runtime injects real value
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!(val >= 0.0, "platform_memory() should be >= 0");
+    }
+
+    #[test]
+    fn platform_fstring_info() {
+        let src = r#"
+            let a = platform_arch();
+            let o = platform_os();
+            emit f"arch={a}, os={o}";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert!(s.starts_with("arch="), "should start with 'arch=', got '{}'", s);
+        assert!(s.contains(", os="), "should contain ', os=', got '{}'", s);
+    }
+
+    // ── Phase 4 B10: Test framework builtins ───────────────────────────────
+
+    #[test]
+    fn assert_eq_pass() {
+        let src = r#"
+            assert_eq(42, 42);
+            emit "ok";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "ok");
+    }
+
+    #[test]
+    fn assert_eq_fail() {
+        let src = r#"
+            assert_eq(1, 2);
+            emit "should not reach";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        // Should have error, no output
+        let has_error = result.events.iter().any(|e| matches!(e, crate::vm::VmEvent::Error(_)));
+        assert!(has_error, "assert_eq(1, 2) should produce an error");
+        let outputs = result.outputs();
+        assert!(outputs.is_empty(), "should not reach emit after failed assert");
+    }
+
+    #[test]
+    fn assert_ne_pass() {
+        let src = r#"
+            assert_ne(1, 2);
+            emit "ok";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "ok");
+    }
+
+    #[test]
+    fn assert_ne_fail() {
+        let src = r#"
+            assert_ne(5, 5);
+            emit "should not reach";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let has_error = result.events.iter().any(|e| matches!(e, crate::vm::VmEvent::Error(_)));
+        assert!(has_error, "assert_ne(5, 5) should produce an error");
+    }
+
+    #[test]
+    fn assert_true_pass() {
+        let src = r#"
+            assert_true(1);
+            emit "ok";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+    }
+
+    #[test]
+    fn panic_stops_execution() {
+        let src = r#"
+            panic("test error");
+            emit "should not reach";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let has_error = result.events.iter().any(|e| matches!(e, crate::vm::VmEvent::Error(_)));
+        assert!(has_error, "panic should produce an error");
+        let outputs = result.outputs();
+        assert!(outputs.is_empty(), "should not reach emit after panic");
+    }
+
+    #[test]
+    fn assert_eq_strings() {
+        let src = r#"
+            assert_eq("hello", "hello");
+            emit "ok";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "ok");
+    }
+
+    #[test]
+    fn assert_eq_computed() {
+        let src = r#"
+            let a = 3 + 4;
+            let b = 7;
+            assert_eq(a, b);
+            emit "ok";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "ok");
+    }
+
+    // ── B8+B10 combined ────────────────────────────────────────────────────
+
+    #[test]
+    fn phase4_platform_assert() {
+        // Use test framework to verify platform detection
+        let src = r#"
+            let arch = platform_arch();
+            assert_true(str_len(arch));
+            let os = platform_os();
+            assert_true(str_len(os));
+            emit "platform ok";
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let s = crate::vm::chain_to_string(&outputs[0]).unwrap_or_default();
+        assert_eq!(s, "platform ok");
     }
 }
