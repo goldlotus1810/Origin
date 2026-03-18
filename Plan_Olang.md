@@ -1272,22 +1272,139 @@ Kết luận:
   ○{ } = language of constraints in 5D space
 ```
 
+### 5 lỗ hổng Phase 6 phải giải quyết
+
+#### Gap 1: Static vs Runtime constraint check
+
+```
+Vấn đề: ○{ } constraint check lúc nào? Nếu chỉ runtime → không bằng Rust.
+
+Giải pháp: 2-tier checking
+  Compile-time (semantic.rs):
+    - Literal values: fn f(○{ V=0xC0 }) → gọi f(○{ V=0x40 }) → ERROR ngay
+    - Propagation: fn a() → ○{ V>0x80 }, fn b(○{ V>0x40 }) → b(a()) → OK
+    - Const chains: let x = ○{ S=SDF }; f(x) → compiler biết S=SDF
+
+  Runtime (vm.rs):
+    - Dynamic values: let x = compute(); f(x) → runtime check ○{ } constraint
+    - Cross-module: imported function → runtime fallback
+
+  Kết quả: phần lớn check compile-time (như Rust), dynamic chỉ khi cần
+```
+
+Files: `semantic.rs` — ConstraintPropagation pass (thêm vào validation)
+
+#### Gap 2: Immutability by default
+
+```
+Vấn đề: let x = 5 — mutable hay immutable? Olang không phân biệt.
+
+Giải pháp:
+  let x = 5;           // immutable (default, như Rust)
+  let mut x = 5;       // mutable (explicit)
+  ○{ T=Static }        // LUÔN immutable (enforce bởi Time)
+
+  Semantic check:
+    let x = 5;
+    x = 10;            // ❌ ERROR: x is immutable
+    let mut y = 5;
+    y = 10;            // ✅ OK
+
+  Time dimension reinforcement:
+    let data = ○{ T=Static };
+    let mut data = ○{ T=Static };  // ❌ ERROR: T=Static cannot be mut
+    let mut temp = ○{ T=Instant }; // ✅ OK: Instant = short-lived, mutable OK
+```
+
+Files: `semantic.rs` — track mutability per variable in scope
+
+#### Gap 3: Copy cost → CoW + Move semantics từ Time
+
+```
+Vấn đề: pass(data) clone toàn bộ chain → O(n) cost mỗi lần.
+
+Giải pháp: Time dimension quyết định semantics
+  T=Static   → share (immutable → safe to share, zero-copy read)
+  T=Instant  → move (dùng 1 lần → transfer ownership, no copy)
+  T=Fast     → CoW (share read, clone on write)
+  T=Medium   → clone (default behavior hiện tại)
+  T=Slow     → deep clone + persist
+
+  VM implementation:
+    Static:  Rc<Chain> — reference counted, no copy
+    Instant: stack move — pop source, push dest, source invalidated
+    Fast:    Rc<Chain> + clone on StoreUpdate
+    Medium:  deep clone (hiện tại)
+```
+
+Files: `vm.rs` — Time-aware value passing
+
+#### Gap 4: Exhaustive ○{ } match
+
+```
+Vấn đề: match ○{ V>0x80 } → miss V=0x00..0x80 → silent bug.
+
+Giải pháp: Range exhaustiveness check
+  match result {
+    ○{ V > 0x80 } → ok(),          // 0x81..0xFF
+    ○{ V > 0x40 } → weak(),        // 0x41..0x80
+    ○{ V > 0x00 } → error(),       // 0x01..0x40
+    ○{ V = 0x00 } → none(),        // 0x00
+  }  // ✅ exhaustive: 0x00..0xFF covered
+
+  Compiler rules:
+    - Nếu match ○{ } patterns mà range không cover 0x00..0xFF → WARNING
+    - Nếu có _ wildcard → OK (catch-all)
+    - Multi-dimension: mỗi dimension trong pattern phải independently exhaustive
+    - Overlapping ranges → WARNING (dead code)
+```
+
+Files: `semantic.rs` — exhaustiveness checker cho molecular patterns
+
+#### Gap 5: Effect system từ Relation dimension
+
+```
+Vấn đề: function có side effect hay pure? Rust dùng &/&mut hint. Olang chưa có.
+
+Giải pháp: Relation = effect annotation (MIỄN PHÍ từ 5D)
+  fn read_config()  → ○{ R=Member }    // pure: đọc, không đổi gì
+  fn send_command() → ○{ R=Causes }    // effect: gây ra thay đổi
+  fn emit_log()     → ○{ R=Flows }     // output: data chảy ra ngoài
+  fn transform()    → ○{ R=Compose }   // pure: biến đổi input → output
+
+  Compiler CÓ THỂ:
+    ○{ R=Member } fn bên trong ○{ R=Member } context     → ✅ pure in pure
+    ○{ R=Causes } fn bên trong ○{ R=Member } context     → ⚠️ WARNING: side effect in pure
+    ○{ R=Causes } fn bên trong ○{ R=Causes } context     → ✅ effect in effect
+    ○{ R=Flows }  fn bên trong bất kỳ context             → ✅ logging always OK
+
+  Kết quả: effect system mà Rust KHÔNG CÓ, Olang có MIỄN PHÍ từ Relation.
+```
+
+Files: `semantic.rs` — effect tracking per function
+
 ### Implementation plan Phase 6
 
 ```
 Task    Feature                      Depends on    Estimate
 ──────────────────────────────────────────────────────────────
-6A      Molecular constraint         Phase 5 done   syntax.rs + semantic.rs
-6B      Time-based lifetime          6A             vm.rs scope cleanup
-6C      Relation as interface        6A             semantic.rs dispatch
-6D      Valence guard in match       6A             syntax.rs + semantic.rs
-6E      Documentation + examples     6A-6D          docs/molecular_types.md
+6A      Molecular constraint parse   Phase 5 done   syntax.rs
+6B      Constraint propagation       6A             semantic.rs (static check)
+6C      Immutability by default      independent    semantic.rs (scope tracking)
+6D      Time-based CoW/Move/Share    6A+6C          vm.rs (value passing)
+6E      Exhaustive ○{ } match        6A             semantic.rs (range checker)
+6F      Effect system (Relation)     6A             semantic.rs (effect tracking)
+6G      Runtime constraint fallback  6B             vm.rs (dynamic check)
+6H      Documentation + examples    6A-6G           docs/molecular_types.md
 
 Validation:
-  ▢ fn f(x: ○{ S=SDF }) — reject non-SDF argument
-  ▢ ○{ T=Instant } auto-drop at scope exit
-  ▢ match ○{ V>0x80 } — semantic pattern matching
-  ▢ Silk dispatch replaces vtable for R-based interfaces
+  ▢ fn f(x: ○{ S=SDF }) — reject non-SDF argument at COMPILE TIME
+  ▢ Constraint propagation: a()→○{V>0x80}, b(○{V>0x40}), b(a()) → no runtime check
+  ▢ let x = 5; x = 10; → ERROR (immutable default)
+  ▢ let mut x = 5; x = 10; → OK
+  ▢ ○{ T=Static } → zero-copy share, ○{ T=Instant } → move
+  ▢ match ○{ V>0x80 } without _ → WARNING: non-exhaustive
+  ▢ ○{ R=Causes } fn called in pure context → WARNING
   ▢ cargo test --workspace passes
 ```
 
