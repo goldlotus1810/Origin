@@ -1087,6 +1087,329 @@ Phase 5 done khi:
 
 ---
 
+## Phase 6: Molecular Type System — Sự tốt đẹp của Rust, không có sự rườm rà
+
+> **Nguyên lý:** Olang không copy Rust. Olang giải cùng bài toán bằng paradigm khác.
+> **Chìa khóa:** `○{ }` — 5D molecular space IS the type system.
+
+### Tại sao Rust rườm rà?
+
+```
+Rust giải bài toán đúng (safety), nhưng bằng cách phức tạp:
+
+  Borrow checker:    &, &mut, 'a, 'b, 'static     → annotation hell
+  Generic bounds:    where T: Clone + Send + 'a     → cascading constraints
+  Orphan rules:      không impl ngoài cho type ngoài → workaround boilerplate
+  Pin/Unpin:         async + self-referential        → brain damage
+  Monomorphization:  duplicate code per type          → compile chậm
+  Deref coercion:    implicit magic chains            → surprising behavior
+```
+
+### Olang ĐÃ giải cùng bài toán — bằng cách KHÁC
+
+```
+Bài toán              Rust giải bằng              Olang giải bằng
+──────────────────────────────────────────────────────────────────────
+Memory safety         Borrow checker + lifetime   Append-only (QT9-10)
+                                                  → không delete = không use-after-free
+Concurrency safety    Send/Sync traits            ISL messaging
+                                                  → không share memory = không data race
+Type confusion        Static type system          1 type: MolecularChain
+                                                  → không confusion vì chỉ có 1 type
+Error handling        Result<T,E> + ?             Try/catch + VmError
+                                                  → 8 error types, stack-safe
+Pattern matching      match + exhaustive          match + ○{ } patterns
+                                                  → type/literal/variant/wildcard
+Zero-cost abstract    Monomorphization            5 bytes = Molecule
+                                                  → abstraction IS data, 0 overhead
+Resource limit        Programmer tự lo            FUSE + max_steps + max_depth
+                                                  → VM tự bảo vệ
+```
+
+### Cái Olang CẦN THÊM — theo kiểu ○{ }
+
+#### 6A. Molecular Constraint (thay Generic + Trait Bounds)
+
+```rust
+// Rust — rườm rà
+fn process<T: Clone + Send + Hash + 'static>(item: T) -> Result<T, Error>
+where T: Into<String> { ... }
+```
+
+```
+// Olang — 5D constraint
+fn process(item: ○{ S=SDF, V>0x40 }) → ...
+//                 ^^^^^^^^^^^^^^^^
+//  "item phải có Shape là SDF và Valence > 0x40"
+//  Không cần generic. Không cần trait. 5D position IS the constraint.
+
+// Ví dụ thực tế:
+fn render(node: ○{ S=* })               // bất kỳ Shape nào
+fn amplify(emotion: ○{ V>0x80, A>0x80 }) // positive + high arousal
+fn connect(a: ○{ R=Causes }, b)          // a phải có Relation=Causes
+fn urgent(msg: ○{ T=Fast|Instant })      // chỉ nhận message nhanh
+```
+
+**Tại sao hoạt động?** Mọi thứ đã là Molecule. 5 chiều = type constraints tự nhiên.
+Compiler chỉ cần kiểm tra: argument's molecule matches ○{ } pattern.
+
+Files sửa:
+- `lang/syntax.rs` — parse ○{ dim op value } trong function parameter types
+- `lang/semantic.rs` — validate molecular constraints tại call site
+- `exec/vm.rs` — runtime constraint check (fallback khi static check không đủ)
+
+#### 6B. Time Dimension = Lifetime (không cần 'a)
+
+```rust
+// Rust — rườm rà
+fn borrow<'a>(data: &'a str) -> &'a str { ... }
+struct Iter<'a> { data: &'a [u8] }
+```
+
+```
+// Olang — Time IS lifetime
+let sensor = ○{ T=Instant }    // sống rất ngắn → scope end = auto-drop
+let cache  = ○{ T=Fast }      // sống vài cycle → STM auto-decay
+let memory = ○{ T=Medium }    // sống lâu → cần explicit release
+let truth  = ○{ T=Static }    // bất biến → append QR, sống mãi
+
+// VM tự biết vòng đời:
+//   T=Instant → drop khi scope exit (như Rust stack variable)
+//   T=Static  → persist forever (như Rust 'static)
+//   T=Fast    → decay theo Fibonacci schedule (như Rust Rc với weak refs)
+// KHÔNG CẦN lifetime annotation. Time byte = implicit lifetime.
+```
+
+Files sửa:
+- `exec/vm.rs` — Time-aware scope cleanup: T=Instant auto-drop, T=Static persist
+- `lang/semantic.rs` — warn nếu T=Instant escapes scope
+
+#### 6C. Relation Dimension = Interface (không cần impl Trait)
+
+```rust
+// Rust — rườm rà
+trait Drawable { fn draw(&self); }
+impl Drawable for Circle { fn draw(&self) { ... } }
+impl Drawable for Square { fn draw(&self) { ... } }
+// → orphan rule, vtable, dyn Trait, impl Trait in return position...
+```
+
+```
+// Olang — Relation IS the interface
+// R=Causes  → node CÓ THỂ gây effect   (≈ trait CanCause)
+// R=Member  → node THUỘC VỀ group       (≈ trait Belongs)
+// R=Flows   → node CHẢY sang node khác  (≈ trait Stream)
+
+// Silk edges = dynamic dispatch tự nhiên
+// Không cần khai báo trait → Relation đã định nghĩa "node làm được gì"
+// Không cần impl → node tự có Relation từ Molecule
+// Không cần vtable → Silk walk chọn edge weight cao nhất
+```
+
+#### 6D. Valence Guard (thay Option/Result — semantic richer)
+
+```rust
+// Rust — structural
+let x: Option<i32> = Some(42);
+let r: Result<Data, Error> = Ok(data);
+// → unwrap, ?, map, and_then, or_else... boilerplate
+```
+
+```
+// Olang — Valence IS semantic ok/error
+// V > 0x80 = positive = valid = "Ok"
+// V < 0x80 = negative = error = "Err"
+// V = 0x00 = void = "None"
+
+match result {
+  ○{ V > 0x80 } → process(result),    // positive outcome
+  ○{ V < 0x40 } → handle_crisis(),    // severe negative
+  ○{ V = 0x00 } → nothing(),          // absence
+  _ → handle_neutral(),               // ambiguous
+}
+
+// So sánh:
+//   Rust Option/Result: structural (Some/None, Ok/Err) — binary
+//   Olang Valence:      semantic spectrum (0x00..0xFF) — continuous
+//   → Olang phân biệt "lỗi nhẹ" (V=0x60) vs "lỗi nặng" (V=0x10) vs "crisis" (V=0x00)
+//   → Rust chỉ có Err (tất cả lỗi như nhau structurally)
+```
+
+#### 6E. Silk = Borrow Checker tự nhiên
+
+```
+Borrow checker giải:  "không ai đọc trong khi ai đó đang ghi"
+Olang không cần vì:
+
+  ① Append-only (QT9-10)  → không ai "ghi đè" → không conflict
+  ② ISL messaging         → Worker gửi chain, không share memory
+  ③ Copy semantics        → mọi thứ clone on pass → no aliasing
+  ④ Silk weight            → 2 node cùng target → Hebbian weight quyết định
+                              không phải compiler → emergent, not enforced
+
+  Kết quả: CÙNG safety guarantees, KHÁC mechanism
+    Rust:  compiler reject tại compile time → safe nhưng đau
+    Olang: architecture prevent tại design time → safe và đơn giản
+```
+
+### Tổng kết: Olang vs Rust — Cùng đích, khác đường
+
+```
+                    Rust                          Olang
+─────────────────────────────────────────────────────────────
+Type system         Static, structural            5D molecular space
+Lifetime            'a, 'b annotations            Time dimension (byte)
+Interface           trait + impl                   Relation dimension
+Error severity      Binary (Ok/Err)               Valence spectrum (0x00-0xFF)
+Ownership           Move/borrow/clone             Copy + append-only
+Concurrency         Send/Sync compile check       ISL no-share architecture
+Compile speed       Slow (LLVM + borrow check)    Fast (no LLVM, no borrow check)
+Safety source       Compiler enforcement          Architecture enforcement
+
+Kết luận:
+  Rust = compiler là vệ sĩ → an toàn nhưng strict
+  Olang = kiến trúc là vệ sĩ → an toàn và tự do
+  ○{ } = language of constraints in 5D space
+```
+
+### 5 lỗ hổng Phase 6 phải giải quyết
+
+#### Gap 1: Static vs Runtime constraint check
+
+```
+Vấn đề: ○{ } constraint check lúc nào? Nếu chỉ runtime → không bằng Rust.
+
+Giải pháp: 2-tier checking
+  Compile-time (semantic.rs):
+    - Literal values: fn f(○{ V=0xC0 }) → gọi f(○{ V=0x40 }) → ERROR ngay
+    - Propagation: fn a() → ○{ V>0x80 }, fn b(○{ V>0x40 }) → b(a()) → OK
+    - Const chains: let x = ○{ S=SDF }; f(x) → compiler biết S=SDF
+
+  Runtime (vm.rs):
+    - Dynamic values: let x = compute(); f(x) → runtime check ○{ } constraint
+    - Cross-module: imported function → runtime fallback
+
+  Kết quả: phần lớn check compile-time (như Rust), dynamic chỉ khi cần
+```
+
+Files: `semantic.rs` — ConstraintPropagation pass (thêm vào validation)
+
+#### Gap 2: Immutability by default
+
+```
+Vấn đề: let x = 5 — mutable hay immutable? Olang không phân biệt.
+
+Giải pháp:
+  let x = 5;           // immutable (default, như Rust)
+  let mut x = 5;       // mutable (explicit)
+  ○{ T=Static }        // LUÔN immutable (enforce bởi Time)
+
+  Semantic check:
+    let x = 5;
+    x = 10;            // ❌ ERROR: x is immutable
+    let mut y = 5;
+    y = 10;            // ✅ OK
+
+  Time dimension reinforcement:
+    let data = ○{ T=Static };
+    let mut data = ○{ T=Static };  // ❌ ERROR: T=Static cannot be mut
+    let mut temp = ○{ T=Instant }; // ✅ OK: Instant = short-lived, mutable OK
+```
+
+Files: `semantic.rs` — track mutability per variable in scope
+
+#### Gap 3: Copy cost → CoW + Move semantics từ Time
+
+```
+Vấn đề: pass(data) clone toàn bộ chain → O(n) cost mỗi lần.
+
+Giải pháp: Time dimension quyết định semantics
+  T=Static   → share (immutable → safe to share, zero-copy read)
+  T=Instant  → move (dùng 1 lần → transfer ownership, no copy)
+  T=Fast     → CoW (share read, clone on write)
+  T=Medium   → clone (default behavior hiện tại)
+  T=Slow     → deep clone + persist
+
+  VM implementation:
+    Static:  Rc<Chain> — reference counted, no copy
+    Instant: stack move — pop source, push dest, source invalidated
+    Fast:    Rc<Chain> + clone on StoreUpdate
+    Medium:  deep clone (hiện tại)
+```
+
+Files: `vm.rs` — Time-aware value passing
+
+#### Gap 4: Exhaustive ○{ } match
+
+```
+Vấn đề: match ○{ V>0x80 } → miss V=0x00..0x80 → silent bug.
+
+Giải pháp: Range exhaustiveness check
+  match result {
+    ○{ V > 0x80 } → ok(),          // 0x81..0xFF
+    ○{ V > 0x40 } → weak(),        // 0x41..0x80
+    ○{ V > 0x00 } → error(),       // 0x01..0x40
+    ○{ V = 0x00 } → none(),        // 0x00
+  }  // ✅ exhaustive: 0x00..0xFF covered
+
+  Compiler rules:
+    - Nếu match ○{ } patterns mà range không cover 0x00..0xFF → WARNING
+    - Nếu có _ wildcard → OK (catch-all)
+    - Multi-dimension: mỗi dimension trong pattern phải independently exhaustive
+    - Overlapping ranges → WARNING (dead code)
+```
+
+Files: `semantic.rs` — exhaustiveness checker cho molecular patterns
+
+#### Gap 5: Effect system từ Relation dimension
+
+```
+Vấn đề: function có side effect hay pure? Rust dùng &/&mut hint. Olang chưa có.
+
+Giải pháp: Relation = effect annotation (MIỄN PHÍ từ 5D)
+  fn read_config()  → ○{ R=Member }    // pure: đọc, không đổi gì
+  fn send_command() → ○{ R=Causes }    // effect: gây ra thay đổi
+  fn emit_log()     → ○{ R=Flows }     // output: data chảy ra ngoài
+  fn transform()    → ○{ R=Compose }   // pure: biến đổi input → output
+
+  Compiler CÓ THỂ:
+    ○{ R=Member } fn bên trong ○{ R=Member } context     → ✅ pure in pure
+    ○{ R=Causes } fn bên trong ○{ R=Member } context     → ⚠️ WARNING: side effect in pure
+    ○{ R=Causes } fn bên trong ○{ R=Causes } context     → ✅ effect in effect
+    ○{ R=Flows }  fn bên trong bất kỳ context             → ✅ logging always OK
+
+  Kết quả: effect system mà Rust KHÔNG CÓ, Olang có MIỄN PHÍ từ Relation.
+```
+
+Files: `semantic.rs` — effect tracking per function
+
+### Implementation plan Phase 6
+
+```
+Task    Feature                      Depends on    Estimate
+──────────────────────────────────────────────────────────────
+6A      Molecular constraint parse   Phase 5 done   syntax.rs
+6B      Constraint propagation       6A             semantic.rs (static check)
+6C      Immutability by default      independent    semantic.rs (scope tracking)
+6D      Time-based CoW/Move/Share    6A+6C          vm.rs (value passing)
+6E      Exhaustive ○{ } match        6A             semantic.rs (range checker)
+6F      Effect system (Relation)     6A             semantic.rs (effect tracking)
+6G      Runtime constraint fallback  6B             vm.rs (dynamic check)
+6H      Documentation + examples    6A-6G           docs/molecular_types.md
+
+Validation:
+  ▢ fn f(x: ○{ S=SDF }) — reject non-SDF argument at COMPILE TIME
+  ▢ Constraint propagation: a()→○{V>0x80}, b(○{V>0x40}), b(a()) → no runtime check
+  ▢ let x = 5; x = 10; → ERROR (immutable default)
+  ▢ let mut x = 5; x = 10; → OK
+  ▢ ○{ T=Static } → zero-copy share, ○{ T=Instant } → move
+  ▢ match ○{ V>0x80 } without _ → WARNING: non-exhaustive
+  ▢ ○{ R=Causes } fn called in pure context → WARNING
+  ▢ cargo test --workspace passes
+```
+
+---
+
 ## Sau Phase 5: Migration Path
 
 ```
