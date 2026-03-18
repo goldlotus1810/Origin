@@ -212,9 +212,33 @@ impl DreamCycle {
             ));
 
             // Proposal promote QR cho observations fire nhiều
+            // Gap #8: prefer mature, but Dream can also advance maturity
             for obs in cluster {
-                if obs.fire_count >= fib(self.config.tree_depth) {
-                    let qr_confidence = (obs.fire_count as f32 / 10.0).min(1.0);
+                let eligible = if obs.maturity.is_mature() {
+                    true
+                } else {
+                    // Dream context: try advancing with Hebbian weight
+                    let ha = obs.chain.chain_hash();
+                    let w = graph.assoc_weight(ha, ha).max(
+                        graph.neighbors(ha).iter().fold(0.0f32, |m, &nb| {
+                            m.max(graph.assoc_weight(ha, nb)).max(graph.assoc_weight(nb, ha))
+                        })
+                    );
+                    let adv = obs.maturity.advance(obs.fire_count, w, fib(self.config.tree_depth));
+                    adv.is_mature() || obs.fire_count >= fib(self.config.tree_depth)
+                };
+                if eligible && obs.fire_count >= fib(self.config.tree_depth) {
+                    // Gap #5: unified_neighbors enriches QR confidence
+                    let neighbor_bonus = obs.mol_summary.as_ref().map_or(0.0, |mol| {
+                        let neighbors = graph.unified_neighbors(
+                            obs.chain.chain_hash(),
+                            Some(mol),
+                        );
+                        // More high-weight neighbors → higher confidence
+                        let strong = neighbors.iter().filter(|n| n.weight >= 0.5).count();
+                        (strong as f32 * 0.05).min(0.3)
+                    });
+                    let qr_confidence = ((obs.fire_count as f32 / 10.0) + neighbor_bonus).min(1.0);
                     proposals.push(DreamProposal::promote_qr(
                         obs.chain.chain_hash(),
                         obs.fire_count,
@@ -246,7 +270,8 @@ impl DreamCycle {
 
     /// Tìm clusters trong observations dùng dual-threshold.
     ///
-    /// score(A,B) = 0.3×chain_sim + 0.4×hebbian_weight + 0.3×co_act_ratio
+    /// QT⑪: Cluster chỉ trong cùng layer — group by layer trước.
+    /// score(A,B) = α×(chain_sim + implicit) + β×hebbian_weight + γ×co_act_ratio
     fn find_clusters<'a>(
         &self,
         observations: &[&'a Observation],
@@ -256,48 +281,63 @@ impl DreamCycle {
             return Vec::new();
         }
 
-        let max_fire = observations.iter().map(|o| o.fire_count).max().unwrap_or(1);
-
-        let n = observations.len();
-        let mut parent: Vec<usize> = (0..n).collect();
-
-        // Union-Find: find root iteratively
-        fn find_root(parent: &mut [usize], mut x: usize) -> usize {
-            while parent[x] != x {
-                let pp = parent[parent[x]];
-                parent[x] = pp;
-                x = parent[x];
-            }
-            x
+        // QT⑪: Group by layer trước khi cluster
+        let mut by_layer: BTreeMap<u8, Vec<&'a Observation>> = BTreeMap::new();
+        for &obs in observations {
+            by_layer.entry(obs.layer).or_default().push(obs);
         }
 
-        // Compare all pairs
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let score = self.cluster_score(observations[i], observations[j], graph, max_fire);
-                if score >= self.config.cluster_threshold {
-                    let ri = find_root(&mut parent, i);
-                    let rj = find_root(&mut parent, j);
-                    if ri != rj {
-                        parent[ri] = rj;
+        let mut all_clusters: Vec<Vec<&'a Observation>> = Vec::new();
+
+        for layer_obs in by_layer.values() {
+            let max_fire = layer_obs.iter().map(|o| o.fire_count).max().unwrap_or(1);
+            let n = layer_obs.len();
+            let mut parent: Vec<usize> = (0..n).collect();
+
+            // Union-Find: find root iteratively
+            fn find_root(parent: &mut [usize], mut x: usize) -> usize {
+                while parent[x] != x {
+                    let pp = parent[parent[x]];
+                    parent[x] = pp;
+                    x = parent[x];
+                }
+                x
+            }
+
+            // Compare all pairs within same layer
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let score =
+                        self.cluster_score(layer_obs[i], layer_obs[j], graph, max_fire);
+                    if score >= self.config.cluster_threshold {
+                        let ri = find_root(&mut parent, i);
+                        let rj = find_root(&mut parent, j);
+                        if ri != rj {
+                            parent[ri] = rj;
+                        }
                     }
                 }
             }
+
+            // Group by root
+            let mut groups: BTreeMap<usize, Vec<&'a Observation>> = BTreeMap::new();
+            for (i, &obs) in layer_obs.iter().enumerate() {
+                let root = find_root(&mut parent, i);
+                groups.entry(root).or_default().push(obs);
+            }
+
+            all_clusters.extend(groups.into_values());
         }
 
-        // Group by root
-        let mut groups: BTreeMap<usize, Vec<&'a Observation>> = BTreeMap::new();
-        for (i, &obs) in observations.iter().enumerate() {
-            let root = find_root(&mut parent, i);
-            groups.entry(root).or_default().push(obs);
-        }
-
-        groups.into_values().collect()
+        all_clusters
     }
 
     /// Tính cluster_score(A, B).
     ///
-    /// score = α×chain_sim + β×hebbian_weight + γ×co_act_ratio
+    /// score = α×(chain_sim + implicit_bonus) + β×hebbian_weight + γ×co_act_ratio
+    ///
+    /// Dùng MolSummary::similarity() (5D-aware) thay vì chain byte similarity.
+    /// implicit_bonus từ implicit Silk (5D shared dimensions).
     fn cluster_score(
         &self,
         a: &Observation,
@@ -305,18 +345,33 @@ impl DreamCycle {
         graph: &SilkGraph,
         max_fire: u32,
     ) -> f32 {
-        // Chain similarity
-        let chain_sim = a.chain.similarity_full(&b.chain);
-
-        // Hebbian weight (bidirectional max)
         let ha = a.chain.chain_hash();
         let hb = b.chain.chain_hash();
+
+        // Chain similarity — prefer MolSummary (5D-aware) over byte-level
+        let chain_sim = match (&a.mol_summary, &b.mol_summary) {
+            (Some(ma), Some(mb)) => ma.similarity(mb),
+            _ => a.chain.similarity_full(&b.chain), // fallback
+        };
+
+        // Implicit Silk bonus (5D shared dimensions)
+        let implicit_bonus = match (&a.mol_summary, &b.mol_summary) {
+            (Some(ma), Some(mb)) => {
+                let silk = silk::index::SilkIndex::implicit_silk(ma, mb);
+                silk.strength * 0.5 // scale implicit bonus
+            }
+            _ => 0.0,
+        };
+
+        // Hebbian weight (bidirectional max)
         let hebbian = graph.assoc_weight(ha, hb).max(graph.assoc_weight(hb, ha));
 
         // Co-activation ratio
         let co_score = graph.cluster_score_partial(ha, hb, max_fire);
 
-        self.config.alpha * chain_sim + self.config.beta * hebbian + self.config.gamma * co_score
+        self.config.alpha * (chain_sim + implicit_bonus)
+            + self.config.beta * hebbian
+            + self.config.gamma * co_score
     }
 }
 
@@ -651,6 +706,7 @@ mod tests {
             fire_count: 1,
             mol_summary: None,
             maturity: olang::molecular::Maturity::Formula,
+            layer: 0,
         };
         let obs2 = Observation {
             chain: chain.clone(),
@@ -659,6 +715,7 @@ mod tests {
             fire_count: 1,
             mol_summary: None,
             maturity: olang::molecular::Maturity::Formula,
+            layer: 0,
         };
         let result = aggregate_emotion(&[&obs1, &obs2]);
         assert!(

@@ -68,6 +68,136 @@ impl ImplicitSilk {
             shared_count: 0,
         }
     }
+
+    /// Classify compound pattern từ shared_dims.
+    ///
+    /// 31 mẫu = C(5,1) + C(5,2) + C(5,3) + C(5,4) + C(5,5).
+    /// None nếu shared_count == 0.
+    pub fn compound_kind(&self) -> Option<CompoundKind> {
+        if self.shared_count == 0 {
+            return None;
+        }
+        let has_s = self.shared_dims.iter().any(|d| matches!(d, SilkDim::Shape(_)));
+        let has_r = self.shared_dims.iter().any(|d| matches!(d, SilkDim::Relation(_)));
+        let has_v = self.shared_dims.iter().any(|d| matches!(d, SilkDim::Valence(_)));
+        let has_a = self.shared_dims.iter().any(|d| matches!(d, SilkDim::Arousal(_)));
+        let has_t = self.shared_dims.iter().any(|d| matches!(d, SilkDim::Time(_)));
+
+        Some(match (has_s, has_r, has_v, has_a, has_t) {
+            // 5 chiều (1 mẫu)
+            (true,  true,  true,  true,  true)  => CompoundKind::Identical,
+            // 4 chiều (5 mẫu)
+            (false, true,  true,  true,  true)  => CompoundKind::AllButShape,
+            (true,  false, true,  true,  true)  => CompoundKind::AllButRelation,
+            (true,  true,  false, true,  true)  => CompoundKind::AllButValence,
+            (true,  true,  true,  false, true)  => CompoundKind::AllButArousal,
+            (true,  true,  true,  true,  false) => CompoundKind::AllButTime,
+            // 3 chiều (10 mẫu)
+            (true,  true,  true,  false, false) => CompoundKind::ShapeRelationValence,
+            (true,  true,  false, true,  false) => CompoundKind::ShapeRelationArousal,
+            (true,  true,  false, false, true)  => CompoundKind::ShapeRelationTime,
+            (true,  false, true,  true,  false) => CompoundKind::ShapeValenceArousal,
+            (true,  false, true,  false, true)  => CompoundKind::ShapeValenceTime,
+            (true,  false, false, true,  true)  => CompoundKind::ShapeArousalTime,
+            (false, true,  true,  true,  false) => CompoundKind::RelationValenceArousal,
+            (false, true,  true,  false, true)  => CompoundKind::RelationValenceTime,
+            (false, true,  false, true,  true)  => CompoundKind::RelationArousalTime,
+            (false, false, true,  true,  true)  => CompoundKind::ValenceArousalTime,
+            // 2 chiều (10 mẫu)
+            (true,  true,  false, false, false) => CompoundKind::ShapeRelation,
+            (true,  false, true,  false, false) => CompoundKind::ShapeValence,
+            (true,  false, false, true,  false) => CompoundKind::ShapeArousal,
+            (true,  false, false, false, true)  => CompoundKind::ShapeTime,
+            (false, true,  true,  false, false) => CompoundKind::RelationValence,
+            (false, true,  false, true,  false) => CompoundKind::RelationArousal,
+            (false, true,  false, false, true)  => CompoundKind::RelationTime,
+            (false, false, true,  true,  false) => CompoundKind::ValenceArousal,
+            (false, false, true,  false, true)  => CompoundKind::ValenceTime,
+            (false, false, false, true,  true)  => CompoundKind::ArousalTime,
+            // 1 chiều (5 mẫu)
+            (true,  false, false, false, false) => CompoundKind::ShapeOnly,
+            (false, true,  false, false, false) => CompoundKind::RelationOnly,
+            (false, false, true,  false, false) => CompoundKind::ValenceOnly,
+            (false, false, false, true,  false) => CompoundKind::ArousalOnly,
+            (false, false, false, false, true)  => CompoundKind::TimeOnly,
+            // Impossible (shared_count > 0 nhưng no dims) → unreachable
+            (false, false, false, false, false) => return None,
+        })
+    }
+}
+
+/// 31 compound patterns — phân loại kiểu quan hệ theo số chiều chung.
+///
+/// C(5,1)=5, C(5,2)=10, C(5,3)=10, C(5,4)=5, C(5,5)=1 = 31 mẫu.
+/// 37 kênh × 31 mẫu = 1147 kiểu quan hệ có nghĩa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompoundKind {
+    // ── 1 chiều chung (5 mẫu) ──────────────────────────────────────────
+    ShapeOnly,
+    RelationOnly,
+    ValenceOnly,
+    ArousalOnly,
+    TimeOnly,
+
+    // ── 2 chiều chung (10 mẫu) ─────────────────────────────────────────
+    ShapeRelation,
+    ShapeValence,     // ẩn dụ thị giác
+    ShapeArousal,
+    ShapeTime,        // animation family
+    RelationValence,  // moral analog
+    RelationArousal,
+    RelationTime,
+    ValenceArousal,   // empathy link
+    ValenceTime,
+    ArousalTime,
+
+    // ── 3 chiều chung (10 mẫu) ─────────────────────────────────────────
+    ShapeRelationValence,   // gần như cùng khái niệm
+    ShapeRelationArousal,
+    ShapeRelationTime,
+    ShapeValenceArousal,
+    ShapeValenceTime,
+    ShapeArousalTime,
+    RelationValenceArousal,
+    RelationValenceTime,
+    RelationArousalTime,
+    ValenceArousalTime,
+
+    // ── 4 chiều chung (5 mẫu) ──────────────────────────────────────────
+    AllButShape,      // khác hình, giống hết → ẩn dụ sâu
+    AllButRelation,
+    AllButValence,
+    AllButArousal,
+    AllButTime,
+
+    // ── 5 chiều chung (1 mẫu) ──────────────────────────────────────────
+    Identical,        // cùng node
+}
+
+impl CompoundKind {
+    /// Số chiều chung.
+    pub fn shared_count(&self) -> u8 {
+        match self {
+            Self::ShapeOnly | Self::RelationOnly | Self::ValenceOnly
+            | Self::ArousalOnly | Self::TimeOnly => 1,
+
+            Self::ShapeRelation | Self::ShapeValence | Self::ShapeArousal
+            | Self::ShapeTime | Self::RelationValence | Self::RelationArousal
+            | Self::RelationTime | Self::ValenceArousal | Self::ValenceTime
+            | Self::ArousalTime => 2,
+
+            Self::ShapeRelationValence | Self::ShapeRelationArousal
+            | Self::ShapeRelationTime | Self::ShapeValenceArousal
+            | Self::ShapeValenceTime | Self::ShapeArousalTime
+            | Self::RelationValenceArousal | Self::RelationValenceTime
+            | Self::RelationArousalTime | Self::ValenceArousalTime => 3,
+
+            Self::AllButShape | Self::AllButRelation | Self::AllButValence
+            | Self::AllButArousal | Self::AllButTime => 4,
+
+            Self::Identical => 5,
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -622,5 +752,64 @@ mod tests {
         assert_eq!(0x80u8 / 32, 4); // neutral → zone 4
         assert_eq!(0xC0u8 / 32, 6);
         assert_eq!(0xFFu8 / 32, 7);
+    }
+
+    // ── CompoundKind classification ──────────────────────────────────────
+
+    #[test]
+    fn compound_kind_identical() {
+        let fire = fire_mol();
+        let anger = anger_mol();
+        let silk = SilkIndex::implicit_silk(&fire, &anger);
+        assert_eq!(silk.compound_kind(), Some(CompoundKind::Identical));
+        assert_eq!(CompoundKind::Identical.shared_count(), 5);
+    }
+
+    #[test]
+    fn compound_kind_two_dims() {
+        let fire = fire_mol();
+        let ice = ice_mol();
+        let silk = SilkIndex::implicit_silk(&fire, &ice);
+        // Shape=Sphere (same), Relation=Causes (same) → ShapeRelation
+        assert_eq!(silk.compound_kind(), Some(CompoundKind::ShapeRelation));
+        assert_eq!(silk.compound_kind().unwrap().shared_count(), 2);
+    }
+
+    #[test]
+    fn compound_kind_none_when_no_match() {
+        let fire = fire_mol();
+        let sad = sadness_mol();
+        let silk = SilkIndex::implicit_silk(&fire, &sad);
+        assert_eq!(silk.compound_kind(), None);
+    }
+
+    #[test]
+    fn compound_kind_all_31_variants() {
+        // Verify enum covers all 31 patterns
+        let all: [CompoundKind; 31] = [
+            CompoundKind::ShapeOnly, CompoundKind::RelationOnly,
+            CompoundKind::ValenceOnly, CompoundKind::ArousalOnly, CompoundKind::TimeOnly,
+            CompoundKind::ShapeRelation, CompoundKind::ShapeValence,
+            CompoundKind::ShapeArousal, CompoundKind::ShapeTime,
+            CompoundKind::RelationValence, CompoundKind::RelationArousal,
+            CompoundKind::RelationTime, CompoundKind::ValenceArousal,
+            CompoundKind::ValenceTime, CompoundKind::ArousalTime,
+            CompoundKind::ShapeRelationValence, CompoundKind::ShapeRelationArousal,
+            CompoundKind::ShapeRelationTime, CompoundKind::ShapeValenceArousal,
+            CompoundKind::ShapeValenceTime, CompoundKind::ShapeArousalTime,
+            CompoundKind::RelationValenceArousal, CompoundKind::RelationValenceTime,
+            CompoundKind::RelationArousalTime, CompoundKind::ValenceArousalTime,
+            CompoundKind::AllButShape, CompoundKind::AllButRelation,
+            CompoundKind::AllButValence, CompoundKind::AllButArousal, CompoundKind::AllButTime,
+            CompoundKind::Identical,
+        ];
+        assert_eq!(all.len(), 31);
+        // Verify shared_count distribution: 5+10+10+5+1 = 31
+        let ones = all.iter().filter(|k| k.shared_count() == 1).count();
+        let twos = all.iter().filter(|k| k.shared_count() == 2).count();
+        let threes = all.iter().filter(|k| k.shared_count() == 3).count();
+        let fours = all.iter().filter(|k| k.shared_count() == 4).count();
+        let fives = all.iter().filter(|k| k.shared_count() == 5).count();
+        assert_eq!((ones, twos, threes, fours, fives), (5, 10, 10, 5, 1));
     }
 }
