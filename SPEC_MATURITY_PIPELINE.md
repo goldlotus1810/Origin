@@ -1,9 +1,10 @@
 # Spec: Wire Maturity vào Dream Pipeline
 
-**Ngày:** 2026-03-18  
-**Cập nhật:** 2026-03-18 (sau audit old/2026-03-18/)  
-**Ưu tiên:** HIGH  
-**Scope:** 3 files, không thay đổi public API  
+**Ngày:** 2026-03-18
+**Cập nhật:** 2026-03-18 (sau audit old/2026-03-18/)
+**Audit:** 2026-03-18 — xem [AUDIT RESULTS](#audit-results-2026-03-18) ở cuối file
+**Ưu tiên:** HIGH
+**Scope:** 3 files, không thay đổi public API
 **Mục tiêu:** Node chuyển từ công thức (Formula) → đang học (Evaluating) → chín (Mature) dựa trên evidence thật từ STM và Dream.
 
 ---
@@ -764,6 +765,129 @@ refactor sau này.
 
 ---
 
-*HomeOS · 2026-03-18 · Maturity pipeline · Formula → Evaluating → Mature*  
+*HomeOS · 2026-03-18 · Maturity pipeline · Formula → Evaluating → Mature*
 *Cập nhật sau audit old/2026-03-18/ — thiết kế từ node va silk.md được phân tích đầy đủ*
 
+---
+
+## AUDIT RESULTS (2026-03-18)
+
+**Auditor:** Claude (automated code verification)
+**Phương pháp:** So sánh từng claim trong Spec với code thực tế trong codebase (2227 tests pass).
+**Kết quả tổng:** 18/19 claims kỹ thuật verify được là đúng (95%). Phát hiện **1 bug logic nghiêm trọng**, **1 sai số liệu**, và **1 claim thiếu chính xác**.
+
+---
+
+### BUG NGHIÊM TRỌNG: `advance()` với weight=0.0 KHÔNG BAO GIỜ đạt Mature
+
+**Ảnh hưởng:** Thay đổi 1 (dòng 165) + Thay đổi 2 (dòng 232) + test `dream_detects_mature_nodes` (dòng 268) sẽ FAIL.
+
+**Vấn đề:** Spec truyền `weight=0.0` vào `advance()` ở cả 2 nơi:
+
+```rust
+// Thay đổi 1 — learning.rs (dòng 165)
+obs.maturity = obs.maturity.advance(obs.fire_count, 0.0, fib_threshold);
+
+// Thay đổi 2 — dream.rs (dòng 232)
+obs.maturity.advance(obs.fire_count, 0.0, fib_threshold).is_mature()
+```
+
+**Code thực tế** (`molecular.rs:324-330`):
+```rust
+Self::Evaluating => {
+    // φ⁻¹ + φ⁻³ ≈ 0.854 (PROMOTE_WEIGHT from hebbian.rs)
+    if weight >= 0.854 && fire_count >= fib_threshold {
+        Self::Mature
+    } else {
+        Self::Evaluating
+    }
+}
+```
+
+**Hệ quả:**
+- `0.0 >= 0.854` = **luôn false** → Evaluating KHÔNG BAO GIỜ → Mature
+- Thay đổi 1: STM nodes chỉ tới `Evaluating`, kẹt ở đó vĩnh viễn
+- Thay đổi 2: `matured_nodes` luôn rỗng (`Vec::new()`)
+- Test `dream_detects_mature_nodes` sẽ **FAIL** — fire_count=10 nhưng weight=0.0 nên vẫn Evaluating
+
+**Sửa đề xuất (chọn 1 trong 2):**
+1. **Truyền Hebbian weight thật:** STM push và Dream cần query `SilkGraph` cho weight thực tế của chain_hash. Đòi hỏi thêm `&SilkGraph` param vào `push()`.
+2. **Fire-count-only path:** Thêm method `advance_by_fire(fire_count, fib_threshold)` bỏ qua weight check — dùng cho STM context nơi chưa có Hebbian link. Đơn giản hơn, nhưng bypass thiết kế "cần cả weight lẫn fire_count".
+
+---
+
+### SAI SỐ LIỆU: Test count
+
+**Spec ghi (dòng 325):** `# phải pass 2063 tests cũ`
+**Thực tế:** 2227 tests pass
+
+Chênh +164 tests. Con số cần cập nhật.
+
+---
+
+### CLAIM THIẾU CHÍNH XÁC: MolSummary similarity vs match/precision
+
+**Spec ghi (dòng 95):** "MolSummary::similarity() tính gần đúng theo delta — đúng tinh thần nhưng chưa tách biệt match và precision rõ ràng như thiết kế."
+
+**Thực tế:**
+- `MolSummary::similarity()` (`graph.rs:44-91`) — dùng delta-based, **đúng như spec nói** ✅
+- NHƯNG `SilkIndex::implicit_silk()` (`index.rs:180-236`) — **ĐÃ tách match vs precision**: exact match=0.20, base-only match=0.15. Spec không nhắc đến điều này.
+
+**Kết luận:** Spec đúng về MolSummary nhưng thiếu thông tin — ImplicitSilk đã implement pattern match/precision mà spec nói "chưa có".
+
+---
+
+### TẤT CẢ CLAIMS ĐÃ VERIFY
+
+| # | Claim | Nguồn verify | Kết quả |
+|---|-------|-------------|---------|
+| 1 | `Maturity` enum (Formula/Evaluating/Mature) | `molecular.rs:286-294` | ✅ |
+| 2 | `advance()` logic (fire>0 → Eval, weight≥0.854 && fire≥fib → Mature) | `molecular.rs:315-334` | ✅ |
+| 3 | `is_mature()` tồn tại | `molecular.rs:341` | ✅ |
+| 4 | `Observation` chưa có field `maturity` | `learning.rs:50-59` | ✅ cần thêm |
+| 5 | `DreamResult` chưa có field `matured_nodes` | `dream.rs:94-106` | ✅ cần thêm |
+| 6 | `DreamCycle::run()` signature | `dream.rs:133` | ✅ |
+| 7 | `DreamConfig` defaults (threshold=0.6, min=3, depth=3, α=0.3, β=0.4, γ=0.3) | `dream.rs:75-86` | ✅ |
+| 8 | `silk::hebbian::fib()` tồn tại | `hebbian.rs:87-98` | ✅ |
+| 9 | `dream.run()` có 2 callers | `origin.rs:1157, 4643` | ✅ |
+| 10 | `is_command()` thiếu 6 keywords (typeof/explain/why/trace/inspect/assert) | `parser.rs:1136-1159` | ✅ |
+| 11 | `SilkGraph` không có `parent_layer`/`parent_map` | `graph.rs:118-125` | ✅ |
+| 12 | SilkIndex 37 horizontal buckets (8+8+8+8+5) | `index.rs:22-30, 84-97` | ✅ |
+| 13 | `implicit_silk()` và `implicit_neighbors()` tồn tại | `index.rs:180, 270` | ✅ |
+| 14 | `ImplicitSilk` có `shared_dims` + `strength` + `shared_count` | `index.rs:50-71` | ✅ |
+| 15 | `HebbianLink` 19 bytes, KHÔNG có EmotionTag | `edge.rs:327-334` | ✅ |
+| 16 | `SilkEdge` 46 bytes, CÓ EmotionTag | `edge.rs:231-253, 296` | ✅ |
+| 17 | cluster_score = α×chain_sim + β×hebbian + γ×co_act | `dream.rs:293` | ✅ |
+| 18 | MolSummary::similarity() delta-based | `graph.rs:44-91` | ✅ |
+| 19 | ImplicitSilk chưa tách match/precision | `index.rs:180-236` | ❌ đã tách (0.20 exact, 0.15 base) |
+
+---
+
+### VỀ NỘI DUNG MỚI: "Nguồn gốc thiết kế" + "Thiết kế gốc"
+
+Spec mới thêm ~470 dòng phân tích thiết kế từ `node va silk.md`. Nội dung này:
+- **Hữu ích** cho context — giải thích TẠI SAO Maturity cần wire
+- **Chính xác** về mặt kỹ thuật (tất cả code references verify đúng)
+- **Lặp lại** — "Ý tưởng cốt lõi 1-4" (dòng 609-738) gần như trùng nội dung với "Nguồn gốc thiết kế" (dòng 11-127). Cùng topic được viết 2 lần.
+
+**Khuyến nghị:** Gộp 2 section trùng lặp thành 1, giảm ~200 dòng. Section "Thiết kế gốc từ node va silk.md" (dòng 605-751) có thể xóa vì nội dung đã có ở đầu file.
+
+---
+
+### TỔNG KẾT AUDIT
+
+```
+🔴 CRITICAL:  advance(weight=0.0) bug — Mature state unreachable, 1 test sẽ FAIL
+🟡 MINOR:     Test count sai (2063 → 2227)
+🟡 MINOR:     ImplicitSilk đã tách match/precision — spec nói chưa có
+🟡 STYLE:     ~200 dòng nội dung lặp (section đầu vs section cuối)
+🟢 POSITIVE:  95% claims kỹ thuật chính xác (18/19)
+🟢 POSITIVE:  Phân tích #1-#6 chi tiết và chính xác
+🟢 POSITIVE:  Context thiết kế từ node va silk.md rất hữu ích
+```
+
+**Trước khi implement spec này, PHẢI sửa bug weight=0.0.**
+
+---
+
+*Audit completed 2026-03-18 · Claude automated verification · synced with main*
