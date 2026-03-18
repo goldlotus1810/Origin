@@ -1729,6 +1729,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "join" => Some("__array_join"),
                 "map" => Some("__array_map"),
                 "filter" => Some("__array_filter"),
+                "fold" => Some("__array_fold"),
+                "any" => Some("__array_any"),
+                "all" => Some("__array_all"),
+                "find" => Some("__array_find"),
+                "enumerate" => Some("__array_enumerate"),
+                "count" => Some("__array_count"),
                 // ISL builtins
                 "isl_send" => Some("__isl_send"),
                 "isl_broadcast" => Some("__isl_broadcast"),
@@ -2247,6 +2253,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "slice" => Some("__array_slice"),
                 "map" => Some("__array_map"),
                 "filter" => Some("__array_filter"),
+                "fold" => Some("__array_fold"),
+                "any" => Some("__array_any"),
+                "all" => Some("__array_all"),
+                "find" => Some("__array_find"),
+                "enumerate" => Some("__array_enumerate"),
+                "count" => Some("__array_count"),
                 // String methods
                 "contains" => Some("__str_contains"),
                 "split" => Some("__str_split"),
@@ -5400,5 +5412,281 @@ mod tests {
         assert!((v1 - 10.0).abs() < f64::EPSILON, "header (default) = 10, got {}", v1);
         assert!((v2 - 20.0).abs() < f64::EPSILON, "body = 20, got {}", v2);
         assert!((v3 - 99.0).abs() < f64::EPSILON, "footer (overridden) = 99, got {}", v3);
+    }
+
+    // ── Phase 2 B3: Module system tests ───────────────────────────────────────
+
+    #[test]
+    fn module_use_with_multiple_selective_imports() {
+        let stmts = parse("use silk.graph.{co_activate, SilkGraph, walk_weighted};").unwrap();
+        match &stmts[0] {
+            Stmt::Use { module, imports } => {
+                assert_eq!(module, "silk.graph");
+                assert_eq!(imports.len(), 3);
+                assert_eq!(imports[0], "co_activate");
+                assert_eq!(imports[1], "SilkGraph");
+                assert_eq!(imports[2], "walk_weighted");
+            }
+            other => panic!("Expected Use, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn module_decl_deep_path() {
+        let stmts = parse("module agents.skills.cluster;").unwrap();
+        match &stmts[0] {
+            Stmt::ModDecl(path) => assert_eq!(path, "agents.skills.cluster"),
+            other => panic!("Expected ModDecl, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn module_use_and_decl_combined() {
+        let src = r#"
+            module app.main;
+            use silk.graph;
+            use context.emotion;
+            use agents.learning.{process_one, encode};
+        "#;
+        let stmts = parse(src).unwrap();
+        assert_eq!(stmts.len(), 4);
+        assert!(matches!(&stmts[0], Stmt::ModDecl(p) if p == "app.main"));
+        assert!(matches!(&stmts[1], Stmt::Use { module, imports } if module == "silk.graph" && imports.is_empty()));
+        assert!(matches!(&stmts[2], Stmt::Use { module, .. } if module == "context.emotion"));
+        assert!(matches!(&stmts[3], Stmt::Use { module, imports } if module == "agents.learning" && imports.len() == 2));
+    }
+
+    #[test]
+    fn module_use_lowers_to_ir_with_call() {
+        let stmts = parse("use context.emotion;").unwrap();
+        let prog = lower(&stmts);
+        let has_load = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "context.emotion"));
+        let has_call = prog.ops.iter().any(|op| matches!(op, Op::Call(s) if s == "__use_module"));
+        assert!(has_load, "Should emit Load for module path");
+        assert!(has_call, "Should emit Call __use_module");
+    }
+
+    #[test]
+    fn module_use_selective_lowers_correctly() {
+        let stmts = parse("use silk.{walk, co_activate};").unwrap();
+        let prog = lower(&stmts);
+        let has_module = prog.ops.iter().any(|op| matches!(op, Op::Load(s) if s == "silk"));
+        let has_selective = prog.ops.iter().any(|op| matches!(op, Op::Call(s) if s == "__use_module_selective"));
+        assert!(has_module, "Should emit Load for module");
+        assert!(has_selective, "Should emit Call __use_module_selective");
+    }
+
+    // ── Phase 2 B4: Closure + Higher-order function tests ─────────────────────
+
+    #[test]
+    fn closure_vm_map() {
+        // [1, 2, 3].map(|x| x * 2) should produce [2, 4, 6]
+        let src = r#"
+            let arr = [1, 2, 3];
+            emit arr.map(|x| x * 2);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "map should produce output");
+        // Verify the output contains 3 elements
+        let elements = crate::exec::vm::tests::split_test_array(&outputs[0]);
+        assert_eq!(elements.len(), 3, "map should produce 3 elements");
+        // Check values: 2, 4, 6
+        let values: Vec<f64> = elements.iter().filter_map(|e| e.to_number()).collect();
+        assert_eq!(values, alloc::vec![2.0, 4.0, 6.0], "map |x| x*2 on [1,2,3] = [2,4,6]");
+    }
+
+    #[test]
+    fn closure_vm_filter() {
+        // [1, 2, 3, 4, 5].filter(|x| x > 3) should produce [4, 5]
+        let src = r#"
+            let arr = [1, 2, 3, 4, 5];
+            emit arr.filter(|x| x > 3);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "filter should produce output");
+        let elements = crate::exec::vm::tests::split_test_array(&outputs[0]);
+        assert_eq!(elements.len(), 2, "filter x>3 on [1..5] should produce 2 elements");
+        let values: Vec<f64> = elements.iter().filter_map(|e| e.to_number()).collect();
+        assert_eq!(values, alloc::vec![4.0, 5.0]);
+    }
+
+    #[test]
+    fn closure_vm_fold() {
+        // [1, 2, 3].fold(0, |acc, x| acc + x) should produce 6
+        let src = r#"
+            let arr = [1, 2, 3];
+            emit arr.fold(0, |acc, x| acc + x);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "fold should produce output");
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 6.0).abs() < f64::EPSILON, "fold sum [1,2,3] = 6, got {}", val);
+    }
+
+    #[test]
+    fn closure_vm_any() {
+        // [1, 2, 3].any(|x| x > 2) should return truthy
+        let src = r#"
+            let arr = [1, 2, 3];
+            emit arr.any(|x| x > 2);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "any should produce output");
+        assert!(!outputs[0].is_empty(), "any(x>2) on [1,2,3] should be truthy");
+    }
+
+    #[test]
+    fn closure_vm_all() {
+        // [1, 2, 3].all(|x| x > 0) should return truthy
+        let src = r#"
+            let arr = [1, 2, 3];
+            emit arr.all(|x| x > 0);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "all should produce output");
+        assert!(!outputs[0].is_empty(), "all(x>0) on [1,2,3] should be truthy");
+    }
+
+    #[test]
+    fn closure_vm_all_false() {
+        // [1, 2, 3].all(|x| x > 2) should return falsy
+        let src = r#"
+            let arr = [1, 2, 3];
+            emit arr.all(|x| x > 2);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "all should produce output");
+        assert!(outputs[0].is_empty(), "all(x>2) on [1,2,3] should be falsy");
+    }
+
+    #[test]
+    fn closure_vm_find() {
+        // [10, 20, 30].find(|x| x > 15) should return 20
+        let src = r#"
+            let arr = [10, 20, 30];
+            emit arr.find(|x| x > 15);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "find should produce output");
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 20.0).abs() < f64::EPSILON, "find(x>15) on [10,20,30] = 20, got {}", val);
+    }
+
+    #[test]
+    fn closure_map_filter_chain() {
+        // Higher-order chaining: map then filter
+        // [1, 2, 3, 4].map(|x| x * 2).filter(|x| x > 4)
+        // = [2, 4, 6, 8].filter(|x| x > 4) = [6, 8]
+        let src = r#"
+            let arr = [1, 2, 3, 4];
+            let doubled = arr.map(|x| x * 2);
+            emit doubled.filter(|x| x > 4);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "chained map+filter should produce output");
+        let elements = crate::exec::vm::tests::split_test_array(&outputs[0]);
+        assert_eq!(elements.len(), 2, "map(*2).filter(>4) on [1,2,3,4] = 2 elements");
+        let values: Vec<f64> = elements.iter().filter_map(|e| e.to_number()).collect();
+        assert_eq!(values, alloc::vec![6.0, 8.0]);
+    }
+
+    #[test]
+    fn closure_count_elements() {
+        // [1, 2, 3, 4, 5].count(|x| x > 3) should return 2
+        let src = r#"
+            let arr = [1, 2, 3, 4, 5];
+            emit arr.count(|x| x > 3);
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty(), "count should produce output");
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 2.0).abs() < f64::EPSILON, "count(x>3) on [1..5] = 2, got {}", val);
+    }
+
+    #[test]
+    fn closure_as_function_arg() {
+        // Pass closure as variable
+        let src = r#"
+            let double = |x| x * 2;
+            let result = double(21);
+            emit result;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        let outputs = result.outputs();
+        assert!(!outputs.is_empty());
+        let val = outputs[0].to_number().unwrap_or(-1.0);
+        assert!((val - 42.0).abs() < f64::EPSILON, "double(21) = 42, got {}", val);
+    }
+
+    #[test]
+    fn module_decl_validation_passes() {
+        let stmts = parse("module my.app; let x = 1; emit x;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Module decl should not cause validation errors: {:?}", errors);
+    }
+
+    #[test]
+    fn module_use_validation_passes() {
+        let stmts = parse("use silk.graph; let x = 1; emit x;").unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Use should not cause validation errors: {:?}", errors);
+    }
+
+    #[test]
+    fn closure_higher_order_methods_compile() {
+        // Verify all new methods produce valid IR
+        let methods = [
+            "arr.fold(0, |a, b| a + b)",
+            "arr.any(|x| x > 0)",
+            "arr.all(|x| x > 0)",
+            "arr.find(|x| x > 0)",
+            "arr.enumerate()",
+            "arr.count(|x| x > 0)",
+        ];
+        for src_method in &methods {
+            let src = alloc::format!("let arr = [1, 2, 3]; emit {};", src_method);
+            let stmts = parse(&src).unwrap();
+            let prog = lower(&stmts);
+            assert!(prog.ops.len() > 0, "Method {} should compile to non-empty program", src_method);
+        }
     }
 }

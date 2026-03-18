@@ -275,7 +275,8 @@ impl VmStack {
 ///
 /// Maps ShapeBase to Unicode group categories:
 /// Split an array-encoded MolecularChain by separator molecules (shape=0, relation=0).
-fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
+/// Split array chain by separator molecules (shape=0, relation=0, v=0, a=0, t=0).
+pub fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     if chain.is_empty() {
         return Vec::new();
     }
@@ -348,6 +349,131 @@ fn classify_chain(chain: &MolecularChain) -> String {
         s.push(')');
         s
     }
+}
+
+/// Execute a closure inline with given arguments.
+/// Used by higher-order array methods (map, filter, fold, etc.).
+/// Returns the result left on stack after closure body executes.
+fn call_closure_inline(
+    prog: &OlangProgram,
+    body_pc: usize,
+    args: &[MolecularChain],
+    parent_scopes: &[Vec<(String, MolecularChain)>],
+    steps: &mut u32,
+    max_steps: u32,
+) -> MolecularChain {
+    let mut local_stack = VmStack::new();
+    // Push args (reversed so body can Store them in order)
+    for arg in args.iter().rev() {
+        let _ = local_stack.push(arg.clone());
+    }
+    // Create scope with parent's variables visible
+    let mut scopes: Vec<Vec<(String, MolecularChain)>> = Vec::new();
+    // Copy parent scope for variable access (capture by value)
+    if let Some(last) = parent_scopes.last() {
+        scopes.push(last.clone());
+    } else {
+        scopes.push(Vec::new());
+    }
+    // New scope for closure locals
+    scopes.push(Vec::new());
+
+    let mut local_pc = body_pc;
+    let mut local_events = Vec::new();
+    while local_pc < prog.ops.len() && *steps < max_steps {
+        let op = &prog.ops[local_pc];
+        local_pc += 1;
+        *steps += 1;
+        if matches!(op, Op::Ret) {
+            break;
+        }
+        match op {
+            Op::Store(name) => {
+                let val = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                if let Some(scope) = scopes.last_mut() {
+                    if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
+                        entry.1 = val;
+                    } else {
+                        scope.push((name.clone(), val));
+                    }
+                }
+            }
+            Op::LoadLocal(name) => {
+                let val = scopes.iter().rev()
+                    .find_map(|s| s.iter().rev().find(|(n, _)| n == name).map(|(_, c)| c.clone()))
+                    .unwrap_or_else(MolecularChain::empty);
+                let _ = local_stack.push(val);
+            }
+            Op::PushNum(n) => { let _ = local_stack.push(MolecularChain::from_number(*n)); }
+            Op::Push(chain) => { let _ = local_stack.push(chain.clone()); }
+            Op::Call(fname) => {
+                match fname.as_str() {
+                    "__hyp_add" | "__hyp_sub" | "__hyp_mul" | "__hyp_div"
+                    | "__hyp_mod" | "__phys_add" | "__phys_sub" => {
+                        let b = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                        let a = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                        let fa = a.to_number().unwrap_or(0.0);
+                        let fb = b.to_number().unwrap_or(0.0);
+                        let result = match fname.as_str() {
+                            "__hyp_add" | "__phys_add" => fa + fb,
+                            "__hyp_sub" | "__phys_sub" => fa - fb,
+                            "__hyp_mul" => fa * fb,
+                            "__hyp_div" => if fb.abs() > f64::EPSILON { fa / fb } else { 0.0 },
+                            "__hyp_mod" => if fb.abs() > f64::EPSILON { fa % fb } else { 0.0 },
+                            _ => 0.0,
+                        };
+                        let _ = local_stack.push(MolecularChain::from_number(result));
+                    }
+                    "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
+                        let b = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                        let a = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                        let fa = a.to_number().unwrap_or(0.0);
+                        let fb = b.to_number().unwrap_or(0.0);
+                        let result = match fname.as_str() {
+                            "__cmp_lt" => fa < fb,
+                            "__cmp_gt" => fa > fb,
+                            "__cmp_le" => fa <= fb,
+                            "__cmp_ge" => fa >= fb,
+                            "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                            _ => false,
+                        };
+                        let _ = local_stack.push(if result {
+                            MolecularChain::from_number(1.0)
+                        } else {
+                            MolecularChain::empty()
+                        });
+                    }
+                    _ => {
+                        local_events.push(VmEvent::LookupAlias(fname.clone()));
+                    }
+                }
+            }
+            Op::Lca => {
+                let b = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                let a = if let Ok(v) = local_stack.pop() { v } else { MolecularChain::empty() };
+                let _ = local_stack.push(lca(&a, &b));
+            }
+            Op::Pop => { let _ = local_stack.pop(); }
+            Op::Dup => {
+                if let Some(top) = local_stack.peek() {
+                    let _ = local_stack.push(top.clone());
+                }
+            }
+            Op::Swap => {
+                let b = if let Ok(v) = local_stack.pop() { v } else { break };
+                let a = if let Ok(v) = local_stack.pop() { v } else { break };
+                let _ = local_stack.push(b);
+                let _ = local_stack.push(a);
+            }
+            Op::Emit => {
+                // In closure context, emit means "this is the return value"
+                // Don't actually emit; leave on stack
+            }
+            _ => {}
+        }
+    }
+    // Return top of stack
+    local_stack.pop().unwrap_or_else(|_| MolecularChain::empty())
 }
 
 /// OlangVM — stack machine thực thi OlangProgram.
@@ -1441,18 +1567,207 @@ impl OlangVM {
                             let _ = stack.push(result);
                         }
                         "__array_map" => {
-                            // Simple map: applies a number transform from stack
-                            // Stack: [array, function_chain]
-                            // For now: just return the array (closures needed for full impl)
-                            let _fn = vm_pop!(stack, events);
+                            // Stack: [array, closure]
+                            // Apply closure to each element, collect results
+                            let closure_marker = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let _ = stack.push(arr);
+                            let elements = split_array_chain(&arr);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for (i, elem) in elements.iter().enumerate() {
+                                        if i > 0 { result.0.push(sep); }
+                                        // Execute closure with elem as argument
+                                        let mapped = call_closure_inline(
+                                            prog, body_pc, &[elem.clone()],
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                        result.0.extend(mapped.0.iter().cloned());
+                                    }
+                                }
+                            }
+                            let _ = stack.push(result);
                         }
                         "__array_filter" => {
-                            // Simple filter: for now just return the array
-                            let _fn = vm_pop!(stack, events);
+                            // Stack: [array, closure]
+                            // Keep elements where closure returns non-empty
+                            let closure_marker = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let _ = stack.push(arr);
+                            let elements = split_array_chain(&arr);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            let mut count = 0usize;
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for elem in &elements {
+                                        let keep = call_closure_inline(
+                                            prog, body_pc, &[elem.clone()],
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                        if !keep.is_empty() {
+                                            if count > 0 { result.0.push(sep); }
+                                            result.0.extend(elem.0.iter().cloned());
+                                            count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_fold" => {
+                            // Stack: [array, init, closure]
+                            // Fold (reduce) array with 2-arg closure: |acc, elem| { ... }
+                            let closure_marker = vm_pop!(stack, events);
+                            let init = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let mut acc = init;
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for elem in &elements {
+                                        acc = call_closure_inline(
+                                            prog, body_pc, &[acc, elem.clone()],
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                    }
+                                }
+                            }
+                            let _ = stack.push(acc);
+                        }
+                        "__array_any" => {
+                            // Stack: [array, closure]
+                            // Returns 1.0 if any element satisfies predicate, else empty
+                            let closure_marker = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let mut found = false;
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for elem in &elements {
+                                        let r = call_closure_inline(
+                                            prog, body_pc, &[elem.clone()],
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                        if !r.is_empty() { found = true; break; }
+                                    }
+                                }
+                            }
+                            let _ = stack.push(if found {
+                                MolecularChain::from_number(1.0)
+                            } else {
+                                MolecularChain::empty()
+                            });
+                        }
+                        "__array_all" => {
+                            // Stack: [array, closure]
+                            // Returns 1.0 if all elements satisfy predicate, else empty
+                            let closure_marker = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let mut all_pass = true;
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for elem in &elements {
+                                        let r = call_closure_inline(
+                                            prog, body_pc, &[elem.clone()],
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                        if r.is_empty() { all_pass = false; break; }
+                                    }
+                                }
+                            }
+                            let _ = stack.push(if all_pass {
+                                MolecularChain::from_number(1.0)
+                            } else {
+                                MolecularChain::empty()
+                            });
+                        }
+                        "__array_find" => {
+                            // Stack: [array, closure]
+                            // Returns first element satisfying predicate, or empty
+                            let closure_marker = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let mut found = MolecularChain::empty();
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for elem in &elements {
+                                        let r = call_closure_inline(
+                                            prog, body_pc, &[elem.clone()],
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                        if !r.is_empty() {
+                                            found = elem.clone();
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            let _ = stack.push(found);
+                        }
+                        "__array_enumerate" => {
+                            // Stack: [array]
+                            // Returns array of [index, element] pairs (flattened as [0, e0, 1, e1, ...])
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            for (i, elem) in elements.iter().enumerate() {
+                                if i > 0 { result.0.push(sep); }
+                                // Each pair is [idx_chain + sep + elem_chain]
+                                let idx_chain = MolecularChain::from_number(i as f64);
+                                result.0.extend(idx_chain.0.iter().cloned());
+                                result.0.push(sep);
+                                result.0.extend(elem.0.iter().cloned());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__array_count" => {
+                            // Stack: [array, closure]
+                            // Count elements satisfying predicate
+                            let closure_marker = vm_pop!(stack, events);
+                            let arr = vm_pop!(stack, events);
+                            let elements = split_array_chain(&arr);
+                            let mut count = 0usize;
+                            if let Some(mol) = closure_marker.first() {
+                                if mol.shape == 0xFF {
+                                    let body_pc = mol.emotion.valence as usize
+                                        | ((mol.emotion.arousal as usize) << 8);
+                                    for elem in &elements {
+                                        let r = call_closure_inline(
+                                            prog, body_pc, &[elem.clone()],
+                                            &scopes, &mut steps, self.max_steps,
+                                        );
+                                        if !r.is_empty() { count += 1; }
+                                    }
+                                }
+                            }
+                            let _ = stack.push(MolecularChain::from_number(count as f64));
                         }
                         // ── ISL builtins ───────────────────────────────────
                         "__isl_send" => {
@@ -2405,10 +2720,16 @@ impl VmResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+#[allow(missing_docs)]
+pub mod tests {
     use super::*;
     use crate::encoder::encode_codepoint;
     use crate::ir::{compile_expr, OlangIrExpr};
+
+    /// Test helper: split array chain for assertions in other test modules.
+    pub fn split_test_array(chain: &MolecularChain) -> Vec<MolecularChain> {
+        split_array_chain(chain)
+    }
 
     fn vm() -> OlangVM {
         OlangVM::new()
