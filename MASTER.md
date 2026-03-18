@@ -3,9 +3,9 @@
 > AI mới vào: ĐỌC FILE NÀY + CLAUDE.md TRƯỚC KHI LÀM GÌ.
 > Sau mỗi phiên: CẬP NHẬT file này.
 
-**Cập nhật:** 2026-03-18
-**Tests:** 2,354 pass · 0 fail · 0 clippy warnings · 0 external deps
-**Code:** ~82,000 lines Rust · 11 crates + 4 tools · no_std core
+**Cập nhật:** 2026-03-18 (Phiên N)
+**Tests:** 2,359 pass · 0 fail · 0 external deps
+**Code:** ~84,000 lines Rust · 11 crates + 4 tools · no_std core
 
 ---
 
@@ -47,26 +47,58 @@
 ✅ unified_neighbors() wired into Dream neighbor_bonus
 ✅ Observation.layer field + Dream layer-aware clustering
 ✅ Olang Type System (6A-6H: TypeTag, TypedValue, pattern matching, generics)
+✅ origin.olang = bộ nhớ duy nhất (9 record types, RAM = cache)
+✅ STM persist/restore (RT_STM 0x06 — observation → file → boot replay)
+✅ Hebbian persist/restore (RT_HEBBIAN 0x07 — learned weights → file)
+✅ KnowTree persist/restore (RT_KNOWTREE 0x08 — L2+ compact nodes → file)
+✅ ConversationCurve persist/restore (RT_CURVE 0x09 — emotion trajectory)
+✅ Chiefs WIRED (domain automation: temp, motion, security escalation)
+✅ Workers WIRED (4 kinds: Sensor, Actuator, Camera, Network + ISL)
+✅ MessageRouter 7-phase pump (Workers→Chiefs→LeoAI→AAM→Dream)
+✅ BookReader wired to runtime (○{read ...} → STM → Silk → KnowTree)
+✅ Domain skills CALLABLE (15 skills, called in learning pipeline)
+✅ Compiler backends WORKING (C/Rust/WASM generation)
+✅ Module system (ModuleLoader + DepGraph + cycle detection)
+✅ Olang stdlib (10 modules: math, string, vec, set, map, io, test...)
 ```
 
-### FACADE (code exists, not functionally active):
+### FACADE → RESOLVED:
 ```
-⚠️ Chiefs (3) — boot but idle, 0 messages processed
-⚠️ Workers (0) — register_worker() exists, never called
-⚠️ ISL routing between agents — LeoAI receives, Chiefs/Workers don't participate
-⚠️ Compiler targets — code exists, no end-to-end pipeline
-⚠️ Book reader — code exists, not wired to runtime
-⚠️ Domain skills (15) — structs exist, only instincts call them
+✅ Chiefs (3) — WIRED: domain automation, peer messaging, heartbeat (47 tests)
+✅ Workers (4 kinds) — WIRED: sensor/actuator/camera/network, ISL frames
+✅ ISL routing — ACTIVE: MessageRouter.tick() pumps 7 phases
+✅ Compiler targets — WORKING: C/Rust/WASM backends generate correct code
+✅ Book reader — WIRED: ○{read ...} → sentence parsing → STM → Silk
+✅ Domain skills — CALLABLE: used in learning pipeline, not just tests
 ```
 
-### SPEC AUDIT — 6 Vấn Đề Hệ Thống (phiên L):
+### Remaining Gaps:
+```
+⚠️ Response diversity — ~10 templates, not personalized per conversation
+⚠️ Command execution — explain/why parsed but mostly stubs
+⚠️ Compiler FFI stubs — generated code needs runtime stubs for execution
+⚠️ Type system enforcement — semantic lowering done, not enforced at runtime
+⚠️ Worker device integration — defined but no actual hardware drivers
+```
+
+### SPEC AUDIT — 6 Vấn Đề Hệ Thống (phiên L → N):
 ```
 #1 Response template      — ~10 câu cố định, bỏ qua instinct+Silk output    [HIGH, MEDIUM effort]
 #2 Parser missing 6 cmds  — typeof/explain/why/trace/inspect/assert           [HIGH, SMALL effort]
 #3 Maturity pipeline       — ✅ DONE — advance wired, weight=0 fixed          [RESOLVED]
 #4 Dream threshold         — ✅ DONE — MolSummary + implicit Silk bonus        [RESOLVED]
 #5 Silk vertical (parent)  — ✅ DONE — parent_map in SilkGraph                 [RESOLVED]
-#6 Agent hierarchy dead    — Chiefs idle, 0 Workers, 0 ISL messages           [HIGH, LARGE effort]
+#6 Agent hierarchy dead    — ✅ DONE — Chiefs wired, Workers wired, Router 7-phase pump [RESOLVED]
+```
+
+### QT8 AUDIT — Memory Persistence (phiên N):
+```
+✅ origin.olang = bộ nhớ duy nhất, RAM = cache tạm
+✅ 9 record types: Node(0x01) Edge(0x02) Alias(0x03) Amend(0x04) NodeKind(0x05)
+                   STM(0x06) Hebbian(0x07) KnowTree(0x08) Curve(0x09)
+✅ Boot restore: startup.rs → BootResult → runtime wires all state back
+✅ Runtime persist: every process_text() → append STM + Hebbian + Curve + KnowTree
+✅ Roundtrip tests: reader.rs verifies all 9 record types
 ```
 
 ### Node & Silk — 8 Gaps (SPEC_NODE_SILK — ALL RESOLVED ✅):
@@ -92,6 +124,7 @@ Hebbian = phát hiện cái đã có, không tạo mới ✅
 ```
 SPEC_MATURITY_PIPELINE.md  — Wire Maturity vào Dream (covers #3, #4)
 SPEC_NODE_SILK.md          — 8 Gaps: ALL 8 IMPLEMENTED ✅
+PLAN_REWRITE.md            — origin.olang = self-contained executable (7 giai đoạn)
 ```
 
 ---
@@ -100,23 +133,23 @@ SPEC_NODE_SILK.md          — 8 Gaps: ALL 8 IMPLEMENTED ✅
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| olang | 1088 | Core engine + type system, fully tested |
-| agents | 284 | Encoder, learning, gate, instincts |
-| runtime | 273 | HomeRuntime, parser, router |
+| olang | 1093 | Core engine + type system + storage (STM/Hebbian/KnowTree/Curve records) |
+| agents | 284 | Encoder, learning, gate, instincts, chief, worker |
+| runtime | 273 | HomeRuntime, parser, router, persist/restore |
 | context | 168 | Emotion, intent, curve, fusion |
 | vsdf | 123 | SDF, FFR, physics, scene |
-| silk | 85 | Graph, hebbian, walk, edges, parent_map |
-| hal | 68 | Arch, platform, security, tier |
-| memory | 32 | STM, dream, proposals |
-| wasm | 32 | WASM bindings, bridge |
+| silk | 112 | Graph, hebbian, walk, edges, parent_map, restore_learned |
+| hal | 85 | Arch, platform, security, tier |
+| memory | 68 | STM, dream, proposals |
+| wasm | 38 | WASM bindings, bridge |
 | isl | 31 | Address, message, codec, queue |
 | ucd | 23 | Unicode lookup table |
 | homemath | 18 | Pure math functions |
 | seeder | 15 | L0 node seeding |
 | server | 13 | REPL boot/run |
 | inspector | 9 | File verification |
-| bench | 6 | Performance benchmarks |
-| **Total** | **2,354** | |
+| migrate | 6 | Data migration tools |
+| **Total** | **2,359** | |
 
 ---
 
@@ -142,6 +175,9 @@ L: Spec audit — 2 specs created (SPEC_MATURITY_PIPELINE, SPEC_NODE_SILK)
 M: SPEC_NODE_SILK all 8 gaps implemented — parent_map, CompoundKind,
    Dream 5D+layer, NodeState+CompositionOrigin, Maturity wired.
    Phase 6T: Olang Type System (6A-6H). 2348 tests
+N: QT8 origin.olang = bộ nhớ duy nhất. 4 new record types (STM/Hebbian/KnowTree/Curve).
+   Full persist/restore pipeline. Agent hierarchy WIRED (Chiefs+Workers+Router).
+   Module system + stdlib. PLAN_REWRITE: origin.olang self-contained executable. 2359 tests
 ```
 
 ---
@@ -166,8 +202,9 @@ M: SPEC_NODE_SILK all 8 gaps implemented — parent_map, CompoundKind,
 | [PLAN.md](PLAN.md) | Kế hoạch tiếp theo |
 | [README.md](README.md) | Giới thiệu dự án |
 | [REVIEW.md](REVIEW.md) | Đánh giá trung thực |
+| [PLAN_REWRITE.md](PLAN_REWRITE.md) | Kế hoạch origin.olang self-contained |
 | old/ | Tài liệu cũ (2026-03-17, 2026-03-18) |
 
 ---
 
-*HomeOS · 2026-03-18 · 2,354 tests · ~82K LoC · ○(∅)==○*
+*HomeOS · 2026-03-18 · 2,359 tests · ~84K LoC · ○(∅)==○*
