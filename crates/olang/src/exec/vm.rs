@@ -28,10 +28,15 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
     // Check if it looks like a string chain (all shape=0x02, relation=0x01)
     let is_string = chain.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01);
     if is_string {
-        let s: String = chain.0.iter()
-            .map(|m| m.emotion.valence as char)
-            .collect();
-        Some(s)
+        // Decode bytes as UTF-8 (strings are stored as 1 molecule = 1 byte)
+        let bytes: Vec<u8> = chain.0.iter().map(|m| m.emotion.valence).collect();
+        match String::from_utf8(bytes) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                // Lossy fallback for invalid UTF-8 sequences
+                Some(String::from_utf8_lossy(e.as_bytes()).into_owned())
+            }
+        }
     } else {
         None
     }

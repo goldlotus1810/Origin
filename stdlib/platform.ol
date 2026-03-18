@@ -14,17 +14,17 @@ mod platform;
 // Returns: "x86_64", "x86", "aarch64", "arm", "riscv64", "riscv32",
 //          "mips", "wasm32", or "unknown"
 pub fn arch() {
-    platform_arch()
+    __platform_arch()
 }
 
 // Operating system string.
 // Returns: "linux", "macos", "windows", "bare", or "unknown"
 pub fn os() {
-    platform_os()
+    __platform_os()
 }
 
 // Total system memory in bytes.
 // Returns 0 if not available (bare metal, WASM, etc.).
 pub fn memory() {
-    platform_memory()
+    __platform_memory()
 }

@@ -14,12 +14,12 @@ mod io;
 
 // Print a value to console (no newline).
 pub fn print(msg) {
-    print(msg);
+    __print(msg);
 }
 
 // Print a value to console with newline.
 pub fn println(msg) {
-    println(msg);
+    __println(msg);
 }
 
 // ── File operations (append-only per QT9) ───────────────────────────────────
@@ -27,17 +27,17 @@ pub fn println(msg) {
 // Read entire file contents as string.
 // Returns file contents or empty on failure.
 pub fn read_file(path) {
-    file_read(path)
+    __file_read(path)
 }
 
 // Append data to file (QT9: append-only, never overwrite).
 // Returns 1 on success.
 pub fn append_file(path, data) {
-    file_append(path, data)
+    __file_append(path, data)
 }
 
 // Write data to file (use append_file when possible — QT9).
 // Returns 1 on success.
 pub fn write_file(path, data) {
-    file_write(path, data)
+    __file_write(path, data)
 }
