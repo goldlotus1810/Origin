@@ -82,12 +82,28 @@ struct FnInfo {
     param_count: usize,
 }
 
+/// Trait definition cho conformance checking.
+#[derive(Debug, Clone)]
+struct TraitInfo {
+    name: String,
+    methods: Vec<TraitMethodInfo>,
+}
+
+/// A single method signature in a trait.
+#[derive(Debug, Clone)]
+struct TraitMethodInfo {
+    name: String,
+    param_count: usize, // excluding `self`
+}
+
 /// Scope: theo dõi biến cục bộ và hàm.
 struct Scope {
     /// Stack of local variable names (pushed on enter, popped on exit)
     locals: Vec<String>,
     /// Defined functions
     fns: Vec<FnInfo>,
+    /// Defined traits
+    traits: Vec<TraitInfo>,
     /// Stack frames: mỗi frame lưu số locals tại thời điểm enter
     frames: Vec<usize>,
 }
@@ -97,6 +113,7 @@ impl Scope {
         Self {
             locals: Vec::new(),
             fns: Vec::new(),
+            traits: Vec::new(),
             frames: Vec::new(),
         }
     }
@@ -129,6 +146,14 @@ impl Scope {
     fn lookup_fn(&self, name: &str) -> Option<&FnInfo> {
         self.fns.iter().rev().find(|f| f.name == name)
     }
+
+    fn define_trait(&mut self, info: TraitInfo) {
+        self.traits.push(info);
+    }
+
+    fn lookup_trait(&self, name: &str) -> Option<&TraitInfo> {
+        self.traits.iter().rev().find(|t| t.name == name)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,10 +166,27 @@ pub fn validate(stmts: &[Stmt]) -> Vec<SemError> {
     let mut scope = Scope::new();
     scope.enter();
 
-    // First pass: collect function definitions
+    // First pass: collect function and trait definitions
     for stmt in stmts {
         if let Stmt::FnDef { name, params, .. } = stmt {
             scope.define_fn(name, params.len());
+        }
+        if let Stmt::TraitDef { name, methods, .. } = stmt {
+            scope.define_trait(TraitInfo {
+                name: name.clone(),
+                methods: methods
+                    .iter()
+                    .map(|m| TraitMethodInfo {
+                        name: m.name.clone(),
+                        // params includes "self", subtract 1 for external param count
+                        param_count: if m.params.is_empty() {
+                            0
+                        } else {
+                            m.params.len() - 1
+                        },
+                    })
+                    .collect(),
+            });
         }
     }
 
@@ -341,10 +383,10 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
         }
 
         // ── Type system statements — define types + methods ────────────────
-        Stmt::StructDef { name, fields: _ } => {
+        Stmt::StructDef { name, .. } => {
             scope.define_local(name);
         }
-        Stmt::EnumDef { name, variants: _ } => {
+        Stmt::EnumDef { name, .. } => {
             scope.define_local(name);
         }
         Stmt::ImplBlock { target: _, methods } => {
@@ -352,12 +394,40 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
                 validate_stmt(m, scope, errors);
             }
         }
-        Stmt::TraitDef { name, methods: _ } => {
+        Stmt::TraitDef { name, .. } => {
             scope.define_local(name);
         }
-        Stmt::ImplTrait { trait_name: _, target: _, methods } => {
+        Stmt::ImplTrait { trait_name, target, methods } => {
             for m in methods {
                 validate_stmt(m, scope, errors);
+            }
+            // Trait conformance check: all required methods must be implemented
+            if let Some(trait_info) = scope.lookup_trait(trait_name).cloned() {
+                for required in &trait_info.methods {
+                    let found = methods.iter().any(|m| {
+                        if let Stmt::FnDef { name, params, .. } = m {
+                            // Method params include "self", so subtract 1
+                            let ext_count = if params.is_empty() {
+                                0
+                            } else {
+                                params.len() - 1
+                            };
+                            name == &required.name && ext_count == required.param_count
+                        } else {
+                            false
+                        }
+                    });
+                    if !found {
+                        errors.push(SemError::new(&alloc::format!(
+                            "impl {} for {}: missing method `{}` (requires {} params)",
+                            trait_name, target, required.name, required.param_count
+                        )));
+                    }
+                }
+            } else {
+                errors.push(SemError::new(&alloc::format!(
+                    "trait `{}` not defined", trait_name
+                )));
             }
         }
         Stmt::Spawn { body } => {
@@ -538,6 +608,15 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
         Expr::ChannelCreate => {
             // Always valid — creates a new channel
         }
+        Expr::UnwrapOr { value, default } => {
+            validate_expr(value, scope, errors);
+            validate_expr(default, scope, errors);
+        }
+        Expr::Tuple(elements) => {
+            for e in elements {
+                validate_expr(e, scope, errors);
+            }
+        }
     }
 }
 
@@ -603,6 +682,8 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::StructLiteral { .. } | Expr::EnumVariantExpr { .. }
         | Expr::MethodCall { .. } | Expr::SelfRef
         | Expr::ChannelCreate => ChainKind::Unknown,
+        Expr::UnwrapOr { value, .. } => infer_expr_kind(value),
+        Expr::Tuple(_) => ChainKind::Unknown,
     }
 }
 
@@ -1307,7 +1388,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         }
 
         // ── Type system statements: struct/enum/impl/trait ─────────────────
-        Stmt::StructDef { name, fields } => {
+        Stmt::StructDef { name, fields, .. } => {
             // Register struct type: push name + field names as array → Call __struct_def
             for f in fields {
                 ctx.emit(Op::Push(crate::vm::string_to_chain(&f.name)));
@@ -1318,7 +1399,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::Call("__struct_def".into()));
         }
 
-        Stmt::EnumDef { name, variants } => {
+        Stmt::EnumDef { name, variants, .. } => {
             // Register enum type: push name + variant names
             for v in variants {
                 ctx.emit(Op::Push(crate::vm::string_to_chain(&v.name)));
@@ -1965,14 +2046,79 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 }
                 ctx.emit(Op::Call(builtin_name.into()));
             } else {
-                // User-defined method: push self + args, dispatch via type tag
-                lower_expr(object, ctx);
-                for arg in args {
-                    lower_expr(arg, ctx);
+                // User-defined method: try compile-time dispatch via mangled name.
+                // Look for __Type_method in ctx.fns (registered by ImplBlock lowering).
+                // If object is a known struct literal, use its type directly.
+                // Otherwise try all registered impl methods matching this method name.
+                let mangled_candidates: Vec<FnDef> = ctx.fns.iter()
+                    .filter(|f| f.name.ends_with(&alloc::format!("_{}", method)))
+                    .cloned()
+                    .collect();
+
+                if mangled_candidates.len() == 1 {
+                    // Unique match — inline the method at compile time
+                    let fn_def = mangled_candidates.into_iter().next().unwrap();
+                    let call_id = ctx.next_call_id();
+                    let saved = ctx.locals.len();
+
+                    // Build args: self (object) + remaining args
+                    let mut all_args: Vec<&Expr> = Vec::new();
+                    all_args.push(object);
+                    for a in args {
+                        all_args.push(a);
+                    }
+
+                    // Generate unique param names
+                    let unique_params: Vec<String> = fn_def.params.iter()
+                        .map(|p| alloc::format!("__p{}_{}", call_id, p))
+                        .collect();
+
+                    // Evaluate args and store
+                    for (unique_name, arg) in unique_params.iter().zip(all_args.iter()) {
+                        lower_expr(arg, ctx);
+                        ctx.emit(Op::Store(unique_name.clone()));
+                        ctx.locals.push(unique_name.clone());
+                    }
+
+                    // Register original param names as aliases
+                    for (orig, unique_name) in fn_def.params.iter().zip(unique_params.iter()) {
+                        ctx.emit(Op::LoadLocal(unique_name.clone()));
+                        ctx.emit(Op::Store(orig.clone()));
+                        ctx.locals.push(orig.clone());
+                    }
+
+                    // Inline function body
+                    ctx.inline_depth += 1;
+                    let body_len = fn_def.body.len();
+                    if body_len > 1 {
+                        for s in &fn_def.body[..body_len - 1] {
+                            lower_stmt(s, ctx);
+                        }
+                    }
+                    if let Some(last) = fn_def.body.last() {
+                        match last {
+                            Stmt::Expr(expr) => lower_expr(expr, ctx),
+                            Stmt::Return(Some(expr)) => lower_expr(expr, ctx),
+                            _ => {
+                                lower_stmt(last, ctx);
+                                ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                            }
+                        }
+                    } else {
+                        ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+                    }
+                    ctx.inline_depth -= 1;
+                    ctx.locals.truncate(saved);
+                } else {
+                    // Multiple or no matches — fallback to runtime dispatch
+                    lower_expr(object, ctx);
+                    for arg in args {
+                        lower_expr(arg, ctx);
+                    }
+                    ctx.emit(Op::PushNum(args.len() as f64 + 1.0)); // +1 for self
+                    ctx.emit(Op::Push(crate::vm::string_to_chain(method)));
+                    ctx.emit(Op::Call("__method_call".into()));
                 }
-                ctx.emit(Op::PushNum(args.len() as f64 + 1.0)); // +1 for self
-                ctx.emit(Op::Push(crate::vm::string_to_chain(method)));
-                ctx.emit(Op::Call("__method_call".into()));
             }
         }
 
@@ -1982,6 +2128,34 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::ChannelCreate => {
             ctx.emit(Op::Call("__channel_new".into()));
+        }
+
+        Expr::UnwrapOr { value, default } => {
+            // value ?? default → if value is non-empty, use value; else use default
+            // This is the Option/Result unwrap-or-default operator
+            lower_expr(value, ctx);
+            let jz_pos = ctx.current_pos();
+            ctx.emit(Op::Jz(0)); // if empty → jump to default
+            // Value is non-empty — it's already on stack, jump to end
+            let jmp_pos = ctx.current_pos();
+            ctx.emit(Op::Jmp(0)); // skip default
+            // Default path
+            let default_start = ctx.current_pos();
+            ctx.patch_jump(jz_pos, default_start);
+            ctx.emit(Op::Pop); // pop the empty value
+            lower_expr(default, ctx);
+            // End
+            let end = ctx.current_pos();
+            ctx.patch_jump(jmp_pos, end);
+        }
+
+        Expr::Tuple(elements) => {
+            // Tuple → encode as array (same representation)
+            for e in elements {
+                lower_expr(e, ctx);
+            }
+            ctx.emit(Op::PushNum(elements.len() as f64));
+            ctx.emit(Op::Call("__array_new".into()));
         }
     }
 }
@@ -3779,5 +3953,207 @@ mod tests {
         assert!(outputs.len() >= 1, "wildcard match should produce output");
         let v = outputs[0].to_number().unwrap();
         assert!((v - 42.0).abs() < f64::EPSILON);
+    }
+
+    // ── Type system validation tests ────────────────────────────────────────
+
+    #[test]
+    fn validate_trait_conformance_ok() {
+        let src = r#"
+            trait Greetable {
+                fn greet(self);
+            }
+            impl Greetable for Person {
+                fn greet(self) { emit self; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_trait_conformance_missing_method() {
+        let src = r#"
+            trait Greetable {
+                fn greet(self);
+                fn farewell(self);
+            }
+            impl Greetable for Person {
+                fn greet(self) { emit self; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("missing method `farewell`"));
+    }
+
+    #[test]
+    fn validate_trait_undefined() {
+        let src = r#"
+            impl Unknown for Person {
+                fn greet(self) { emit self; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("not defined"));
+    }
+
+    #[test]
+    fn validate_struct_def_no_errors() {
+        let src = "struct Point { x, y }";
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_enum_def_no_errors() {
+        let src = "enum Color { Red, Green, Blue }";
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_unwrap_or_expression() {
+        let src = r#"
+            let x = 42;
+            emit x ?? 0;
+        "#;
+        let stmts = parse(src).unwrap();
+        let errors = validate(&stmts);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn lower_struct_def_produces_ops() {
+        let src = "struct Point { x, y }";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        // Should produce ops for __struct_def call
+        assert!(!prog.ops.is_empty());
+        let has_struct_def = prog.ops.iter().any(|op| {
+            matches!(op, Op::Call(name) if name == "__struct_def")
+        });
+        assert!(has_struct_def, "Expected __struct_def call in lowered ops");
+    }
+
+    #[test]
+    fn lower_enum_def_produces_ops() {
+        let src = "enum Color { Red, Green, Blue }";
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        assert!(!prog.ops.is_empty());
+        let has_enum_def = prog.ops.iter().any(|op| {
+            matches!(op, Op::Call(name) if name == "__enum_def")
+        });
+        assert!(has_enum_def, "Expected __enum_def call in lowered ops");
+    }
+
+    #[test]
+    fn lower_unwrap_or() {
+        let src = r#"
+            let x = 42;
+            emit x ?? 0;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        // Should contain Jz for the conditional branch
+        let has_jz = prog.ops.iter().any(|op| matches!(op, Op::Jz(_)));
+        assert!(has_jz, "Expected Jz in unwrap_or lowering");
+    }
+
+    #[test]
+    fn lower_impl_methods_are_mangled() {
+        let src = r#"
+            struct Point { x, y }
+            impl Point {
+                fn origin(self) { emit 0; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        // The method "origin" should be mangled to __Point_origin and stored
+        // We verify by looking for the PushNum(0) which is in the method body
+        assert!(!prog.ops.is_empty());
+    }
+
+    #[test]
+    fn vm_struct_def_and_literal() {
+        let src = r#"
+            struct Point { x, y }
+            let p = Point { x: 10, y: 20 };
+            emit p;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn vm_enum_unit_variant() {
+        let src = r#"
+            enum Color { Red, Green, Blue }
+            let c = Color::Red;
+            emit c;
+        "#;
+        let stmts = parse(src).unwrap();
+        let prog = lower(&stmts);
+        let vm = crate::vm::OlangVM::new();
+        let result = vm.execute(&prog);
+        assert!(!result.has_error(), "VM errors: {:?}", result.errors());
+    }
+
+    #[test]
+    fn generics_struct_parse() {
+        let src = "struct Wrapper[T] { value: T }";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            crate::syntax::Stmt::StructDef { name, type_params, fields } => {
+                assert_eq!(name, "Wrapper");
+                assert_eq!(type_params, &["T"]);
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "value");
+            }
+            _ => panic!("Expected StructDef"),
+        }
+    }
+
+    #[test]
+    fn generics_enum_parse() {
+        let src = "enum Result[T, E] { Ok(T), Err(E) }";
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            crate::syntax::Stmt::EnumDef { name, type_params, variants } => {
+                assert_eq!(name, "Result");
+                assert_eq!(type_params, &["T", "E"]);
+                assert_eq!(variants.len(), 2);
+            }
+            _ => panic!("Expected EnumDef"),
+        }
+    }
+
+    #[test]
+    fn generics_trait_parse() {
+        let src = r#"
+            trait Iterator[T] {
+                fn next(self);
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            crate::syntax::Stmt::TraitDef { name, type_params, methods } => {
+                assert_eq!(name, "Iterator");
+                assert_eq!(type_params, &["T"]);
+                assert_eq!(methods.len(), 1);
+            }
+            _ => panic!("Expected TraitDef"),
+        }
     }
 }

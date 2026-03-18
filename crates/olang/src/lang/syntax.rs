@@ -145,17 +145,17 @@ pub enum Stmt {
     /// `obj.field = expr;` or `obj.a.b.c = expr;` — assign to field of dict/record
     FieldAssign { object: String, fields: Vec<String>, value: Expr },
 
-    /// `struct Name { field1, field2, ... }` — struct definition
-    StructDef { name: String, fields: Vec<StructField> },
+    /// `struct Name[T] { field1, field2, ... }` — struct definition (with optional generics)
+    StructDef { name: String, type_params: Vec<String>, fields: Vec<StructField> },
 
-    /// `enum Name { Variant1, Variant2(Type), ... }` — enum definition
-    EnumDef { name: String, variants: Vec<EnumVariant> },
+    /// `enum Name[T] { Variant1, Variant2(Type), ... }` — enum definition (with optional generics)
+    EnumDef { name: String, type_params: Vec<String>, variants: Vec<EnumVariant> },
 
     /// `impl Name { fn method(self, ...) { ... } ... }` — impl block
     ImplBlock { target: String, methods: Vec<Stmt> },
 
-    /// `trait Name { fn method(self); ... }` — trait definition
-    TraitDef { name: String, methods: Vec<TraitMethod> },
+    /// `trait Name[T] { fn method(self); ... }` — trait definition (with optional generics)
+    TraitDef { name: String, type_params: Vec<String>, methods: Vec<TraitMethod> },
 
     /// `impl TraitName for StructName { ... }` — trait implementation
     ImplTrait { trait_name: String, target: String, methods: Vec<Stmt> },
@@ -359,6 +359,13 @@ pub enum Expr {
 
     /// `channel()` — create a new channel for spawn communication
     ChannelCreate,
+
+    /// `expr ?? default` — unwrap Option/Result with default value
+    /// If expr is empty (None/Err), return default; otherwise return expr.
+    UnwrapOr { value: Box<Expr>, default: Box<Expr> },
+
+    /// Tuple literal: `(a, b, c)` — used for multiple return values
+    Tuple(Vec<Expr>),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -752,10 +759,28 @@ impl<'a> Parser<'a> {
 
     // ── Type system: struct, enum, impl, trait ──────────────────────────────
 
-    /// `struct Name { field1: Type, field2, ... }`
+    /// Parse optional type parameters: `[T, U, ...]`. Returns empty vec if none.
+    fn parse_type_params(&mut self) -> Result<Vec<String>, ParseError> {
+        if !self.check(&Token::LBracket) {
+            return Ok(Vec::new());
+        }
+        self.advance(); // consume '['
+        let mut params = Vec::new();
+        while !self.check(&Token::RBracket) && !self.at_eof() {
+            params.push(self.expect_ident()?);
+            if self.check(&Token::Comma) {
+                self.advance();
+            }
+        }
+        self.expect(&Token::RBracket)?;
+        Ok(params)
+    }
+
+    /// `struct Name[T] { field1: Type, field2, ... }`
     fn parse_struct_def(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'struct'
         let name = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
         self.expect(&Token::LBrace)?;
         let mut fields = Vec::new();
         while !self.check(&Token::RBrace) && !self.at_eof() {
@@ -773,13 +798,14 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Token::RBrace)?;
         if self.check(&Token::Semi) { self.advance(); }
-        Ok(Stmt::StructDef { name, fields })
+        Ok(Stmt::StructDef { name, type_params, fields })
     }
 
     /// `enum Name { Variant1, Variant2(Type), ... }`
     fn parse_enum_def(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'enum'
         let name = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
         self.expect(&Token::LBrace)?;
         let mut variants = Vec::new();
         while !self.check(&Token::RBrace) && !self.at_eof() {
@@ -798,7 +824,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Token::RBrace)?;
         if self.check(&Token::Semi) { self.advance(); }
-        Ok(Stmt::EnumDef { name, variants })
+        Ok(Stmt::EnumDef { name, type_params, variants })
     }
 
     /// `impl Name { ... }` or `impl Trait for Name { ... }`
@@ -839,6 +865,7 @@ impl<'a> Parser<'a> {
     fn parse_trait_def(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'trait'
         let name = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
         self.expect(&Token::LBrace)?;
         let mut methods = Vec::new();
         while !self.check(&Token::RBrace) && !self.at_eof() {
@@ -862,7 +889,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Token::RBrace)?;
         if self.check(&Token::Semi) { self.advance(); }
-        Ok(Stmt::TraitDef { name, methods })
+        Ok(Stmt::TraitDef { name, type_params, methods })
     }
 
     /// `spawn { body }`
@@ -1089,12 +1116,26 @@ impl<'a> Parser<'a> {
         self.parse_pipe_chain()
     }
 
-    /// pipe_chain = rel_chain ('|>' rel_chain)*
+    /// unwrap_chain = rel_chain ('??' rel_chain)?
+    fn parse_unwrap_chain(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_rel_chain()?;
+        if self.check(&Token::DoubleQuestion) {
+            self.advance();
+            let default = self.parse_rel_chain()?;
+            return Ok(Expr::UnwrapOr {
+                value: Box::new(left),
+                default: Box::new(default),
+            });
+        }
+        Ok(left)
+    }
+
+    /// pipe_chain = unwrap_chain ('|>' unwrap_chain)*
     fn parse_pipe_chain(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_rel_chain()?;
+        let mut left = self.parse_unwrap_chain()?;
         while self.check(&Token::PipeArrow) {
             self.advance();
-            let right = self.parse_rel_chain()?;
+            let right = self.parse_unwrap_chain()?;
             // a |> f  →  f(a)  — pipe left as first arg to right (must be Call)
             left = Expr::Pipe(Box::new(left), Box::new(right));
         }
@@ -1648,6 +1689,11 @@ impl<'a> Parser<'a> {
                     | Token::Implies  // ⇒
                     | Token::Cycle    // ↻
                     | Token::Circle   // ○
+                    | Token::Struct
+                    | Token::Enum
+                    | Token::Impl
+                    | Token::Trait
+                    | Token::Spawn
             )
         })
     }
@@ -2479,6 +2525,186 @@ mod tests {
                 assert!(matches!(&body[0], Stmt::Continue));
             }
             _ => panic!("Expected ForIn"),
+        }
+    }
+
+    // ── Type system: struct, enum, impl, trait ──────────────────────────────
+
+    #[test]
+    fn parse_struct_basic() {
+        let stmts = parse("struct Point { x, y }").unwrap();
+        match &stmts[0] {
+            Stmt::StructDef { name, type_params, fields } => {
+                assert_eq!(name, "Point");
+                assert!(type_params.is_empty());
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name, "x");
+                assert_eq!(fields[1].name, "y");
+            }
+            _ => panic!("Expected StructDef"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_with_type_params() {
+        let stmts = parse("struct Pair[T, U] { first: T, second: U }").unwrap();
+        match &stmts[0] {
+            Stmt::StructDef { name, type_params, fields } => {
+                assert_eq!(name, "Pair");
+                assert_eq!(type_params, &["T", "U"]);
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name, "first");
+                assert_eq!(fields[0].type_name.as_deref(), Some("T"));
+                assert_eq!(fields[1].name, "second");
+                assert_eq!(fields[1].type_name.as_deref(), Some("U"));
+            }
+            _ => panic!("Expected StructDef"),
+        }
+    }
+
+    #[test]
+    fn parse_enum_basic() {
+        let stmts = parse("enum Color { Red, Green, Blue }").unwrap();
+        match &stmts[0] {
+            Stmt::EnumDef { name, type_params, variants } => {
+                assert_eq!(name, "Color");
+                assert!(type_params.is_empty());
+                assert_eq!(variants.len(), 3);
+                assert_eq!(variants[0].name, "Red");
+                assert!(variants[0].fields.is_empty());
+            }
+            _ => panic!("Expected EnumDef"),
+        }
+    }
+
+    #[test]
+    fn parse_enum_with_type_params() {
+        let stmts = parse("enum Option[T] { Some(T), None }").unwrap();
+        match &stmts[0] {
+            Stmt::EnumDef { name, type_params, variants } => {
+                assert_eq!(name, "Option");
+                assert_eq!(type_params, &["T"]);
+                assert_eq!(variants.len(), 2);
+                assert_eq!(variants[0].name, "Some");
+                assert_eq!(variants[0].fields, vec!["T"]);
+                assert_eq!(variants[1].name, "None");
+                assert!(variants[1].fields.is_empty());
+            }
+            _ => panic!("Expected EnumDef"),
+        }
+    }
+
+    #[test]
+    fn parse_impl_block() {
+        let src = r#"
+            impl Point {
+                fn new(x, y) { emit x; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::ImplBlock { target, methods } => {
+                assert_eq!(target, "Point");
+                assert_eq!(methods.len(), 1);
+            }
+            _ => panic!("Expected ImplBlock"),
+        }
+    }
+
+    #[test]
+    fn parse_trait_def() {
+        let src = r#"
+            trait Drawable {
+                fn draw(self);
+                fn area(self, scale);
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::TraitDef { name, type_params, methods } => {
+                assert_eq!(name, "Drawable");
+                assert!(type_params.is_empty());
+                assert_eq!(methods.len(), 2);
+                assert_eq!(methods[0].name, "draw");
+                assert_eq!(methods[0].params, vec!["self"]);
+                assert_eq!(methods[1].name, "area");
+                assert_eq!(methods[1].params, vec!["self", "scale"]);
+            }
+            _ => panic!("Expected TraitDef"),
+        }
+    }
+
+    #[test]
+    fn parse_trait_with_type_params() {
+        let src = r#"
+            trait Container[T] {
+                fn get(self);
+                fn put(self, item);
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::TraitDef { name, type_params, methods } => {
+                assert_eq!(name, "Container");
+                assert_eq!(type_params, &["T"]);
+                assert_eq!(methods.len(), 2);
+            }
+            _ => panic!("Expected TraitDef"),
+        }
+    }
+
+    #[test]
+    fn parse_impl_trait_for_type() {
+        let src = r#"
+            impl Drawable for Circle {
+                fn draw(self) { emit self; }
+            }
+        "#;
+        let stmts = parse(src).unwrap();
+        match &stmts[0] {
+            Stmt::ImplTrait { trait_name, target, methods } => {
+                assert_eq!(trait_name, "Drawable");
+                assert_eq!(target, "Circle");
+                assert_eq!(methods.len(), 1);
+            }
+            _ => panic!("Expected ImplTrait"),
+        }
+    }
+
+    #[test]
+    fn parse_unwrap_or() {
+        let stmts = parse("x ?? 0").unwrap();
+        match &stmts[0] {
+            Stmt::Expr(Expr::UnwrapOr { value, default }) => {
+                assert!(matches!(value.as_ref(), Expr::Ident(n) if n == "x"));
+                assert!(matches!(default.as_ref(), Expr::Int(0)));
+            }
+            _ => panic!("Expected UnwrapOr, got {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn parse_method_call() {
+        let stmts = parse("obj.method(arg1, arg2)").unwrap();
+        match &stmts[0] {
+            Stmt::Expr(Expr::MethodCall { object, method, args }) => {
+                assert!(matches!(object.as_ref(), Expr::Ident(n) if n == "obj"));
+                assert_eq!(method, "method");
+                assert_eq!(args.len(), 2);
+            }
+            _ => panic!("Expected MethodCall"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal() {
+        let stmts = parse("Point { x: 1, y: 2 }").unwrap();
+        match &stmts[0] {
+            Stmt::Expr(Expr::StructLiteral { name, fields }) => {
+                assert_eq!(name, "Point");
+                assert_eq!(fields.len(), 2);
+            }
+            _ => panic!("Expected StructLiteral, got {:?}", stmts[0]),
         }
     }
 }
