@@ -15,11 +15,14 @@
 //! - [`nlp`]     — Linguistic modifiers
 //! - [`system`]  — Boot sequence, self-model
 
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 
 extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
 
 // ── Module Groups ────────────────────────────────────────────────────────────
 

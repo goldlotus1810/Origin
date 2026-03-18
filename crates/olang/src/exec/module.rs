@@ -545,6 +545,35 @@ impl ModuleLoader {
 
         Ok(pub_names)
     }
+
+    /// Load a module from file: resolve path → read file → parse → compile → cache.
+    ///
+    /// Searches `roots` directories in order for `module_path.replace('.', '/') + ".ol"`.
+    /// Requires the `std` feature (file I/O).
+    #[cfg(feature = "std")]
+    pub fn load(
+        &mut self,
+        module_path: &str,
+        requester: Option<&str>,
+    ) -> Result<Vec<String>, ModuleError> {
+        // Already cached?
+        if let Some(cached) = self.cache.get(module_path) {
+            return Ok(cached.public_symbols().iter().map(|s| s.to_string()).collect());
+        }
+
+        let file_path = Self::resolve_path(module_path);
+        for root in &self.roots {
+            let full = alloc::format!("{}/{}", root, file_path);
+            if let Ok(source) = std::fs::read_to_string(&full) {
+                return self.load_from_source(module_path, &source, requester);
+            }
+        }
+        Err(ModuleError::new(&alloc::format!(
+            "Module not found: {} (searched: {})",
+            module_path,
+            self.roots.join(", ")
+        )))
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1060,5 +1089,39 @@ mod tests {
         assert_eq!(ModuleLoader::resolve_path("silk.graph"), "silk/graph.ol");
         assert_eq!(ModuleLoader::resolve_path("std.collections"), "std/collections.ol");
         assert_eq!(ModuleLoader::resolve_path("math"), "math.ol");
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn load_from_file() {
+        use std::io::Write;
+        // Create a temp dir with a module file
+        let dir = std::env::temp_dir().join("olang_test_load");
+        let _ = std::fs::create_dir_all(&dir);
+        let file_path = dir.join("hello.ol");
+        let mut f = std::fs::File::create(&file_path).unwrap();
+        write!(f, "pub fn greet(name) {{ return name; }}").unwrap();
+        drop(f);
+
+        let root = dir.to_string_lossy().to_string();
+        let mut loader = ModuleLoader::new(alloc::vec![root]);
+        let result = loader.load("hello", None);
+        assert!(result.is_ok(), "load() failed: {:?}", result.err());
+        let exports = result.unwrap();
+        assert!(exports.contains(&"greet".to_string()));
+        assert!(loader.is_loaded("hello"));
+
+        // Cleanup
+        let _ = std::fs::remove_file(&file_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn load_module_not_found() {
+        let mut loader = ModuleLoader::new(alloc::vec!["/nonexistent".into()]);
+        let result = loader.load("missing.module", None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("Module not found"));
     }
 }
