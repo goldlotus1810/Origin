@@ -232,14 +232,33 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::FileRead => "{ Chain p = pop(&s); push(&s, olang_file_read((const char*)&p)); }".into(),
         Op::FileWrite => "{ Chain d = pop(&s); Chain p = pop(&s); olang_file_write((const char*)&p, (const uint8_t*)&d, sizeof(d)); }".into(),
         Op::FileAppend => "{ Chain d = pop(&s); Chain p = pop(&s); olang_file_append((const char*)&p, (const uint8_t*)&d, sizeof(d)); }".into(),
-        Op::SpawnBegin => "/* spawn begin */ {".into(),
-        Op::SpawnEnd => "} /* spawn end */".into(),
-        Op::Closure(params, body_len) => format!("/* closure({},{}) */", params, body_len),
-        Op::CallClosure(arity) => format!("/* call_closure({}) */", arity),
+        Op::SpawnBegin => "{ pthread_t _tid; pthread_create(&_tid, NULL, (void*(*)(void*))({".into(),
+        Op::SpawnEnd => "}), NULL); pthread_detach(_tid); } /* spawn end */".into(),
+        Op::Closure(params, body_len) => format!(
+            "{{ typedef struct {{ Stack env; }} Env_{p}; \
+             Env_{p}* _env_{p} = (Env_{p}*)malloc(sizeof(Env_{p})); \
+             _env_{p}->env = s; \
+             push(&s, (uint64_t)_env_{p}); \
+             /* closure: params={p}, body_len={b} */ }}",
+            p = params, b = body_len
+        ),
+        Op::CallClosure(arity) => format!(
+            "{{ uint64_t _fn_ptr = pop(&s); \
+             Chain _args[{a}]; \
+             for(int _i={a}-1;_i>=0;_i--) _args[_i]=pop(&s); \
+             /* call_closure arity={a} via fn_ptr */ \
+             push(&s, ((uint64_t(*)(Chain*))_fn_ptr)(_args)); }}",
+            a = arity
+        ),
         Op::ChanNew => "{ uint64_t _id = olang_chan_new(); push(&s, _id); }".into(),
         Op::ChanSend => "{ Chain v = pop(&s); Chain ch = pop(&s); olang_chan_send(ch, v); push(&s, 1); }".into(),
         Op::ChanRecv => "{ Chain ch = pop(&s); push(&s, olang_chan_recv(ch)); }".into(),
-        Op::Select(n) => format!("/* select({}) */", n),
+        Op::Select(n) => format!(
+            "{{ int _n = {n}; Chain _chs[{n}]; \
+             for(int _i={n}-1;_i>=0;_i--) _chs[_i]=pop(&s); \
+             push(&s, olang_select(_chs, {n})); }}",
+            n = n
+        ),
     })
 }
 
@@ -372,14 +391,32 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::FileRead => "{ let p = stack.pop().unwrap_or(0); stack.push(unsafe { olang_file_read(p as *const u8) }); }".into(),
         Op::FileWrite => "{ let d = stack.pop().unwrap_or(0); let p = stack.pop().unwrap_or(0); unsafe { olang_file_write(p as *const u8, d as *const u8, 8); } }".into(),
         Op::FileAppend => "{ let d = stack.pop().unwrap_or(0); let p = stack.pop().unwrap_or(0); unsafe { olang_file_append(p as *const u8, d as *const u8, 8); } }".into(),
-        Op::SpawnBegin => "{ // spawn begin".into(),
-        Op::SpawnEnd => "} // spawn end".into(),
-        Op::Closure(params, body_len) => format!("// closure({}, {})", params, body_len),
-        Op::CallClosure(arity) => format!("// call_closure({})", arity),
+        Op::SpawnBegin => "{ let _handle = std::thread::spawn(move || {".into(),
+        Op::SpawnEnd => "}); } // spawn end".into(),
+        Op::Closure(params, body_len) => format!(
+            "{{ let _env = stack.clone(); stack.push(_env.as_ptr() as u64); \
+             /* closure: params={}, body_len={} */ }}",
+            params, body_len
+        ),
+        Op::CallClosure(arity) => format!(
+            "{{ let _fn_ptr = stack.pop().unwrap_or(0); \
+             let mut _args: Vec<u64> = Vec::new(); \
+             for _ in 0..{a}u8 {{ _args.push(stack.pop().unwrap_or(0)); }} \
+             _args.reverse(); \
+             let _f: fn(&[u64]) -> u64 = unsafe {{ core::mem::transmute(_fn_ptr) }}; \
+             stack.push(_f(&_args)); }}",
+            a = arity
+        ),
         Op::ChanNew => "stack.push(unsafe { olang_chan_new() });".into(),
         Op::ChanSend => "{ let v = stack.pop().unwrap_or(0); let ch = stack.pop().unwrap_or(0); unsafe { olang_chan_send(ch, v); } stack.push(1); }".into(),
         Op::ChanRecv => "{ let ch = stack.pop().unwrap_or(0); stack.push(unsafe { olang_chan_recv(ch) }); }".into(),
-        Op::Select(n) => format!("// select({})", n),
+        Op::Select(n) => format!(
+            "{{ let mut _chs: Vec<u64> = Vec::new(); \
+             for _ in 0..{n}u8 {{ _chs.push(stack.pop().unwrap_or(0)); }} \
+             _chs.reverse(); \
+             stack.push(unsafe {{ olang_select(_chs.as_ptr(), {n}) }}); }}",
+            n = n
+        ),
     })
 }
 
@@ -461,14 +498,29 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
         Op::FileRead => format!("{{ let p = stack.pop().unwrap_or(0); stack.push(unsafe {{ olang_file_read(p as *const u8) }}); }} _pc = {};", next),
         Op::FileWrite => format!("{{ let d = stack.pop().unwrap_or(0); let p = stack.pop().unwrap_or(0); unsafe {{ olang_file_write(p as *const u8, d as *const u8, 8); }} }} _pc = {};", next),
         Op::FileAppend => format!("{{ let d = stack.pop().unwrap_or(0); let p = stack.pop().unwrap_or(0); unsafe {{ olang_file_append(p as *const u8, d as *const u8, 8); }} }} _pc = {};", next),
-        Op::SpawnBegin => format!("/* spawn begin */ _pc = {};", next),
-        Op::SpawnEnd => format!("/* spawn end */ _pc = {};", next),
-        Op::Closure(params, body_len) => format!("/* closure({},{}) */ _pc = {};", params, body_len, next),
-        Op::CallClosure(arity) => format!("/* call_closure({}) */ _pc = {};", arity, next),
+        Op::SpawnBegin => format!("{{ let _handle = std::thread::spawn(move || {{ _pc = {};", next),
+        Op::SpawnEnd => format!("}}); }} _pc = {};", next),
+        Op::Closure(params, body_len) => format!(
+            "{{ let _env = stack.clone(); stack.push(_env.as_ptr() as u64); /* closure({},{}) */ }} _pc = {};",
+            params, body_len, next
+        ),
+        Op::CallClosure(arity) => format!(
+            "{{ let _fn = stack.pop().unwrap_or(0); \
+             let mut _a: Vec<u64> = (0..{a}u8).map(|_| stack.pop().unwrap_or(0)).collect(); \
+             _a.reverse(); \
+             let _f: fn(&[u64])->u64 = unsafe {{ core::mem::transmute(_fn) }}; \
+             stack.push(_f(&_a)); }} _pc = {};",
+            next, a = arity
+        ),
         Op::ChanNew => format!("stack.push(unsafe {{ olang_chan_new() }}); _pc = {};", next),
         Op::ChanSend => format!("{{ let v = stack.pop().unwrap_or(0); let ch = stack.pop().unwrap_or(0); unsafe {{ olang_chan_send(ch, v); }} stack.push(1); }} _pc = {};", next),
         Op::ChanRecv => format!("{{ let ch = stack.pop().unwrap_or(0); stack.push(unsafe {{ olang_chan_recv(ch) }}); }} _pc = {};", next),
-        Op::Select(n) => format!("/* select({}) */ _pc = {};", n, next),
+        Op::Select(n) => format!(
+            "{{ let mut _chs: Vec<u64> = (0..{n}u8).map(|_| stack.pop().unwrap_or(0)).collect(); \
+             _chs.reverse(); \
+             stack.push(unsafe {{ olang_select(_chs.as_ptr(), {n}) }}); }} _pc = {};",
+            next, n = n
+        ),
     })
 }
 
@@ -499,7 +551,16 @@ fn emit_wat(prog: &OlangProgram) -> Result<String, CompileError> {
     out.push_str("  (import \"olang\" \"ffi\"          (func $ffi         (param i32 i32 i32) (result i64)))\n");
     out.push_str("  (import \"olang\" \"file_read\"    (func $file_read   (param i32) (result i64)))\n");
     out.push_str("  (import \"olang\" \"file_write\"   (func $file_write  (param i32 i32 i32) (result i32)))\n");
-    out.push_str("  (import \"olang\" \"file_append\"  (func $file_append (param i32 i32 i32) (result i32)))\n\n");
+    out.push_str("  (import \"olang\" \"file_append\"  (func $file_append (param i32 i32 i32) (result i32)))\n");
+    out.push_str("  ;; Concurrency\n");
+    out.push_str("  (import \"olang\" \"spawn_begin\"     (func $spawn_begin))\n");
+    out.push_str("  (import \"olang\" \"spawn_end\"       (func $spawn_end))\n");
+    out.push_str("  (import \"olang\" \"closure_create\"  (func $closure_create (param i32 i32) (result i64)))\n");
+    out.push_str("  (import \"olang\" \"closure_call\"    (func $closure_call   (param i32) (result i64)))\n");
+    out.push_str("  (import \"olang\" \"chan_new\"        (func $chan_new (result i64)))\n");
+    out.push_str("  (import \"olang\" \"chan_send\"       (func $chan_send (param i64 i64) (result i32)))\n");
+    out.push_str("  (import \"olang\" \"chan_recv\"       (func $chan_recv (param i64) (result i64)))\n");
+    out.push_str("  (import \"olang\" \"select\"          (func $select   (param i32) (result i64)))\n\n");
 
     // Memory for string literals
     out.push_str("  (memory 1)\n\n");
@@ -629,14 +690,20 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         Op::FileRead => "local.set $a  i32.const 256  call $file_read  ;; file_read".into(),
         Op::FileWrite => "local.set $b  local.set $a  i32.const 256  i32.const 0  i32.const 8  call $file_write  drop  ;; file_write".into(),
         Op::FileAppend => "local.set $b  local.set $a  i32.const 256  i32.const 0  i32.const 8  call $file_append  drop  ;; file_append".into(),
-        Op::SpawnBegin => ";; spawn begin".into(),
-        Op::SpawnEnd => ";; spawn end".into(),
-        Op::Closure(params, body_len) => format!(";; closure({}, {})", params, body_len),
-        Op::CallClosure(arity) => format!(";; call_closure({})", arity),
+        Op::SpawnBegin => ";; spawn begin — async task\n    (call $spawn_begin)".into(),
+        Op::SpawnEnd => "(call $spawn_end)  ;; spawn end".into(),
+        Op::Closure(params, body_len) => format!(
+            "(i32.const {}) (i32.const {}) (call $closure_create)  ;; closure({}, {})",
+            params, body_len, params, body_len
+        ),
+        Op::CallClosure(arity) => format!(
+            "(i32.const {}) (call $closure_call)  ;; call_closure({})",
+            arity, arity
+        ),
         Op::ChanNew => "(call $chan_new)  ;; chan_new".into(),
         Op::ChanSend => "(local.set $b) (local.set $a) (local.get $a) (local.get $b) (call $chan_send) (drop)  ;; chan_send".into(),
         Op::ChanRecv => "(local.set $a) (local.get $a) (call $chan_recv)  ;; chan_recv".into(),
-        Op::Select(n) => format!(";; select({})", n),
+        Op::Select(n) => format!("(i32.const {}) (call $select)  ;; select({})", n, n),
     })
 }
 
@@ -715,13 +782,13 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
         Op::FileAppend =>
             format!("(i32.const 256) (i32.const 0) (i32.const 8) (call $file_append) (drop) (local.set $pc (i32.const {})) (br $dispatch) ;; file_append", next),
         Op::SpawnBegin =>
-            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; spawn begin", next),
+            format!("(call $spawn_begin) (local.set $pc (i32.const {})) (br $dispatch) ;; spawn begin", next),
         Op::SpawnEnd =>
-            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; spawn end", next),
+            format!("(call $spawn_end) (local.set $pc (i32.const {})) (br $dispatch) ;; spawn end", next),
         Op::Closure(params, body_len) =>
-            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; closure({}, {})", next, params, body_len),
+            format!("(i32.const {}) (i32.const {}) (call $closure_create) (local.set $pc (i32.const {})) (br $dispatch) ;; closure({}, {})", params, body_len, next, params, body_len),
         Op::CallClosure(arity) =>
-            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; call_closure({})", next, arity),
+            format!("(i32.const {}) (call $closure_call) (local.set $pc (i32.const {})) (br $dispatch) ;; call_closure({})", arity, next, arity),
         Op::ChanNew =>
             format!("(call $chan_new) (local.set $pc (i32.const {})) (br $dispatch) ;; chan_new", next),
         Op::ChanSend =>
@@ -729,7 +796,7 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
         Op::ChanRecv =>
             format!("(local.set $a) (local.get $a) (call $chan_recv) (local.set $pc (i32.const {})) (br $dispatch) ;; chan_recv", next),
         Op::Select(n) =>
-            format!("(local.set $pc (i32.const {})) (br $dispatch) ;; select({})", next, n),
+            format!("(i32.const {}) (call $select) (local.set $pc (i32.const {})) (br $dispatch) ;; select({})", n, next, n),
     })
 }
 

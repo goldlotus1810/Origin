@@ -172,6 +172,9 @@ pub enum Stmt {
 
     /// `select { msg from rx => { ... }, timeout N => { ... } }` — multi-channel wait
     Select { arms: Vec<SelectArm> },
+
+    /// `pub fn/struct/enum/trait ...` — public visibility wrapper
+    Pub(Box<Stmt>),
 }
 
 /// Arm trong select statement.
@@ -400,6 +403,12 @@ pub enum Expr {
     /// If expr is empty (None/Err), return default; otherwise return expr.
     UnwrapOr { value: Box<Expr>, default: Box<Expr> },
 
+    /// `expr?` — try propagation: unwrap Ok/Some, early return Err/None
+    TryPropagate(Box<Expr>),
+
+    /// Slice: `arr[start..end]`, `arr[start..]`, `arr[..end]`
+    Slice { object: Box<Expr>, start: Option<Box<Expr>>, end: Option<Box<Expr>> },
+
     /// Tuple literal: `(a, b, c)` — used for multiple return values
     Tuple(Vec<Expr>),
 
@@ -602,8 +611,9 @@ impl<'a> Parser<'a> {
             Token::Trait => self.parse_trait_def(),
             Token::Pub => {
                 self.advance(); // consume 'pub'
-                // pub struct / pub fn / pub enum / pub trait — skip pub, parse inner
-                self.parse_stmt()
+                // pub struct / pub fn / pub enum / pub trait — wrap inner
+                let inner = self.parse_stmt()?;
+                Ok(Stmt::Pub(Box::new(inner)))
             }
             Token::Spawn => self.parse_spawn(),
             Token::Select => self.parse_select(),
@@ -1542,14 +1552,46 @@ impl<'a> Parser<'a> {
                     self.expect(&Token::RParen)?;
                     Expr::Call { name, args }
                 }
-                // Check for array indexing: name[idx]
+                // Check for array indexing or slice: name[idx] or name[start..end]
                 else if self.check(&Token::LBracket) {
                     self.advance();
-                    let index = self.parse_expr()?;
-                    self.expect(&Token::RBracket)?;
-                    Expr::Index {
-                        array: Box::new(Expr::Ident(name)),
-                        index: Box::new(index),
+                    // Check for [..end] (start omitted)
+                    if self.check(&Token::DotDot) {
+                        self.advance();
+                        let end = if self.check(&Token::RBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expr()?))
+                        };
+                        self.expect(&Token::RBracket)?;
+                        Expr::Slice {
+                            object: Box::new(Expr::Ident(name)),
+                            start: None,
+                            end,
+                        }
+                    } else {
+                        let first = self.parse_expr()?;
+                        // Check for [start..end] or [start..]
+                        if self.check(&Token::DotDot) {
+                            self.advance();
+                            let end = if self.check(&Token::RBracket) {
+                                None
+                            } else {
+                                Some(Box::new(self.parse_expr()?))
+                            };
+                            self.expect(&Token::RBracket)?;
+                            Expr::Slice {
+                                object: Box::new(Expr::Ident(name)),
+                                start: Some(Box::new(first)),
+                                end,
+                            }
+                        } else {
+                            self.expect(&Token::RBracket)?;
+                            Expr::Index {
+                                array: Box::new(Expr::Ident(name)),
+                                index: Box::new(first),
+                            }
+                        }
                     }
                 } else {
                     Expr::Ident(name)
@@ -1731,6 +1773,12 @@ impl<'a> Parser<'a> {
                     field,
                 };
             }
+        }
+
+        // Postfix `?` — try propagation: unwrap Ok/Some, early return Err/None
+        if self.check(&Token::Wild) {
+            self.advance();
+            expr = Expr::TryPropagate(Box::new(expr));
         }
 
         Ok(expr)
@@ -2915,6 +2963,42 @@ mod tests {
                 assert!(matches!(default.as_ref(), Expr::Int(0)));
             }
             _ => panic!("Expected UnwrapOr, got {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn parse_try_propagate() {
+        // expr? → TryPropagate
+        let stmts = parse("x?").unwrap();
+        match &stmts[0] {
+            Stmt::Expr(Expr::TryPropagate(inner)) => {
+                assert!(matches!(inner.as_ref(), Expr::Ident(n) if n == "x"));
+            }
+            _ => panic!("Expected TryPropagate, got {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn parse_try_propagate_on_call() {
+        // func()? → TryPropagate on call result
+        let stmts = parse("read_file(path)?").unwrap();
+        match &stmts[0] {
+            Stmt::Expr(Expr::TryPropagate(inner)) => {
+                assert!(matches!(inner.as_ref(), Expr::Call { .. }));
+            }
+            _ => panic!("Expected TryPropagate on call, got {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn parse_try_propagate_on_method() {
+        // obj.method()? → TryPropagate on method call
+        let stmts = parse("obj.read()?").unwrap();
+        match &stmts[0] {
+            Stmt::Expr(Expr::TryPropagate(inner)) => {
+                assert!(matches!(inner.as_ref(), Expr::MethodCall { .. }));
+            }
+            _ => panic!("Expected TryPropagate on method call, got {:?}", stmts[0]),
         }
     }
 
