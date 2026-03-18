@@ -2,6 +2,7 @@
 name    = "runtime"
 version.workspace = true
 edition.workspace = true
+description = "HomeOS runtime — entry point, parser, response rendering"
 
 [lib]
 path = "src/lib.rs"

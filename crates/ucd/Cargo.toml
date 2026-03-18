@@ -2,6 +2,7 @@
 name    = "ucd"
 version.workspace = true
 edition.workspace = true
+description = "Unicode 18.0 character database — build-time Molecule lookup"
 build   = "build.rs"
 
 [features]
