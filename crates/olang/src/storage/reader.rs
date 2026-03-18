@@ -9,8 +9,8 @@ use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
 use crate::writer::{
-    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_CURVE, RT_EDGE, RT_HEBBIAN, RT_KNOWTREE, RT_NODE,
-    RT_NODE_KIND, RT_SLIM_KNOWTREE, RT_STM, VERSION, VERSION_V03, VERSION_V04,
+    HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_AUTH, RT_CURVE, RT_EDGE, RT_HEBBIAN, RT_KNOWTREE,
+    RT_NODE, RT_NODE_KIND, RT_SLIM_KNOWTREE, RT_STM, VERSION, VERSION_V03, VERSION_V04,
 };
 
 /// Read a little-endian u64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
@@ -165,6 +165,17 @@ pub struct ParsedCurve {
     pub file_offset: u64,
 }
 
+/// Auth record — master key identity (0x0B).
+#[derive(Debug, Clone)]
+pub struct ParsedAuth {
+    /// Raw 113-byte AuthHeader data.
+    pub header_bytes: [u8; 113],
+    /// Timestamp khi auth record được ghi.
+    pub timestamp: i64,
+    /// Byte offset trong file gốc.
+    pub file_offset: u64,
+}
+
 /// Lỗi khi parse.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {
@@ -231,6 +242,7 @@ impl<'a> OlangReader<'a> {
         let mut stm_records: Vec<ParsedStm> = Vec::new();
         let mut hebbian_records: Vec<ParsedHebbian> = Vec::new();
         let mut knowtree_records: Vec<ParsedKnowTree> = Vec::new();
+        let mut auth_records: Vec<ParsedAuth> = Vec::new();
         let mut slim_knowtree_records: Vec<ParsedSlimKnowTree> = Vec::new();
         let mut curve_records: Vec<ParsedCurve> = Vec::new();
 
@@ -478,6 +490,21 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_AUTH => {
+                    // [auth_header: 113][ts: 8] = 121
+                    if pos + 121 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let mut header_bytes = [0u8; 113];
+                    header_bytes.copy_from_slice(&self.data[pos..pos + 113]);
+                    pos += 113;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    auth_records.push(ParsedAuth {
+                        header_bytes, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 other => return Err(ParseError::UnknownRecordType(other)),
             }
         }
@@ -497,6 +524,7 @@ impl<'a> OlangReader<'a> {
             knowtree_records,
             slim_knowtree_records,
             curve_records,
+            auth_records,
             amended_offsets,
             created_at: self.created_at,
         })
@@ -533,6 +561,7 @@ impl<'a> OlangReader<'a> {
         let mut knowtree_records: Vec<ParsedKnowTree> = Vec::new();
         let mut slim_knowtree_records: Vec<ParsedSlimKnowTree> = Vec::new();
         let mut curve_records: Vec<ParsedCurve> = Vec::new();
+        let mut auth_records: Vec<ParsedAuth> = Vec::new();
 
         let mut pos = HEADER_SIZE;
         let mut error = None;
@@ -793,6 +822,21 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_AUTH => {
+                    if pos + 121 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let mut header_bytes = [0u8; 113];
+                    header_bytes.copy_from_slice(&self.data[pos..pos + 113]);
+                    pos += 113;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    auth_records.push(ParsedAuth {
+                        header_bytes, timestamp: ts,
+                        file_offset: record_offset,
+                    });
+                }
+
                 other => {
                     error = Some(ParseError::UnknownRecordType(other));
                     break;
@@ -802,7 +846,8 @@ impl<'a> OlangReader<'a> {
 
         let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len()
             + node_kinds.len() + stm_records.len() + hebbian_records.len()
-            + knowtree_records.len() + slim_knowtree_records.len() + curve_records.len();
+            + knowtree_records.len() + slim_knowtree_records.len() + curve_records.len()
+            + auth_records.len();
         let amended_offsets: alloc::collections::BTreeSet<u64> =
             amends.iter().map(|a| a.target_offset).collect();
         let file = ParsedFile {
@@ -816,6 +861,7 @@ impl<'a> OlangReader<'a> {
             knowtree_records,
             slim_knowtree_records,
             curve_records,
+            auth_records,
             amended_offsets,
             created_at: self.created_at,
         };
@@ -852,6 +898,8 @@ pub struct ParsedFile {
     pub slim_knowtree_records: Vec<ParsedSlimKnowTree>,
     /// ConversationCurve turn records — replay to reconstruct curve on boot.
     pub curve_records: Vec<ParsedCurve>,
+    /// Auth records — last one wins (append-only identity).
+    pub auth_records: Vec<ParsedAuth>,
     /// Offsets đã bị amend — dùng để filter records.
     pub amended_offsets: alloc::collections::BTreeSet<u64>,
     /// Timestamp khi file được tạo.

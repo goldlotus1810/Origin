@@ -123,6 +123,15 @@ pub const RT_CURVE: u8 = 0x09;
 /// 500M records × 22B avg = 11GB → fits on phone with room to spare.
 pub const RT_SLIM_KNOWTREE: u8 = 0x0A;
 
+/// Record type: AuthHeader — master key identity for origin.olang.
+///
+/// Format: [0x0B][auth_header: 113][timestamp: 8]
+/// Total: 1 + 113 + 8 = 122 bytes
+///
+/// Append-only: mỗi lần setup/change → append record mới.
+/// Boot replay: last RT_AUTH record wins.
+pub const RT_AUTH: u8 = 0x0B;
+
 /// Header size: MAGIC(4) + VERSION(1) + CREATED(8) = 13 bytes
 pub const HEADER_SIZE: usize = 13;
 
@@ -407,6 +416,23 @@ impl OlangWriter {
         self.buf.push(RT_CURVE);
         self.buf.extend_from_slice(&valence.to_le_bytes());
         self.buf.extend_from_slice(&fx_dn.to_le_bytes());
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+        self.write_count += 1;
+        offset
+    }
+
+    /// Ghi AuthHeader record — master key identity.
+    ///
+    /// Append-only: last record wins on boot replay.
+    /// Format: [0x0B][auth_header: 113][ts: 8]
+    pub fn append_auth(
+        &mut self,
+        auth_bytes: &[u8; 113],
+        timestamp: i64,
+    ) -> u64 {
+        let offset = self.buf.len() as u64;
+        self.buf.push(RT_AUTH);
+        self.buf.extend_from_slice(auth_bytes);
         self.buf.extend_from_slice(&timestamp.to_le_bytes());
         self.write_count += 1;
         offset
