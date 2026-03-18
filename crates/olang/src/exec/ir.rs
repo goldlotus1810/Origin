@@ -167,6 +167,13 @@ pub enum Op {
     SpawnBegin,
     /// End of spawn block.
     SpawnEnd,
+
+    /// Create closure: jump over body, push closure marker onto stack.
+    /// `Closure(param_count, body_len)` — body follows immediately after this op.
+    /// The closure captures the current local scope by value.
+    Closure(u8, usize),
+    /// Call a closure: pop closure + args from stack, execute body.
+    CallClosure(u8),
 }
 
 impl Op {
@@ -216,6 +223,8 @@ impl Op {
             Self::FileAppend => "FILE_APPEND",
             Self::SpawnBegin => "SPAWN_BEGIN",
             Self::SpawnEnd => "SPAWN_END",
+            Self::Closure(..) => "CLOSURE",
+            Self::CallClosure(_) => "CALL_CLOSURE",
         }
     }
 
@@ -330,6 +339,12 @@ impl Op {
             Self::FileAppend => alloc::vec![0x53],
             Self::SpawnBegin => alloc::vec![0x60],
             Self::SpawnEnd => alloc::vec![0x61],
+            Self::Closure(params, body_len) => {
+                let mut v = alloc::vec![0x70, *params];
+                v.extend_from_slice(&(*body_len as u32).to_le_bytes());
+                v
+            }
+            Self::CallClosure(arity) => alloc::vec![0x71, *arity],
         }
     }
 }

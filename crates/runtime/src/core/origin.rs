@@ -849,6 +849,12 @@ impl HomeRuntime {
                 VmEvent::UseModule { name } => {
                     output_text.push_str(&format!("[use {}] ", name));
                 }
+                VmEvent::UseModuleSelective { name, imports } => {
+                    output_text.push_str(&format!("[use {} {{{}}}] ", name, imports.join(", ")));
+                }
+                VmEvent::ModDecl { path } => {
+                    output_text.push_str(&format!("[mod {}] ", path));
+                }
             }
         }
 

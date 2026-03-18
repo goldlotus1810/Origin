@@ -356,6 +356,8 @@ pub enum Keyword {
     Spawn,
     /// `channel` — create communication channel
     Channel,
+    /// `mod` — module declaration
+    Mod,
 }
 
 /// Check xem string có phải keyword không.
@@ -385,6 +387,7 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "pub" => Some(Keyword::Pub),
         "spawn" => Some(Keyword::Spawn),
         "channel" => Some(Keyword::Channel),
+        "module" => Some(Keyword::Mod),
         _ => None,
     }
 }
@@ -543,6 +546,8 @@ pub enum Token {
     Spawn,
     /// `channel`
     Channel,
+    /// `mod` — module declaration
+    ModKw,
     /// `::` — path separator (enum variants, module paths)
     ColonColon,
     /// `[`
@@ -928,6 +933,7 @@ impl<'a> Lexer<'a> {
                 Keyword::Pub => Token::Pub,
                 Keyword::Spawn => Token::Spawn,
                 Keyword::Channel => Token::Channel,
+                Keyword::Mod => Token::ModKw,
             };
         }
 
