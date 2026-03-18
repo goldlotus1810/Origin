@@ -4,7 +4,7 @@
 > Sau mỗi phiên: CẬP NHẬT file này.
 
 **Cập nhật:** 2026-03-18
-**Tests:** 2,227 pass · 0 fail · 0 clippy warnings · 0 external deps
+**Tests:** 2,348 pass · 0 fail · 0 clippy warnings · 0 external deps
 **Code:** ~82,000 lines Rust · 11 crates + 4 tools · no_std core
 
 ---
@@ -38,6 +38,15 @@
 ✅ SkillPattern → AAM approval pipeline
 ✅ Multilingual seeding (7 languages, 432+ aliases)
 ✅ Codebase restructured (subdirectories per crate)
+✅ Silk parent_map vertical (child→parent pointer, 43KB design)
+✅ CompoundKind 31 compound patterns (C(5,k), k=1..5)
+✅ Dream 5D clustering (MolSummary + implicit Silk + layer filter QT⑪)
+✅ NodeState wrapper (Molecule + Maturity + CompositionOrigin)
+✅ CompositionOrigin tracking (Innate/Composed/Evolved) in LCA + evolve
+✅ Maturity advance wired to STM + Dream (weight=0 bug fixed)
+✅ unified_neighbors() wired into Dream neighbor_bonus
+✅ Observation.layer field + Dream layer-aware clustering
+✅ Olang Type System (6A-6H: TypeTag, TypedValue, pattern matching, generics)
 ```
 
 ### FACADE (code exists, not functionally active):
@@ -48,24 +57,22 @@
 ⚠️ Compiler targets — code exists, no end-to-end pipeline
 ⚠️ Book reader — code exists, not wired to runtime
 ⚠️ Domain skills (15) — structs exist, only instincts call them
-⚠️ Maturity pipeline — enum+advance() exist, NOT wired to STM/Dream
-⚠️ Silk parent pointer — thiết kế 43KB vertical Silk, chưa implement
 ```
 
 ### SPEC AUDIT — 6 Vấn Đề Hệ Thống (phiên L):
 ```
 #1 Response template      — ~10 câu cố định, bỏ qua instinct+Silk output    [HIGH, MEDIUM effort]
 #2 Parser missing 6 cmds  — typeof/explain/why/trace/inspect/assert           [HIGH, SMALL effort]
-#3 Maturity pipeline       — advance(weight=0.0) BUG → Mature unreachable     [HIGH, SMALL effort]
-#4 Dream threshold         — cluster_score ≈ 0.10 << threshold 0.6            [MEDIUM, SMALL effort]
-#5 Silk vertical (parent)  — 5460 pointers × 8B = 43KB, chưa có              [HIGH, MEDIUM effort]
+#3 Maturity pipeline       — ✅ DONE — advance wired, weight=0 fixed          [RESOLVED]
+#4 Dream threshold         — ✅ DONE — MolSummary + implicit Silk bonus        [RESOLVED]
+#5 Silk vertical (parent)  — ✅ DONE — parent_map in SilkGraph                 [RESOLVED]
 #6 Agent hierarchy dead    — Chiefs idle, 0 Workers, 0 ISL messages           [HIGH, LARGE effort]
 ```
 
 ### SPEC FILES:
 ```
-SPEC_MATURITY_PIPELINE.md  — Wire Maturity vào Dream (covers #3, #4, maps #1-#6)
-SPEC_NODE_SILK.md          — 5 Gaps: parent pointer, compound, Dream 5D, layer, unified_neighbors
+SPEC_MATURITY_PIPELINE.md  — Wire Maturity vào Dream (covers #3, #4)
+SPEC_NODE_SILK.md          — 8 Gaps: ALL 8 IMPLEMENTED ✅
 ```
 
 ---
@@ -74,14 +81,14 @@ SPEC_NODE_SILK.md          — 5 Gaps: parent pointer, compound, Dream 5D, layer
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| olang | 838 | Core engine, fully tested |
-| agents | 282 | Encoder, learning, gate, instincts |
+| olang | 1088 | Core engine + type system, fully tested |
+| agents | 284 | Encoder, learning, gate, instincts |
 | runtime | 273 | HomeRuntime, parser, router |
 | context | 168 | Emotion, intent, curve, fusion |
 | vsdf | 123 | SDF, FFR, physics, scene |
-| silk | 88 | Graph, hebbian, walk, edges |
-| hal | 85 | Arch, platform, security, tier |
-| memory | 65 | STM, dream, proposals |
+| silk | 85 | Graph, hebbian, walk, edges, parent_map |
+| hal | 68 | Arch, platform, security, tier |
+| memory | 32 | STM, dream, proposals |
 | wasm | 32 | WASM bindings, bridge |
 | isl | 31 | Address, message, codec, queue |
 | ucd | 23 | Unicode lookup table |
@@ -89,7 +96,8 @@ SPEC_NODE_SILK.md          — 5 Gaps: parent pointer, compound, Dream 5D, layer
 | seeder | 15 | L0 node seeding |
 | server | 13 | REPL boot/run |
 | inspector | 9 | File verification |
-| **Total** | **2,227** | |
+| bench | 6 | Performance benchmarks |
+| **Total** | **2,348** | |
 
 ---
 
@@ -112,6 +120,9 @@ K: Honest audit — response template, command parsing, agent orchestration issu
 L: Spec audit — 2 specs created (SPEC_MATURITY_PIPELINE, SPEC_NODE_SILK)
    6 systemic issues mapped, 1 critical bug found (advance weight=0.0)
    Phase 1-3 Olang features verified, 2227 tests
+M: SPEC_NODE_SILK all 8 gaps implemented — parent_map, CompoundKind,
+   Dream 5D+layer, NodeState+CompositionOrigin, Maturity wired.
+   Phase 6T: Olang Type System (6A-6H). 2348 tests
 ```
 
 ---
@@ -140,4 +151,4 @@ L: Spec audit — 2 specs created (SPEC_MATURITY_PIPELINE, SPEC_NODE_SILK)
 
 ---
 
-*HomeOS · 2026-03-18 · 2,227 tests · ~82K LoC · ○(∅)==○*
+*HomeOS · 2026-03-18 · 2,348 tests · ~82K LoC · ○(∅)==○*

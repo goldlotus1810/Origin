@@ -99,24 +99,24 @@ ucd (UnicodeData.txt → compile-time table)
 ```
 crates/
 ├── ucd/        Unicode → Molecule lookup (build.rs, 5424 entries)       23 tests
-├── olang/      Core: Molecule · LCA · Registry · VM · Compact · KT    838 tests
+├── olang/      Core: Molecule · LCA · Registry · VM · Compact · KT   1088 tests
 │   └── src/
 │       ├── core/       Molecule, MolecularChain, LCA, encoder
 │       ├── storage/    Registry, Writer, Reader, Compact, KnowTree
 │       └── execution/  VM, IR, Compiler, Syntax, Semantic
-├── silk/       Hebbian learning · EmotionTag edges · Walk               88 tests
+├── silk/       Hebbian learning · EmotionTag edges · Walk · parent_map   85 tests
 ├── context/    Emotion V/A/D/I · ConversationCurve · Intent            168 tests
 │   └── src/
 │       ├── emotion/    EmotionTag, WordAffect, phrase blending
 │       └── pipeline/   Engine, Curve, Intent, Fusion, Snapshot
-├── agents/     Encoder · Learning · Gate · Instinct · Chief/Worker     282 tests
+├── agents/     Encoder · Learning · Gate · Instinct · Chief/Worker     284 tests
 │   └── src/
 │       ├── core/       Encoder, Learning loop, SecurityGate
 │       ├── intelligence/ LeoAI, 7 Instincts, Domain Skills
 │       └── hierarchy/  Chief, Worker, ISL routing
-├── memory/     STM · DreamCycle · Proposals · AAM                       65 tests
+├── memory/     STM · DreamCycle · Proposals · AAM                       32 tests
 ├── runtime/    HomeRuntime · ○{} Parser · Router                       273 tests
-├── hal/        Hardware Abstraction · Tier · FFI · Security             85 tests
+├── hal/        Hardware Abstraction · Tier · FFI · Security             68 tests
 ├── isl/        Inter-System Link messaging (AES-256-GCM)                31 tests
 ├── vsdf/       18 SDF generators · FFR · Physics · SceneGraph          123 tests
 │   └── src/
@@ -134,31 +134,53 @@ tools/
 
 ---
 
-## Silk Architecture — Horizontal + Vertical
+## Silk Architecture — 3 Layers + Vertical
 
-### Horizontal Silk (implicit, 0 bytes)
+### Nguyên lý: Silk = hệ quả tự nhiên của 5D
+
 ```
-37 base channels: 8 Shape + 8 Relation + 8 Valence zone + 8 Arousal zone + 5 Time
-SilkIndex → implicit_silk(A, B) → shared_dims, strength, shared_count
+Silk KHÔNG CẦN LƯU EDGE.
+Silk = "2 node chia sẻ cùng công thức trên chiều nào?"
+     = lookup trong SilkIndex.
 
+Emotion không phải metadata trên edge.
+Emotion LÀ 2 TRONG 5 CHIỀU của node (V + A).
+"Cùng cảm xúc" = cùng công thức V hoặc A = TỰ ĐỘNG Silk.
+
+5400 công thức L0 → mỗi công thức = 1 "nhóm máu"
+Cùng nhóm máu trên chiều nào → Silk trên chiều đó.
+```
+
+### 3 tầng Silk (horizontal, implicit, 0 bytes)
+
+| Tầng | Tên | Số lượng | Trạng thái |
+|------|-----|---------|-----------|
+| Base | 37 kênh (8S+8R+8V+8A+5T) | 37 | ✅ SilkIndex |
+| Compound | 31 mẫu C(5,k) k=1..5 | 31 | ✅ CompoundKind enum |
+| Precise | ~5400 kênh (= số L0 nodes) | ~5400 | SPEC — chưa implement |
+
+```
 Strength = number of shared dimensions:
-  1 dim shared = 0.20 (loosely related)
-  2 dims       = 0.40 (clearly related)
-  3 dims       = 0.60 (near identical)
-  4 dims       = 0.80 (almost same concept)
-  5 dims       = 1.00 (same node)
+  1 dim shared = 0.20 (loosely related)    → C(5,1) =  5 patterns
+  2 dims       = 0.40 (clearly related)    → C(5,2) = 10 patterns
+  3 dims       = 0.60 (near identical)     → C(5,3) = 10 patterns
+  4 dims       = 0.80 (almost same concept)→ C(5,4) =  5 patterns
+  5 dims       = 1.00 (same node)          → C(5,5) =  1 pattern
 
-31 compound patterns: C(5,1)+C(5,2)+C(5,3)+C(5,4)+C(5,5) = 5+10+10+5+1
-  S+V       = "looks similar + feels similar" → visual metaphor
-  R+V       = "relates similar + feels similar" → moral analog
-  V+A       = "same emotional state" → empathy link
-  AllButS   = "different shape, everything else same" → deep metaphor
+37 kênh × 31 mẫu = 1147 kiểu quan hệ có nghĩa
+
+CompoundKind examples:
+  ShapeValence     = "looks similar + feels similar" → visual metaphor
+  RelationValence  = "relates similar + feels similar" → moral analog
+  ValenceArousal   = "same emotional state" → empathy link
+  AllButShape      = "different shape, everything else same" → deep metaphor
 ```
-
-**Status:** SilkIndex 37 buckets ✅ | implicit_silk() ✅ | CompoundKind enum ❌ (Gap #2)
 
 ### Vertical Silk (parent pointer, 43 KB)
+
 ```
+SilkGraph.parent_map: BTreeMap<u64, u64>  (child_hash → parent_hash)
+
 L1→L0:  5400 pointers  (each UCD atom → L1 representative)
 L2→L1:    37 pointers
 L3→L2:    12 pointers
@@ -169,31 +191,102 @@ L7→L6:     1 pointer
 ─────────────────────
 Total: 5460 × 8B = 43 KB
 
+API:
+  register_parent(child, parent)  → đăng ký parent pointer
+  parent_of(hash)                 → Option<u64>
+  children_of(parent)             → Vec<u64>
+  layer_of(hash)                  → u8 (depth via parent chain)
+
 Query: O(1) via parent chain traversal
   "🔥 related to ∈?" → compare 5D + check shared parent at L1
 ```
 
-**Status:** parent_map in SilkGraph ❌ (Gap #1 — SPEC_NODE_SILK)
+### Learned Silk (Hebbian, explicit)
+
+```
+Hebbian learning: fire together → wire together
+co_activate(a, b) → strengthen awareness of implicit relationship
+HebbianLink: (hash_a, hash_b, weight, fire_count, emotion_tag)
+
+3 query strategies merged by unified_neighbors():
+  1. implicit_silk()    → 5D dimensional comparison (0 bytes, computed)
+  2. learned (Hebbian)  → co-activation weights (explicit edges)
+  3. structural         → legacy SilkEdge (explicit edges)
+  → unified_neighbors() ranks and merges all 3 sources
+```
 
 ---
 
-## Node Maturity Lifecycle
+## Node Architecture
+
+### Molecule = Công thức, không phải Giá trị
 
 ```
-Molecule = FORMULA, not static value.
-Each dimension = a function f(inputs...) waiting for data.
+Mỗi byte trong Molecule = tham chiếu đến công thức gốc L0:
 
+  Shape    = f_s(inputs...)    ← công thức hình dạng
+  Relation = f_r(inputs...)    ← công thức quan hệ
+  Valence  = f_v(inputs...)    ← công thức cảm xúc
+  Arousal  = f_a(inputs...)    ← công thức cường độ
+  Time     = f_t(inputs...)    ← công thức thời gian
+
+  Chưa có input → TIỀM NĂNG    Có input → GIÁ TRỊ CỤ THỂ    Đủ → node CHÍN
+```
+
+### NodeState = Molecule + Maturity + Origin
+
+```rust
+NodeState {
+    mol: Molecule,               // 5D coordinate
+    maturity: Maturity,          // Formula → Evaluating → Mature
+    origin: CompositionOrigin,   // how was this node created?
+}
+```
+
+### CompositionOrigin — traceability
+
+```
+Innate(u32)                          → L0 node from encode_codepoint()
+Composed { sources: [u64], op }      → LCA/Fuse/Program tổ hợp nhiều nodes
+Evolved { source, dim, old, new }    → evolve() mutate 1/5 chiều
+
+ComposeOp: Lca | Fuse | Program
+
+Wire points:
+  lca_with_origin()  → returns (LcaResult, CompositionOrigin::Composed)
+  lca_to_node_state() → returns Option<NodeState>
+  evolve()           → EvolveResult includes CompositionOrigin::Evolved
+```
+
+### Maturity Lifecycle (wired)
+
+```
   Formula     → node created, no real input yet (5 potential functions)
   Evaluating  → fire_count ≥ fib(depth), accumulating evidence
   Mature      → weight ≥ 0.854 && fire_count ≥ fib(depth), ready for QR
 
-  STM.push() increments fire_count → advance(fire_count, weight, fib_threshold)
-  Dream.run() detects mature nodes → report in DreamResult.matured_nodes
-  QR promote  → append-only, signed, permanent knowledge
+  STM.push()  → fire_count++ → advance(fire_count, heuristic_weight, fib_threshold)
+  Dream.run() → maturity check before QR promote + neighbor_bonus via unified_neighbors()
+  QR promote  → only if Mature → append-only, signed, permanent knowledge
 ```
 
-**Status:** Maturity enum ✅ | advance() ✅ | Wire to STM ❌ | Wire to Dream ❌
-**Bug:** advance(weight=0.0) → Mature unreachable (SPEC_MATURITY_PIPELINE)
+### Dream Clustering (5D-aware, layer-filtered)
+
+```
+cluster_score(a, b):
+  α × MolSummary::similarity()      ← 5D molecular similarity (not byte-level)
+    + implicit_silk bonus            ← 5D shared dimensions
+  + β × Hebbian weight              ← co-activation strength
+  + γ × co_activation score         ← fire together count
+
+Layer enforcement (QT⑪):
+  Observations grouped by layer before clustering
+  → Dream never clusters L0 with L2
+
+QR promote gate:
+  maturity == Mature required
+  neighbor_bonus from unified_neighbors() boosts confidence
+```
 
 ---
 
@@ -280,4 +373,4 @@ Compact:     DeltaMolecule (1-6B vs 5B) + ChainDictionary (dedup)
 
 ---
 
-*HomeOS · ~82K LoC Rust · 2,227 tests · 0 clippy warnings · 0 external deps · no_std core*
+*HomeOS · ~82K LoC Rust · 2,348 tests · 0 clippy warnings · 0 external deps · no_std core*
