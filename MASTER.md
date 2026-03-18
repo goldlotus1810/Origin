@@ -4,7 +4,7 @@
 > Sau mỗi phiên: CẬP NHẬT file này.
 
 **Cập nhật:** 2026-03-18
-**Tests:** 2,348 pass · 0 fail · 0 clippy warnings · 0 external deps
+**Tests:** 2,354 pass · 0 fail · 0 clippy warnings · 0 external deps
 **Code:** ~82,000 lines Rust · 11 crates + 4 tools · no_std core
 
 ---
@@ -116,7 +116,7 @@ SPEC_NODE_SILK.md          — 8 Gaps: ALL 8 IMPLEMENTED ✅
 | server | 13 | REPL boot/run |
 | inspector | 9 | File verification |
 | bench | 6 | Performance benchmarks |
-| **Total** | **2,348** | |
+| **Total** | **2,354** | |
 
 ---
 
@@ -170,4 +170,4 @@ M: SPEC_NODE_SILK all 8 gaps implemented — parent_map, CompoundKind,
 
 ---
 
-*HomeOS · 2026-03-18 · 2,348 tests · ~82K LoC · ○(∅)==○*
+*HomeOS · 2026-03-18 · 2,354 tests · ~82K LoC · ○(∅)==○*
