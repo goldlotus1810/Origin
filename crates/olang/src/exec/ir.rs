@@ -122,6 +122,51 @@ pub enum Op {
     /// Unlike Store which always writes to innermost scope, StoreUpdate
     /// searches from innermost outward and updates the first match.
     StoreUpdate(String),
+
+    // ── Device I/O ────────────────────────────────────────────────────────────
+    // Bridge Olang → Hardware: VM emit VmEvent, Runtime gọi HAL.
+    //
+    // Tại sao cần opcodes riêng?
+    //   C driver: 500 dòng (struct, init, read, write, interrupt, error handling)
+    //   Olang:    1 opcode + device_id → Runtime gọi HAL → phần cứng thật
+    //
+    // ○{💡}.evolve(V, 0xFF) → DeviceWrite("light_0", 0xFF) → HAL.device_write()
+
+    /// Ghi giá trị ra thiết bị. Pop 1 chain (value), device_id = tham số.
+    /// VM emit DeviceWrite event → Runtime gọi HAL.device_write().
+    DeviceWrite(String),
+
+    /// Đọc giá trị từ thiết bị. Push kết quả lên stack (f32 → chain).
+    /// VM emit DeviceRead event → Runtime gọi HAL.device_read() → push chain.
+    DeviceRead(String),
+
+    /// Liệt kê thiết bị có sẵn. Push danh sách device_id lên stack.
+    /// VM emit DeviceList event → Runtime gọi HAL.scan_devices().
+    DeviceList,
+
+    // ── FFI & System I/O ──────────────────────────────────────────────────────
+    // Olang gọi hàm bên ngoài (Rust/C) và tương tác hệ thống.
+    //
+    // FFI: gọi extern function bằng tên → VM emit FfiCall event
+    // FileRead/FileWrite: đọc/ghi file → VM emit event → Runtime dùng HAL
+    // Spawn: tạo task mới → VM emit SpawnRequest → Runtime tạo ISL message
+
+    /// Gọi foreign function. Pop N args (theo arity), push kết quả.
+    /// VM emit FfiCall event → Runtime dispatch → extern fn → push result.
+    Ffi(String, u8), // (function_name, arity)
+
+    /// Đọc file. Pop 1 chain (path), push nội dung lên stack.
+    FileRead,
+    /// Ghi file. Pop 2 chains (path, data).
+    FileWrite,
+    /// Append file. Pop 2 chains (path, data). QT9: Append-only.
+    FileAppend,
+
+    /// Spawn concurrent task. Marks begin of async block.
+    /// VM emit SpawnRequest event → Runtime tạo ISL message → Worker/Chief xử lý.
+    SpawnBegin,
+    /// End of spawn block.
+    SpawnEnd,
 }
 
 impl Op {
@@ -162,6 +207,15 @@ impl Op {
             Self::TryBegin(_) => "TRY_BEGIN",
             Self::CatchEnd => "CATCH_END",
             Self::StoreUpdate(_) => "STORE_UPDATE",
+            Self::DeviceWrite(_) => "DEVICE_WRITE",
+            Self::DeviceRead(_) => "DEVICE_READ",
+            Self::DeviceList => "DEVICE_LIST",
+            Self::Ffi(..) => "FFI",
+            Self::FileRead => "FILE_READ",
+            Self::FileWrite => "FILE_WRITE",
+            Self::FileAppend => "FILE_APPEND",
+            Self::SpawnBegin => "SPAWN_BEGIN",
+            Self::SpawnEnd => "SPAWN_END",
         }
     }
 
@@ -252,6 +306,30 @@ impl Op {
                 b.extend_from_slice(sb);
                 b
             }
+            Self::DeviceWrite(id) => {
+                let sb = id.as_bytes();
+                let mut b = alloc::vec![0x40, sb.len() as u8];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::DeviceRead(id) => {
+                let sb = id.as_bytes();
+                let mut b = alloc::vec![0x41, sb.len() as u8];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::DeviceList => alloc::vec![0x42],
+            Self::Ffi(name, arity) => {
+                let sb = name.as_bytes();
+                let mut b = alloc::vec![0x50, sb.len() as u8, *arity];
+                b.extend_from_slice(sb);
+                b
+            }
+            Self::FileRead => alloc::vec![0x51],
+            Self::FileWrite => alloc::vec![0x52],
+            Self::FileAppend => alloc::vec![0x53],
+            Self::SpawnBegin => alloc::vec![0x60],
+            Self::SpawnEnd => alloc::vec![0x61],
         }
     }
 }
@@ -412,6 +490,27 @@ pub enum OlangIrExpr {
         builtin: String,
         rhs: Box<OlangIrExpr>,
     },
+
+    // ── Device I/O expressions ────────────────────────────────────────────────
+
+    /// device "relay_0" write <expr> — ghi giá trị ra thiết bị
+    /// Compile: emit_expr(value) → DeviceWrite(device_id)
+    DeviceWriteExpr {
+        /// ID thiết bị (VD: "gpio_relay", "light_0")
+        device_id: String,
+        /// Giá trị ghi (sẽ convert thành u8 molecular dimension)
+        value: Box<OlangIrExpr>,
+    },
+
+    /// device "dht22" read — đọc giá trị từ thiết bị
+    /// Compile: DeviceRead(device_id) → push f32 chain lên stack
+    DeviceReadExpr {
+        /// ID thiết bị
+        device_id: String,
+    },
+
+    /// device list — liệt kê thiết bị
+    DeviceListExpr,
 }
 
 fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
@@ -564,14 +663,15 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
         }
 
         OlangIrExpr::Spawn { body } => {
-            // Go-style: wrap body in scope, VM can detect spawn for async
-            // For now: sequential execution with spawn marker event
-            prog.push_op(Op::Nop); // placeholder: spawn marker
+            // Spawn: VM emit SpawnRequest → Runtime tạo ISL task.
+            // SpawnBegin/SpawnEnd wrap body cho Runtime collect opcodes.
+            prog.push_op(Op::SpawnBegin);
             prog.push_op(Op::ScopeBegin);
             for e in body {
                 emit_expr(e, prog);
             }
             prog.push_op(Op::ScopeEnd);
+            prog.push_op(Op::SpawnEnd);
         }
 
         OlangIrExpr::Pipe(exprs) => {
@@ -719,6 +819,21 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             emit_expr(lhs, prog);
             emit_expr(rhs, prog);
             prog.push_op(Op::Call(builtin.clone()));
+        }
+
+        // ── Device I/O ────────────────────────────────────────────────────────
+
+        OlangIrExpr::DeviceWriteExpr { device_id, value } => {
+            emit_expr(value, prog);
+            prog.push_op(Op::DeviceWrite(device_id.clone()));
+        }
+
+        OlangIrExpr::DeviceReadExpr { device_id } => {
+            prog.push_op(Op::DeviceRead(device_id.clone()));
+        }
+
+        OlangIrExpr::DeviceListExpr => {
+            prog.push_op(Op::DeviceList);
         }
     }
 }
@@ -952,6 +1067,57 @@ mod tests {
         let prog = compile_expr(&expr);
         assert!(prog.ops.contains(&Op::Load("fire".into())));
         assert!(prog.ops.contains(&Op::Store("x".into())));
+    }
+
+    #[test]
+    fn compile_device_write() {
+        let expr = OlangIrExpr::DeviceWriteExpr {
+            device_id: "relay_0".into(),
+            value: alloc::boxed::Box::new(OlangIrExpr::MolecularLiteral {
+                shape: 1, relation: 1, valence: 0xFF, arousal: 0x80, time: 1,
+            }),
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::DeviceWrite(id) if id == "relay_0")));
+    }
+
+    #[test]
+    fn compile_device_read() {
+        let expr = OlangIrExpr::DeviceReadExpr {
+            device_id: "dht22".into(),
+        };
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.iter().any(|op| matches!(op, Op::DeviceRead(id) if id == "dht22")));
+    }
+
+    #[test]
+    fn compile_device_list() {
+        let expr = OlangIrExpr::DeviceListExpr;
+        let prog = compile_expr(&expr);
+        assert!(prog.ops.contains(&Op::DeviceList));
+    }
+
+    #[test]
+    fn device_opcodes_serialize() {
+        let ops = alloc::vec![
+            Op::DeviceWrite("relay_0".into()),
+            Op::DeviceRead("dht22".into()),
+            Op::DeviceList,
+        ];
+        for op in &ops {
+            let b = op.to_bytes();
+            assert!(!b.is_empty(), "{} serialize phải non-empty", op.name());
+        }
+        assert_eq!(ops[0].to_bytes()[0], 0x40);
+        assert_eq!(ops[1].to_bytes()[0], 0x41);
+        assert_eq!(ops[2].to_bytes()[0], 0x42);
+    }
+
+    #[test]
+    fn device_opcode_names() {
+        assert_eq!(Op::DeviceWrite("x".into()).name(), "DEVICE_WRITE");
+        assert_eq!(Op::DeviceRead("x".into()).name(), "DEVICE_READ");
+        assert_eq!(Op::DeviceList.name(), "DEVICE_LIST");
     }
 
     #[test]

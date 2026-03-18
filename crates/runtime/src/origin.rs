@@ -153,6 +153,10 @@ pub struct HomeRuntime {
     boot_errors: alloc::vec::Vec<String>,
     /// Execution tracing toggle (○{trace} bật/tắt)
     trace_enabled: bool,
+    /// Platform bridge — HAL → phần cứng thật.
+    /// None = REPL/test mode (chỉ log events).
+    /// Some = wired to real hardware via PlatformBridge.
+    platform: Option<alloc::boxed::Box<dyn hal::ffi::PlatformBridge>>,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -208,6 +212,17 @@ impl HomeRuntime {
     /// Boot từ hư không — ○(∅)==○.
     pub fn new(session_id: u64) -> Self {
         Self::with_file(session_id, None)
+    }
+
+    /// Boot với platform bridge — Olang ○{} điều khiển phần cứng thật.
+    pub fn with_platform(
+        session_id: u64,
+        file_bytes: Option<&[u8]>,
+        platform: alloc::boxed::Box<dyn hal::ffi::PlatformBridge>,
+    ) -> Self {
+        let mut rt = Self::with_file(session_id, file_bytes);
+        rt.platform = Some(platform);
+        rt
     }
 
     /// Boot với file bytes — load registry + Silk edges từ origin.olang.
@@ -269,6 +284,7 @@ impl HomeRuntime {
             manifest: boot_result.manifest,
             boot_errors: boot_result.errors,
             trace_enabled: false,
+            platform: None,
         };
 
         // ── Run bootstrap programs — firmware trên VM ─────────────────────
@@ -425,6 +441,11 @@ impl HomeRuntime {
                 self.uptime_ns = ts;
                 self.process_olang(expr, ts)
             }
+            ParseResult::FullProgram(source) => {
+                self.turn_count += 1;
+                self.uptime_ns = ts;
+                self.run_program(&source, ts)
+            }
             ParseResult::Error(e) => Response {
                 text: format!("Parse error: {}", e),
                 tone: ResponseTone::Engaged,
@@ -573,6 +594,13 @@ impl HomeRuntime {
                         1.0, // intentional → full reward
                         ts,
                     );
+                    // QT8: Ghi edge vào pending_writes
+                    {
+                        use olang::writer::OlangWriter;
+                        let mut ew = OlangWriter::new_append();
+                        ew.append_edge(*from, *to, *rel, ts);
+                        self.pending_writes.extend_from_slice(ew.as_bytes());
+                    }
                     output_text.push_str(&format!(
                         "edge(0x{:04X}→0x{:04X} rel=0x{:02X}) ",
                         from & 0xFFFF,
@@ -701,6 +729,126 @@ impl HomeRuntime {
                         ));
                     }
                 }
+
+                // ── Device I/O events ────────────────────────────────────
+                // VM emit → Runtime xử lý → HAL → phần cứng thật.
+                // Khi chạy từ REPL (không có HAL), chỉ log event.
+                // Khi chạy trên thiết bị, Runtime inject HAL và thực thi.
+
+                VmEvent::DeviceWrite { device_id, value } => {
+                    if let Some(ref platform) = self.platform {
+                        let ok = platform.write_actuator(device_id, *value);
+                        output_text.push_str(&format!(
+                            "[device_write \"{}\" = 0x{:02X} → {}] ",
+                            device_id, value, if ok { "ok" } else { "fail" }
+                        ));
+                    } else {
+                        output_text.push_str(&format!(
+                            "[device_write \"{}\" = 0x{:02X}] ",
+                            device_id, value
+                        ));
+                    }
+                }
+                VmEvent::DeviceRead { device_id } => {
+                    if let Some(ref platform) = self.platform {
+                        if let Some(val) = platform.read_sensor(device_id) {
+                            output_text.push_str(&format!(
+                                "[device_read \"{}\" = {:.2}] ",
+                                device_id, val
+                            ));
+                        } else {
+                            output_text.push_str(&format!(
+                                "[device_read \"{}\" = none] ",
+                                device_id
+                            ));
+                        }
+                    } else {
+                        output_text.push_str(&format!(
+                            "[device_read \"{}\"] ",
+                            device_id
+                        ));
+                    }
+                }
+                VmEvent::DeviceListRequest => {
+                    output_text.push_str("[device_list] ");
+                }
+
+                // ── FFI & System I/O events ────────────────────────────────
+                VmEvent::FfiCall { name, args } => {
+                    output_text.push_str(&format!(
+                        "[ffi \"{}\" ({} args)] ",
+                        name,
+                        args.len()
+                    ));
+                }
+                VmEvent::FileReadRequest { path } => {
+                    if let Some(ref platform) = self.platform {
+                        if let Some(data) = platform.read_file(path) {
+                            // Push file contents as string if valid UTF-8
+                            if let Ok(text) = core::str::from_utf8(&data) {
+                                output_text.push_str(&format!(
+                                    "[file_read \"{}\" → {} bytes] {}",
+                                    path, data.len(), text
+                                ));
+                            } else {
+                                output_text.push_str(&format!(
+                                    "[file_read \"{}\" → {} bytes (binary)] ",
+                                    path, data.len()
+                                ));
+                            }
+                        } else {
+                            output_text.push_str(&format!(
+                                "[file_read \"{}\" → not found] ",
+                                path
+                            ));
+                        }
+                    } else {
+                        output_text.push_str(&format!(
+                            "[file_read \"{}\"] ",
+                            path
+                        ));
+                    }
+                }
+                VmEvent::FileWriteRequest { path, data } => {
+                    if let Some(ref platform) = self.platform {
+                        let ok = platform.write_file(path, data);
+                        output_text.push_str(&format!(
+                            "[file_write \"{}\" ({} bytes) → {}] ",
+                            path, data.len(), if ok { "ok" } else { "fail" }
+                        ));
+                    } else {
+                        output_text.push_str(&format!(
+                            "[file_write \"{}\" ({} bytes)] ",
+                            path, data.len()
+                        ));
+                    }
+                }
+                VmEvent::FileAppendRequest { path, data } => {
+                    if let Some(ref platform) = self.platform {
+                        // QT9: Append-only — read + append + write
+                        let mut existing = platform.read_file(path).unwrap_or_default();
+                        existing.extend_from_slice(data);
+                        let ok = platform.write_file(path, &existing);
+                        output_text.push_str(&format!(
+                            "[file_append \"{}\" (+{} bytes) → {}] ",
+                            path, data.len(), if ok { "ok" } else { "fail" }
+                        ));
+                    } else {
+                        output_text.push_str(&format!(
+                            "[file_append \"{}\" ({} bytes)] ",
+                            path, data.len()
+                        ));
+                    }
+                }
+                VmEvent::SpawnRequest { body_ops_count } => {
+                    output_text.push_str(&format!(
+                        "[spawn {} ops] ",
+                        body_ops_count
+                    ));
+                }
+                VmEvent::UseModule { name } => {
+                    output_text.push_str(&format!("[use {}] ", name));
+                }
             }
         }
 
@@ -716,6 +864,37 @@ impl HomeRuntime {
                     0.7, // intentional but indirect
                     ts,
                 );
+            }
+        }
+
+        // ── QT8+QT9: Ghi L1 nodes + Silk edges cho VM learned chains ────
+        // Mọi chain từ VM (Output, LookupAlias) → phải persist vào origin.olang
+        if !learned.is_empty() {
+            use olang::writer::OlangWriter;
+            let mut vm_writer = OlangWriter::new_append();
+            let mut wrote_any = false;
+            for chain in &learned {
+                let hash = chain.chain_hash();
+                if self.registry.lookup_hash(hash).is_none() {
+                    let _ = vm_writer.append_node(chain, 1, false, ts);
+                    wrote_any = true;
+                    // QT9: Registry SAU
+                    self.gated_insert(chain, 1, ts, false, olang::registry::NodeKind::Knowledge, "vm:L1");
+                }
+                // Silk edges từ chain này
+                let edges: alloc::vec::Vec<_> = self.learning.graph()
+                    .edges_from(hash)
+                    .iter()
+                    .filter(|e| e.weight >= 0.10)
+                    .map(|e| (e.from_hash, e.to_hash, e.kind.as_byte(), e.updated_at))
+                    .collect();
+                for (from, to, kind, edge_ts) in &edges {
+                    vm_writer.append_edge(*from, *to, *kind, *edge_ts);
+                    wrote_any = true;
+                }
+            }
+            if wrote_any {
+                self.pending_writes.extend_from_slice(vm_writer.as_bytes());
             }
         }
 
@@ -821,6 +1000,34 @@ impl HomeRuntime {
                 VmEvent::RequestStats => {
                     let resp = self.handle_command("stats", ts);
                     output_text.push_str(&resp.text);
+                }
+                VmEvent::UseModule { name } => {
+                    // Try to load module file via HAL platform
+                    if let Some(ref platform) = self.platform {
+                        // Try paths: name.olang, name
+                        let paths = [
+                            format!("{}.olang", name),
+                            name.clone(),
+                        ];
+                        let mut loaded = false;
+                        for path in &paths {
+                            if let Some(data) = platform.read_file(path) {
+                                if let Ok(source) = core::str::from_utf8(&data) {
+                                    let resp = self.run_program(source, ts);
+                                    if !resp.text.is_empty() && resp.kind != ResponseKind::Blocked {
+                                        output_text.push_str(&resp.text);
+                                    }
+                                    loaded = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if !loaded {
+                            output_text.push_str(&format!("[module '{}' not found] ", name));
+                        }
+                    } else {
+                        output_text.push_str(&format!("[no platform for module '{}'] ", name));
+                    }
                 }
                 _ => {} // Other events handled silently
             }
@@ -2193,15 +2400,6 @@ impl HomeRuntime {
         }
     }
 
-    // ── Response generation ───────────────────────────────────────────────────
-
-    /// Sinh fallback text khi không có original từ pipeline.
-    /// Dùng response_template::tone_fallback — không hardcode string ở đây.
-    #[allow(dead_code)]
-    fn generate_response(&self, tone: ResponseTone, current_v: f32, _fx: f32) -> String {
-        crate::response_template::tone_fallback(tone, current_v)
-    }
-
     // ── SilkWalk — tìm context liên quan ─────────────────────────────────────
 
     /// Walk Silk từ các từ khóa trong câu hỏi.
@@ -2355,6 +2553,41 @@ impl HomeRuntime {
 
         // ── T6: Learning pipeline — BẢN NĂNG: mọi modality ─────────────────
         let proc_result = self.learning.process_one(input.clone());
+
+        // ── T6a: QT8+QT9 — Ghi L1 node vào pending_writes TRƯỚC ────────
+        // Mọi input thành công → tạo node L1 trong origin.olang.
+        // L1 = learned node (chưa QR). QR promote → L2..Ln-1 qua Dream.
+        if let ProcessResult::Ok { ref chain, emotion: _ } = proc_result {
+            let hash = chain.chain_hash();
+            // Chỉ ghi nếu chưa có trong registry (tránh duplicate)
+            if self.registry.lookup_hash(hash).is_none() {
+                use olang::writer::OlangWriter;
+                let mut l1_writer = OlangWriter::new_append();
+                let _ = l1_writer.append_node(chain, 1, false, ts); // L1, chưa QR
+                self.pending_writes.extend_from_slice(l1_writer.as_bytes());
+                // QT9: Registry SAU khi đã ghi file
+                self.gated_insert(chain, 1, ts, false, olang::registry::NodeKind::Knowledge, "learn:L1");
+            }
+
+            // Silk edges mới từ process_one → ghi file
+            // Lấy edges liên quan đến chain mới, weight đủ mạnh
+            {
+                let graph = self.learning.graph();
+                let edges: alloc::vec::Vec<_> = graph.edges_from(hash)
+                    .iter()
+                    .filter(|e| e.weight >= 0.10)
+                    .map(|e| (e.from_hash, e.to_hash, e.kind.as_byte(), e.updated_at))
+                    .collect();
+                if !edges.is_empty() {
+                    use olang::writer::OlangWriter;
+                    let mut edge_writer = OlangWriter::new_append();
+                    for (from, to, kind, edge_ts) in &edges {
+                        edge_writer.append_edge(*from, *to, *kind, *edge_ts);
+                    }
+                    self.pending_writes.extend_from_slice(edge_writer.as_bytes());
+                }
+            }
+        }
 
         // ── T6b: KnowTree — store text as L2 compact node ───────────────
         if let ProcessResult::Ok { ref chain, emotion } = proc_result {

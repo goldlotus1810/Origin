@@ -254,12 +254,81 @@ impl Worker {
             return;
         }
 
+        // Parse command payload: [device_id_len, device_id..., value]
+        // Nếu payload có device info → lưu lại cho process_command_with_hal().
+        // Ở đây chỉ ACK — execution thực sự diễn ra khi có HAL.
         let ack = ISLMessage::ack(self.addr, cmd.from, MsgType::ActuatorCmd);
         let frame = ISLFrame::bare(ack);
         self.outbox.push(WorkerReport {
             frame,
             emotion: EmotionTag::NEUTRAL,
         });
+    }
+
+    /// Xử lý ActuatorCmd VỚI HAL — thực sự điều khiển phần cứng.
+    ///
+    /// Đây là bridge hoàn chỉnh: ISL command → HAL → phần cứng thật.
+    ///
+    /// ```text
+    /// Olang: ○{💡}.evolve(V, 0xFF)
+    ///   → VM: DeviceWrite("light_0", 0xFF)
+    ///   → Runtime: ISLMessage(ActuatorCmd) → Worker
+    ///   → Worker: process_command_with_hal() → HAL.device_write()
+    ///   → HAL: gpio_write(pin, HIGH) → phần cứng thật
+    /// ```
+    ///
+    /// Tại sao 1 dòng Olang thay 500 dòng C?
+    ///   C: struct Light { pin, brightness, color, ... }
+    ///      init(), set_brightness(), set_color(), on(), off(), error_handler()
+    ///   Olang: device "light_0" write 0xFF;
+    pub fn process_command_with_hal(
+        &mut self,
+        cmd: ISLMessage,
+        device_id: &str,
+        value: u8,
+        platform: &dyn hal::HalPlatform,
+        _ts: i64,
+    ) {
+        if cmd.msg_type != MsgType::ActuatorCmd {
+            return;
+        }
+
+        // Security check
+        if self.kind == WorkerKind::Actuator && self.security_locked {
+            let nack = ISLMessage::nack(self.addr, cmd.from, MsgType::ActuatorCmd);
+            let frame = ISLFrame::bare(nack);
+            self.outbox.push(WorkerReport {
+                frame,
+                emotion: EmotionTag {
+                    valence: -0.50,
+                    arousal: 0.60,
+                    dominance: 0.80,
+                    intensity: 0.50,
+                },
+            });
+            return;
+        }
+
+        // THỰC THI: gọi HAL → phần cứng thật
+        let result = platform.device_write(device_id, value);
+
+        let (msg, emotion) = match result {
+            hal::DeviceResult::Ok => (
+                ISLMessage::ack(self.addr, cmd.from, MsgType::ActuatorCmd),
+                EmotionTag::NEUTRAL,
+            ),
+            _ => (
+                ISLMessage::nack(self.addr, cmd.from, MsgType::ActuatorCmd),
+                EmotionTag {
+                    valence: -0.40,
+                    arousal: 0.50,
+                    dominance: 0.30,
+                    intensity: 0.60,
+                },
+            ),
+        };
+        let frame = ISLFrame::bare(msg);
+        self.outbox.push(WorkerReport { frame, emotion });
     }
 
     /// Camera worker: process frame, detect motion.
@@ -1473,6 +1542,55 @@ mod tests {
         let w = Worker::new(waddr(), chief(), WorkerKind::Sensor);
         let probe = w.probe_with_hal(&platform, 1000);
         assert_eq!(probe.status, HardwareStatus::Ready, "RISC-V có sensor");
+    }
+
+    // ── Device I/O with HAL ──────────────────────────────────────────────────
+
+    #[test]
+    fn process_command_with_hal_actuator_ok() {
+        let platform = hal::MockPlatform::esp32();
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let cmd = ISLMessage::with_payload(chief(), waddr(), MsgType::ActuatorCmd, [0x01, 0x02, 0xFF]);
+        w.process_command_with_hal(cmd, "gpio_relay", 0xFF, &platform, 1000);
+        assert!(w.has_reports());
+        let reports = w.flush();
+        assert_eq!(reports.len(), 1);
+        // ACK because gpio_relay is Actuator → DeviceResult::Ok
+        assert_eq!(reports[0].frame.header.msg_type, MsgType::Ack);
+    }
+
+    #[test]
+    fn process_command_with_hal_sensor_nack() {
+        let platform = hal::MockPlatform::esp32();
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let cmd = ISLMessage::with_payload(chief(), waddr(), MsgType::ActuatorCmd, [0x01, 0x02, 0xFF]);
+        // gpio_dht22 is Sensor → can't write → NACK
+        w.process_command_with_hal(cmd, "gpio_dht22", 0xFF, &platform, 1000);
+        assert!(w.has_reports());
+        let reports = w.flush();
+        assert_eq!(reports[0].frame.header.msg_type, MsgType::Nack);
+    }
+
+    #[test]
+    fn process_command_with_hal_security_locked() {
+        let platform = hal::MockPlatform::esp32();
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        w.security_locked = true;
+        let cmd = ISLMessage::with_payload(chief(), waddr(), MsgType::ActuatorCmd, [0x01, 0x02, 0xFF]);
+        w.process_command_with_hal(cmd, "gpio_relay", 0xFF, &platform, 1000);
+        let reports = w.flush();
+        // Security locked → NACK
+        assert_eq!(reports[0].frame.header.msg_type, MsgType::Nack);
+    }
+
+    #[test]
+    fn process_command_with_hal_not_found() {
+        let platform = hal::MockPlatform::esp32();
+        let mut w = Worker::new(waddr(), chief(), WorkerKind::Actuator);
+        let cmd = ISLMessage::with_payload(chief(), waddr(), MsgType::ActuatorCmd, [0x01, 0x02, 0xFF]);
+        w.process_command_with_hal(cmd, "nonexistent", 0xFF, &platform, 1000);
+        let reports = w.flush();
+        assert_eq!(reports[0].frame.header.msg_type, MsgType::Nack);
     }
 
     // ── SensorNormalizer ──────────────────────────────────────────────────────

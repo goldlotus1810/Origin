@@ -114,6 +114,63 @@ pub enum VmEvent {
     WhyConnection { from: u64, to: u64 },
     /// Explain: trace origin of a chain
     ExplainOrigin { hash: u64 },
+
+    // ── Device I/O events ────────────────────────────────────────────────────
+    // VM emit — Runtime xử lý → gọi HAL → phần cứng thật.
+
+    /// Ghi giá trị ra thiết bị. Runtime gọi HAL.device_write().
+    DeviceWrite {
+        /// Device ID (VD: "gpio_relay", "light_0")
+        device_id: String,
+        /// Giá trị ghi (molecular dimension: 0x00=off, 0xFF=max)
+        value: u8,
+    },
+    /// Đọc giá trị từ thiết bị. Runtime gọi HAL.device_read().
+    DeviceRead {
+        /// Device ID
+        device_id: String,
+    },
+    /// Liệt kê thiết bị. Runtime gọi HAL.scan_devices().
+    DeviceListRequest,
+
+    // ── FFI & System I/O events ──────────────────────────────────────────────
+
+    /// Gọi foreign function. Runtime dispatch → extern fn → inject result.
+    FfiCall {
+        /// Function name (VD: "gpio_write", "http_get")
+        name: String,
+        /// Arguments (popped from stack before event)
+        args: Vec<MolecularChain>,
+    },
+    /// Đọc file. Runtime gọi HAL.read_file().
+    FileReadRequest {
+        /// File path (extracted from chain)
+        path: String,
+    },
+    /// Ghi file. Runtime gọi HAL.write_file().
+    FileWriteRequest {
+        /// File path
+        path: String,
+        /// Data to write
+        data: Vec<u8>,
+    },
+    /// Append file. Runtime gọi HAL.write_file() ở chế độ append.
+    FileAppendRequest {
+        /// File path
+        path: String,
+        /// Data to append
+        data: Vec<u8>,
+    },
+    /// Spawn request. Runtime tạo ISL message hoặc async task.
+    SpawnRequest {
+        /// Number of opcodes in the spawned block
+        body_ops_count: usize,
+    },
+    /// Module import request. Runtime loads + executes the module file.
+    UseModule {
+        /// Module name or path
+        name: String,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -325,6 +382,9 @@ impl OlangVM {
         let mut loop_stack: Vec<(usize, u32)> = Vec::new();
         // Try/catch stack: catch handler PC targets
         let mut try_stack: Vec<usize> = Vec::new();
+        // Channel store: id → queue of messages (cooperative concurrency)
+        let mut channels: Vec<Vec<MolecularChain>> = Vec::new();
+        let mut next_channel_id: u64 = 1;
 
         while pc < prog.ops.len() {
             if steps >= self.max_steps {
@@ -1118,7 +1178,7 @@ impl OlangVM {
                             let mut mols = Vec::new();
                             for m in &s.0 {
                                 let b = m.emotion.valence;
-                                let upper = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+                                let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
                                 mols.push(Molecule {
                                     shape: 0x02, relation: 0x01,
                                     emotion: EmotionDim { valence: upper, arousal: 0 },
@@ -1132,7 +1192,7 @@ impl OlangVM {
                             let mut mols = Vec::new();
                             for m in &s.0 {
                                 let b = m.emotion.valence;
-                                let lower = if b >= b'A' && b <= b'Z' { b + 32 } else { b };
+                                let lower = if b.is_ascii_uppercase() { b + 32 } else { b };
                                 mols.push(Molecule {
                                     shape: 0x02, relation: 0x01,
                                     emotion: EmotionDim { valence: lower, arousal: 0 },
@@ -1430,6 +1490,218 @@ impl OlangVM {
                             let val = vm_pop!(stack, events);
                             let _ = stack.push(MolecularChain::from_number(val.0.len() as f64));
                         }
+                        // ── Device I/O builtins ──────────────────────────
+                        "__device_write" => {
+                            // Stack: [device_id_string, value_chain]
+                            let value_chain = vm_pop!(stack, events);
+                            let id_chain = vm_pop!(stack, events);
+                            let device_id = chain_to_string(&id_chain).unwrap_or_default();
+                            let value = value_chain.to_number().unwrap_or(0.0) as u8;
+                            events.push(VmEvent::DeviceWrite { device_id, value });
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        "__device_read" => {
+                            // Stack: [device_id_string]
+                            let id_chain = vm_pop!(stack, events);
+                            let device_id = chain_to_string(&id_chain).unwrap_or_default();
+                            events.push(VmEvent::DeviceRead { device_id });
+                            let _ = stack.push(MolecularChain::empty()); // placeholder
+                        }
+                        "__device_list" => {
+                            events.push(VmEvent::DeviceListRequest);
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                        // ── FFI builtins ─────────────────────────────────
+                        "__ffi" => {
+                            // Stack: [function_name_string, ...args]
+                            let name_chain = vm_pop!(stack, events);
+                            let fn_name = chain_to_string(&name_chain).unwrap_or_default();
+                            events.push(VmEvent::FfiCall { name: fn_name, args: Vec::new() });
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                        // ── File I/O builtins ────────────────────────────
+                        "__file_read" => {
+                            let path_chain = vm_pop!(stack, events);
+                            let path = chain_to_string(&path_chain).unwrap_or_default();
+                            events.push(VmEvent::FileReadRequest { path });
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                        "__file_write" => {
+                            let data_chain = vm_pop!(stack, events);
+                            let path_chain = vm_pop!(stack, events);
+                            let path = chain_to_string(&path_chain).unwrap_or_default();
+                            let data = if let Some(s) = chain_to_string(&data_chain) {
+                                s.into_bytes()
+                            } else {
+                                data_chain.to_tagged_bytes()
+                            };
+                            events.push(VmEvent::FileWriteRequest { path, data });
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        "__file_append" => {
+                            let data_chain = vm_pop!(stack, events);
+                            let path_chain = vm_pop!(stack, events);
+                            let path = chain_to_string(&path_chain).unwrap_or_default();
+                            let data = if let Some(s) = chain_to_string(&data_chain) {
+                                s.into_bytes()
+                            } else {
+                                data_chain.to_tagged_bytes()
+                            };
+                            events.push(VmEvent::FileAppendRequest { path, data });
+                            let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        // ── Time builtins ────────────────────────────────
+                        "__time" => {
+                            // Push 0 — Runtime injects actual timestamp
+                            let _ = stack.push(MolecularChain::from_number(0.0));
+                        }
+                        "__sleep" => {
+                            // Pop duration_ms — no-op in VM (Runtime handles)
+                            let _duration = vm_pop!(stack, events);
+                        }
+
+                        // ── Type system builtins ──────────────────────────────
+                        "__struct_def" => {
+                            // Stack: [fields_array, name_chain]
+                            // Register struct type — store in scope as metadata
+                            let name_chain = vm_pop!(stack, events);
+                            let fields = vm_pop!(stack, events);
+                            // Store struct definition: "__struct_Name" → fields array
+                            let name = chain_to_string(&name_chain).unwrap_or_default();
+                            let key = alloc::format!("__struct_{}", name);
+                            let scope = scopes.last_mut().unwrap();
+                            scope.push((key, fields));
+                        }
+                        "__struct_tag" => {
+                            // Stack: [dict_chain, name_chain]
+                            // Tag a dict with a struct type name
+                            let name_chain = vm_pop!(stack, events);
+                            let dict = vm_pop!(stack, events);
+                            // Prepend type tag as first key-value pair "__type" => name
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let type_key = string_to_chain("__type");
+                            let mut tagged = MolecularChain(Vec::new());
+                            tagged.0.extend(type_key.0.iter().copied());
+                            tagged.0.push(sep);
+                            tagged.0.extend(name_chain.0.iter().copied());
+                            if !dict.is_empty() {
+                                tagged.0.push(sep);
+                                tagged.0.extend(dict.0.iter().copied());
+                            }
+                            let _ = stack.push(tagged);
+                        }
+                        "__enum_def" => {
+                            // Stack: [variants_array, name_chain]
+                            let name_chain = vm_pop!(stack, events);
+                            let variants = vm_pop!(stack, events);
+                            let name = chain_to_string(&name_chain).unwrap_or_default();
+                            let key = alloc::format!("__enum_{}", name);
+                            let scope = scopes.last_mut().unwrap();
+                            scope.push((key, variants));
+                        }
+                        "__enum_unit" => {
+                            // Stack: [tag_chain]
+                            // Unit variant — just push tag as-is
+                            // tag is already on stack
+                        }
+                        "__enum_payload" => {
+                            // Stack: [tag, arg0, arg1, ..., count]
+                            // Build: tag | sep | arg0 | sep | arg1 ...
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(0.0) as usize;
+                            let mut args = Vec::new();
+                            for _ in 0..count {
+                                args.push(vm_pop!(stack, events));
+                            }
+                            args.reverse();
+                            let tag = vm_pop!(stack, events);
+                            let sep = Molecule {
+                                shape: 0, relation: 0,
+                                emotion: EmotionDim { valence: 0, arousal: 0 },
+                                time: 0,
+                            };
+                            let mut result = MolecularChain(Vec::new());
+                            result.0.extend(tag.0.iter().copied());
+                            for arg in args {
+                                result.0.push(sep);
+                                result.0.extend(arg.0.iter().copied());
+                            }
+                            let _ = stack.push(result);
+                        }
+                        "__method_call" => {
+                            // Stack: [self, arg0, ..., argN, arg_count, method_name]
+                            let method_name_chain = vm_pop!(stack, events);
+                            let count_chain = vm_pop!(stack, events);
+                            let count = count_chain.to_number().unwrap_or(1.0) as usize;
+                            let method_name = chain_to_string(&method_name_chain).unwrap_or_default();
+                            // Pop all args (including self)
+                            let mut args = Vec::new();
+                            for _ in 0..count {
+                                args.push(vm_pop!(stack, events));
+                            }
+                            args.reverse();
+                            // Get type tag from self (first arg) — look for __type key
+                            let self_val = &args[0];
+                            let elements = split_array_chain(self_val);
+                            let mut type_name = String::new();
+                            let type_key = string_to_chain("__type");
+                            let mut i = 0;
+                            while i + 1 < elements.len() {
+                                if elements[i].0 == type_key.0 {
+                                    type_name = chain_to_string(&elements[i + 1]).unwrap_or_default();
+                                    break;
+                                }
+                                i += 2;
+                            }
+                            // Lookup mangled function name: __Type_method
+                            let mangled = alloc::format!("__{type_name}_{method_name}");
+                            // Push args back and call the mangled function
+                            for arg in &args {
+                                let _ = stack.push(arg.clone());
+                            }
+                            events.push(VmEvent::LookupAlias(mangled));
+                        }
+                        // ── Channel builtins ──────────────────────────────
+                        "__channel_new" => {
+                            // Create a new channel, push its ID as a number
+                            let id = next_channel_id;
+                            next_channel_id += 1;
+                            channels.push(Vec::new()); // queue for this channel
+                            let _ = stack.push(MolecularChain::from_number(id as f64));
+                        }
+                        "__channel_send" => {
+                            // Stack: [channel_id, value]
+                            let value = vm_pop!(stack, events);
+                            let ch_chain = vm_pop!(stack, events);
+                            let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                            if ch_id >= 1 && ch_id <= channels.len() {
+                                channels[ch_id - 1].push(value);
+                            }
+                            let _ = stack.push(MolecularChain::from_number(1.0)); // success
+                        }
+                        "__channel_recv" => {
+                            // Stack: [channel_id] → pops first message or empty
+                            let ch_chain = vm_pop!(stack, events);
+                            let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                            if ch_id >= 1 && ch_id <= channels.len() && !channels[ch_id - 1].is_empty() {
+                                let msg = channels[ch_id - 1].remove(0);
+                                let _ = stack.push(msg);
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+
+                        "__use_module" => {
+                            // Module loading — emit event for Runtime to handle
+                            let module_chain = vm_pop!(stack, events);
+                            let name = chain_to_string(&module_chain).unwrap_or_default();
+                            events.push(VmEvent::UseModule { name });
+                        }
+
                         _ => {
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
@@ -1609,6 +1881,114 @@ impl OlangVM {
                         hash: chain.chain_hash(),
                     });
                     let _ = stack.push(chain);
+                }
+
+                // ── Device I/O opcodes ─────────────────────────────────────────
+                // VM = side-effect free. Emit events → Runtime xử lý → HAL.
+                // Đây là bridge: Olang → VmEvent → Runtime → HAL → phần cứng.
+
+                Op::DeviceWrite(device_id) => {
+                    let val_chain = vm_pop!(stack, events);
+                    // Extract value: nếu là number chain → u8, nếu là mol → valence
+                    let value = if let Some(n) = val_chain.to_number() {
+                        n as u8
+                    } else if let Some(mol) = val_chain.0.first() {
+                        mol.emotion.valence
+                    } else {
+                        0
+                    };
+                    events.push(VmEvent::DeviceWrite {
+                        device_id: device_id.clone(),
+                        value,
+                    });
+                }
+
+                Op::DeviceRead(device_id) => {
+                    // Emit event — Runtime sẽ gọi HAL.device_read() và inject kết quả.
+                    // Tạm push empty chain → Runtime sẽ replace.
+                    events.push(VmEvent::DeviceRead {
+                        device_id: device_id.clone(),
+                    });
+                    // Push placeholder — caller (Runtime) có thể inject actual value
+                    let _ = stack.push(MolecularChain::empty());
+                }
+
+                Op::DeviceList => {
+                    events.push(VmEvent::DeviceListRequest);
+                }
+
+                // ── FFI & System I/O ──────────────────────────────────────────
+
+                Op::Ffi(name, arity) => {
+                    let mut args = Vec::new();
+                    for _ in 0..*arity {
+                        args.push(vm_pop!(stack, events));
+                    }
+                    args.reverse(); // stack order → call order
+                    events.push(VmEvent::FfiCall {
+                        name: name.clone(),
+                        args,
+                    });
+                    // Push placeholder — Runtime injects actual result
+                    let _ = stack.push(MolecularChain::empty());
+                }
+
+                Op::FileRead => {
+                    let path_chain = vm_pop!(stack, events);
+                    let path = chain_to_string(&path_chain)
+                        .unwrap_or_default();
+                    events.push(VmEvent::FileReadRequest { path });
+                    // Push placeholder — Runtime injects file contents
+                    let _ = stack.push(MolecularChain::empty());
+                }
+
+                Op::FileWrite => {
+                    let data_chain = vm_pop!(stack, events);
+                    let path_chain = vm_pop!(stack, events);
+                    let path = chain_to_string(&path_chain)
+                        .unwrap_or_default();
+                    let data = if let Some(s) = chain_to_string(&data_chain) {
+                        s.into_bytes()
+                    } else {
+                        data_chain.to_tagged_bytes()
+                    };
+                    events.push(VmEvent::FileWriteRequest { path, data });
+                }
+
+                Op::FileAppend => {
+                    let data_chain = vm_pop!(stack, events);
+                    let path_chain = vm_pop!(stack, events);
+                    let path = chain_to_string(&path_chain)
+                        .unwrap_or_default();
+                    let data = if let Some(s) = chain_to_string(&data_chain) {
+                        s.into_bytes()
+                    } else {
+                        data_chain.to_tagged_bytes()
+                    };
+                    events.push(VmEvent::FileAppendRequest { path, data });
+                }
+
+                Op::SpawnBegin => {
+                    // Count opcodes until SpawnEnd
+                    let mut count = 0usize;
+                    let mut search_pc = pc;
+                    while search_pc < prog.ops.len() {
+                        if matches!(prog.ops[search_pc], Op::SpawnEnd) {
+                            break;
+                        }
+                        count += 1;
+                        search_pc += 1;
+                    }
+                    events.push(VmEvent::SpawnRequest {
+                        body_ops_count: count,
+                    });
+                    // Skip past SpawnEnd — the body will be executed by Runtime as async
+                    pc = search_pc + 1;
+                    continue;
+                }
+
+                Op::SpawnEnd => {
+                    // Should not be reached — SpawnBegin skips past SpawnEnd
                 }
 
                 Op::TryBegin(catch_target) => {

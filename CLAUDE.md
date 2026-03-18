@@ -327,11 +327,11 @@ Resource access control cho Workers/Chiefs:
 
 ---
 
-## Olang VM — 31 Opcodes (không phải 26)
+## Olang VM — 36 Opcodes
 
 ```
-Stack:    Push Load Dup Pop Swap PushNum PushMol Store LoadLocal
-Control:  Jmp Jz Loop Call Ret ScopeBegin ScopeEnd Halt Nop
+Stack:    Push Load Dup Pop Swap PushNum PushMol Store StoreUpdate LoadLocal
+Control:  Jmp Jz Loop Call Ret ScopeBegin ScopeEnd TryBegin CatchEnd Halt Nop
 Chain:    Lca Edge Query Emit Fuse
 System:   Dream Stats
 Debug:    Trace Inspect Assert TypeOf Why Explain
@@ -339,8 +339,10 @@ Debug:    Trace Inspect Assert TypeOf Why Explain
 Molecular literal syntax (mới):
   { S=1 R=6 V=200 A=180 T=4 } → PushMol opcode
 
-Parser RelOps (10):
-  ∈ ⊂ ≡ ∘ → ≈ ← ∂(context) ∪(contains) ∩(intersects)
+Parser RelOps (18 = 10 gốc + 8 mở rộng):
+  Gốc:      ∈ ⊂ ≡ ∘ → ≈ ← ∂(context) ∪(contains) ∩(intersects)
+  Mở rộng:  ⊥(orthogonal) ∖(set minus) ↔(bidir) ⟶(flows)
+             ⟳(repeats) ↑(resolves) ⚡(trigger) ∥(parallel)
 
 Compiler targets: C · Rust · WASM (WAT)
 ```
