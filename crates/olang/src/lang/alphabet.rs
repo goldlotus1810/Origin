@@ -388,7 +388,9 @@ pub fn keyword_from_str(s: &str) -> Option<Keyword> {
         "return" => Some(Keyword::Return),
         "use" => Some(Keyword::Use),
         "struct" => Some(Keyword::Struct),
+        "type" => Some(Keyword::Struct),    // Olang bootstrap dùng "type" thay "struct"
         "enum" => Some(Keyword::Enum),
+        "union" => Some(Keyword::Enum),     // Olang bootstrap dùng "union" thay "enum"
         "impl" => Some(Keyword::Impl),
         "trait" => Some(Keyword::Trait),
         "self" => Some(Keyword::SelfKw),

@@ -49,9 +49,9 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Blocker | Fix | Effort | Status | Branch |
 |----|---------|-----|--------|--------|--------|
-| B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:373` | 5 min | FREE | — |
+| B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:391` | 5 min | DONE | claude/review-and-fix-project-erPD8 |
 | B2 | ModuleLoader thiếu file I/O | ~20 LOC `module.rs` | 1-2h | FREE | — |
-| B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | FREE | — |
+| B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | DONE | claude/review-and-fix-project-erPD8 |
 
 **Lưu ý:** B1+B2+B3 block toàn bộ Phase 0. Nên giải TRƯỚC.
 
@@ -61,7 +61,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 0.1 | Test lexer.ol trên Rust VM | `PLAN_0_1` | B1,B2,B3 | BLOCKED | — | — | Chờ blockers |
+| 0.1 | Test lexer.ol trên Rust VM | `PLAN_0_1` | B1,B2,B3 | BLOCKED | — | — | B1+B3 DONE, chờ B2 |
 | 0.2 | Test parser.ol + module import | `PLAN_0_2` | 0.1 | FREE | — | — | — |
 | 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | FREE | — | — | — |
 | 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | FREE | — | — | — |
@@ -125,4 +125,10 @@ Khi Session A xong 0.3:
 2026-03-18  AUTH → DONE (session 2pN6F). 7 files, 910 LOC, 21 tests.
             Ed25519 VerifyingKey extended (from_bytes, as_bytes, seed).
             Wire vào HomeRuntime chưa làm (origin.rs quá lớn, cần kế hoạch).
+2026-03-18  B1 DONE: thêm "union"→Enum, "type"→Struct vào alphabet.rs
+            B3 DONE: thêm "to_num"→"__to_number" vào semantic.rs
+            Bonus fixes: CmpOp::Eq (== as compare op), struct-style enum variants,
+            __eq VM builtin returns empty() for false (Jz-compatible).
+            Parser audit test audit_parse_bootstrap_lexer_ol PASSES.
+            All 2381 workspace tests pass. Còn lại B2 (ModuleLoader file I/O).
 ```
