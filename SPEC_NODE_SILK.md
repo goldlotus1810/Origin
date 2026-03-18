@@ -7,6 +7,99 @@
 
 ---
 
+## Triết lý nền tảng — tinh túy từ `node va silk.md`
+
+> Nguồn: `old/2026-03-18/node va silk.md` — cuộc thảo luận thiết kế gốc về bản chất Node & Silk.
+> Dưới đây là các **nguyên lý cốt lõi** được trích xuất và áp dụng cho spec này.
+
+### Nguyên lý 1: Molecule = Công thức, không phải Giá trị
+
+Mỗi byte trong Molecule không phải giá trị tĩnh — nó là **tham chiếu đến một công thức gốc L0**:
+
+```
+Shape    = f_s(inputs...)    ← công thức hình dạng
+Relation = f_r(inputs...)    ← công thức quan hệ
+Valence  = f_v(inputs...)    ← công thức cảm xúc
+Arousal  = f_a(inputs...)    ← công thức cường độ
+Time     = f_t(inputs...)    ← công thức thời gian
+
+Chưa có input → TIỀM NĂNG    Có input → GIÁ TRỊ CỤ THỂ    Đủ → node CHÍN
+```
+
+**Hệ quả trực tiếp:**
+- **Dream** = đánh giá công thức nào đã "chín" (đủ evidence) → promote QR
+- **LeoAI program()** = tổ hợp công thức A ∘ B → công thức C mới, chờ dữ liệu
+- **evolve()** = thay 1 biến trong công thức → loài mới
+- **16GB budget**: 100M concept × 7 bytes công thức = 700 MB (thay vì TB nếu lưu giá trị)
+
+→ **Áp dụng cho Gap #3:** Dream phải evaluate công thức (MolSummary 5D), không so sánh bytes.
+
+### Nguyên lý 2: Silk = Hệ quả tự nhiên của 5D, không phải Edge List
+
+```
+Emotion KHÔNG phải metadata trên edge.
+Emotion LÀ 2 TRONG 5 CHIỀU của node (V + A).
+"Cùng cảm xúc" = cùng công thức V hoặc A = TỰ ĐỘNG Silk.
+```
+
+Mỗi node có 5 chiều → 2 node chia sẻ chiều nào = Silk trên chiều đó. Không cần lưu edge.
+
+**Ví dụ chứng minh:**
+- 🔥 lửa = `[Sphere, Causes, V=0xC0, A=0xC0, Fast]` vs 😡 giận = `[Sphere, Causes, V=0xC0, A=0xC0, Fast]` → 5/5 chiều giống → ẩn dụ phổ quát "lửa giận"
+- "buồn" `[V=0x30]` vs "mất việc" `[V=0x20]` → V tương đồng → Silk Valence, weight ≈ 0.94
+
+→ **Áp dụng cho Gap #3 + #5:** Dream và Walk phải query implicit Silk (5D comparison).
+
+### Nguyên lý 3: "Nhóm máu" — L0 vừa là Alphabet vừa là Silk Channel
+
+```
+5400 công thức L0 → mỗi công thức = 1 "nhóm máu"
+Cùng nhóm máu trên chiều nào → Silk trên chiều đó
+L0 VỪA là alphabet, VỪA là Silk channel.
+```
+
+**3 tầng Silk:**
+
+| Tầng | Tên | Cách hoạt động | Số lượng |
+|------|-----|----------------|---------|
+| Base | 37 kênh (8S+8R+8V+8A+5T) | Cùng base value = cùng "nhóm máu" | 37 |
+| Precise | ~5400 kênh | Cùng variant chính xác = match hoàn hảo | ~5400 |
+| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều cùng lúc = kiểu quan hệ | 31 |
+
+**Công thức sức mạnh kết nối:**
+```
+strength(A, B) = Σ match(dim) × precision(dim)
+match(dim)     = 1 nếu cùng base, 0 nếu khác
+precision(dim) = 1.0 nếu cùng variant, 0.5 nếu chỉ cùng base
+
+37 kênh × 31 mẫu = 1147 KIỂU quan hệ có nghĩa
+```
+
+→ **Áp dụng cho Gap #2:** `CompoundKind` enum phải implement chính xác 31 mẫu + công thức strength.
+
+### Nguyên lý 4: 5532 Silk = 72 ngang + 5460 dọc = 43 KB
+
+```
+Silk tự do (horizontal):      72  quan hệ implicit    = 0 bytes
+Silk đại diện (vertical):   5460  kết nối parent-child = 43 KB
+                            ─────
+Tổng:                       5532  Silk connections     = 43 KB
+
+L0→L1: 5400 pointers | L1→L2: 37 | L2→L3: 12 | L3→L4: 5 | L4→L5: 3 | L5→L6: 2 | L6→L7: 1
+
+Truy vấn O(1): 2 lookup đại diện + 1 so sánh 5D
+```
+
+→ **Áp dụng cho Gap #1:** `parent_map` = 5460 entries × 8B = 43 KB. Duy nhất thứ cần LƯU.
+
+### Nguyên lý 5: Hebbian = Phát hiện cái đã có, không Tạo cái mới
+
+> "Silk fire together, wire together — không phải vì ai nối chúng lại, mà vì chúng đã ở cùng vị trí trong không gian 5D từ đầu."
+
+Hebbian learning chỉ **tăng cường nhận biết** (strengthen awareness) về quan hệ implicit đã tồn tại. Đây là lý do `co_activate()` đúng — nó phát hiện, không tạo mới. Nhưng Dream cần dùng implicit Silk để **biết** cái gì đã tồn tại.
+
+---
+
 ## Tóm tắt thiết kế gốc
 
 Tài liệu `node va silk.md` định nghĩa Silk là **hệ quả toán học tự nhiên** của không gian 5D, không phải edge list:
