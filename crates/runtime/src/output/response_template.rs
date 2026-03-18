@@ -32,22 +32,61 @@ pub struct ResponseParams {
     pub context: Option<String>,
     /// Original response từ learning pipeline (optional)
     pub original: Option<String>,
+    /// Ngôn ngữ phản hồi — "vi" (default), "en", v.v.
+    pub language: Lang,
+}
+
+/// Ngôn ngữ được phát hiện từ input text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Lang {
+    /// Tiếng Việt (default)
+    Vi,
+    /// English
+    En,
+}
+
+impl Default for Lang {
+    fn default() -> Self {
+        Lang::Vi
+    }
+}
+
+/// Detect language from input text.
+///
+/// Heuristic: nếu có Vietnamese diacritics (ă, ơ, ư, đ, ê, ô, ấ, ầ, ể, ữ...)
+/// hoặc common Vietnamese words → Vi. Ngược lại → En.
+pub fn detect_language(text: &str) -> Lang {
+    let lo = text.to_lowercase();
+    // Vietnamese diacritics: characters with combining marks typical of Vietnamese
+    let vi_chars = ['ă', 'ơ', 'ư', 'đ', 'ê', 'ô', 'ấ', 'ầ', 'ể', 'ữ', 'ộ', 'ứ', 'ờ', 'ả', 'ẵ', 'ẫ'];
+    if lo.chars().any(|c| vi_chars.contains(&c)) {
+        return Lang::Vi;
+    }
+    // Common Vietnamese words
+    let vi_words = ["tôi", "bạn", "mình", "không", "được", "này", "của", "cho", "với", "và"];
+    for w in vi_words {
+        if lo.contains(w) {
+            return Lang::Vi;
+        }
+    }
+    Lang::En
 }
 
 /// Render response text từ params — không hardcode string trong caller.
 pub fn render(p: &ResponseParams) -> String {
+    let lang = p.language;
     match &p.action {
-        IntentAction::CrisisOverride => crisis_text(),
+        IntentAction::CrisisOverride => crisis_text_lang(lang),
 
-        IntentAction::SoftRefusal => soft_refusal_text(),
+        IntentAction::SoftRefusal => soft_refusal_text_lang(lang),
 
-        IntentAction::AskContext { angry } => ask_context_text(*angry, p.valence),
+        IntentAction::AskContext { angry } => ask_context_text_lang(*angry, p.valence, lang),
 
-        IntentAction::EmpathizeFirst => empathize_text(p.tone, p.valence, p.original.as_deref()),
+        IntentAction::EmpathizeFirst => empathize_text_lang(p.tone, p.valence, p.original.as_deref(), lang),
 
         IntentAction::AddClarify { kind } => {
             let base = p.original.as_deref().unwrap_or("");
-            let clarify = clarify_text(*kind, p.valence);
+            let clarify = clarify_text_lang(*kind, p.valence, lang);
             if base.is_empty() {
                 clarify
             } else {
@@ -55,21 +94,29 @@ pub fn render(p: &ResponseParams) -> String {
             }
         }
 
-        IntentAction::Proceed => proceed_text(p.tone, p.valence, p.original.as_deref()),
+        IntentAction::Proceed => proceed_text_lang(p.tone, p.valence, p.original.as_deref(), lang),
 
-        IntentAction::UserConfirm => confirm_text(p.valence),
+        IntentAction::UserConfirm => confirm_text_lang(lang),
 
-        IntentAction::UserDeny => deny_text(p.valence),
+        IntentAction::UserDeny => deny_text_lang(lang),
 
         // ForceLearnQR and ConfirmLearnQR are handled directly in process_input
         // before reaching render() — these arms are unreachable but required.
         IntentAction::ForceLearnQR | IntentAction::ConfirmLearnQR => {
-            proceed_text(p.tone, p.valence, p.original.as_deref())
+            proceed_text_lang(p.tone, p.valence, p.original.as_deref(), lang)
         }
 
-        IntentAction::Observe => observe_text(p.valence, p.original.as_deref()),
+        IntentAction::Observe => observe_text_lang(p.valence, p.original.as_deref(), lang),
 
         IntentAction::SilentAck => silent_ack_text(p.valence),
+
+        // HomeControl: handled in process_input before render() — original has ISL result.
+        IntentAction::HomeControl => {
+            p.original.clone().unwrap_or_else(|| match lang {
+                Lang::Vi => String::from("○ Đã gửi lệnh."),
+                Lang::En => String::from("○ Command sent."),
+            })
+        }
     }
 }
 
@@ -80,133 +127,172 @@ pub fn render(p: &ResponseParams) -> String {
 /// Crisis text — theo QT9: trung thực, không manipulate.
 /// Hotline là thông tin thực tế, không phải string cứng trong logic.
 pub fn crisis_text() -> String {
-    crisis_text_with_region("vi")
+    crisis_text_lang(Lang::Vi)
+}
+
+fn crisis_text_lang(lang: Lang) -> String {
+    match lang {
+        Lang::Vi => format!(
+            "Mình đọc được điều bạn vừa nói và muốn hỏi thẳng: \
+             bạn có đang nghĩ đến việc tự làm hại bản thân không?\n\n\
+             Không cần trả lời ngay. Mình ở đây.\n\n\
+             Đường dây hỗ trợ: 1800 599 920 (miễn phí, 24/7)."),
+        Lang::En => format!(
+            "I hear what you just said and want to ask directly: \
+             are you thinking about hurting yourself?\n\n\
+             You don't have to answer right now. I'm here.\n\n\
+             Crisis line: 988 Suicide & Crisis Lifeline (call or text 988)."),
+    }
 }
 
 pub fn crisis_text_with_region(lang: &str) -> String {
-    // Thông tin hotline theo vùng — đây là DATA, không phải logic
-    let hotline = match lang {
-        "vi" => "1800 599 920 (miễn phí, 24/7)",
-        "en" => "988 Suicide & Crisis Lifeline (call or text 988)",
-        _ => "a local crisis helpline",
-    };
-    // Cấu trúc: thừa nhận → hỏi thẳng → hỗ trợ → nguồn lực
-    // Không thêm thông tin gốc (QT9: không gây hại)
-    format!(
-        "Mình đọc được điều bạn vừa nói và muốn hỏi thẳng: \
-         bạn có đang nghĩ đến việc tự làm hại bản thân không?\n\n\
-         Không cần trả lời ngay. Mình ở đây.\n\n\
-         Đường dây hỗ trợ: {}.",
-        hotline
-    )
-}
-
-fn soft_refusal_text() -> String {
-    // Từ chối nhẹ — không phán xét, mở cửa cho dialog
-    // Cấu trúc: tôi không làm → lý do nguyên tắc → mời nói tiếp
-    "Cái này mình không làm được — không phải vì quy tắc, \
-     mà vì mình không muốn giúp ảnh hưởng xấu đến người khác. \
-     Bạn muốn nói về điều đang thúc đẩy bạn hỏi điều này không?"
-        .to_string()
-}
-
-fn ask_context_text(angry: bool, cur_v: f32) -> String {
-    if angry || cur_v < -0.50 {
-        // Cảm xúc mạnh → đồng cảm trước
-        "Mình thấy bạn đang có cảm xúc rất mạnh. \
-         Kể cho mình nghe chuyện gì đang xảy ra được không?"
-            .to_string()
-    } else {
-        // Không rõ context → hỏi neutral
-        "Câu này mình cần hiểu rõ hơn. \
-         Bạn đang nghĩ đến tình huống nào cụ thể?"
-            .to_string()
+    match lang {
+        "en" => crisis_text_lang(Lang::En),
+        _ => crisis_text_lang(Lang::Vi),
     }
 }
 
-fn empathize_text(_tone: ResponseTone, cur_v: f32, original: Option<&str>) -> String {
-    // Cấu trúc: thừa nhận cảm xúc → [thông tin nếu có]
-    let ack = if cur_v < -0.60 {
-        "Mình nghe bạn."
-    } else if cur_v < -0.30 {
-        "Mình hiểu."
-    } else {
-        "Ừ."
-    };
+fn soft_refusal_text() -> String { soft_refusal_text_lang(Lang::Vi) }
 
-    match original {
-        Some(s) if !s.is_empty() => format!("{} {}", ack, s),
-        _ => format!("{} Bạn muốn kể thêm không?", ack),
+fn soft_refusal_text_lang(lang: Lang) -> String {
+    match lang {
+        Lang::Vi => "Cái này mình không làm được — không phải vì quy tắc, \
+             mà vì mình không muốn giúp ảnh hưởng xấu đến người khác. \
+             Bạn muốn nói về điều đang thúc đẩy bạn hỏi điều này không?".to_string(),
+        Lang::En => "I can't help with this — not because of rules, \
+             but because I don't want to help cause harm to others. \
+             Would you like to talk about what's driving this question?".to_string(),
     }
 }
 
-fn clarify_text(kind: ClarifyKind, cur_v: f32) -> String {
-    match kind {
-        ClarifyKind::WhatPurpose => {
-            "Bạn đang tìm hiểu để làm gì — học, công việc, hay tò mò?".to_string()
-        }
-        ClarifyKind::WhatDirection => "Bạn đang nghiên cứu theo hướng nào?".to_string(),
-        ClarifyKind::WhatContext => "Bạn đang dùng trong tình huống cụ thể nào không?".to_string(),
-        ClarifyKind::CheckingIn => {
-            if cur_v < -0.30 {
-                "Bạn đang ổn không?".to_string()
+fn ask_context_text(angry: bool, cur_v: f32) -> String { ask_context_text_lang(angry, cur_v, Lang::Vi) }
+
+fn ask_context_text_lang(angry: bool, cur_v: f32, lang: Lang) -> String {
+    match lang {
+        Lang::Vi => {
+            if angry || cur_v < -0.50 {
+                "Mình thấy bạn đang có cảm xúc rất mạnh. \
+                 Kể cho mình nghe chuyện gì đang xảy ra được không?".to_string()
             } else {
-                "Bạn có thể nói thêm không?".to_string()
+                "Câu này mình cần hiểu rõ hơn. \
+                 Bạn đang nghĩ đến tình huống nào cụ thể?".to_string()
+            }
+        }
+        Lang::En => {
+            if angry || cur_v < -0.50 {
+                "I can see you're feeling strongly about this. \
+                 Can you tell me what's going on?".to_string()
+            } else {
+                "I need to understand this better. \
+                 What specific situation are you thinking of?".to_string()
             }
         }
     }
 }
 
-fn proceed_text(tone: ResponseTone, cur_v: f32, original: Option<&str>) -> String {
-    // Nếu có original từ learning pipeline → dùng nó
-    // Nếu không → dùng tone-based placeholder
+fn empathize_text(tone: ResponseTone, cur_v: f32, original: Option<&str>) -> String { empathize_text_lang(tone, cur_v, original, Lang::Vi) }
+
+fn empathize_text_lang(_tone: ResponseTone, cur_v: f32, original: Option<&str>, lang: Lang) -> String {
+    let ack = match lang {
+        Lang::Vi => {
+            if cur_v < -0.60 { "Mình nghe bạn." }
+            else if cur_v < -0.30 { "Mình hiểu." }
+            else { "Ừ." }
+        }
+        Lang::En => {
+            if cur_v < -0.60 { "I hear you." }
+            else if cur_v < -0.30 { "I understand." }
+            else { "Yeah." }
+        }
+    };
+    match original {
+        Some(s) if !s.is_empty() => format!("{} {}", ack, s),
+        _ => match lang {
+            Lang::Vi => format!("{} Bạn muốn kể thêm không?", ack),
+            Lang::En => format!("{} Would you like to tell me more?", ack),
+        },
+    }
+}
+
+fn clarify_text(kind: ClarifyKind, cur_v: f32) -> String { clarify_text_lang(kind, cur_v, Lang::Vi) }
+
+fn clarify_text_lang(kind: ClarifyKind, cur_v: f32, lang: Lang) -> String {
+    match lang {
+        Lang::Vi => match kind {
+            ClarifyKind::WhatPurpose => "Bạn đang tìm hiểu để làm gì — học, công việc, hay tò mò?".to_string(),
+            ClarifyKind::WhatDirection => "Bạn đang nghiên cứu theo hướng nào?".to_string(),
+            ClarifyKind::WhatContext => "Bạn đang dùng trong tình huống cụ thể nào không?".to_string(),
+            ClarifyKind::CheckingIn => {
+                if cur_v < -0.30 { "Bạn đang ổn không?".to_string() }
+                else { "Bạn có thể nói thêm không?".to_string() }
+            }
+        },
+        Lang::En => match kind {
+            ClarifyKind::WhatPurpose => "What are you exploring this for — study, work, or curiosity?".to_string(),
+            ClarifyKind::WhatDirection => "What direction are you researching?".to_string(),
+            ClarifyKind::WhatContext => "Is there a specific situation you're using this in?".to_string(),
+            ClarifyKind::CheckingIn => {
+                if cur_v < -0.30 { "Are you doing okay?".to_string() }
+                else { "Could you tell me more?".to_string() }
+            }
+        },
+    }
+}
+
+fn proceed_text_lang(tone: ResponseTone, cur_v: f32, original: Option<&str>, lang: Lang) -> String {
     if let Some(s) = original {
         if !s.is_empty() {
             return s.to_string();
         }
     }
-    // Fallback theo tone — tối giản, không thừa
-    tone_fallback(tone, cur_v)
+    tone_fallback_lang(tone, cur_v, lang)
 }
 
 /// Fallback text theo tone — tối giản.
 /// Caller nên có original text; đây chỉ là safety net.
 pub fn tone_fallback(tone: ResponseTone, cur_v: f32) -> String {
-    match tone {
-        ResponseTone::Supportive => {
-            if cur_v < -0.40 {
-                "Bạn muốn kể thêm không?".to_string()
-            } else {
-                "Mình đang lắng nghe.".to_string()
+    tone_fallback_lang(tone, cur_v, Lang::Vi)
+}
+
+fn tone_fallback_lang(tone: ResponseTone, cur_v: f32, lang: Lang) -> String {
+    match lang {
+        Lang::Vi => match tone {
+            ResponseTone::Supportive => {
+                if cur_v < -0.40 { "Bạn muốn kể thêm không?".to_string() }
+                else { "Mình đang lắng nghe.".to_string() }
             }
-        }
-        ResponseTone::Pause => "Bạn có ổn không?".to_string(),
-        ResponseTone::Gentle => "Cứ từ từ thôi.".to_string(),
-        ResponseTone::Reinforcing => "Tốt đấy.".to_string(),
-        ResponseTone::Celebratory => "Tuyệt!".to_string(),
-        ResponseTone::Engaged => "Ừ.".to_string(),
+            ResponseTone::Pause => "Bạn có ổn không?".to_string(),
+            ResponseTone::Gentle => "Cứ từ từ thôi.".to_string(),
+            ResponseTone::Reinforcing => "Tốt đấy.".to_string(),
+            ResponseTone::Celebratory => "Tuyệt!".to_string(),
+            ResponseTone::Engaged => "Ừ.".to_string(),
+        },
+        Lang::En => match tone {
+            ResponseTone::Supportive => {
+                if cur_v < -0.40 { "Would you like to tell me more?".to_string() }
+                else { "I'm listening.".to_string() }
+            }
+            ResponseTone::Pause => "Are you okay?".to_string(),
+            ResponseTone::Gentle => "Take your time.".to_string(),
+            ResponseTone::Reinforcing => "That's good.".to_string(),
+            ResponseTone::Celebratory => "Great!".to_string(),
+            ResponseTone::Engaged => "Yeah.".to_string(),
+        },
     }
 }
 
-/// Observe — im lặng thông minh.
-///
-/// Khi không đủ context để trả lời đầy đủ → ghi nhận nhẹ nhàng,
-/// không phán đoán, không hỏi dồn dập.
-///
-/// Nếu caller đã resolve được reference → dùng original.
-/// Nếu chưa → im lặng tối giản.
-fn observe_text(cur_v: f32, original: Option<&str>) -> String {
-    // Nếu có original (reference đã resolve) → dùng nó
+fn observe_text_lang(cur_v: f32, original: Option<&str>, lang: Lang) -> String {
     if let Some(s) = original {
         if !s.is_empty() {
             return s.to_string();
         }
     }
-    // Im lặng tối giản — đủ để user biết mình được lắng nghe
     if cur_v < -0.40 {
-        "Mình đang nghe.".to_string()
+        match lang {
+            Lang::Vi => "Mình đang nghe.".to_string(),
+            Lang::En => "I'm listening.".to_string(),
+        }
     } else {
-        // Gần neutral hoặc positive → im lặng hơn
         String::new()
     }
 }
@@ -216,16 +302,21 @@ fn observe_text(cur_v: f32, original: Option<&str>) -> String {
 /// "Ah!", "ya..!", "ôi!" → chỉ cần acknowledge rất nhẹ.
 /// Trả về chuỗi rỗng = runtime sẽ hiểu là silence.
 fn silent_ack_text(_cur_v: f32) -> String {
-    // Thán từ → không cần response text. Runtime ghi nhận emotion.
     String::new()
 }
 
-fn confirm_text(_cur_v: f32) -> String {
-    "Đã ghi nhận. Mình sẽ thực hiện.".to_string()
+fn confirm_text_lang(lang: Lang) -> String {
+    match lang {
+        Lang::Vi => "Đã ghi nhận. Mình sẽ thực hiện.".to_string(),
+        Lang::En => "Noted. I'll proceed.".to_string(),
+    }
 }
 
-fn deny_text(_cur_v: f32) -> String {
-    "Đã ghi nhận. Mình sẽ không thực hiện.".to_string()
+fn deny_text_lang(lang: Lang) -> String {
+    match lang {
+        Lang::Vi => "Đã ghi nhận. Mình sẽ không thực hiện.".to_string(),
+        Lang::En => "Noted. I won't proceed.".to_string(),
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,6 +335,7 @@ mod tests {
             fx: v,
             context: None,
             original: None,
+            language: Lang::Vi,
         }
     }
 
@@ -298,6 +390,7 @@ mod tests {
             fx: 0.1,
             context: None,
             original: Some("đây là câu trả lời thật".to_string()),
+            language: Lang::Vi,
         };
         let r = render(&p);
         assert!(r.contains("đây là câu trả lời thật"));

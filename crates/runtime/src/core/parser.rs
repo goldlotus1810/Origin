@@ -1159,6 +1159,7 @@ fn is_command(s: &str) -> bool {
         || s.starts_with("assert ")
         || s.starts_with("explain ")
         || s.starts_with("why ")
+        || s.starts_with("read ")
         || is_math_command(s)
         || is_constant_command(s)
         || is_leo_command(s)

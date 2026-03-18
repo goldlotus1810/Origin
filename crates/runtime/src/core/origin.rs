@@ -10,7 +10,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use crate::response_template::{render, ResponseParams};
+use crate::response_template::{render, detect_language, Lang, ResponseParams};
 use agents::encoder::ContentInput;
 use agents::gate::GateVerdict;
 use agents::learning::{LearningLoop, ProcessResult};
@@ -170,6 +170,21 @@ struct RecentText {
     timestamp: i64,
     /// Tên riêng đã extract được (nếu có)
     names: alloc::vec::Vec<String>,
+}
+
+/// Extract first integer from text (e.g., "đặt nhiệt độ 25" → 25).
+fn extract_number(s: &str) -> Option<i32> {
+    let mut num_str = String::new();
+    let mut found = false;
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            num_str.push(c);
+            found = true;
+        } else if found {
+            break;
+        }
+    }
+    if found { num_str.parse().ok() } else { None }
 }
 
 /// Extract text content from OlangExpr for SecurityGate checking.
@@ -1986,6 +2001,26 @@ impl HomeRuntime {
                 }
             }
 
+            _ if cmd.starts_with("read ") => {
+                // ○{read <text>} — BookReader → learn sentences → STM → Silk → KnowTree
+                let text = &cmd[5..];
+                if text.trim().is_empty() {
+                    return Response {
+                        text: String::from("○{read <text>} — cần nội dung để đọc."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let stored = self.read_book(text, ts);
+                Response {
+                    text: format!("Read ○ {} sentences learned.", stored),
+                    tone: ResponseTone::Engaged,
+                    fx: self.learning.context().fx(),
+                    kind: ResponseKind::System,
+                }
+            }
+
             _ => {
                 // Math commands (solve, derive, integrate, simplify, eval)
                 let math_prefixes = [
@@ -2841,6 +2876,10 @@ impl HomeRuntime {
         let mut action = decide_action(&est, cur_v);
         let fx = self.learning.context().fx();
         let tone = self.learning.context().tone();
+        let lang = match &input {
+            ContentInput::Text { content, .. } => detect_language(content),
+            _ => Lang::Vi,
+        };
 
         // ── T7b: Reference resolution — "bà ấy", "anh ta"... ─────────────
         // Nếu Observe vì unresolved_ref → thử resolve từ recent_texts
@@ -2896,6 +2935,21 @@ impl HomeRuntime {
                 // ── ConfirmLearnQR: "cái này đúng" → promote last STM → QR ──
                 if action == IntentAction::ConfirmLearnQR {
                     return self.confirm_learn_qr(ts);
+                }
+
+                // ── HomeControl: route command to HomeChief via ISL ────────
+                if action == IntentAction::HomeControl {
+                    let cmd_text = match &input {
+                        ContentInput::Text { content, .. } => content.as_str(),
+                        _ => "",
+                    };
+                    let result_text = self.dispatch_home_control(cmd_text, ts);
+                    return Response {
+                        text: result_text,
+                        tone,
+                        fx,
+                        kind: ResponseKind::Natural,
+                    };
                 }
 
                 // ── Knowledge recall + contradiction ──────────────────────
@@ -2992,6 +3046,7 @@ impl HomeRuntime {
                         fx,
                         context: recall,
                         original: observe_original,
+                        language: lang,
                     });
                     return Response {
                         text,
@@ -3028,6 +3083,7 @@ impl HomeRuntime {
                     fx,
                     context: recall,
                     original,
+                    language: lang,
                 });
 
                 // ── T7e: Instinct enrichment — bản năng làm giàu response ──
@@ -3092,6 +3148,7 @@ impl HomeRuntime {
                     fx,
                     context: None,
                     original: None,
+                    language: lang,
                 });
                 Response {
                     text,
@@ -3298,6 +3355,66 @@ impl HomeRuntime {
             self.knowtree.store_chapter(&chains, None, ts);
         }
         stored
+    }
+
+    // ── HomeControl → ISL → Chief ─────────────────────────────────────────────
+
+    /// Dispatch home control command to HomeChief via ISL.
+    ///
+    /// Parse command text → find target Chief → send ActuatorCmd via ISL.
+    /// Returns response text confirming the dispatch.
+    fn dispatch_home_control(&mut self, cmd_text: &str, ts: i64) -> String {
+        let lo = cmd_text.to_lowercase();
+
+        // Determine command byte and value from natural language
+        let (cmd_byte, value, description) = if lo.contains("tắt") || lo.contains("turn off") || lo.contains("off") {
+            (0x00_u8, 0x00_u8, "tắt")
+        } else if lo.contains("bật") || lo.contains("mở") || lo.contains("turn on") || lo.contains("on") {
+            (0x01, 0xFF, "bật")
+        } else if lo.contains("nhiệt độ") || lo.contains("temperature") {
+            // Extract number if present
+            let val = extract_number(&lo).unwrap_or(22) as u8;
+            (0x02, val, "đặt nhiệt độ")
+        } else {
+            (0x01, 0xFF, "điều khiển")
+        };
+
+        // Find HomeChief (group=1) and send ActuatorCmd
+        let home_chief_idx = self.chiefs.iter().position(|c| c.kind == ChiefKind::Home);
+        if let Some(idx) = home_chief_idx {
+            // If Chief has workers → forward to first alive worker
+            let worker_addr = self.chiefs[idx].workers.values()
+                .find(|w| w.alive)
+                .map(|w| w.addr);
+
+            if let Some(target) = worker_addr {
+                self.chiefs[idx].forward_command(target, cmd_byte, value);
+                // Tick router to process the command
+                let _tick = self.router.tick(
+                    &mut self.workers,
+                    &mut self.chiefs,
+                    &mut self.leo,
+                    ts,
+                );
+                format!("○ Đã {} — lệnh gửi đến Worker {:?}.", description, target)
+            } else {
+                // No workers yet — send ISL to Chief inbox for when workers connect
+                let msg = isl::message::ISLMessage::actuator(
+                    isl::address::ISLAddress::new(0, 0, 0, 0), // from Runtime
+                    self.chiefs[idx].addr,
+                    cmd_byte,
+                    value,
+                );
+                let frame = isl::message::ISLFrame::bare(msg);
+                self.chiefs[idx].receive_frame(frame, ts);
+                format!(
+                    "○ Đã {} — lệnh gửi đến HomeChief (chưa có Worker kết nối).",
+                    description
+                )
+            }
+        } else {
+            format!("○ Không tìm thấy HomeChief — hệ thống chưa sẵn sàng.")
+        }
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
