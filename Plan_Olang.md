@@ -657,6 +657,50 @@ SHOULD-HAVE (usability):
   ⑨ Array chain:   arr.filter(...).map(...) — method chaining trên array
 ```
 
+### Audit Phase 5 AI-B (2026-03-18)
+
+```
+Task    Feature              Verdict     Chi tiết
+──────────────────────────────────────────────────────────────────────
+B11     Set builtins         ❌ CHƯA     0/9 builtins (__set_new → __set_to_array)
+        Deque builtins       ❌ CHƯA     0/8 builtins (__deque_new → __deque_peek_back)
+        Method dispatch      ❌ CHƯA     semantic.rs không có Set/Deque routing
+        Tests                ❌ 0 tests
+──────────────────────────────────────────────────────────────────────
+B12     String slice [..]    ❌ CHƯA     Expr::Slice không tồn tại, DotDot chỉ dùng trong for
+        Array method chain   ⚠️ PARTIAL  Parser cho phép .a().b() chaining, nhưng
+                                         filter/map trả array → chain tiếp được (eager)
+                                         Lazy chaining chưa có (cần A12 Iterator)
+        __str_slice          ❌ CHƯA     Chỉ có __array_slice, không có __str_slice
+        Tests                ❌ 0 tests  cho string slice
+──────────────────────────────────────────────────────────────────────
+B13     Existing .ol (5)     ⚠️ BUG     io.ol, platform.ol, test.ol gọi print()
+                                         thay vì __print() → đệ quy vô hạn
+        Missing .ol (10)     ❌ CHƯA     math/string/bytes/vec/map/set/deque/
+                                         option/result/iterator.ol
+        bootstrap/           ✅ GOOD     lexer.ol + parser.ol excellent quality
+──────────────────────────────────────────────────────────────────────
+B14     Closure compile      ❌ STUBS    C/Rust/WASM: chỉ emit comment stubs
+        Channel compile      ❌ STUBS    C/Rust/WASM: chỉ emit comment stubs
+        Spawn compile        ❌ STUBS    C/Rust/WASM: chỉ emit comment stubs
+        Select compile       ❌ STUBS    VM có marker nhưng không preemptive
+        Device I/O compile   ✅ DONE     extern calls đúng
+        FFI compile          ✅ DONE     extern calls đúng
+        E2E compile tests    ❌ CHƯA     Không có gcc/rustc/wat2wasm execution tests
+──────────────────────────────────────────────────────────────────────
+VM builtins (đã có):  87 builtins
+VM builtins (thiếu):  17 (Set 9 + Deque 8) + Option/Result methods
+```
+
+#### Bugs cần fix TRƯỚC khi implement Phase 5
+
+```
+BUG-1: stdlib/io.ol:17      — print(msg) gọi chính nó → infinite recursion
+        Fix: đổi thành __print(msg) hoặc đặt tên function khác
+BUG-2: stdlib/platform.ol   — tương tự, arch()/os()/memory() gọi chính nó
+BUG-3: stdlib/test.ol       — assert_eq() gọi chính nó thay vì __assert_eq()
+```
+
 ---
 
 ## Phase 5: Completion & Polish (tuần 9-10)

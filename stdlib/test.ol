@@ -21,17 +21,17 @@ mod test;
 
 // Assert two values are equal. Panics with message if not.
 pub fn assert_eq(a, b) {
-    assert_eq(a, b);
+    __assert_eq(a, b);
 }
 
 // Assert two values are NOT equal. Panics with message if equal.
 pub fn assert_ne(a, b) {
-    assert_ne(a, b);
+    __assert_ne(a, b);
 }
 
 // Assert value is truthy (non-empty). Panics if empty/falsy.
 pub fn assert_true(val) {
-    assert_true(val);
+    __assert_true(val);
 }
 
 // Assert value is falsy (empty). Panics if non-empty.
