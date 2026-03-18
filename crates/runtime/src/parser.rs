@@ -256,6 +256,8 @@ pub enum ParseResult {
     Natural(String),
     /// ○{} expression đã parse
     OlangExpr(OlangExpr),
+    /// Full program (struct/enum/impl/trait) — delegate to syntax parser
+    FullProgram(String),
     /// Parse error
     Error(String),
 }
@@ -281,7 +283,19 @@ impl OlangParser {
 
         // Detect ○{...}
         if let Some(inner) = extract_olang(trimmed) {
-            match self.parse_expr(inner.trim()) {
+            let inner_trimmed = inner.trim();
+            // Type-system keywords → delegate to full syntax parser
+            if inner_trimmed.starts_with("struct ")
+                || inner_trimmed.starts_with("enum ")
+                || inner_trimmed.starts_with("impl ")
+                || inner_trimmed.starts_with("trait ")
+                || inner_trimmed.starts_with("pub struct ")
+                || inner_trimmed.starts_with("pub enum ")
+                || inner_trimmed.starts_with("pub trait ")
+            {
+                return ParseResult::FullProgram(inner_trimmed.to_string());
+            }
+            match self.parse_expr(inner_trimmed) {
                 Ok(expr) => ParseResult::OlangExpr(expr),
                 Err(e) => ParseResult::Error(e),
             }

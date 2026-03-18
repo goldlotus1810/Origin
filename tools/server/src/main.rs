@@ -64,10 +64,11 @@ fn main() {
     // ══════════════════════════════════════════════════════════════════════════
     // Phase 3: LOAD registry + QT axioms
     // ══════════════════════════════════════════════════════════════════════════
+    let desktop_bridge = Box::new(hal::ffi::DesktopBridge::new());
     let mut rt = if let Some(ref bytes) = file_bytes {
-        HomeRuntime::with_file(session_id, Some(bytes))
+        HomeRuntime::with_platform(session_id, Some(bytes), desktop_bridge)
     } else {
-        HomeRuntime::new(session_id)
+        HomeRuntime::with_platform(session_id, None, desktop_bridge)
     };
 
     println!(

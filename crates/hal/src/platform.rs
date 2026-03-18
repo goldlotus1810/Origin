@@ -139,10 +139,36 @@ pub enum BusType {
 // HalPlatform — trait chính
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Kết quả điều khiển thiết bị.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceResult {
+    /// Thành công
+    Ok,
+    /// Thiết bị không tìm thấy
+    NotFound,
+    /// Không hỗ trợ
+    Unsupported,
+    /// Lỗi phần cứng
+    HardwareError,
+    /// Bị từ chối (CapabilityGate)
+    Denied,
+}
+
 /// HAL Platform trait — interface giữa HomeOS và phần cứng thật.
 ///
 /// Mỗi platform (Linux, Android, ESP32, WASM) implement trait này.
 /// Worker gọi trait methods — không biết đang chạy trên platform nào.
+///
+/// Device control: Olang gọi `device_write()` → HAL thực thi trên phần cứng.
+/// Mỗi thiết bị = 1 device_id (string). Value = molecular dimensions (5 bytes).
+///
+/// Tại sao 5 bytes điều khiển được mọi thiết bị?
+///   device_write("relay_0", 0xFF) = bật relay
+///   device_write("light_0", 0x40) = đèn 25%
+///   device_read("dht22")          = đọc nhiệt độ → f32
+///
+/// 500 dòng C per driver → 1 dòng Olang:
+///   ○{💡}.evolve(V, 0xFF)  // bật đèn
 pub trait HalPlatform {
     /// Tên platform.
     fn name(&self) -> &str;
@@ -164,6 +190,41 @@ pub trait HalPlatform {
 
     /// Lấy danh sách capabilities.
     fn capabilities(&self) -> Vec<PlatformCapability>;
+
+    // ── Device I/O ────────────────────────────────────────────────────────────
+
+    /// Ghi giá trị ra thiết bị.
+    ///
+    /// device_id = DeviceDescriptor.id (VD: "gpio_relay", "light_0")
+    /// value     = giá trị molecular (0x00..0xFF, map từ Valence/Arousal)
+    ///
+    /// Platform impl map value → hardware action:
+    ///   ESP32: gpio_write(pin, value > 0)
+    ///   RPi:   /sys/class/gpio/...
+    ///   Android: JNI → SmartHome API
+    fn device_write(&self, device_id: &str, value: u8) -> DeviceResult {
+        let _ = (device_id, value);
+        DeviceResult::Unsupported
+    }
+
+    /// Đọc giá trị từ thiết bị.
+    ///
+    /// Trả về f32 (normalized hoặc raw tùy sensor).
+    /// None = thiết bị không tồn tại hoặc không đọc được.
+    fn device_read(&self, device_id: &str) -> Option<f32> {
+        let _ = device_id;
+        None
+    }
+
+    /// Ghi nhiều bytes ra thiết bị (I2C/SPI protocol).
+    ///
+    /// Dùng cho thiết bị cần protocol phức tạp hơn 1 byte:
+    ///   I2C: device_write_bytes("i2c_0x48", &[0x01, 0x60]) → set config register
+    ///   SPI: device_write_bytes("spi_display", &frame_data) → ghi framebuffer
+    fn device_write_bytes(&self, device_id: &str, data: &[u8]) -> DeviceResult {
+        let _ = (device_id, data);
+        DeviceResult::Unsupported
+    }
 
     /// Tổng hợp platform profile.
     fn profile(&self, ts: i64) -> PlatformProfile {
@@ -435,6 +496,30 @@ impl HalPlatform for MockPlatform {
     fn capabilities(&self) -> Vec<PlatformCapability> {
         self.caps.clone()
     }
+
+    fn device_write(&self, device_id: &str, _value: u8) -> DeviceResult {
+        // Mock: succeed nếu device tồn tại và là Actuator/GpioPin
+        if let Some(dev) = self.devices.iter().find(|d| d.id == device_id) {
+            match dev.device_type {
+                DeviceType::Actuator | DeviceType::GpioPin => DeviceResult::Ok,
+                _ => DeviceResult::Unsupported,
+            }
+        } else {
+            DeviceResult::NotFound
+        }
+    }
+
+    fn device_read(&self, device_id: &str) -> Option<f32> {
+        // Mock: trả giá trị cố định nếu device tồn tại và là Sensor
+        if let Some(dev) = self.devices.iter().find(|d| d.id == device_id) {
+            match dev.device_type {
+                DeviceType::Sensor => Some(25.0), // 25°C mock
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -539,5 +624,81 @@ mod tests {
         let profile = platform.profile(42);
         assert_eq!(profile.probed_at, 42);
         assert_eq!(profile.os, "mock");
+    }
+
+    // ── Device I/O tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn device_write_actuator_ok() {
+        let platform = MockPlatform::esp32();
+        // gpio_relay is Actuator → should succeed
+        assert_eq!(
+            platform.device_write("gpio_relay", 0xFF),
+            DeviceResult::Ok
+        );
+    }
+
+    #[test]
+    fn device_write_sensor_unsupported() {
+        let platform = MockPlatform::esp32();
+        // gpio_dht22 is Sensor → can't write
+        assert_eq!(
+            platform.device_write("gpio_dht22", 0xFF),
+            DeviceResult::Unsupported
+        );
+    }
+
+    #[test]
+    fn device_write_not_found() {
+        let platform = MockPlatform::esp32();
+        assert_eq!(
+            platform.device_write("nonexistent", 0xFF),
+            DeviceResult::NotFound
+        );
+    }
+
+    #[test]
+    fn device_read_sensor_ok() {
+        let platform = MockPlatform::esp32();
+        // gpio_dht22 is Sensor → should return value
+        let val = platform.device_read("gpio_dht22");
+        assert!(val.is_some());
+        assert!((val.unwrap() - 25.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn device_read_actuator_none() {
+        let platform = MockPlatform::esp32();
+        // gpio_relay is Actuator → can't read
+        assert!(platform.device_read("gpio_relay").is_none());
+    }
+
+    #[test]
+    fn device_read_not_found() {
+        let platform = MockPlatform::esp32();
+        assert!(platform.device_read("nonexistent").is_none());
+    }
+
+    #[test]
+    fn device_write_rpi_gpio() {
+        let platform = MockPlatform::raspberry_pi();
+        // gpio is GpioPin → should succeed
+        assert_eq!(platform.device_write("gpio", 0x01), DeviceResult::Ok);
+    }
+
+    #[test]
+    fn device_write_bytes_default_unsupported() {
+        let platform = MockPlatform::esp32();
+        assert_eq!(
+            platform.device_write_bytes("gpio_relay", &[0x01, 0x02]),
+            DeviceResult::Unsupported
+        );
+    }
+
+    #[test]
+    fn device_result_enum() {
+        assert_ne!(DeviceResult::Ok, DeviceResult::NotFound);
+        assert_ne!(DeviceResult::Unsupported, DeviceResult::HardwareError);
+        assert_ne!(DeviceResult::Denied, DeviceResult::Ok);
     }
 }

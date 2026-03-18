@@ -184,7 +184,6 @@ static CORE_LEXICON: &[WordEntry] = &[
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Constants cho TargetAffect — không magic numbers.
-#[allow(dead_code)]
 const MAX_STEP_PER_TURN: f32 = 0.40; // không nhảy quá 0.40/bước (từ Go)
 const PAUSE_STEP: f32 = 0.15;
 const SUPPORTIVE_STEP: f32 = 0.20;
@@ -249,8 +248,16 @@ pub fn target_affect(curve: &ConversationCurve) -> EmotionTag {
         }
     };
 
+    // Clamp jump: không nhảy quá MAX_STEP_PER_TURN mỗi bước (QT từ Go)
+    let jump = target_v - v;
+    let clamped_v = if jump.abs() > MAX_STEP_PER_TURN {
+        v + jump.signum() * MAX_STEP_PER_TURN
+    } else {
+        target_v
+    };
+
     EmotionTag {
-        valence: target_v.clamp(-0.95, 0.95),
+        valence: clamped_v.clamp(-0.95, 0.95),
         arousal: target_a.clamp(0.10, 0.95),
         dominance: 0.60,
         intensity: v.abs() * 0.85,

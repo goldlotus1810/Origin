@@ -51,6 +51,15 @@ pub trait PlatformBridge {
     /// Get sensor reading (if available).
     fn read_sensor(&self, sensor_id: &str) -> Option<f32>;
 
+    /// Ghi giá trị ra thiết bị (actuator/GPIO/relay).
+    ///
+    /// Đây là bridge giữa Olang VM và phần cứng thật.
+    /// value = molecular dimension (0x00=off, 0xFF=max).
+    fn write_actuator(&self, device_id: &str, value: u8) -> bool {
+        let _ = (device_id, value);
+        false
+    }
+
     /// Play haptic feedback (mobile only).
     fn haptic(&self, _pattern: HapticPattern) {}
 
