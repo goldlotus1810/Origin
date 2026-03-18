@@ -402,6 +402,30 @@ pub enum Expr {
 
     /// Tuple literal: `(a, b, c)` — used for multiple return values
     Tuple(Vec<Expr>),
+
+    /// f-string interpolation: `f"hello {name}"`
+    /// parts alternate: literal string, expression, literal, expression, ...
+    FStr { parts: Vec<FStrPart> },
+
+    /// Bitwise shift left: `a << b`
+    BitShl(Box<Expr>, Box<Expr>),
+    /// Bitwise shift right: `a >> b`
+    BitShr(Box<Expr>, Box<Expr>),
+    /// Bitwise AND: `a & b`
+    BitAnd(Box<Expr>, Box<Expr>),
+    /// Bitwise XOR: `a ^ b`
+    BitXor(Box<Expr>, Box<Expr>),
+    /// Bitwise NOT: `~a`
+    BitNot(Box<Expr>),
+}
+
+/// Part of an f-string interpolation
+#[derive(Debug, Clone, PartialEq)]
+pub enum FStrPart {
+    /// Literal text segment
+    Literal(String),
+    /// Expression to evaluate and interpolate
+    Expr(Expr),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1448,6 +1472,26 @@ impl<'a> Parser<'a> {
                         rhs: Box::new(right),
                     };
                 }
+                Token::Shl => {
+                    self.advance();
+                    let right = self.parse_primary()?;
+                    left = Expr::BitShl(Box::new(left), Box::new(right));
+                }
+                Token::Shr => {
+                    self.advance();
+                    let right = self.parse_primary()?;
+                    left = Expr::BitShr(Box::new(left), Box::new(right));
+                }
+                Token::BitAnd => {
+                    self.advance();
+                    let right = self.parse_primary()?;
+                    left = Expr::BitAnd(Box::new(left), Box::new(right));
+                }
+                Token::BitXor => {
+                    self.advance();
+                    let right = self.parse_primary()?;
+                    left = Expr::BitXor(Box::new(left), Box::new(right));
+                }
                 _ => break,
             }
         }
@@ -1543,6 +1587,32 @@ impl<'a> Parser<'a> {
                 Expr::Str(s)
             }
 
+            Token::FStr(raw_parts) => {
+                let raw_parts = raw_parts.clone();
+                self.advance();
+                // Parse f-string parts: alternating literal / expr_source
+                let mut parts = Vec::new();
+                for (i, part) in raw_parts.iter().enumerate() {
+                    if i % 2 == 0 {
+                        // Even indices are literal text
+                        if !part.is_empty() {
+                            parts.push(FStrPart::Literal(part.clone()));
+                        }
+                    } else {
+                        // Odd indices are expression source text — parse them
+                        let mut sub = Parser::new(part);
+                        match sub.parse_expr() {
+                            Ok(expr) => parts.push(FStrPart::Expr(expr)),
+                            Err(_) => {
+                                // If parse fails, treat as literal
+                                parts.push(FStrPart::Literal(part.clone()));
+                            }
+                        }
+                    }
+                }
+                Expr::FStr { parts }
+            }
+
             Token::LParen => {
                 self.advance();
                 let inner = self.parse_expr()?;
@@ -1619,6 +1689,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let inner = self.parse_primary()?;
                 Expr::LogicNot(Box::new(inner))
+            }
+
+            // Bitwise NOT: ~expr
+            Token::BitNot => {
+                self.advance();
+                let inner = self.parse_primary()?;
+                Expr::BitNot(Box::new(inner))
             }
 
             other => return Err(ParseError::new(&alloc::format!(

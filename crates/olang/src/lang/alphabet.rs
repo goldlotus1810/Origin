@@ -579,6 +579,22 @@ pub enum Token {
     /// `??` — unwrap with default value (Option/Result)
     DoubleQuestion,
 
+    /// f-string: `f"hello {name}"` — interpolated string with embedded expressions
+    /// Parts alternate: literal, expr_source, literal, expr_source, ...
+    /// Odd-indexed parts are expression source text to be parsed and evaluated.
+    FStr(Vec<String>),
+
+    /// `<<` — bit shift left
+    Shl,
+    /// `>>` — bit shift right
+    Shr,
+    /// `&` — bitwise AND (single ampersand)
+    BitAnd,
+    /// `^` — bitwise XOR
+    BitXor,
+    /// `~` — bitwise NOT (unary)
+    BitNot,
+
     // ── End ──
     /// End of input
     Eof,
@@ -733,11 +749,18 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     return Token::And;
                 }
-                // Single & is not a valid token, treat as ident
-                return Token::Ident("&".into());
+                return Token::BitAnd;
             }
             '"' => {
                 return self.lex_string();
+            }
+            '~' => {
+                self.chars.next();
+                return Token::BitNot;
+            }
+            '^' => {
+                self.chars.next();
+                return Token::BitXor;
             }
             '.' => {
                 self.chars.next();
@@ -762,6 +785,10 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     return Token::Le;
                 }
+                if let Some(&(_, '<')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Shl;
+                }
                 return Token::Lt;
             }
             '>' => {
@@ -769,6 +796,10 @@ impl<'a> Lexer<'a> {
                 if let Some(&(_, '=')) = self.chars.peek() {
                     self.chars.next();
                     return Token::Ge;
+                }
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Shr;
                 }
                 return Token::Gt;
             }
@@ -906,6 +937,63 @@ impl<'a> Lexer<'a> {
         Token::Str(s)
     }
 
+    /// Lex f-string: `f"hello {name}, you have {count} items"`
+    /// Returns FStr with alternating literal/expression parts.
+    /// parts[0] = literal, parts[1] = expr source, parts[2] = literal, ...
+    fn lex_fstring(&mut self) -> Token {
+        self.chars.next(); // consume opening "
+        let mut parts = Vec::new();
+        let mut current = String::new();
+
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c == '"' {
+                self.chars.next();
+                break;
+            }
+            if c == '\\' {
+                self.chars.next();
+                if let Some(&(_, esc)) = self.chars.peek() {
+                    self.chars.next();
+                    match esc {
+                        'n' => current.push('\n'),
+                        't' => current.push('\t'),
+                        'r' => current.push('\r'),
+                        '\\' => current.push('\\'),
+                        '"' => current.push('"'),
+                        '{' => current.push('{'),
+                        '}' => current.push('}'),
+                        _ => { current.push('\\'); current.push(esc); }
+                    }
+                }
+                continue;
+            }
+            if c == '{' {
+                self.chars.next(); // consume {
+                // Push the literal part so far
+                parts.push(core::mem::take(&mut current));
+                // Read expression until matching }
+                let mut depth = 1u32;
+                let mut expr_src = String::new();
+                while let Some(&(_, ec)) = self.chars.peek() {
+                    self.chars.next();
+                    if ec == '{' { depth += 1; }
+                    if ec == '}' {
+                        depth -= 1;
+                        if depth == 0 { break; }
+                    }
+                    expr_src.push(ec);
+                }
+                parts.push(expr_src);
+                continue;
+            }
+            self.chars.next();
+            current.push(c);
+        }
+        // Push trailing literal
+        parts.push(current);
+        Token::FStr(parts)
+    }
+
     fn lex_ident(&mut self, start: usize) -> Token {
         let mut end = start;
 
@@ -920,6 +1008,13 @@ impl<'a> Lexer<'a> {
         }
 
         let word = &self.src[start..end];
+
+        // f-string: f"..." — check before keywords
+        if word == "f" {
+            if let Some(&(_, '"')) = self.chars.peek() {
+                return self.lex_fstring();
+            }
+        }
 
         // Keyword?
         if let Some(kw) = keyword_from_str(word) {

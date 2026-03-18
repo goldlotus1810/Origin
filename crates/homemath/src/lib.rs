@@ -232,6 +232,48 @@ fn sin_taylor_reduced(x: f64, is_cos: bool) -> f64 {
     sign * s
 }
 
+/// Tangent (f64) — sin(x)/cos(x).
+pub fn tan(x: f64) -> f64 {
+    let c = cos(x);
+    if fabs(c) < 1e-15 { return f64::INFINITY; }
+    sin(x) / c
+}
+
+/// Arctangent (f64) — CORDIC-style approximation.
+pub fn atan(x: f64) -> f64 {
+    if x.is_nan() { return x; }
+    if x.is_infinite() {
+        return if x > 0.0 { core::f64::consts::FRAC_PI_2 } else { -core::f64::consts::FRAC_PI_2 };
+    }
+    // Reduce range: for |x| > 1, use atan(x) = π/2 - atan(1/x)
+    let (t, offset, sign) = if fabs(x) > 1.0 {
+        (1.0 / fabs(x), core::f64::consts::FRAC_PI_2, if x > 0.0 { -1.0 } else { 1.0 })
+    } else {
+        (fabs(x), 0.0, 1.0)
+    };
+    // Taylor-like polynomial for |t| <= 1
+    let t2 = t * t;
+    let r = t * (1.0
+        - t2 / 3.0 * (1.0
+        - t2 * 3.0 / 5.0 * (1.0
+        - t2 * 5.0 / 7.0 * (1.0
+        - t2 * 7.0 / 9.0 * (1.0
+        - t2 * 9.0 / 11.0 * (1.0
+        - t2 * 11.0 / 13.0))))));
+    let result = offset + sign * r;
+    if x < 0.0 { -result } else { result }
+}
+
+/// Arctangent of y/x with quadrant awareness (f64).
+pub fn atan2(y: f64, x: f64) -> f64 {
+    if x > 0.0 { atan(y / x) }
+    else if x < 0.0 && y >= 0.0 { atan(y / x) + core::f64::consts::PI }
+    else if x < 0.0 && y < 0.0 { atan(y / x) - core::f64::consts::PI }
+    else if x == 0.0 && y > 0.0 { core::f64::consts::FRAC_PI_2 }
+    else if x == 0.0 && y < 0.0 { -core::f64::consts::FRAC_PI_2 }
+    else { 0.0 } // x == 0, y == 0
+}
+
 // ──────────────────── f32 functions ────────────────────
 
 /// Absolute value (f32).
