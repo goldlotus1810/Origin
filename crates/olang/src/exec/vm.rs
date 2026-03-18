@@ -2558,6 +2558,46 @@ impl OlangVM {
                     }
                 }
 
+                // ── First-class channel opcodes ──────────────────────
+                Op::ChanNew => {
+                    let id = next_channel_id;
+                    next_channel_id += 1;
+                    channels.push(Vec::new());
+                    let _ = stack.push(MolecularChain::from_number(id as f64));
+                }
+
+                Op::ChanSend => {
+                    // Stack: [channel_id, value] → send value into channel
+                    let value = vm_pop!(stack, events);
+                    let ch_chain = vm_pop!(stack, events);
+                    let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                    if ch_id >= 1 && ch_id <= channels.len() {
+                        channels[ch_id - 1].push(value);
+                    }
+                    let _ = stack.push(MolecularChain::from_number(1.0));
+                }
+
+                Op::ChanRecv => {
+                    // Stack: [channel_id] → pop first message or empty
+                    let ch_chain = vm_pop!(stack, events);
+                    let ch_id = ch_chain.to_number().unwrap_or(0.0) as usize;
+                    if ch_id >= 1 && ch_id <= channels.len() && !channels[ch_id - 1].is_empty() {
+                        let msg = channels[ch_id - 1].remove(0);
+                        let _ = stack.push(msg);
+                    } else {
+                        let _ = stack.push(MolecularChain::empty());
+                    }
+                }
+
+                Op::Select(_arm_count) => {
+                    // Select: cooperative channel multiplexing.
+                    // The Select opcode itself is a marker — the lowered code
+                    // after it contains ChanRecv + body for each arm sequentially.
+                    // In cooperative (non-preemptive) mode, we just let the
+                    // sequential arms execute. The VM records the arm_count as
+                    // metadata for future preemptive scheduling.
+                }
+
                 Op::Halt => {
                     break;
                 }

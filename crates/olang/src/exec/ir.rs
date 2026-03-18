@@ -174,6 +174,20 @@ pub enum Op {
     Closure(u8, usize),
     /// Call a closure: pop closure + args from stack, execute body.
     CallClosure(u8),
+
+    // ── Channel concurrency (Phase 4) ──────────────────────────────────────
+
+    /// Create new channel. Push channel_id onto stack.
+    ChanNew,
+    /// Pop value + channel_id from stack. Send value to channel.
+    ChanSend,
+    /// Pop channel_id from stack. Receive value (non-blocking: empty if no msg).
+    ChanRecv,
+    /// Select: multi-channel wait. Arms encoded as sequence:
+    ///   For each recv arm: ChanRecv + body + Jmp(end)
+    ///   Timeout arm: PushNum(ms) + body
+    /// `Select(arm_count)` — number of arms (including optional timeout)
+    Select(u8),
 }
 
 impl Op {
@@ -225,6 +239,10 @@ impl Op {
             Self::SpawnEnd => "SPAWN_END",
             Self::Closure(..) => "CLOSURE",
             Self::CallClosure(_) => "CALL_CLOSURE",
+            Self::ChanNew => "CHAN_NEW",
+            Self::ChanSend => "CHAN_SEND",
+            Self::ChanRecv => "CHAN_RECV",
+            Self::Select(_) => "SELECT",
         }
     }
 
@@ -345,6 +363,10 @@ impl Op {
                 v
             }
             Self::CallClosure(arity) => alloc::vec![0x71, *arity],
+            Self::ChanNew => alloc::vec![0x80],
+            Self::ChanSend => alloc::vec![0x81],
+            Self::ChanRecv => alloc::vec![0x82],
+            Self::Select(n) => alloc::vec![0x83, *n],
         }
     }
 }

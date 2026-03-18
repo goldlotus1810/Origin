@@ -169,6 +169,30 @@ pub enum Stmt {
 
     /// `spawn { body }` — concurrent task
     Spawn { body: Vec<Stmt> },
+
+    /// `select { msg from rx => { ... }, timeout N => { ... } }` — multi-channel wait
+    Select { arms: Vec<SelectArm> },
+}
+
+/// Arm trong select statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectArm {
+    /// `var from channel_expr => { body }` — receive from channel
+    Recv {
+        /// Variable name to bind received value.
+        var: String,
+        /// Channel expression to receive from.
+        channel: Expr,
+        /// Body statements executed when message arrives.
+        body: Vec<Stmt>,
+    },
+    /// `timeout expr => { body }` — timeout fallback
+    Timeout {
+        /// Duration expression (numeric).
+        duration: Expr,
+        /// Body statements executed on timeout.
+        body: Vec<Stmt>,
+    },
 }
 
 /// Struct field with optional type annotation and visibility.
@@ -558,6 +582,7 @@ impl<'a> Parser<'a> {
                 self.parse_stmt()
             }
             Token::Spawn => self.parse_spawn(),
+            Token::Select => self.parse_select(),
             Token::Command(_) => self.parse_command(),
 
             // Symbol style
@@ -995,6 +1020,41 @@ impl<'a> Parser<'a> {
         self.expect(&Token::RBrace)?;
         if self.check(&Token::Semi) { self.advance(); }
         Ok(Stmt::Spawn { body })
+    }
+
+    /// `select { var from ch => { ... }, timeout N => { ... } }`
+    fn parse_select(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'select'
+        self.expect(&Token::LBrace)?;
+        let mut arms = Vec::new();
+
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            if self.check(&Token::Timeout) {
+                // timeout expr => { body }
+                self.advance(); // consume 'timeout'
+                let duration = self.parse_expr()?;
+                self.expect(&Token::FatArrow)?;
+                let body = self.parse_block()?;
+                arms.push(SelectArm::Timeout { duration, body });
+            } else {
+                // var from channel_expr => { body }
+                let var = self.expect_ident()?;
+                if !self.check(&Token::From) {
+                    return Err(ParseError::new("Expected 'from' in select arm"));
+                }
+                self.advance(); // consume 'from'
+                let channel = self.parse_expr()?;
+                self.expect(&Token::FatArrow)?;
+                let body = self.parse_block()?;
+                arms.push(SelectArm::Recv { var, channel, body });
+            }
+            // Optional comma between arms
+            if self.check(&Token::Comma) { self.advance(); }
+        }
+
+        self.expect(&Token::RBrace)?;
+        if self.check(&Token::Semi) { self.advance(); }
+        Ok(Stmt::Select { arms })
     }
 
     /// command (STR)? ';'?
@@ -1786,6 +1846,7 @@ impl<'a> Parser<'a> {
                     | Token::Impl
                     | Token::Trait
                     | Token::Spawn
+                    | Token::Select
                     | Token::Pub
                     | Token::ModKw
                     | Token::Use
