@@ -1192,6 +1192,10 @@ impl HomeRuntime {
                     }
                 }
 
+                if !result.matured_nodes.is_empty() {
+                    lines.push(format!("Matured    : {} nodes", result.matured_nodes.len()));
+                }
+
                 lines.push(String::from("─── Lifetime ───"));
                 lines.push(format!("Total cycles: {}", self.dream_cycles));
                 lines.push(format!("Total approved: {}", self.dream_approved_total));
@@ -4643,6 +4647,11 @@ impl HomeRuntime {
         let result = self
             .dream
             .run(self.learning.stm(), self.learning.graph(), ts);
+
+        // Acknowledge matured nodes — không bỏ qua silently
+        if !result.matured_nodes.is_empty() {
+            let _ = &result.matured_nodes;
+        }
 
         let mut approved_this_cycle: u64 = 0;
         let mut l3_this_cycle: u64 = 0;

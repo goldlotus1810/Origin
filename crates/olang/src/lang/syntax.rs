@@ -831,6 +831,7 @@ impl<'a> Parser<'a> {
 
     /// Parse generic type parameters with optional trait bounds: `[T, U: Trait]`
     /// Returns (type_params, trait_bounds) where trait_bounds is vec of (param, bound).
+    #[allow(clippy::type_complexity)]
     fn parse_generic_params(&mut self) -> Result<(Vec<String>, Vec<(String, String)>), ParseError> {
         if !self.check(&Token::LBracket) {
             return Ok((Vec::new(), Vec::new()));

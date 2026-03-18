@@ -1088,6 +1088,12 @@ fn mol_to_key(mol: &Molecule) -> u64 {
         | (mol.time as u64)
 }
 
+impl Default for FormulaTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FormulaTable {
     /// Tạo bảng rỗng.
     pub fn new() -> Self {

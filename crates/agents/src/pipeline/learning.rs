@@ -11,7 +11,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use context::engine::ContextEngine;
-use olang::molecular::{Dimension, MolecularChain, Molecule};
+use olang::molecular::{Dimension, Maturity, MolecularChain, Molecule};
 use silk::edge::EmotionTag;
 use silk::graph::{MolSummary, SilkGraph};
 
@@ -56,6 +56,8 @@ pub struct Observation {
     pub fire_count: u32,
     /// Cached 5D summary cho Silk comparison — tránh tính lại.
     pub mol_summary: Option<MolSummary>,
+    /// Maturity state: Formula → Evaluating → Mature
+    pub maturity: Maturity,
 }
 
 impl ShortTermMemory {
@@ -77,6 +79,10 @@ impl ShortTermMemory {
             .find(|o| o.chain.chain_hash() == hash)
         {
             obs.fire_count += 1;
+            // Cập nhật maturity dựa trên fire_count mới
+            // fib(2) = 2 — threshold cho STM (depth=2)
+            let fib_threshold = silk::hebbian::fib(2);
+            obs.maturity = obs.maturity.advance(obs.fire_count, 0.0, fib_threshold);
             // Blend emotion
             obs.emotion = obs.emotion.blend(emotion, 0.3);
             obs.timestamp = ts;
@@ -106,6 +112,7 @@ impl ShortTermMemory {
             timestamp: ts,
             fire_count: 1,
             mol_summary,
+            maturity: Maturity::Formula,
         });
     }
 
@@ -635,6 +642,30 @@ mod tests {
                 .iter()
                 .any(|o| o.chain.chain_hash() == chains[0].chain_hash()),
             "chains[0] fire=2 phải còn"
+        );
+    }
+
+    // ── Maturity ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn observation_starts_as_formula() {
+        let mut stm = ShortTermMemory::new(512);
+        let chain = olang::encoder::encode_codepoint(0x1F525);
+        stm.push(chain.clone(), EmotionTag::NEUTRAL, 0);
+        let obs = stm.top_n(1);
+        assert_eq!(obs[0].maturity, Maturity::Formula, "Lần đầu push → Formula");
+    }
+
+    #[test]
+    fn observation_advances_to_evaluating_on_second_fire() {
+        let mut stm = ShortTermMemory::new(512);
+        let chain = olang::encoder::encode_codepoint(0x1F525);
+        stm.push(chain.clone(), EmotionTag::NEUTRAL, 0);
+        stm.push(chain.clone(), EmotionTag::NEUTRAL, 1); // fire_count → 2 >= fib(2)=2
+        let obs = stm.top_n(1);
+        assert!(
+            obs[0].maturity == Maturity::Evaluating || obs[0].maturity == Maturity::Mature,
+            "fire_count=2 → ít nhất Evaluating: {:?}", obs[0].maturity
         );
     }
 
