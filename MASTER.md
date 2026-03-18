@@ -4,7 +4,7 @@
 > Sau mỗi phiên: CẬP NHẬT file này.
 
 **Cập nhật:** 2026-03-18
-**Tests:** 2,063 pass · 0 fail · 0 clippy warnings · 0 external deps
+**Tests:** 2,227 pass · 0 fail · 0 clippy warnings · 0 external deps
 **Code:** ~82,000 lines Rust · 11 crates + 4 tools · no_std core
 
 ---
@@ -48,6 +48,24 @@
 ⚠️ Compiler targets — code exists, no end-to-end pipeline
 ⚠️ Book reader — code exists, not wired to runtime
 ⚠️ Domain skills (15) — structs exist, only instincts call them
+⚠️ Maturity pipeline — enum+advance() exist, NOT wired to STM/Dream
+⚠️ Silk parent pointer — thiết kế 43KB vertical Silk, chưa implement
+```
+
+### SPEC AUDIT — 6 Vấn Đề Hệ Thống (phiên L):
+```
+#1 Response template      — ~10 câu cố định, bỏ qua instinct+Silk output    [HIGH, MEDIUM effort]
+#2 Parser missing 6 cmds  — typeof/explain/why/trace/inspect/assert           [HIGH, SMALL effort]
+#3 Maturity pipeline       — advance(weight=0.0) BUG → Mature unreachable     [HIGH, SMALL effort]
+#4 Dream threshold         — cluster_score ≈ 0.10 << threshold 0.6            [MEDIUM, SMALL effort]
+#5 Silk vertical (parent)  — 5460 pointers × 8B = 43KB, chưa có              [HIGH, MEDIUM effort]
+#6 Agent hierarchy dead    — Chiefs idle, 0 Workers, 0 ISL messages           [HIGH, LARGE effort]
+```
+
+### SPEC FILES:
+```
+SPEC_MATURITY_PIPELINE.md  — Wire Maturity vào Dream (covers #3, #4, maps #1-#6)
+SPEC_NODE_SILK.md          — 5 Gaps: parent pointer, compound, Dream 5D, layer, unified_neighbors
 ```
 
 ---
@@ -71,7 +89,7 @@
 | seeder | 15 | L0 node seeding |
 | server | 13 | REPL boot/run |
 | inspector | 9 | File verification |
-| **Total** | **2,063** | |
+| **Total** | **2,227** | |
 
 ---
 
@@ -91,6 +109,9 @@ J: SkillPattern → AAM pipeline + test coverage + warning cleanup, 1784 tests
 K: Honest audit — response template, command parsing, agent orchestration issues identified
    Response generation improved, instincts wired to output, Dream fixed
    Codebase restructured into subdirectories, 2063 tests
+L: Spec audit — 2 specs created (SPEC_MATURITY_PIPELINE, SPEC_NODE_SILK)
+   6 systemic issues mapped, 1 critical bug found (advance weight=0.0)
+   Phase 1-3 Olang features verified, 2227 tests
 ```
 
 ---
@@ -119,4 +140,4 @@ K: Honest audit — response template, command parsing, agent orchestration issu
 
 ---
 
-*HomeOS · 2026-03-18 · 2,063 tests · ~82K LoC · ○(∅)==○*
+*HomeOS · 2026-03-18 · 2,227 tests · ~82K LoC · ○(∅)==○*

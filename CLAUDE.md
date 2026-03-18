@@ -442,6 +442,39 @@ Skill (QT4):
 
 ---
 
+### Maturity Pipeline (SPEC — chưa wire):
+```
+Vòng đời node:
+  Formula     → node mới, chưa có input thật (5 công thức tiềm năng)
+  Evaluating  → fire_count ≥ fib(depth), đang tích lũy evidence
+  Mature      → weight ≥ 0.854 && fire_count ≥ fib(depth), sẵn sàng QR
+
+Wire points (chưa implement):
+  STM.push()    → Observation.maturity = advance(fire_count, weight, fib_threshold)
+  Dream.run()   → DreamResult.matured_nodes = Vec<u64>
+  QR promote    → append-only, signed, permanent
+
+⚠️ BUG: advance(weight=0.0) → Mature UNREACHABLE (weight < 0.854 luôn)
+   Cần truyền Hebbian weight thật hoặc thêm advance_by_fire() path
+```
+
+### Silk Vertical — Parent Pointer (SPEC — chưa implement):
+```
+Silk ngang (implicit, 0 bytes): 37 kênh SilkIndex ← ĐÃ CÓ ✅
+Silk dọc (parent pointer, 43KB): child → parent chain ← CHƯA CÓ ❌
+
+  SilkGraph.parent_map: BTreeMap<u64, u64>  (child_hash → parent_hash)
+  register_parent(), parent_of(), children_of(), layer_of()
+  5460 pointers × 8B = 43 KB toàn bộ mạng dọc
+
+31 compound patterns (C(5,1)+...+C(5,5) = 31):
+  37 kênh × 31 mẫu = 1147 kiểu quan hệ ← CompoundKind enum chưa có
+
+Dream cần wire:
+  cluster_score() → dùng MolSummary + implicit_silk() thay vì chain bytes
+  Observation.layer → filter cùng tầng trước khi cluster (QT⑪)
+```
+
 ## Anti-patterns — TUYỆT ĐỐI KHÔNG
 
 ```rust
