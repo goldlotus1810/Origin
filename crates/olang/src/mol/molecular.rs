@@ -342,6 +342,108 @@ impl Maturity {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// NodeState — Molecule + lifecycle state + composition origin
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Node = Molecule + lifecycle state + nguồn gốc composition.
+///
+/// Molecule vẫn là 5 bytes tĩnh. NodeState bọc thêm:
+/// - `maturity`: Formula → Evaluating → Mature
+/// - `origin`: node sinh ra từ đâu? (Innate/Composed/Evolved)
+#[derive(Debug, Clone, PartialEq)]
+pub struct NodeState {
+    /// 5D molecule (5 bytes).
+    pub mol: Molecule,
+    /// Lifecycle: Formula → Evaluating → Mature.
+    pub maturity: Maturity,
+    /// Nguồn gốc: L0 innate, LCA composed, hoặc evolved.
+    pub origin: CompositionOrigin,
+}
+
+impl NodeState {
+    /// Tạo NodeState từ Molecule (innate L0, codepoint đã biết).
+    pub fn innate(mol: Molecule, codepoint: u32) -> Self {
+        Self {
+            mol,
+            maturity: Maturity::Formula,
+            origin: CompositionOrigin::Innate(codepoint),
+        }
+    }
+
+    /// Tạo NodeState từ LCA composition.
+    pub fn composed(mol: Molecule, sources: Vec<u64>, op: ComposeOp) -> Self {
+        Self {
+            mol,
+            maturity: Maturity::Formula,
+            origin: CompositionOrigin::Composed { sources, op },
+        }
+    }
+
+    /// Tạo NodeState từ evolution.
+    pub fn evolved(mol: Molecule, source: u64, dim: u8, old_val: u8, new_val: u8) -> Self {
+        Self {
+            mol,
+            maturity: Maturity::Formula,
+            origin: CompositionOrigin::Evolved {
+                source,
+                dim,
+                old_val,
+                new_val,
+            },
+        }
+    }
+}
+
+/// Nguồn gốc composition — "node này sinh ra từ đâu?"
+#[derive(Debug, Default, Clone, PartialEq)]
+pub enum CompositionOrigin {
+    /// L0 node — sinh từ encode_codepoint(), không có parent formula.
+    Innate(u32), // Unicode codepoint
+
+    /// Composite — sinh từ LCA/Fuse của nhiều sources.
+    Composed {
+        /// chain_hash của các parent nodes.
+        sources: Vec<u64>,
+        /// Phép toán tạo composite.
+        op: ComposeOp,
+    },
+
+    /// Evolved — mutate từ 1 node khác.
+    Evolved {
+        /// chain_hash gốc.
+        source: u64,
+        /// Chiều nào bị mutate (0=Shape, 1=Relation, 2=Valence, 3=Arousal, 4=Time).
+        dim: u8,
+        /// Giá trị cũ.
+        old_val: u8,
+        /// Giá trị mới.
+        new_val: u8,
+    },
+
+    /// Unknown — không biết nguồn gốc (backward compat).
+    #[default]
+    Unknown,
+}
+
+impl CompositionOrigin {
+    /// Check if origin is known (not Unknown).
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unknown)
+    }
+}
+
+/// Phép toán tạo composite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeOp {
+    /// LCA weighted average.
+    Lca,
+    /// VM Fuse opcode.
+    Fuse,
+    /// LeoAI program.
+    Program,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Molecule — 5 bytes (RAM) / 1-6 bytes (tagged wire format)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -609,6 +711,8 @@ pub struct EvolveResult {
     pub consistency: u8,
     /// Valid? (consistency >= 3 = ít nhất 3/4 chiều khác vẫn ok)
     pub valid: bool,
+    /// Nguồn gốc evolution — track source + mutation.
+    pub origin: CompositionOrigin,
 }
 
 impl Molecule {
@@ -665,6 +769,12 @@ impl Molecule {
             new_value,
             consistency,
             valid: consistency >= 3,
+            origin: CompositionOrigin::Evolved {
+                source: 0, // Caller should set this to actual chain_hash
+                dim: dim as u8,
+                old_val: old_value,
+                new_val: new_value,
+            },
         }
     }
 
