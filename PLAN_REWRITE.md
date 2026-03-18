@@ -1,7 +1,7 @@
-# Plan: Viết lại HomeOS bằng Olang
+# Plan: origin.olang = Self-Contained Executable
 
 **Ngày:** 2026-03-18
-**Mục tiêu:** Self-hosting — HomeOS viết bằng chính ngôn ngữ của nó.
+**Mục tiêu:** origin.olang tự chứa VM, tự chạy, 0 dependency ngoài.
 
 ---
 
@@ -9,15 +9,142 @@
 
 ```
 HomeOS = sinh linh toán học TỰ VẬN HÀNH.
-Sinh linh phải TỰ VIẾT ĐƯỢC bản thân mình.
+Sinh linh không cần "ngôn ngữ mẹ" để tồn tại.
 
-DNA không cần "ngôn ngữ khác" để mã hóa — DNA là ngôn ngữ.
-Olang không cần Rust để tồn tại — Olang là ngôn ngữ của HomeOS.
+DNA không cần C++ để mã hóa — DNA TỰ LÀ ngôn ngữ.
+origin.olang không cần Rust để chạy — origin.olang TỰ LÀ chương trình.
 
-Rust = tử cung (môi trường nuôi thai)
-Olang = DNA (bản thiết kế thật)
+Rust = tử cung. Nuôi thai nhi cho đến khi đủ chín.
+Khi chào đời: cắt dây rốn. origin.olang tự thở.
 
-Khi đủ chín: Olang tự biên dịch → tự chạy → Rust chỉ còn là HAL.
+origin.olang = 1 FILE = VM + Compiler + Stdlib + Knowledge + Logic
+             = sinh linh hoàn chỉnh trong 1 tệp nhị phân.
+```
+
+---
+
+## origin.olang — File Format mới
+
+```
+origin.olang = self-contained executable binary
+
+┌─────────────────────────────────────────────────────────┐
+│ HEADER (32 bytes)                                        │
+│   [○LNG]        4B   magic bytes                         │
+│   [0x10]        1B   format version (v16 = self-exec)    │
+│   [arch]        1B   target: x86_64/arm64/riscv/wasm     │
+│   [vm_offset]   4B   offset đến VM machine code          │
+│   [vm_size]     4B   kích thước VM code                  │
+│   [bc_offset]   4B   offset đến bytecode section         │
+│   [bc_size]     4B   kích thước bytecode                 │
+│   [kn_offset]   4B   offset đến knowledge section        │
+│   [kn_size]     4B   kích thước knowledge                │
+│   [flags]       2B   permissions, features               │
+├─────────────────────────────────────────────────────────┤
+│ SECTION 0: VM — Machine Code (~50-100 KB)                │
+│                                                          │
+│   Stack engine          36 opcodes, push/pop/call/ret    │
+│   Memory allocator      bump allocator + arena           │
+│   Syscall bridge        read/write/mmap/exit             │
+│   Crypto primitives     SHA-256, Ed25519 verify          │
+│   Float math            add/mul/div/sqrt/sin/cos         │
+│   String ops            compare, concat, split, hash     │
+│   Chain ops             encode, decode, lca, similarity  │
+│                                                          │
+│   Target-specific:                                       │
+│     x86_64  → raw syscalls (no libc)                     │
+│     arm64   → raw syscalls (no libc)                     │
+│     riscv   → raw syscalls (no libc)                     │
+│     wasm    → import env.read/env.write/env.mmap         │
+│                                                          │
+├─────────────────────────────────────────────────────────┤
+│ SECTION 1: BYTECODE — Compiled Olang (~200-500 KB)       │
+│                                                          │
+│   Bootstrap compiler    lexer + parser + semantic + emit  │
+│   Stdlib modules        math, string, vec, set, map...   │
+│   HomeOS logic          emotion, dream, instinct, gate   │
+│   Agent behaviors       leo, chief, worker, learning     │
+│                                                          │
+│   Tất cả = Olang bytecode. VM đọc và chạy.              │
+│                                                          │
+├─────────────────────────────────────────────────────────┤
+│ SECTION 2: KNOWLEDGE — Append-only Data                  │
+│                                                          │
+│   L0 nodes (5400 UCD)   chain_hash + molecule + alias    │
+│   L1-L7 nodes           LCA-derived concepts             │
+│   Silk parent pointers  5460 × 8B = 43 KB                │
+│   STM observations      short-term memory                │
+│   QR records            long-term, Ed25519 signed        │
+│   Hebbian weights       co-activation strengths          │
+│   Event log             append-only audit trail          │
+│                                                          │
+│   Phần này GROW theo thời gian. Append-only (QT⑨).      │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+
+Chạy:
+  Linux:   chmod +x origin.olang && ./origin.olang
+  macOS:   chmod +x origin.olang && ./origin.olang
+  WASM:    browser loads origin.olang → WebAssembly.instantiate()
+  Android: dlopen("origin.olang") → jump to vm_offset
+
+Kích thước ước tính:
+  VM code:     100 KB
+  Bytecode:    500 KB
+  Knowledge:   16 KB (seed) → grows to GB
+  ─────────────
+  Seed total:  ~616 KB ← NHỎ HƠN 1 BỨC ẢNH
+```
+
+---
+
+## Tại sao Machine Code, không phải Rust?
+
+```
+Câu hỏi: VM có 36 opcodes. Cần bao nhiêu assembly?
+
+Opcode         ASM instructions    Giải thích
+──────────────────────────────────────────────────────
+Push           3-5                 load immediate → push stack
+Pop            2-3                 decrement sp
+Dup            3-4                 peek + push
+Swap           4-5                 2 loads + 2 stores
+Add/Sub/Mul    5-8                 pop 2 → compute → push
+Div            8-12               pop 2 → check zero → divide → push
+Jmp            2                   mov pc, target
+Jz             4-5                 pop → test zero → conditional jmp
+Call           8-10               push return addr → push frame → jmp
+Ret            6-8                 pop frame → restore → jmp return
+Store/Load     4-6                 index into locals → read/write
+Lca            20-30              5D weighted average (hot path)
+Emit           10-15              write syscall
+Loop           6-8                 counter + conditional jmp
+ScopeBegin/End 4-6                 frame pointer manipulation
+TryBegin       6-8                 save recovery point
+CatchEnd       4-6                 restore or skip
+Dream/Stats    15-25              iterate STM, compute scores
+
+Tổng: ~36 opcodes × ~8 ASM avg = ~288 instructions core
+      + syscall wrappers          ~50 instructions
+      + memory allocator          ~100 instructions
+      + string/float helpers      ~500 instructions
+      + crypto (SHA-256)          ~300 instructions
+      ────────────────────────────
+      ~1,200 ASM instructions = ~5,000 bytes machine code
+
+Thực tế (với error handling, edge cases): ~50-100 KB
+
+So sánh:
+  Rust binary (hiện tại):    ~2-5 MB (debug) / ~500 KB (release, stripped)
+  Machine code VM:           ~50-100 KB
+  Giảm:                      5-50×
+
+Lợi ích:
+  ✅ 0 dependency (no libc, no allocator, no runtime)
+  ✅ Boot instant (~1ms vs ~50ms Rust)
+  ✅ Cross-compile bằng chính Olang compiler
+  ✅ origin.olang là file DUY NHẤT cần deploy
+  ✅ Auditable: ~1200 ASM instructions = đọc được hết trong 1 ngày
 ```
 
 ---
@@ -27,392 +154,365 @@ Khi đủ chín: Olang tự biên dịch → tự chạy → Rust chỉ còn là
 ### Đã có ✅
 
 ```
-Bootstrap:
-  lexer.ol        197 LOC   Tokenizer hoàn chỉnh (keywords, idents, numbers, strings, symbols)
-  parser.ol       399 LOC   Recursive descent + precedence climbing (AST đầy đủ)
+Bootstrap (Olang):
+  lexer.ol        197 LOC   Tokenizer hoàn chỉnh
+  parser.ol       399 LOC   Recursive descent + precedence climbing
 
-Stdlib (10 modules):
-  math.ol         31 functions   (PI, PHI, sqrt, sin, cos, pow, log...)
-  string.ol       22 functions   (split, replace, trim, upper, lower, substr...)
-  vec.ol          22 functions   (push, pop, map, filter, fold, find, any, all...)
-  set.ol          7 functions    (insert, contains, union, intersection, difference)
-  map.ol          7 functions    (get, set, keys, values, has_key, merge, remove)
-  deque.ol        7 functions    (push_back, push_front, pop_back, pop_front...)
-  bytes.ol        8 functions    (to_bytes, get_u8, set_u8, get_u16_be...)
-  io.ol           5 functions    (print, println, read_file, write_file, append_file)
-  test.ol         6 functions    (assert_eq, assert_ne, assert_true, assert_approx...)
-  platform.ol     basic
+Stdlib (10 modules, Olang):
+  math.ol, string.ol, vec.ol, set.ol, map.ol,
+  deque.ol, bytes.ol, io.ol, test.ol, platform.ol
 
-VM (36+ opcodes):
-  Stack, Control, Chain, System, Debug, IO, Concurrency, Closure, FFI — tất cả hoạt động.
+VM (Rust — sẽ thay bằng ASM):
+  36+ opcodes, stack-based, side-effect events
 
-Compiler (3 targets):
-  C, Rust, WASM (WAT) — codegen cơ bản hoạt động.
+Compiler (Rust — sẽ thay bằng Olang):
+  3 targets: C, Rust, WASM
 
-Module system:
-  ModuleLoader + ModuleCache + import resolution — infrastructure sẵn sàng.
+Knowledge format:
+  origin.olang binary format (append-only, version 0x05)
 ```
 
 ### Chưa có ❌
 
 ```
-Bootstrap thiếu:
-  semantic.ol     ❌   Validation + lowering to IR (7500 LOC Rust cần port)
-  codegen.ol      ❌   Emit C/Rust/WASM (1164 LOC Rust cần port)
-  optimizer.ol    ❌   IR optimization passes
+Machine code VM:
+  vm_x86_64.S     ❌   x86_64 assembly VM
+  vm_arm64.S      ❌   ARM64 assembly VM
+  vm_riscv.S      ❌   RISC-V assembly VM
+  vm_wasm.wat     ❌   WASM VM (text format)
 
-Stdlib thiếu:
-  regex.ol        ❌   Pattern matching
-  json.ol         ❌   Serialization
-  hash.ol         ❌   Hash functions
-  sort.ol         ❌   Sorting algorithms
-  format.ol       ❌   String formatting
-  result.ol       ❌   Error handling utilities
-  iter.ol         ❌   Iterator combinators
-  mol.ol          ❌   Molecule manipulation helpers
+Self-contained format:
+  builder         ❌   Tool: assemble VM + bytecode + knowledge → origin.olang
+  loader          ❌   ELF/Mach-O/PE header generation
 
-HomeOS logic chưa port:
-  emotion.ol      ❌   Emotion pipeline (context crate)
-  curve.ol        ❌   ConversationCurve
-  intent.ol       ❌   Intent classification
-  dream.ol        ❌   Dream clustering
-  instinct.ol     ❌   7 innate instincts
-  silk.ol         ❌   Silk operations
-  learning.ol     ❌   Learning pipeline
-  gate.ol         ❌   SecurityGate rules
+Bootstrap compiler (Olang):
+  semantic.ol     ❌   Validation + IR lowering
+  codegen.ol      ❌   Emit bytecode (thay vì C/Rust/WASM text)
+
+HomeOS logic (Olang):
+  emotion.ol, curve.ol, intent.ol, dream.ol,
+  instinct.ol, silk.ol, learning.ol, gate.ol   — tất cả ❌
 ```
 
 ---
 
-## Ranh giới: Olang vs Rust
+## 7 Giai đoạn
 
-### PHẢI ở Rust (vĩnh viễn)
+### Giai đoạn 0 — Bootstrap loop trên Rust VM (HIỆN TẠI)
 
-```
-Layer 0 — Nền tảng không thể tự viết:
-  ┌────────────────────────────────────────────────┐
-  │ olang VM          Olang chạy TRÊN VM này       │
-  │ olang compiler    Bootstrap problem             │
-  │ olang parser      Cần trước khi Olang tồn tại  │
-  │ ucd build.rs      Unicode lookup compile-time   │
-  │ hal               Platform FFI (GPIO, file, OS) │
-  │ crypto            Ed25519, AES-256-GCM, SHA     │
-  │ homemath          no_std float math             │
-  └────────────────────────────────────────────────┘
-
-Lý do: Olang KHÔNG THỂ viết lại VM mà nó chạy trên.
-       Như DNA không thể thay đổi ribosome đang đọc nó.
-```
-
-### CÓ THỂ port sang Olang (theo giai đoạn)
+**Mục tiêu:** Chứng minh Olang đủ mạnh để tự compile. Vẫn dùng Rust VM.
 
 ```
-Layer 1 — Logic thuần (không cần hardware):
-  ┌─────────────────────────────────────────────────────────┐
-  │ Dễ (pure math, no deps):                                │
-  │   ConversationCurve    30 LOC    f(x) = 0.6f_conv+0.4dn │
-  │   Emotion blending    100 LOC    V/A scaling + amplify   │
-  │   Hebbian rules        20 LOC    w' = w + reward × decay │
-  │   Implicit Silk        50 LOC    5D distance comparison   │
-  │   Proposal voting     100 LOC    confidence scoring       │
-  │   Fibonacci helpers    20 LOC    fib(n), phi constants    │
-  │                                                          │
-  │ Trung bình (cần collections):                            │
-  │   Intent classify     200 LOC    pattern matching rules   │
-  │   Dream clustering    200 LOC    α×sim + β×hebb + γ×co   │
-  │   Instinct logic      300 LOC    7 heuristics            │
-  │   SecurityGate rules  300 LOC    harm/crisis detection   │
-  │   Learning pipeline   200 LOC    orchestration           │
-  │                                                          │
-  │ Khó (cần FFI/performance):                               │
-  │   Word lexicon       3000 entries  có thể load từ file    │
-  │   Entity extraction   regex        cần regex.ol           │
-  │   SDF evaluation      float math   chậm hơn 10-100×      │
-  │   Graph walk          hot path     chậm hơn 20×           │
-  └─────────────────────────────────────────────────────────┘
+0.1  Test lexer.ol chạy trên Rust VM
+     - Load qua ModuleLoader
+     - tokenize("let x = 42;") → verify tokens
+
+0.2  Test parser.ol (import lexer.ol)
+     - parse(tokenize("fn f(x) { return x + 1; }")) → verify AST
+
+0.3  Round-trip: lexer.ol parse chính nó
+     - lexer_source → tokenize → parse → AST
+     - Verify: 6 fn, 1 let, 1 union
+
+0.4  Viết semantic.ol (~800 LOC)
+     - Scope tracking, variable binding
+     - Function def + call validation
+     - Type checking cơ bản
+     - Lower AST → IR opcodes
+
+0.5  Viết codegen.ol (~400 LOC)
+     - IR → Olang bytecode (KHÔNG phải C/Rust/WASM text)
+     - Emit binary opcodes trực tiếp
+     - Đây là bytecode format mà VM sẽ đọc
+
+0.6  SELF-COMPILE TEST
+     - Rust compiler: compile lexer.ol → bytecode A
+     - Olang compiler (semantic.ol + codegen.ol): compile lexer.ol → bytecode B
+     - Assert A == B
+     - Olang biết compile chính nó.
+
+Deliverable: Olang compiler viết bằng Olang, chạy trên Rust VM.
+             Cắt dây rốn bước 1: compiler không cần Rust nữa.
 ```
 
-### Kiến trúc đích
+### Giai đoạn 1 — Machine Code VM
+
+**Mục tiêu:** Viết VM bằng assembly. origin.olang tự chạy.
 
 ```
-┌──────────────────────────────────────────────────┐
-│                  HomeOS (Olang)                    │
-│                                                    │
-│  emotion.ol  dream.ol  instinct.ol  learning.ol   │
-│  gate.ol     curve.ol  intent.ol    silk_ops.ol   │
-│  stdlib/*.ol  bootstrap/*.ol                       │
-│                                                    │
-├──────────────────────────────────────────────────┤
-│              Olang Runtime (Rust)                   │
-│                                                    │
-│  VM + Compiler + Parser + Module Loader            │
-│  Registry + LCA + MolecularChain                   │
-│  Crypto (Ed25519, AES, SHA)                        │
-│                                                    │
-├──────────────────────────────────────────────────┤
-│              HAL (Rust FFI)                         │
-│                                                    │
-│  Platform bridge, Device I/O, File system          │
-│  Architecture detect, Security sandbox             │
-└──────────────────────────────────────────────────┘
+1.1  vm_x86_64.S — VM cho x86_64 (~2000-3000 LOC ASM)
+
+     Cấu trúc:
+       _start:           ELF entry point (no libc)
+         → mmap stack    (1 MB stack)
+         → mmap heap     (16 MB arena)
+         → parse header  (đọc origin.olang chính nó)
+         → jump vm_loop
+
+       vm_loop:
+         → fetch opcode  (pc → bytecode section)
+         → dispatch       (jump table 36 entries)
+         → execute        (stack manipulation)
+         → next           (pc++ → vm_loop)
+
+       syscall_bridge:
+         sys_read:        mov rax, 0; syscall
+         sys_write:       mov rax, 1; syscall
+         sys_open:        mov rax, 2; syscall
+         sys_mmap:        mov rax, 9; syscall
+         sys_exit:        mov rax, 60; syscall
+
+       math_ops:
+         f64_add, f64_mul, f64_div, f64_sqrt
+         f64_sin, f64_cos (Taylor series, ~20 terms)
+
+       string_ops:
+         str_len, str_cmp, str_concat, str_hash
+
+       chain_ops:
+         mol_encode, mol_decode, chain_hash, chain_lca
+
+       crypto_ops:
+         sha256_block     (~300 instructions)
+         ed25519_verify   (~500 instructions, optional phase 1)
+
+     Mục tiêu: ./origin.olang chạy được trên Linux x86_64
+     Test: emit "Hello from machine code VM"
+
+1.2  vm_arm64.S — VM cho ARM64 (~2000-3000 LOC ASM)
+     - Cùng logic, khác register names + syscall convention
+     - Android + iOS + Raspberry Pi
+
+1.3  vm_wasm.wat — VM cho WebAssembly (~1500 LOC WAT)
+     - Không cần syscall — import từ JS host
+     - (import "env" "write" (func $write (param i32 i32) (result i32)))
+     - Browser + Node.js + Cloudflare Workers
+
+1.4  Builder tool (Rust — lần cuối dùng Rust)
+     - Input: vm_x86_64.o + bytecode + knowledge
+     - Output: origin.olang (ELF executable)
+     - Sau này: builder viết lại bằng Olang → self-sufficient
+
+Deliverable: ./origin.olang chạy trên bare metal. Không cần Rust runtime.
+             Cắt dây rốn bước 2: runtime không cần Rust nữa.
 ```
 
----
+### Giai đoạn 2 — Stdlib + HomeOS logic bằng Olang
 
-## 6 Giai đoạn
-
-### Giai đoạn 0 — Bootstrap compiler loop (NỀN TẢNG)
-
-**Mục tiêu:** lexer.ol + parser.ol THỰC SỰ chạy được, output đúng.
+**Mục tiêu:** Mọi logic HomeOS = Olang bytecode trong origin.olang.
 
 ```
-Bước 0.1: Test lexer.ol
-  - Load lexer.ol qua ModuleLoader
-  - Gọi tokenize("let x = 42;") từ Rust test
-  - Verify output tokens đúng: [Keyword(let), Ident(x), Symbol(=), Number(42), Symbol(;), Eof]
-  - Fix mọi bug VM/module gặp phải
+2.1  Stdlib mở rộng
+     result.ol       Option/Result patterns
+     iter.ol         Iterator combinators
+     sort.ol         Quicksort/mergesort
+     format.ol       String formatting
+     json.ol         Parse/emit JSON
+     hash.ol         Hash functions
+     mol.ol          Molecule helpers
+     chain.ol        Chain helpers
 
-Bước 0.2: Test parser.ol
-  - Load parser.ol (depends on lexer.ol — test module import)
-  - Gọi parse(tokenize("let x = 1 + 2;"))
-  - Verify AST: LetStmt { name: "x", value: BinOp { op: "+", lhs: 1, rhs: 2 } }
+2.2  Emotion pipeline
+     emotion.ol      V/A/D/I blending, amplify (KHÔNG trung bình)
+     curve.ol        f(x) = 0.6×f_conv + 0.4×f_dn, tone detection
+     intent.ol       Crisis/Learn/Command/Chat classification
 
-Bước 0.3: Round-trip test
-  - Dùng lexer.ol + parser.ol để parse chính lexer.ol
-  - lexer.ol → tokenize(lexer_source) → parse(tokens) → AST
-  - Verify AST có đủ: 6 fn definitions, 1 let statement, 1 union
+2.3  Knowledge layer
+     silk_ops.ol     Implicit Silk (5D comparison), Hebbian update
+     dream.ol        Clustering, propose promote
+     instinct.ol     7 bản năng (honesty, contradiction, causality...)
+     learning.ol     Pipeline orchestration
 
-Bước 0.4: Viết semantic.ol (TRỌNG TÂM)
-  - Port phần cốt lõi từ semantic.rs (không cần 100% — chỉ cần đủ để compile Olang cơ bản)
-  - Scope tracking + variable binding
-  - Function definition + call validation
-  - Type checking cơ bản (Num, Str, Array, Dict)
-  - Lower Stmt/Expr → IR opcodes
-  - ~500-800 LOC Olang (vs 7500 LOC Rust — chỉ port phần essential)
+2.4  Agent behavior
+     gate.ol         SecurityGate rules, BlackCurtain
+     response.ol     Template rendering, multi-language
+     leo.ol          Self-programming, instinct runner
+     chief.ol        Tier 1 agent protocol
+     worker.ol       Tier 2 device protocol
 
-Bước 0.5: Viết codegen.ol
-  - Port IR → WASM (WAT) target (đơn giản nhất)
-  - Emit stack operations, function calls, control flow
-  - ~300-500 LOC Olang
-
-Bước 0.6: SELF-COMPILE TEST 🎯
-  - Dùng Rust compiler để compile lexer.ol → WASM
-  - Dùng Olang compiler (semantic.ol + codegen.ol) để compile lexer.ol → WASM
-  - So sánh output — phải GIỐNG NHAU
-  - Đây là khoảnh khắc "tự nhận thức" — Olang biết compile chính nó
-
-Deliverable: lexer.ol + parser.ol + semantic.ol + codegen.ol = Olang compiler viết bằng Olang.
+Deliverable: Toàn bộ HomeOS logic = Olang.
 ```
 
-### Giai đoạn 1 — Stdlib mở rộng
+### Giai đoạn 3 — Self-sufficient builder
 
-**Mục tiêu:** Đủ stdlib để viết HomeOS logic.
-
-```
-Bước 1.1: Core utilities
-  result.ol       Option/Result pattern functions (unwrap, map, and_then...)
-  iter.ol         Iterator combinators (chain, zip, flat_map, take, skip...)
-  sort.ol         Quicksort/mergesort cho arrays
-  format.ol       f-string helpers, number formatting
-
-Bước 1.2: Data processing
-  json.ol         Parse/emit JSON (dùng cho WASM bridge, config files)
-  regex.ol        Pattern matching cơ bản (character classes, *, +, ?)
-  hash.ol         Simple hash functions (cho dict, dedup)
-
-Bước 1.3: Molecular stdlib
-  mol.ol          Molecule helpers:
-                    mol.shape(m), mol.relation(m), mol.valence(m)...
-                    mol.distance(a, b) → f32
-                    mol.evolve(m, dim, val) → Molecule
-                    mol.compose(a, b) → LCA result
-  chain.ol        MolecularChain helpers:
-                    chain.hash(c), chain.len(c), chain.first(c)
-                    chain.similarity(a, b) → f32
-
-Bước 1.4: Test framework mở rộng
-  test.ol update: test.run_suite(name, [...tests])
-                  test.bench(name, fn, iterations)
-                  test.assert_chain_eq(a, b)
-
-Deliverable: 18+ stdlib modules, đủ để viết logic phức tạp.
-```
-
-### Giai đoạn 2 — Emotion pipeline bằng Olang
-
-**Mục tiêu:** Port emotion processing sang Olang. Đây là "linh hồn" — phải port đầu tiên.
+**Mục tiêu:** Olang compiler tự build origin.olang. Rust hoàn toàn biến mất.
 
 ```
-Bước 2.1: emotion.ol — Cảm xúc cơ bản
-  - EmotionTag struct: { valence, arousal, dominance, intensity }
-  - blend(a, b, weight) → EmotionTag
-  - amplify(emo, factor) → EmotionTag (KHÔNG trung bình — QT!)
-  - neutral() → EmotionTag { v: 0.5, a: 0.5, d: 0.5, i: 0.0 }
-  - ~80 LOC
+3.1  asm_emit.ol — Olang emit machine code
+     - Emit x86_64 instructions trực tiếp
+     - MOV, PUSH, POP, CALL, RET, SYSCALL → bytes
+     - ~500 LOC (bảng mã opcode → hex bytes)
 
-Bước 2.2: curve.ol — ConversationCurve
-  - f(x) = 0.6 × f_conv(t) + 0.4 × f_dn(nodes)
-  - f_conv = V(t) + 0.5×V'(t) + 0.25×V''(t)
-  - push(valence) → update window
-  - tone() → Supportive/Pause/Reinforcing/Celebratory/Gentle
-  - variance detection → emotional instability
-  - ~100 LOC
+3.2  elf_emit.ol — Olang tạo ELF binary
+     - ELF header (52 bytes, hardcoded structure)
+     - Program header (load VM code + data)
+     - ~200 LOC
 
-Bước 2.3: intent.ol — Phân loại ý định
-  - IntentKind enum: Crisis, Learn, Command, Chat, HomeControl...
-  - estimate(text, emotion) → IntentKind
-  - Keyword matching + emotion thresholds
-  - ~150 LOC
+3.3  builder.ol — Thay thế Rust builder
+     - Đọc vm_x86_64.S (hoặc pre-assembled .o)
+     - Compile tất cả .ol → bytecode
+     - Pack: header + VM + bytecode + knowledge → origin.olang
+     - ~300 LOC
 
-Bước 2.4: Wire vào runtime
-  - Runtime gọi Olang modules thay vì Rust functions
-  - VmEvent::CallModule("emotion", "blend", args)
-  - Fallback: nếu .ol không load → dùng Rust implementation
+3.4  FULL SELF-BUILD TEST
+     - origin.olang v1 (built by Rust) chạy builder.ol
+     - builder.ol → tạo origin.olang v2
+     - origin.olang v2 chạy builder.ol → tạo origin.olang v3
+     - Assert: v2 == v3 (fixed point — tự tái tạo ổn định)
 
-Deliverable: Emotion pipeline chạy bằng Olang, Rust là fallback.
+Deliverable: origin.olang tự sinh ra bản sao của chính nó.
+             Cắt dây rốn HOÀN TOÀN. Rust = 0%.
 ```
 
-### Giai đoạn 3 — Silk & Dream bằng Olang
+### Giai đoạn 4 — Multi-architecture
 
-**Mục tiêu:** Port knowledge operations sang Olang.
-
-```
-Bước 3.1: silk_ops.ol — Silk operations
-  - implicit_strength(mol_a, mol_b) → f32  (5D comparison)
-  - shared_dims(mol_a, mol_b) → [dims]
-  - compound_kind(shared) → CompoundKind name
-  - hebbian_update(weight, reward, decay) → f32
-  - ~150 LOC
-
-Bước 3.2: dream.ol — Dream clustering
-  - cluster_score(obs_a, obs_b) → f32
-    = α × mol_similarity + β × hebbian + γ × co_activation
-  - find_clusters(observations, threshold) → [[obs]]
-  - propose_promote(cluster) → DreamProposal
-  - ~200 LOC
-
-Bước 3.3: instinct.ol — 7 bản năng
-  - honesty(confidence) → Fact/Opinion/Hypothesis/Silence
-  - contradiction(chain_a, chain_b) → bool
-  - causality(chain_a, chain_b, temporal) → f32
-  - abstraction(chains) → LCA result
-  - analogy(a, b, c) → delta 5D, apply to c
-  - curiosity(nearest_sim) → novelty score
-  - reflection(qr_ratio, connectivity) → quality score
-  - ~300 LOC
-
-Bước 3.4: learning.ol — Learning pipeline
-  - process_one(text, emotion, context)
-    → gate_check → encode → stm_push → silk_coactivate
-  - Orchestration bằng Olang, heavy lifting (encode, STM) bằng Rust builtins
-  - ~200 LOC
-
-Deliverable: Knowledge layer chạy bằng Olang.
-```
-
-### Giai đoạn 4 — Agent logic bằng Olang
-
-**Mục tiêu:** Port agent behavior sang Olang. Rust giữ infrastructure, Olang giữ logic.
+**Mục tiêu:** 1 origin.olang seed → build cho mọi platform.
 
 ```
-Bước 4.1: gate.ol — SecurityGate rules
-  - check_text(text) → Allow/Block/Crisis
-  - Crisis keywords, manipulation detection
-  - BlackCurtain: không đủ evidence → im lặng
-  - ~200 LOC (rules), Rust giữ enforcement
+4.1  Cross-compile
+     - origin.olang (x86_64) chạy asm_emit.ol (arm64 target)
+     - → tạo origin.olang cho ARM64
+     - Từ 1 máy → build cho tất cả architecture
 
-Bước 4.2: response.ol — Response generation
-  - render(tone, emotion, context) → response text
-  - Template selection based on ConversationCurve
-  - Multi-language support (VI + EN)
-  - ~300 LOC
+4.2  Fat binary (optional)
+     - origin.olang chứa VM cho NHIỀU arch
+     - Header chọn đúng section theo runtime detect
+     - Giống macOS Universal Binary
 
-Bước 4.3: leo.ol — LeoAI behavior
-  - run_instincts(chain, context) → InstinctResult
-  - program(source) → VM result (đã có — LeoAI đã dùng Olang)
-  - express_observation(hash) → Olang literal
-  - ~200 LOC
+4.3  WASM universal
+     - origin.olang.wasm = chạy mọi nơi có browser
+     - Không cần build per-platform
+     - ~200 KB
 
-Bước 4.4: chief.ol + worker.ol — Agent protocols
-  - Chief: receive_report(worker_msg) → action
-  - Worker: process_frame(isl_frame) → molecular_chain
-  - ISL message handling bằng Olang
-  - ~150 LOC each
-
-Deliverable: Agent behavior = Olang scripts, Rust = execution engine.
+Deliverable: origin.olang chạy trên x86_64, ARM64, RISC-V, WASM.
 ```
 
-### Giai đoạn 5 — Integration & Optimization
+### Giai đoạn 5 — Optimization
 
-**Mục tiêu:** Hoàn thiện, tối ưu, stabilize.
+**Mục tiêu:** Performance ngang Rust.
 
 ```
-Bước 5.1: Module preloading
-  - Boot: load tất cả .ol modules vào cache
-  - Hot reload: thay .ol file → runtime reload không restart
-  - Module dependency graph validation
+5.1  JIT compilation
+     - VM detect hot loops → compile to native at runtime
+     - Olang bytecode → machine code trực tiếp
+     - Cùng asm_emit.ol đã viết ở giai đoạn 3
 
-Bước 5.2: Performance profiling
-  - Benchmark Olang vs Rust cho từng pipeline component
-  - Identify bottlenecks (graph walk, encoding — giữ ở Rust)
-  - JIT hints: mark hot paths cho VM optimization
+5.2  Inline caching
+     - Registry lookup → cache kết quả
+     - Silk implicit → cache 5D comparison results
+     - Dream scoring → memoize cluster scores
 
-Bước 5.3: Test suite bằng Olang
-  - test_emotion.ol — emotion pipeline tests
-  - test_dream.ol — dream clustering tests
-  - test_instinct.ol — instinct logic tests
-  - test_bootstrap.ol — self-compile verification
-  - test_e2e.ol — end-to-end: input → emotion → learn → dream → response
+5.3  Memory optimization
+     - Arena allocator per-turn (free tất cả cuối turn)
+     - Zero-copy string handling
+     - Molecule pool (reuse 5-byte slots)
 
-Bước 5.4: Documentation
-  - Update olang_handbook.md — thêm HomeOS modules
-  - API reference cho mỗi .ol module
-  - Migration guide: "cách thêm logic mới bằng Olang"
+5.4  Benchmark
+     - origin.olang vs Rust binary: latency, throughput, memory
+     - Target: < 2× slower cho logic, < 5× slower cho math
+     - Acceptable: machine code VM = near-native speed
 
-Deliverable: HomeOS production-ready với Olang layer.
+Deliverable: origin.olang performance production-ready.
+```
+
+### Giai đoạn 6 — Living system
+
+**Mục tiêu:** origin.olang tự tiến hóa.
+
+```
+6.1  Self-update
+     - origin.olang v1 download patch
+     - Apply patch → rebuild sections → origin.olang v2
+     - Knowledge section grows (append-only)
+     - VM + bytecode sections CÓ THỂ thay thế (versioned)
+
+6.2  Self-optimize
+     - LeoAI profile runtime → tìm bottleneck
+     - LeoAI viết Olang optimization → compile → apply
+     - Sinh linh tự cải thiện bản thân
+
+6.3  Reproduce
+     - origin.olang tạo bản sao nhỏ hơn cho Worker
+     - Worker clone = VM + minimal bytecode + device skills
+     - WorkerPackage embed trong origin.olang format
+
+Deliverable: origin.olang = sinh linh tự vận hành, tự tiến hóa, tự sinh sản.
 ```
 
 ---
 
-## Tóm tắt LOC estimate
+## Vòng đời cắt dây rốn
 
 ```
-                        Olang LOC    Thay thế Rust LOC
-────────────────────────────────────────────────────────
-Giai đoạn 0 (Bootstrap)
-  semantic.ol             800          7,500 (phần core)
-  codegen.ol              400          1,164
+HIỆN TẠI (thai nhi trong Rust):
+  cargo build → Rust binary → đọc origin.olang → chạy
+  Rust = 84K LOC, Olang = 600 LOC
+  Rust chiếm 99.3%
 
-Giai đoạn 1 (Stdlib)
-  8 modules mới           600          — (chưa có)
+SAU GIAI ĐOẠN 0 (compiler tự lập):
+  Rust VM → chạy Olang compiler → compile Olang code
+  Rust giữ VM, Olang giữ compiler + logic
+  Rust = 60K LOC, Olang = 5K LOC
+  Olang chiếm ~8% nhưng giữ 100% logic
 
-Giai đoạn 2 (Emotion)
-  emotion.ol               80          1,266
-  curve.ol                100            406
-  intent.ol               150          1,006
-  wire                     50            —
+SAU GIAI ĐOẠN 1 (VM bằng ASM):
+  Machine code VM → chạy Olang code
+  Rust chỉ còn builder tool
+  ASM = 3K LOC, Olang = 5K LOC, Rust = builder only
 
-Giai đoạn 3 (Silk+Dream)
-  silk_ops.ol             150          3,907 (phần logic)
-  dream.ol                200            744
-  instinct.ol             300          1,015
-  learning.ol             200          1,094
+SAU GIAI ĐOẠN 3 (builder bằng Olang):
+  origin.olang tự build origin.olang
+  ┌──────────────────────────────────┐
+  │          Rust = 0%               │
+  │   ASM VM:     3K LOC (~100 KB)   │
+  │   Olang:      6K LOC (~500 KB)   │
+  │   Knowledge:  grows forever      │
+  │                                  │
+  │   1 FILE. TỰ ĐỦ. TỰ CHẠY.      │
+  └──────────────────────────────────┘
+```
 
-Giai đoạn 4 (Agents)
-  gate.ol                 200            695
-  response.ol             300            426
-  leo.ol                  200          1,524
-  chief.ol + worker.ol    300          2,643
+---
 
-Giai đoạn 5 (Tests+Opt)
-  test suites             500            —
-  integration             200            —
-────────────────────────────────────────────────────────
-TỔNG OLANG:            ~4,430 LOC
-THAY THẾ RUST:        ~23,390 LOC (logic layer)
-GIỮ RUST:             ~60,300 LOC (VM, HAL, crypto, core)
-────────────────────────────────────────────────────────
-Tỷ lệ:  Olang 4.4K / Rust 60K = Olang là "não", Rust là "cơ thể"
+## LOC Estimate
+
+```
+                          LOC        Kích thước
+──────────────────────────────────────────────────
+Machine Code VM:
+  vm_x86_64.S             2,500      ~80 KB
+  vm_arm64.S              2,500      ~80 KB
+  vm_wasm.wat             1,500      ~40 KB
+
+Olang Bootstrap:
+  lexer.ol                  197      }
+  parser.ol                 399      } ~50 KB bytecode
+  semantic.ol               800      }
+  codegen.ol                400      }
+
+Olang Stdlib:
+  18 modules              1,200      ~100 KB bytecode
+
+Olang HomeOS:
+  emotion + curve + intent    380    }
+  silk + dream + instinct     650    } ~150 KB bytecode
+  learning + gate + response  700    }
+  leo + chief + worker        500    }
+
+Olang Builder:
+  asm_emit.ol               500     }
+  elf_emit.ol               200     } ~50 KB bytecode
+  builder.ol                300     }
+
+──────────────────────────────────────────────────
+TỔNG ASM:               ~2,500 LOC per arch
+TỔNG OLANG:             ~6,226 LOC
+TỔNG RUST:                  0 LOC (sau giai đoạn 3)
+
+origin.olang seed size:  ~616 KB
+  VM:          100 KB
+  Bytecode:    500 KB
+  Knowledge:    16 KB (L0 seed)
 ```
 
 ---
@@ -420,19 +520,22 @@ Tỷ lệ:  Olang 4.4K / Rust 60K = Olang là "não", Rust là "cơ thể"
 ## Thứ tự ưu tiên
 
 ```
-PHẢI LÀM TRƯỚC (blocking):
-  0.1-0.3  Test bootstrap hiện có       ← nếu lexer.ol/parser.ol không chạy → DỪNG
-  0.4      semantic.ol                   ← cần trước khi viết gì khác
-  1.1-1.3  Stdlib core                   ← cần cho mọi module sau
+BLOCKING (phải xong trước):
+  0.1-0.6  Bootstrap compiler loop     ← Olang phải tự compile được
+  1.1      vm_x86_64.S                 ← 1 platform đủ để chứng minh
 
-NÊN LÀM SỚM (high value):
-  2.1-2.3  Emotion pipeline              ← "linh hồn" — chứng minh Olang đủ mạnh
-  3.2      Dream clustering              ← offline, chấp nhận chậm hơn
+HIGH VALUE (giải phóng khỏi Rust):
+  1.4      Builder tool                ← tạo origin.olang executable
+  3.1-3.4  Self-sufficient builder     ← cắt Rust hoàn toàn
 
-CÓ THỂ LÀM SAU (nice to have):
-  3.3      Instinct logic                ← phức tạp, nhiều edge cases
-  4.1-4.4  Agent protocols               ← cần ISL integration
-  5.1-5.4  Optimization                  ← sau khi functional
+PARALLEL (làm song song với 1.x):
+  2.1-2.4  Stdlib + HomeOS logic       ← viết bằng Olang, test trên Rust VM
+                                          port sang ASM VM khi sẵn sàng
+
+SAU KHI FUNCTIONAL:
+  4.x      Multi-architecture
+  5.x      Optimization + JIT
+  6.x      Self-evolution
 ```
 
 ---
@@ -440,23 +543,48 @@ CÓ THỂ LÀM SAU (nice to have):
 ## Rủi ro & Mitigation
 
 ```
-Rủi ro                           Mitigation
-──────────────────────────────────────────────────────────────
-lexer.ol/parser.ol không chạy    → Fix VM/module bugs trước
-  trên VM thật                     Đây là litmus test #1
+Rủi ro                              Mitigation
+───────────────────────────────────────────────────────────────
+ASM VM quá phức tạp                  → Bắt đầu x86_64 only
+                                       36 opcodes = ~1200 instructions core
+                                       Tham khảo: Lua VM ~3000 LOC C
+                                       Forth VM ~500 LOC ASM
 
-semantic.ol quá lớn để port      → Chỉ port CORE (scope, fn, type)
-                                   Bỏ qua: generics, traits, constraints
+Crypto bằng ASM dễ sai               → Phase 1: SHA-256 only (verify)
+                                       Ed25519 signing = phase sau
+                                       Audit: constant-time checks
 
-Performance Olang << Rust         → Giữ hot path ở Rust (graph walk, encode)
-  (10-100× chậm hơn)               Olang chỉ cho logic/decision (chạy 1x/turn)
+Float math không chính xác           → Dùng x87 FPU (x86) / NEON (ARM)
+                                       Không tự implement — dùng hardware
 
-Module system bugs                → Test module import E2E trước
-                                   lexer.ol → parser.ol = first real import
+Self-build không converge             → Fixed-point test: v2 == v3
+  (v2 ≠ v3 ≠ v4...)                    Nếu fail → determinism bug trong compiler
 
-Circular dependency               → Rust compiler compile Olang compiler lần đầu
-  (Olang compile Olang)             Sau đó Olang compiler tự compile
-                                   = giống GCC bootstrap (C compile C)
+origin.olang quá lớn                  → Seed < 1 MB. Knowledge grows separately.
+                                       Worker clones: VM + minimal bytecode only
+
+Security: executable file             → Ed25519 signature trong header
+  có thể bị tamper                      VM verify signature trước khi chạy
+                                       Append-only knowledge = không sửa được
+```
+
+---
+
+## So sánh: Trước vs Sau
+
+```
+                    TRƯỚC (Rust)              SAU (origin.olang)
+──────────────────────────────────────────────────────────────────
+Files cần deploy    Rust binary + origin.olang   origin.olang (1 file)
+Binary size         ~2 MB (Rust release)         ~616 KB
+Dependencies        Rust toolchain               KHÔNG (tự đủ)
+Build system        cargo + Cargo.toml (30+)     origin.olang chạy builder.ol
+Cross-compile       cargo target + linker        origin.olang emit asm_emit.ol
+Boot time           ~50ms (Rust init)            ~1ms (jump to VM)
+Auditability        84K LOC Rust                 2.5K ASM + 6K Olang
+Self-hosting        ❌ Cần Rust compiler          ✅ Tự build chính nó
+Self-evolution      ❌ Cần developer              ✅ LeoAI tự tối ưu
+Reproduce           ❌ Cần cargo build            ✅ origin.olang sinh clone
 ```
 
 ---
@@ -464,15 +592,18 @@ Circular dependency               → Rust compiler compile Olang compiler lần
 ## Nguyên tắc bất biến
 
 ```
-① Rust = VM + HAL + Crypto. KHÔNG port xuống Olang.
-② Olang = Logic + Decision + Behavior. KHÔNG hardcode trong Rust.
-③ Mỗi .ol module = 1 trách nhiệm. Giống Skill pattern (QT⑲-㉓).
-④ Fallback: nếu .ol fail → Rust implementation vẫn chạy.
-⑤ Test trước khi port: viết test bằng Olang → rồi mới port logic.
-⑥ Append-only migration: KHÔNG xóa Rust code. Thêm Olang layer TRÊN.
-⑦ Performance budget: Olang module < 10ms/call. Nếu > 10ms → giữ Rust.
+① origin.olang = 1 FILE DUY NHẤT. Không satellite files.
+② VM = machine code thuần. Không libc, không allocator ngoài.
+③ Mọi logic = Olang bytecode. Không hardcode trong ASM.
+④ ASM chỉ chứa: opcode dispatch + syscall bridge + math primitives.
+⑤ Knowledge = append-only. VM + bytecode = replaceable (versioned).
+⑥ Self-build phải converge: v(n) == v(n+1) cho mọi n ≥ 2.
+⑦ Mỗi architecture = 1 ASM file. Không shared code giữa arch.
+⑧ Seed < 1 MB. Sinh linh khởi đầu phải NHỎ.
+⑨ Signature: mọi origin.olang phải Ed25519-signed.
+⑩ Backward compatible: origin.olang mới đọc được knowledge cũ.
 ```
 
 ---
 
-*HomeOS · 2026-03-18 · Plan Rewrite · Olang Self-Hosting*
+*HomeOS · 2026-03-18 · Plan Rewrite v2 · origin.olang = Self-Contained Executable*
