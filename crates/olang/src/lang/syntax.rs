@@ -78,11 +78,15 @@ pub enum Stmt {
     /// `loop N { body }` hoặc `↻ N { body }`
     Loop { count: u32, body: Vec<Stmt> },
 
-    /// `fn name(params) { body }` hoặc `name ≔ (params) { body }`
+    /// `fn name[T: Trait](params) { body }` hoặc `name ≔ (params) { body }`
     FnDef {
         name: String,
         params: Vec<String>,
         body: Vec<Stmt>,
+        /// Generic type parameters: `fn name[T, U](...)`
+        type_params: Vec<String>,
+        /// Trait bounds: `fn name[T: Skill, U: Iterator](...)`
+        trait_bounds: Vec<(String, String)>,
     },
 
     /// Expression statement
@@ -186,12 +190,15 @@ pub struct EnumVariant {
     pub fields: Vec<String>,
 }
 
-/// Trait method signature (no body).
+/// Trait method signature with optional default body.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]
 pub struct TraitMethod {
     pub name: String,
     pub params: Vec<String>,
+    /// Optional default implementation body.
+    /// If present, implementors can omit this method.
+    pub default_body: Option<Vec<Stmt>>,
 }
 
 /// Match arm — pattern + body.
@@ -662,6 +669,8 @@ impl<'a> Parser<'a> {
     fn parse_fn(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'fn'
         let name = self.expect_ident()?;
+        // Parse optional generic type params: fn name[T, U: Trait](...)
+        let (type_params, trait_bounds) = self.parse_generic_params()?;
         self.expect(&Token::LParen)?;
         let params = self.parse_params()?;
         self.expect(&Token::RParen)?;
@@ -669,7 +678,7 @@ impl<'a> Parser<'a> {
         if self.check(&Token::Semi) {
             self.advance();
         }
-        Ok(Stmt::FnDef { name, params, body })
+        Ok(Stmt::FnDef { name, params, body, type_params, trait_bounds })
     }
 
     /// `match expr { pattern => { body }, ... }`
@@ -805,13 +814,45 @@ impl<'a> Parser<'a> {
         self.advance(); // consume '['
         let mut params = Vec::new();
         while !self.check(&Token::RBracket) && !self.at_eof() {
-            params.push(self.expect_ident()?);
+            let name = self.expect_ident()?;
+            // Skip optional trait bound (handled by parse_generic_params)
+            if self.check(&Token::Colon) {
+                self.advance();
+                let _bound = self.expect_ident()?;
+            }
+            params.push(name);
             if self.check(&Token::Comma) {
                 self.advance();
             }
         }
         self.expect(&Token::RBracket)?;
         Ok(params)
+    }
+
+    /// Parse generic type parameters with optional trait bounds: `[T, U: Trait]`
+    /// Returns (type_params, trait_bounds) where trait_bounds is vec of (param, bound).
+    fn parse_generic_params(&mut self) -> Result<(Vec<String>, Vec<(String, String)>), ParseError> {
+        if !self.check(&Token::LBracket) {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        self.advance(); // consume '['
+        let mut params = Vec::new();
+        let mut bounds = Vec::new();
+        while !self.check(&Token::RBracket) && !self.at_eof() {
+            let name = self.expect_ident()?;
+            // Optional trait bound: T: Trait
+            if self.check(&Token::Colon) {
+                self.advance();
+                let bound = self.expect_ident()?;
+                bounds.push((name.clone(), bound));
+            }
+            params.push(name);
+            if self.check(&Token::Comma) {
+                self.advance();
+            }
+        }
+        self.expect(&Token::RBracket)?;
+        Ok((params, bounds))
     }
 
     /// `struct Name[T] { field1: Type, field2, ... }`
@@ -905,7 +946,7 @@ impl<'a> Parser<'a> {
         Ok(Stmt::ImplBlock { target: first, methods })
     }
 
-    /// `trait Name { fn method(self); ... }`
+    /// `trait Name { fn method(self); fn default_method(self) { body } ... }`
     fn parse_trait_def(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume 'trait'
         let name = self.expect_ident()?;
@@ -928,8 +969,14 @@ impl<'a> Parser<'a> {
                 if self.check(&Token::Comma) { self.advance(); }
             }
             self.expect(&Token::RParen)?;
-            if self.check(&Token::Semi) { self.advance(); }
-            methods.push(TraitMethod { name: method_name, params });
+            // Check for default body: `{ ... }` or just `;`
+            let default_body = if self.check(&Token::LBrace) {
+                Some(self.parse_block()?)
+            } else {
+                if self.check(&Token::Semi) { self.advance(); }
+                None
+            };
+            methods.push(TraitMethod { name: method_name, params, default_body });
         }
         self.expect(&Token::RBrace)?;
         if self.check(&Token::Semi) { self.advance(); }
@@ -1057,7 +1104,7 @@ impl<'a> Parser<'a> {
                         if self.check(&Token::Semi) {
                             self.advance();
                         }
-                        return Ok(Stmt::FnDef { name, params, body });
+                        return Ok(Stmt::FnDef { name, params, body, type_params: Vec::new(), trait_bounds: Vec::new() });
                     }
                 }
             }
@@ -2064,6 +2111,8 @@ mod tests {
                     Box::new(Expr::Ident("a".into())),
                     Box::new(Expr::Ident("b".into())),
                 ))],
+                type_params: vec![],
+                trait_bounds: vec![],
             }]
         );
     }
