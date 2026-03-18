@@ -64,6 +64,8 @@ pub struct BootResult {
     pub slim_knowtree_records: Vec<crate::reader::ParsedSlimKnowTree>,
     /// ConversationCurve turn records — replay to reconstruct curve.
     pub curve_records: Vec<crate::reader::ParsedCurve>,
+    /// Auth records — last one is the active identity.
+    pub auth_records: Vec<crate::reader::ParsedAuth>,
 }
 
 /// Stage boot đã đạt được.
@@ -146,6 +148,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
     let mut knowtree_records = Vec::new();
     let mut slim_knowtree_records = Vec::new();
     let mut curve_records = Vec::new();
+    let mut auth_records = Vec::new();
     let file_had_data = if let Some(bytes) = file_bytes {
         if !bytes.is_empty() {
             match load_from_bytes(bytes, &mut registry) {
@@ -156,6 +159,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
                     knowtree_records = loaded.knowtree_records;
                     slim_knowtree_records = loaded.slim_knowtree_records;
                     curve_records = loaded.curve_records;
+                    auth_records = loaded.auth_records;
                     stage = BootStage::Loaded;
                     true
                 }
@@ -225,6 +229,7 @@ pub fn boot(file_bytes: Option<&[u8]>) -> BootResult {
         knowtree_records,
         slim_knowtree_records,
         curve_records,
+        auth_records,
     }
 }
 
@@ -810,6 +815,7 @@ struct LoadedData {
     knowtree_records: Vec<crate::reader::ParsedKnowTree>,
     slim_knowtree_records: Vec<crate::reader::ParsedSlimKnowTree>,
     curve_records: Vec<crate::reader::ParsedCurve>,
+    auth_records: Vec<crate::reader::ParsedAuth>,
 }
 
 fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<LoadedData, ParseError> {
@@ -861,6 +867,7 @@ fn load_from_bytes(bytes: &[u8], registry: &mut Registry) -> Result<LoadedData, 
         knowtree_records: parsed.knowtree_records,
         slim_knowtree_records: parsed.slim_knowtree_records,
         curve_records: parsed.curve_records,
+        auth_records: parsed.auth_records,
     })
 }
 

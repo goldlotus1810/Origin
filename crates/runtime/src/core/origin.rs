@@ -43,6 +43,7 @@ use agents::domain_skills::{
     IngestSkill, DeltaSkill, HebbianSkill, CuratorSkill,
     MergeSkill, PruneSkill, TemporalPatternSkill, InverseRenderSkill,
 };
+use crate::auth::{AuthHeader, AuthState};
 use crate::router::MessageRouter;
 use memory::proposal::{AlertLevel, RegistryGate};
 
@@ -165,6 +166,10 @@ pub struct HomeRuntime {
     platform: Option<alloc::boxed::Box<dyn hal::ffi::PlatformBridge>>,
     /// Module loader — resolves, caches, and tracks module dependencies
     module_loader: olang::module::ModuleLoader,
+    /// Auth state machine: Virgin → Locked → Unlocked
+    auth_state: AuthState,
+    /// Auth header: master pubkey, salt, setup metadata
+    auth_header: AuthHeader,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -308,6 +313,15 @@ impl HomeRuntime {
         );
         pending_writes.extend_from_slice(&agent_writes);
 
+        // Restore auth: last RT_AUTH record wins (append-only)
+        let (auth_header, auth_state) = if let Some(last_auth) = boot_result.auth_records.last() {
+            let hdr = AuthHeader::from_bytes(&last_auth.header_bytes);
+            let state = if hdr.is_virgin() { AuthState::Virgin } else { AuthState::Locked };
+            (hdr, state)
+        } else {
+            (AuthHeader::virgin(), AuthState::Virgin)
+        };
+
         let mut rt = Self {
             learning,
             parser: OlangParser::new(),
@@ -341,6 +355,8 @@ impl HomeRuntime {
             trace_enabled: false,
             platform: None,
             module_loader: olang::module::ModuleLoader::new(alloc::vec!["stdlib".into(), ".".into()]),
+            auth_state,
+            auth_header,
         };
 
         // Restore KnowTree compact nodes từ file (legacy 0x08)
@@ -2293,6 +2309,10 @@ impl HomeRuntime {
                 }
             }
 
+            _ if cmd.starts_with("auth") => {
+                self.handle_auth_command(cmd, ts)
+            }
+
             _ => {
                 // Math commands (solve, derive, integrate, simplify, eval)
                 let math_prefixes = [
@@ -4057,6 +4077,200 @@ impl HomeRuntime {
     /// Registry alias count.
     pub fn registry_alias_count(&self) -> usize {
         self.registry.alias_count()
+    }
+
+    // ── Auth ─────────────────────────────────────────────────────────────────
+
+    /// Auth state: is the system unlocked?
+    pub fn is_unlocked(&self) -> bool {
+        matches!(self.auth_state, AuthState::Unlocked { .. })
+    }
+
+    /// Auth state: is this a virgin (no master key) origin?
+    pub fn is_virgin(&self) -> bool {
+        self.auth_header.is_virgin()
+    }
+
+    /// Auth header reference.
+    pub fn auth_header(&self) -> &AuthHeader {
+        &self.auth_header
+    }
+
+    /// Handle auth subcommands: status, setup, unlock.
+    fn handle_auth_command(&mut self, cmd: &str, ts: i64) -> Response {
+        let parts: alloc::vec::Vec<&str> = cmd.split_whitespace().collect();
+        let sub = parts.get(1).copied().unwrap_or("status");
+
+        match sub {
+            "status" => {
+                let state_str = match &self.auth_state {
+                    AuthState::Virgin => "Virgin (chưa thiết lập)",
+                    AuthState::Locked => "Locked (cần mật khẩu)",
+                    AuthState::Unlocked { .. } => "Unlocked ✓",
+                };
+                let pubkey_hex = if self.auth_header.is_virgin() {
+                    String::from("(none)")
+                } else {
+                    let pk = &self.auth_header.master_pubkey;
+                    format!("{:02x}{:02x}..{:02x}{:02x}",
+                        pk[0], pk[1], pk[30], pk[31])
+                };
+                let text = format!(
+                    "Auth ○\n\
+                     State  : {}\n\
+                     Pubkey : {}\n\
+                     Setup  : {}",
+                    state_str,
+                    pubkey_hex,
+                    if self.auth_header.setup_ts > 0 {
+                        format!("{}", self.auth_header.setup_ts)
+                    } else {
+                        String::from("(never)")
+                    },
+                );
+                Response {
+                    text,
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            "setup" => {
+                // ○{auth setup <username> <password>}
+                if !self.auth_header.is_virgin() {
+                    return Response {
+                        text: String::from("Auth ○ Đã thiết lập rồi. Dùng ○{auth unlock} để mở khóa."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let username = match parts.get(2) {
+                    Some(u) => *u,
+                    None => return Response {
+                        text: String::from("Auth ○ Cần: auth setup <username> <password>"),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
+                };
+                let password = match parts.get(3) {
+                    Some(p) => *p,
+                    None => return Response {
+                        text: String::from("Auth ○ Cần: auth setup <username> <password>"),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
+                };
+                match crate::auth::setup::create_auth_header(username, password, ts) {
+                    Ok(header) => {
+                        // Write auth record to pending_writes (append-only QT8)
+                        let auth_bytes = header.to_bytes();
+                        let mut record = alloc::vec::Vec::with_capacity(122);
+                        record.push(olang::writer::RT_AUTH);
+                        record.extend_from_slice(&auth_bytes);
+                        record.extend_from_slice(&ts.to_le_bytes());
+                        self.pending_writes.extend_from_slice(&record);
+
+                        // Derive signing key and unlock immediately
+                        let (signing_key, _) = crate::auth::key::derive_keypair(username, password);
+                        self.auth_header = header;
+                        self.auth_state = AuthState::Unlocked { signing_key };
+
+                        Response {
+                            text: String::from("Auth ○ Master key tạo thành công. Hệ thống đã mở khóa."),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        }
+                    }
+                    Err(e) => Response {
+                        text: format!("Auth ○ Lỗi: {}", e),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
+                }
+            }
+
+            "unlock" => {
+                // ○{auth unlock <username> <password>}
+                if self.auth_header.is_virgin() {
+                    return Response {
+                        text: String::from("Auth ○ Chưa thiết lập. Dùng ○{auth setup <user> <pass>} trước."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                if self.is_unlocked() {
+                    return Response {
+                        text: String::from("Auth ○ Đã mở khóa rồi."),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    };
+                }
+                let username = match parts.get(2) {
+                    Some(u) => *u,
+                    None => return Response {
+                        text: String::from("Auth ○ Cần: auth unlock <username> <password>"),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
+                };
+                let password = match parts.get(3) {
+                    Some(p) => *p,
+                    None => return Response {
+                        text: String::from("Auth ○ Cần: auth unlock <username> <password>"),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
+                };
+                match crate::auth::verify::unlock(&self.auth_header, username, password) {
+                    Ok(state) => {
+                        self.auth_state = state;
+                        Response {
+                            text: String::from("Auth ○ Mở khóa thành công."),
+                            tone: ResponseTone::Engaged,
+                            fx: 0.0,
+                            kind: ResponseKind::System,
+                        }
+                    }
+                    Err(e) => Response {
+                        text: format!("Auth ○ {}", e),
+                        tone: ResponseTone::Engaged,
+                        fx: 0.0,
+                        kind: ResponseKind::System,
+                    },
+                }
+            }
+
+            "lock" => {
+                self.auth_state = if self.auth_header.is_virgin() {
+                    AuthState::Virgin
+                } else {
+                    AuthState::Locked
+                };
+                Response {
+                    text: String::from("Auth ○ Đã khóa."),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::System,
+                }
+            }
+
+            _ => Response {
+                text: format!("Auth ○ Lệnh không biết: {}. Dùng: status, setup, unlock, lock", sub),
+                tone: ResponseTone::Engaged,
+                fx: 0.0,
+                kind: ResponseKind::System,
+            },
+        }
     }
 }
 
