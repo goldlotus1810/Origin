@@ -3166,4 +3166,56 @@ mod tests {
             _ => panic!("Expected StructLiteral, got {:?}", stmts[0]),
         }
     }
+
+    // ── Audit: bootstrap lexer.ol parse test ───────────────────────────
+    // AUDIT 2026-03-18: FAILS because parser lacks `union` and `type` keywords.
+    // `union TokenKind {` → parser sees `union` as Ident → expects `=` → gets `{` → error.
+    // Fix: add "union" → Keyword::Enum and "type" → Keyword::Struct in alphabet.rs
+    #[test]
+    #[ignore = "AUDIT: blocked on union/type keyword support in parser"]
+    fn audit_parse_bootstrap_lexer_ol() {
+        // lexer.ol dùng: union, type, let, fn, pub fn, while, if/else,
+        // continue, return, array literal, struct literal, union variant
+        let source = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        match parse(source) {
+            Ok(stmts) => {
+                assert!(!stmts.is_empty(), "lexer.ol should produce statements");
+                // Count expected constructs
+                let mut fn_count = 0u32;
+                let mut _let_count = 0u32;
+                for s in &stmts {
+                    match s {
+                        Stmt::FnDef { .. } => fn_count += 1,
+                        Stmt::Pub(inner) => {
+                            if matches!(inner.as_ref(), Stmt::FnDef { .. }) {
+                                fn_count += 1;
+                            }
+                        }
+                        Stmt::Let { .. } => _let_count += 1,
+                        _ => {}
+                    }
+                }
+                assert!(fn_count >= 5, "lexer.ol has ≥5 fns, got {}", fn_count);
+            }
+            Err(e) => {
+                panic!("AUDIT FAIL: lexer.ol parse failed: {:?}", e);
+            }
+        }
+    }
+
+    // AUDIT 2026-03-18: FAILS — same reason as lexer_ol (union/type keywords)
+    // Plus: parser.ol has `use olang.bootstrap.lexer;` (import needs module system)
+    #[test]
+    #[ignore = "AUDIT: blocked on union/type keyword support + module import"]
+    fn audit_parse_bootstrap_parser_ol() {
+        let source = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        match parse(source) {
+            Ok(stmts) => {
+                assert!(!stmts.is_empty(), "parser.ol should produce statements");
+            }
+            Err(e) => {
+                panic!("AUDIT FAIL: parser.ol parse failed: {:?}", e);
+            }
+        }
+    }
 }
