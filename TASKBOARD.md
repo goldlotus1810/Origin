@@ -81,7 +81,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| AUTH | First-run setup | `PLAN_AUTH` | Không | FREE | — | — | Làm bất kỳ lúc nào |
+| AUTH | First-run setup | `PLAN_AUTH` | Không | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | Core done (910 LOC, 21 tests). Wire vào HomeRuntime = pending. |
 
 ---
 
@@ -122,4 +122,7 @@ Khi Session A xong 0.3:
 ```
 2026-03-18  Tạo TASKBOARD. Audit xong: 2 blockers (B1, B2), 1 minor (B3).
             Tất cả Phase 0 tasks FREE. AUTH FREE.
+2026-03-18  AUTH → DONE (session 2pN6F). 7 files, 910 LOC, 21 tests.
+            Ed25519 VerifyingKey extended (from_bytes, as_bytes, seed).
+            Wire vào HomeRuntime chưa làm (origin.rs quá lớn, cần kế hoạch).
 ```
