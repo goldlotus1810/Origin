@@ -65,6 +65,8 @@ pub use exec::vm;
 pub use exec::compiler;
 /// IR optimizer
 pub use exec::optimize;
+/// Module system (loader, cache, dependency graph)
+pub use exec::module;
 
 /// 5-byte Molecule + MolecularChain
 pub use mol::molecular;

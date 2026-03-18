@@ -5,5 +5,6 @@
 
 pub mod compiler;
 pub mod ir;
+pub mod module;
 pub mod optimize;
 pub mod vm;
