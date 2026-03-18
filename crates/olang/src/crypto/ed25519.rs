@@ -677,6 +677,11 @@ impl SigningKey {
         self.public.clone()
     }
 
+    /// Get the original 32-byte seed.
+    pub fn seed(&self) -> &[u8; 32] {
+        &self._seed
+    }
+
     /// Sign a message.
     pub fn sign(&self, message: &[u8]) -> Signature {
         // r = SHA-512(nonce_prefix || message)
@@ -710,6 +715,16 @@ impl SigningKey {
 }
 
 impl VerifyingKey {
+    /// Create verifying key from 32 bytes.
+    pub fn from_bytes(bytes: &[u8; 32]) -> Self {
+        Self { bytes: *bytes }
+    }
+
+    /// Get raw 32-byte representation.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.bytes
+    }
+
     /// Verify a signature.
     #[allow(clippy::result_unit_err)]
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), ()> {
