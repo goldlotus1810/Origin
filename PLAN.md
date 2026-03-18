@@ -38,11 +38,11 @@ Gap #8  Fix weight=0 bug                     ⚠️  heuristic trong STM, weight
 
 ```
 #1  Response quality (instinct+Silk)         ✅  runtime/origin.rs
-#2  Parser 6 commands                        ❌  CÒN — runtime/parser.rs
+#2  Parser 6 commands                        ✅  runtime/parser.rs — is_command() + 6 prefixes
 #3  Maturity pipeline wire                   ✅  agents/learning.rs + memory/dream.rs
-#4  Dream threshold quá cao                  ❌  CÒN — memory/dream.rs
+#4  Dream threshold quá cao                  ✅  DreamConfig::for_conversation() threshold=0.30
 #5  Silk parent pointer                      ✅  = Gap #1
-#6  Agent hierarchy dead loop                ❌  CÒN — runtime + context + agents
+#6  Agent hierarchy dead loop                ✅  HomeControl intent → ISL → HomeChief
 ```
 
 ### Olang Language — Plan_Olang.md ✅ Phase 6 HOÀN THÀNH

@@ -649,6 +649,9 @@ pub enum IntentAction {
     /// Ghi nhận nhẹ — phát hiện cảm xúc nhưng không cần response đầy đủ.
     /// Ví dụ: "Ah!", "ya..!", thán từ đơn.
     SilentAck,
+    /// Điều khiển thiết bị — route qua ISL đến Chief/Worker.
+    /// Runtime gửi ISL message đến HomeChief → forward đến Worker phù hợp.
+    HomeControl,
 }
 
 /// Quyết định hành động từ IntentEstimate + emotional state.
@@ -683,6 +686,7 @@ pub fn decide_action(est: &IntentEstimate, cur_v: f32) -> IntentAction {
 
     // User commands
     match est.primary {
+        IntentKind::Command => return IntentAction::HomeControl,
         IntentKind::Confirm => return IntentAction::UserConfirm,
         IntentKind::Deny => return IntentAction::UserDeny,
         IntentKind::LearnCommand => return IntentAction::ForceLearnQR,
