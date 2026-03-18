@@ -1437,16 +1437,16 @@ NHÓM 3: Molecular Type System — Olang Language Extension
   (○{ } = 5D constraint system thay Generic + Lifetime + Trait)
 ═══════════════════════════════════════════════════════════════════════════
 
-Task    Feature                      Depends on    Files
-──────────────────────────────────────────────────────────────
-6A      Molecular constraint parse   Phase 5 done  syntax.rs
-6B      Constraint propagation       6A            semantic.rs (static check)
-6C      Immutability by default      independent   semantic.rs (scope tracking)
-6D      Time-based CoW/Move/Share    6A+6C         vm.rs (value passing)
-6E      Exhaustive ○{ } match        6A            semantic.rs (range checker)
-6F      Effect system (Relation)     6A            semantic.rs (effect tracking)
-6G      Runtime constraint fallback  6B            vm.rs (dynamic check)
-6H      Documentation + examples    6A-6G          docs/molecular_types.md
+Task    Feature                      Depends on    Files                         Status
+──────────────────────────────────────────────────────────────────────────────────────────
+6A      Molecular constraint parse   Phase 5 done  syntax.rs                     ✅ DONE
+6B      Constraint propagation       6A            semantic.rs (static check)    ✅ DONE
+6C      Immutability by default      independent   semantic.rs (scope tracking)  ✅ DONE
+6D      Time-based CoW/Move/Share    6A+6C         semantic.rs (value semantics) ✅ DONE
+6E      Exhaustive ○{ } match        6A            semantic.rs (range checker)   ✅ DONE
+6F      Effect system (Relation)     6A            semantic.rs (effect tracking) ✅ DONE
+6G      Runtime constraint fallback  6B            vm.rs (dynamic check)         ✅ DONE
+6H      Documentation + examples    6A-6G          Plan_Olang.md                 ✅ DONE
 ```
 
 ### Thứ tự thực hiện Phase 6

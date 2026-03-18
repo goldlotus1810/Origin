@@ -149,7 +149,7 @@ Phase 2 (Abstraction):        ✅ COMPLETE — trait, generics, module system, c
 Phase 3 (Collections):        ✅ COMPLETE — Iterator, f"...", BitShift, String, Byte, Math
 Phase 4 (Concurrency+Self):   ✅ COMPLETE — channel, spawn, select, self-hosting, migration
 Phase 5 (Completion):         ✅ COMPLETE — ?, Option/Result, Set/Deque, slice, stdlib, compiler
-Phase 6 (Molecular Types):    🔄 NEXT — 3 nhóm: Node lifecycle + Silk structure + ○{ } types
+Phase 6 (Molecular Types):    🔄 IN PROGRESS — 3 nhóm: Node lifecycle + Silk structure + ○{ } types
 
 Phase 6 overview (3 nhóm):
   6N: Node Lifecycle (SPEC gaps #6,#7,#8)
@@ -164,8 +164,15 @@ Phase 6 overview (3 nhóm):
     6S4. Dream MolSummary+Silk   — unblock Dream clustering
     6S5. Wire unified_neighbors  — enrich response + Dream
 
-  6T: Molecular Type System
-    6A-6H. ○{ } constraints, immutability, CoW, exhaustive match, effects
+  6T: Molecular Type System    ✅ COMPLETE
+    6A. Constraint parsing      — ○{ S=SDF, V>0x40 } syntax
+    6B. Constraint propagation  — static check at call sites
+    6C. Immutability by default — let vs let mut
+    6D. Time-based semantics    — CoW/Move/Share from Time dimension
+    6E. Exhaustive match        — warn on non-exhaustive ○{ } patterns
+    6F. Effect system           — infer Pure/Emits from function body
+    6G. Runtime constraints     — __check_constraint VM builtin
+    6H. Documentation           — Plan_Olang.md updated
 ```
 
 ---
