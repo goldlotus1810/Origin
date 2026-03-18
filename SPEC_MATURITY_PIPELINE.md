@@ -602,6 +602,155 @@ fn process_task(&mut self, msg: &ISLMessage) -> Option<ISLMessage> {
 
 ---
 
+## Thiết kế gốc từ `node va silk.md`
+
+File `old/2026-03-18/node va silk.md` là tài liệu thiết kế quan trọng nhất — mô tả cách Silk và Molecule **thật sự** nên hoạt động. Đây là nguồn gốc của các vấn đề #3, #4, #5 và ảnh hưởng đến #1. Cần đọc kỹ trước khi implement bất kỳ thay đổi nào liên quan đến Silk hoặc Molecule.
+
+### Ý tưởng cốt lõi 1 — Molecule = công thức, không phải giá trị
+
+```
+Hiện tại:   Molecule = 5 giá trị tĩnh
+            [Sphere, Causes, 0xC0, 0xC0, Fast]
+
+Thiết kế:   Molecule = 5 CÔNG THỨC
+            Shape    = f_s(inputs...)   ← "cách TRỞ THÀNH Sphere"
+            Relation = f_r(inputs...)
+            Valence  = f_v(inputs...)
+            Arousal  = f_a(inputs...)
+            Time     = f_t(inputs...)
+```
+
+Vòng đời của một node:
+- **Chưa có input** → 5 chiều là công thức tiềm năng, chưa xác định
+- **Có input** → thế giá trị thật vào công thức → giá trị cụ thể
+- **Đủ giá trị** → node "chín" → thay công thức bằng hằng số → promote QR
+
+Đây chính là lý do `Maturity` enum tồn tại. `Formula` = chưa có input thật.
+`Evaluating` = đang tích lũy. `Mature` = đủ evidence, sẵn sàng QR.
+
+**Trạng thái hiện tại:** `Maturity` enum có, logic `advance()` đúng, nhưng
+không được wire vào STM hay Dream. Xem Thay đổi 1-3 ở trên.
+
+---
+
+### Ý tưởng cốt lõi 2 — Silk = 0 bytes, không phải edge list
+
+```
+Thiết kế:   Silk edge = KHÔNG CẦN LƯU
+            Khi 2 node chia sẻ base value trên cùng chiều → Silk TỰ TỒN TẠI
+            "2 node cùng họ Sphere" = Silk trên chiều Shape, implicit, 0 bytes
+
+Hiện tại:   SilkIndex có 37 horizontal buckets — ĐÚNG THIẾT KẾ ✅
+            HebbianLink 19 bytes — ĐÚNG (học được, không phải tạo mới) ✅
+            SilkEdge 46 bytes — backward compat ⚠️
+```
+
+37 kênh Silk cơ bản = 8 Shape + 8 Relation + 8 Valence zone + 8 Arousal zone + 5 Time.
+
+Sức mạnh kết nối tính theo số chiều chung:
+```
+1 chiều chung = liên quan nhẹ    (strength ≈ 0.20)
+2 chiều chung = liên quan rõ     (strength ≈ 0.40)
+3 chiều chung = gần giống        (strength ≈ 0.60)
+4 chiều chung = gần như cùng     (strength ≈ 0.80)
+5 chiều chung = cùng node        (strength = 1.00)
+```
+
+Ví dụ từ tài liệu:
+```
+🔥 lửa  = [Sphere, Causes, V=0xC0, A=0xC0, Fast]
+😡 giận = [Sphere, Causes, V=0xC0, A=0xC0, Fast]
+→ 5/5 chiều giống → gần như cùng node
+→ Đây là lý do "giận dữ" và "lửa" là ẩn dụ phổ quát!
+
+🔥 lửa  = [Sphere, Causes, V=0xC0, A=0xC0, Fast]
+❄️ băng  = [Sphere, Causes, V=0x30, A=0x30, Slow]
+→ 2/5 chiều chung (Shape + Relation)
+→ Đối lập ở cảm xúc và nhịp — nhưng cùng "gây ra" điều gì đó
+```
+
+**Trạng thái hiện tại:** `SilkIndex.implicit_silk()` và `implicit_neighbors()`
+đã implement đúng — so sánh 5D, trả về `ImplicitSilk` với `shared_dims` và
+`strength`. Phần này **đã hoạt động**. Vấn đề là kết quả implicit Silk chưa
+được dùng trong response rendering (#1) và Dream clustering (#4).
+
+---
+
+### Ý tưởng cốt lõi 3 — Silk dọc: từ L0 đến ○ qua 7 tầng
+
+Tài liệu tính toán chi tiết số lượng Silk cần thiết:
+
+```
+Silk tự do (horizontal, 0 bytes):
+  L0: 5400 nodes → 37 kênh index
+  L1:   37 nodes → ~20 cặp
+  L2:   12 nodes → ~8 cặp
+  L3:    5 nodes → ~4 cặp
+  L4:    3 nodes → ~2 cặp
+  L5:    2 nodes → ~1 cặp
+  Tổng: ~72 quan hệ, 0 bytes
+
+Silk đại diện (vertical, 8 bytes/node = parent pointer):
+  L1→L0:  5400 pointers
+  L2→L1:    37 pointers
+  L3→L2:    12 pointers
+  L4→L3:     5 pointers
+  L5→L4:     3 pointers
+  L6→L5:     2 pointers
+  L7→L6:     1 pointer
+  Tổng: 5460 × 8 bytes = 43 KB
+
+TOÀN BỘ mạng Silk từ L0 đến ○ = 43 KB.
+```
+
+Truy vấn qua Silk là O(1):
+```
+"🔥 liên quan gì đến ∈?"
+Bước 1: So sánh 5D → Shape=Sphere giống nhau → 1 chiều chung
+Bước 2: Qua parent pointer → cùng L1 representative
+→ Chi phí: 2 lookups + 1 compare
+```
+
+**Trạng thái hiện tại:** Parent pointer (`parent_map`) **chưa có** trong
+`SilkGraph`. Đây là vấn đề #5. Không có cấu trúc liên tầng → Dream không
+biết 2 nodes có cùng tầng không → `co_activate_same_layer()` phải nhận
+layer từ caller thay vì tự biết.
+
+---
+
+### Ý tưởng cốt lõi 4 — EmotionTag không nên nằm trên Hebbian edge
+
+Tài liệu chỉ ra mâu thuẫn trong thiết kế hiện tại:
+
+```
+Thiết kế đúng:
+  EmotionTag NẰM TRONG node (Molecule V+A)
+  "Cùng cảm xúc" = cùng công thức V hoặc A = TỰ ĐỘNG Silk
+  → Không cần lưu emotion trên edge
+
+Hiện tại:
+  HebbianLink KHÔNG có EmotionTag → ĐÚNG ✅ (19 bytes, slim)
+  SilkEdge    CÓ EmotionTag       → DƯ THỪA ⚠️ (46 bytes, backward compat)
+```
+
+`HebbianLink` đã đúng — emotion không trên edge. `SilkEdge` vẫn giữ
+`EmotionTag` vì backward compat. Không cần sửa ngay, chỉ cần biết khi
+refactor sau này.
+
+---
+
+### Kết nối với 6 vấn đề hệ thống
+
+| Ý tưởng từ node va silk.md | Vấn đề liên quan | Trạng thái |
+|---|---|---|
+| Molecule = công thức, node chín qua evidence | #3 Maturity pipeline | Spec này (PR #23) |
+| Silk implicit 37 kênh, 0 bytes | #4 Dream threshold | SilkIndex đúng nhưng Dream không dùng |
+| Silk dọc: parent pointer 43KB | #5 Silk parent pointer | Chưa implement |
+| Instinct output surface vào response | #1 Response template | Chưa implement |
+| Dream = evaluate công thức đã chín | #4 Dream threshold | Threshold quá cao |
+
+---
+
 ## Thứ tự thực hiện khuyến nghị
 
 ```
@@ -616,4 +765,5 @@ fn process_task(&mut self, msg: &ISLMessage) -> Option<ISLMessage> {
 ---
 
 *HomeOS · 2026-03-18 · Maturity pipeline · Formula → Evaluating → Mature*  
-*Cập nhật sau audit old/2026-03-18/ — thiết kế từ node va silk.md + 6 vấn đề chi tiết*
+*Cập nhật sau audit old/2026-03-18/ — thiết kế từ node va silk.md được phân tích đầy đủ*
+
