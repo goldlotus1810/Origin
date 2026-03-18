@@ -25,7 +25,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::compact::{CompactNode, NodeWithEdges, TieredStore};
+use crate::compact::{CompactEdge, CompactNode, NodeWithEdges, SlimNode, SlimPage, TieredStore};
 use crate::hash::fnv1a_str;
 use crate::molecular::{MolecularChain, RelationBase};
 
@@ -287,6 +287,320 @@ impl KnowTree {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SlimKnowTree — spec-compliant ~10 bytes per node
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// SlimKnowTree — knowledge tree dùng SlimNode/SlimPage.
+///
+/// Pipeline đúng spec:
+/// ```text
+/// UCD entry = 5 công thức (L0, bất biến)
+///      │
+///      ↓  input gọi công thức → tính ra giá trị
+///      │
+/// Molecule [S][R][V][A][T] = 5 bytes (giá trị tĩnh)
+///      │
+///      ↓  tagged sparse encoding
+///      │
+/// [mask:1B][non-defaults:0-5B] = 1-6 bytes
+///      │
+///      ↓  ghi vào SlimKnowTree
+///      │
+/// SlimNode [hash:8][tagged_len:1][tagged:1-6] = 10-15 bytes per node
+/// SlimPage [header:19][nodes...][edges...][checksum:8]
+/// ```
+///
+/// 500M nodes × 11B avg = 5.5GB → VỪA ĐIỆN THOẠI
+pub struct SlimKnowTree {
+    /// Pages per layer (layer → list of pages)
+    pages: Vec<(u8, SlimPage)>,
+    /// Current page per layer
+    current_page_id: u32,
+    /// Stats
+    total_nodes: u64,
+    total_edges: u64,
+    sentences_stored: u64,
+    concepts_stored: u64,
+    promotions: u64,
+}
+
+impl SlimKnowTree {
+    /// Create new SlimKnowTree.
+    pub fn new() -> Self {
+        Self {
+            pages: Vec::new(),
+            current_page_id: 0,
+            total_nodes: 0,
+            total_edges: 0,
+            sentences_stored: 0,
+            concepts_stored: 0,
+            promotions: 0,
+        }
+    }
+
+    // ── Store operations ────────────────────────────────────────────────────
+
+    /// Store chain as SlimNode in the specified layer.
+    ///
+    /// Returns chain_hash.
+    fn store_slim(&mut self, chain: &MolecularChain, layer: u8, ts: i64) -> u64 {
+        let slim = SlimNode::from_chain(chain);
+        let hash = slim.hash;
+
+        // Find or create current page for this layer
+        let page = self.current_page_mut(layer, ts);
+        if !page.push_node(slim) {
+            // Page full → create new page
+            self.current_page_id += 1;
+            let mut new_page = SlimPage::new(self.current_page_id, layer, ts);
+            let slim2 = SlimNode::from_chain(chain);
+            new_page.push_node(slim2);
+            self.pages.push((layer, new_page));
+        }
+
+        self.total_nodes += 1;
+        hash
+    }
+
+    /// Store edge in the current page for the given layer.
+    fn store_edge_slim(&mut self, from: u64, to: u64, weight: f32, relation: u8, layer: u8, ts: i64) {
+        let edge = CompactEdge::encode(from, to, weight, relation);
+        let page = self.current_page_mut(layer, ts);
+        page.push_edge(edge);
+        self.total_edges += 1;
+    }
+
+    /// Store a sentence as L2 SlimNode.
+    pub fn store_sentence(
+        &mut self,
+        chain: &MolecularChain,
+        word_hashes: &[u64],
+        ts: i64,
+    ) -> u64 {
+        let hash = self.store_slim(chain, 2, ts);
+        self.sentences_stored += 1;
+
+        // Silk edges between consecutive words
+        if word_hashes.len() >= 2 {
+            for w in word_hashes.windows(2) {
+                self.store_edge_slim(w[0], w[1], 0.6, RelationBase::Compose.as_byte(), 2, ts);
+            }
+        }
+        // Edge from sentence to each word
+        for &wh in word_hashes {
+            self.store_edge_slim(hash, wh, 0.5, RelationBase::Member.as_byte(), 2, ts);
+        }
+
+        hash
+    }
+
+    /// Store a concept (LCA result) as L3+ SlimNode.
+    pub fn store_concept(
+        &mut self,
+        chain: &MolecularChain,
+        layer: u8,
+        sources: &[u64],
+        ts: i64,
+    ) -> u64 {
+        let layer = layer.max(3);
+        let hash = self.store_slim(chain, layer, ts);
+        self.concepts_stored += 1;
+
+        for &src in sources {
+            self.store_edge_slim(hash, src, 0.7, RelationBase::DerivedFrom.as_byte(), layer, ts);
+        }
+
+        hash
+    }
+
+    /// Promote STM observation to L2 SlimNode.
+    pub fn promote_from_stm(
+        &mut self,
+        chain: &MolecularChain,
+        ts: i64,
+    ) -> u64 {
+        let hash = self.store_slim(chain, 2, ts);
+        self.promotions += 1;
+        hash
+    }
+
+    // ── Query operations ────────────────────────────────────────────────────
+
+    /// Lookup SlimNode by hash in a specific layer.
+    pub fn lookup(&self, hash: u64, layer: u8) -> Option<&SlimNode> {
+        for (l, page) in &self.pages {
+            if *l == layer {
+                if let Some(node) = page.find_node(hash) {
+                    return Some(node);
+                }
+            }
+        }
+        None
+    }
+
+    /// Lookup and decode to MolecularChain.
+    pub fn lookup_chain(&self, hash: u64, layer: u8) -> Option<MolecularChain> {
+        self.lookup(hash, layer)?.to_chain()
+    }
+
+    /// Search by text hash.
+    pub fn search_text(&self, text: &str, layer: u8) -> Option<&SlimNode> {
+        let hash = fnv1a_str(text);
+        self.lookup(hash, layer)
+    }
+
+    // ── Batch operations ────────────────────────────────────────────────────
+
+    /// Store chapter (batch of sentences).
+    pub fn store_chapter(
+        &mut self,
+        chains: &[(MolecularChain, Vec<u64>)],
+        ts: i64,
+    ) -> Vec<u64> {
+        let mut hashes = Vec::with_capacity(chains.len());
+        let mut prev_hash = 0u64;
+
+        for (chain, word_hashes) in chains {
+            let hash = self.store_sentence(chain, word_hashes, ts);
+            hashes.push(hash);
+
+            if prev_hash != 0 {
+                self.store_edge_slim(prev_hash, hash, 0.4, RelationBase::Causes.as_byte(), 2, ts);
+            }
+            prev_hash = hash;
+        }
+
+        hashes
+    }
+
+    // ── Serialization ───────────────────────────────────────────────────────
+
+    /// Serialize all pages → bytes (for origin.olang record 0x08).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let page_count = self.pages.len() as u32;
+        buf.extend_from_slice(&page_count.to_be_bytes());
+        for (_, page) in &self.pages {
+            let page_bytes = page.to_bytes();
+            buf.extend_from_slice(&(page_bytes.len() as u32).to_be_bytes());
+            buf.extend_from_slice(&page_bytes);
+        }
+        buf
+    }
+
+    /// Restore from bytes.
+    pub fn restore_from_bytes(&mut self, b: &[u8]) -> bool {
+        if b.len() < 4 {
+            return false;
+        }
+        let page_count = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize;
+        let mut offset = 4;
+
+        for _ in 0..page_count {
+            if offset + 4 > b.len() {
+                return false;
+            }
+            let page_len = u32::from_be_bytes(
+                b[offset..offset + 4].try_into().unwrap_or([0; 4]),
+            ) as usize;
+            offset += 4;
+
+            if offset + page_len > b.len() {
+                return false;
+            }
+            if let Some(page) = SlimPage::from_bytes(&b[offset..offset + page_len]) {
+                let layer = page.layer;
+                self.total_nodes += page.nodes.len() as u64;
+                self.total_edges += page.edges.len() as u64;
+                self.pages.push((layer, page));
+            }
+            offset += page_len;
+        }
+        true
+    }
+
+    // ── Stats ───────────────────────────────────────────────────────────────
+
+    /// Total nodes.
+    pub fn total_nodes(&self) -> u64 {
+        self.total_nodes
+    }
+
+    /// Total edges.
+    pub fn total_edges(&self) -> u64 {
+        self.total_edges
+    }
+
+    /// Sentences stored.
+    pub fn sentences(&self) -> u64 {
+        self.sentences_stored
+    }
+
+    /// Concepts stored.
+    pub fn concepts(&self) -> u64 {
+        self.concepts_stored
+    }
+
+    /// Promotions from STM.
+    pub fn promotions(&self) -> u64 {
+        self.promotions
+    }
+
+    /// Average bytes per node across all pages.
+    pub fn avg_bytes_per_node(&self) -> f32 {
+        if self.total_nodes == 0 {
+            return 0.0;
+        }
+        let total_bytes: usize = self.pages.iter().map(|(_, p)| {
+            p.nodes.iter().map(|n| n.total_size()).sum::<usize>()
+        }).sum();
+        total_bytes as f32 / self.total_nodes as f32
+    }
+
+    /// Summary.
+    pub fn summary(&self) -> String {
+        format!(
+            "SlimKnowTree: {} sentences + {} concepts + {} promotions\n\
+             Nodes: {} | Edges: {} | Pages: {} | Avg: {:.1}B/node",
+            self.sentences_stored,
+            self.concepts_stored,
+            self.promotions,
+            self.total_nodes,
+            self.total_edges,
+            self.pages.len(),
+            self.avg_bytes_per_node(),
+        )
+    }
+
+    // ── Internal ────────────────────────────────────────────────────────────
+
+    fn current_page_mut(&mut self, layer: u8, ts: i64) -> &mut SlimPage {
+        // Find existing non-full page for this layer
+        let has_page = self.pages.iter().any(|(l, p)| *l == layer && !p.is_full());
+
+        if !has_page {
+            self.current_page_id += 1;
+            let page = SlimPage::new(self.current_page_id, layer, ts);
+            self.pages.push((layer, page));
+        }
+
+        // Return mutable reference to the last non-full page for this layer
+        self.pages
+            .iter_mut()
+            .rev()
+            .find(|(l, p)| *l == layer && !p.is_full())
+            .map(|(_, p)| p)
+            .unwrap()
+    }
+}
+
+impl Default for SlimKnowTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: text → word hashes
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -446,5 +760,133 @@ mod tests {
             kt.store_sentence(&chain, None, &[], i as i64);
         }
         assert!(kt.ram_usage() > 0);
+    }
+
+    // ── SlimKnowTree ────────────────────────────────────────────────────────
+
+    use super::SlimKnowTree;
+
+    #[test]
+    fn slim_knowtree_store_sentence() {
+        let mut skt = SlimKnowTree::new();
+        let chain = test_chain(0x80);
+        let words = alloc::vec![0xAAAAu64, 0xBBBB, 0xCCCC];
+        let hash = skt.store_sentence(&chain, &words, 1000);
+        assert!(hash != 0);
+        assert_eq!(skt.sentences(), 1);
+        assert_eq!(skt.total_nodes(), 1);
+        // 2 word-word + 3 sentence-word = 5 edges
+        assert_eq!(skt.total_edges(), 5);
+    }
+
+    #[test]
+    fn slim_knowtree_store_concept() {
+        let mut skt = SlimKnowTree::new();
+        let chain = test_chain(0x90);
+        let sources = alloc::vec![0x1111u64, 0x2222, 0x3333];
+        let hash = skt.store_concept(&chain, 3, &sources, 1000);
+        assert!(hash != 0);
+        assert_eq!(skt.concepts(), 1);
+        assert_eq!(skt.total_edges(), 3);
+    }
+
+    #[test]
+    fn slim_knowtree_promote() {
+        let mut skt = SlimKnowTree::new();
+        let chain = test_chain(0xA0);
+        let hash = skt.promote_from_stm(&chain, 1000);
+        assert!(hash != 0);
+        assert_eq!(skt.promotions(), 1);
+    }
+
+    #[test]
+    fn slim_knowtree_lookup() {
+        let mut skt = SlimKnowTree::new();
+        let chain = test_chain(0x80);
+        let hash = skt.store_sentence(&chain, &[], 1000);
+
+        let found = skt.lookup(hash, 2);
+        assert!(found.is_some(), "Should find L2 slim node");
+        assert_eq!(found.unwrap().hash, hash);
+    }
+
+    #[test]
+    fn slim_knowtree_lookup_chain() {
+        let mut skt = SlimKnowTree::new();
+        let chain = test_chain(0xB0);
+        let hash = skt.store_sentence(&chain, &[], 1000);
+
+        let decoded = skt.lookup_chain(hash, 2);
+        assert!(decoded.is_some());
+        assert_eq!(decoded.unwrap(), chain);
+    }
+
+    #[test]
+    fn slim_knowtree_store_chapter() {
+        let mut skt = SlimKnowTree::new();
+        let chains: Vec<(MolecularChain, Vec<u64>)> = (0u8..5)
+            .map(|i| {
+                (
+                    test_chain(0x80 + i),
+                    alloc::vec![i as u64 * 100, i as u64 * 100 + 1],
+                )
+            })
+            .collect();
+
+        let hashes = skt.store_chapter(&chains, 1000);
+        assert_eq!(hashes.len(), 5);
+        assert_eq!(skt.sentences(), 5);
+        // Each: 1 word-word + 2 sentence-word = 3. Sequential: 4.
+        // Total: 5×3 + 4 = 19
+        assert_eq!(skt.total_edges(), 19);
+    }
+
+    #[test]
+    fn slim_knowtree_serialization_roundtrip() {
+        let mut skt = SlimKnowTree::new();
+        for i in 0u8..10 {
+            let chain = test_chain(0x80 + i);
+            skt.store_sentence(&chain, &[], i as i64);
+        }
+
+        let bytes = skt.to_bytes();
+        let mut restored = SlimKnowTree::new();
+        assert!(restored.restore_from_bytes(&bytes));
+        assert_eq!(restored.total_nodes(), 10);
+    }
+
+    #[test]
+    fn slim_knowtree_avg_bytes_per_node() {
+        let mut skt = SlimKnowTree::new();
+        for i in 0u8..50 {
+            let chain = test_chain(0x80 + (i % 20));
+            skt.store_sentence(&chain, &[], i as i64);
+        }
+        let avg = skt.avg_bytes_per_node();
+        // SlimNode: hash:8 + len:1 + tagged:2-3 = ~11-12 bytes
+        assert!(
+            avg <= 15.0,
+            "Average {:.1}B/node should be ≤ 15B",
+            avg
+        );
+    }
+
+    #[test]
+    fn slim_knowtree_summary() {
+        let skt = SlimKnowTree::new();
+        let s = skt.summary();
+        assert!(s.contains("SlimKnowTree"), "{}", s);
+    }
+
+    #[test]
+    fn slim_knowtree_concept_minimum_layer() {
+        let mut skt = SlimKnowTree::new();
+        let chain = test_chain(0x80);
+        // Try layer 1 → forced to L3
+        skt.store_concept(&chain, 1, &[], 1000);
+        assert_eq!(skt.concepts(), 1);
+        // Should be findable at layer 3
+        let hash = chain.chain_hash();
+        assert!(skt.lookup(hash, 3).is_some());
     }
 }
