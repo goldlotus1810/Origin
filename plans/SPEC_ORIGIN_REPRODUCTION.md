@@ -317,18 +317,41 @@ So sánh với 16 GB target cho 500M concepts:
 
 ---
 
-## Implementation Notes
+## Implementation: reproduce.ol — Không cần Rust mới
 
 ```
-Liên quan code hiện tại:
-  clone.rs          — giữ nguyên cho Worker clone
-  + reproduce.rs    — MỚI, cho Origin reproduction
-  compact.rs        — dùng delta encoding cho L1 weight export
-  writer.rs/reader.rs — mở rộng header cho generation info
-  knowtree.rs       — export_strong_weights() method mới
+KHÔNG xung đột với Plan hiện tại:
+  - clone.rs (Worker)     → giữ nguyên, khác mục đích
+  - origin.olang format   → append-only, thêm record type = OK
+  - writer/reader          → version bump khi cần (0x05 → 0x06)
+  - Bytecode format (0.5) → cùng bytecode, con đọc được
 
-Cần thêm vào origin.olang format:
-  Record 0x0C: ReproductionRecord
+TOÀN BỘ reproduction logic = 1 file .ol:
+
+  reproduce.ol (~200-300 LOC Olang)
+  ├── fn extract_l0(origin)           — filter layer=0 nodes
+  ├── fn snapshot_weights(silk, thr)  — Hebbian weights > threshold
+  ├── fn select_modules(profile)      — profile → module bitfield
+  ├── fn assemble_child(l0, w, mods)  — pack origin_child.olang
+  ├── fn generate_identity(name)      — child key + header
+  └── fn write_birth_record(parent)   — ReproductionRecord (0x0C)
+
+  Cài:    o install reproduce.ol
+  Dùng:   o reproduce --profile personal --name "my_child"
+  Xem:    o lineage
+  Sync:   o exchange <peer_origin>
+
+  → Ăn vào origin.olang bytecode section
+  → Không cần thêm Rust, không cần thêm crate
+  → Phù hợp 100% flow: logic mới = .ol → o install → done
+
+Khi nào viết reproduce.ol?
+  Sau Phase 2 (Stdlib + HomeOS logic bằng Olang)
+  Cần: bytes.ol (binary ops), io.ol (file ops), crypto.ol (Ed25519)
+  → Tất cả đã nằm trong stdlib roadmap
+
+Record mới trong origin.olang:
+  0x0C: ReproductionRecord (append-only, ghi lại sự kiện sinh)
     [parent_pubkey: 32B]
     [parent_origin_id: 8B]
     [generation: 2B]
@@ -336,14 +359,9 @@ Cần thêm vào origin.olang format:
     [l1_weight_count: 4B]
     [timestamp: 8B]
 
-Cần thêm commands:
-  o reproduce --profile <name> --name <child_name>
-  o lineage                     ← xem cây gia phả
-  o exchange <peer_origin>      ← trao đổi QR records
-
-⚠️ KHÔNG IMPLEMENT BÂY GIỜ.
-   Phase 6.3 trong PLAN_REWRITE.
+⚠️ reproduce.ol = Phase 6.3 trong PLAN_REWRITE.
    Note này để thiết kế sớm, tránh lock-in kiến trúc.
+   Hiện tại KHÔNG CẦN thay đổi gì trong Rust code.
 ```
 
 ---
