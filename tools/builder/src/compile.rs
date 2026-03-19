@@ -57,6 +57,11 @@ pub fn compile_all(stdlib_path: &str) -> Result<Vec<u8>, CompileError> {
     // Compile stdlib root .ol files
     compile_dir(Path::new(stdlib_path), &mut all_bytecode)?;
 
+    // B7: Append a single Halt (0x0F) at the end of all bytecode.
+    // Individual files' Halts are stripped during compilation so
+    // execution flows through all stdlib files before stopping.
+    all_bytecode.push(0x0F);
+
     Ok(all_bytecode)
 }
 
@@ -76,7 +81,15 @@ fn compile_dir(dir: &Path, output: &mut Vec<u8>) -> Result<(), CompileError> {
         let path = entry.path();
         eprintln!("  Compiling: {}", path.display());
         match compile_file(&path) {
-            Ok(bytecode) => output.extend_from_slice(&bytecode),
+            Ok(mut bytecode) => {
+                // B7: Strip trailing Halt (0x0F) from each file's bytecode
+                // so execution continues to the next file. The final Halt
+                // is appended by compile_all() after all files.
+                while bytecode.last() == Some(&0x0F) {
+                    bytecode.pop();
+                }
+                output.extend_from_slice(&bytecode);
+            }
             Err(e) => {
                 eprintln!("  Warning: skipping {} ({})", path.display(), e);
             }
@@ -101,5 +114,40 @@ mod tests {
         let bytecode = compile_source("").unwrap();
         // Empty source should produce at least a Halt
         assert!(!bytecode.is_empty());
+    }
+
+    #[test]
+    fn b7_halt_stripping() {
+        // Verify that compiled bytecode ends with Halt (0x0F)
+        let bytecode = compile_source("let x = 42;").unwrap();
+        assert_eq!(*bytecode.last().unwrap(), 0x0F, "Bytecode should end with Halt");
+
+        // After stripping: should not end with Halt
+        let mut stripped = bytecode.clone();
+        while stripped.last() == Some(&0x0F) {
+            stripped.pop();
+        }
+        assert_ne!(*stripped.last().unwrap(), 0x0F, "Stripped bytecode should not end with Halt");
+    }
+
+    #[test]
+    fn b7_concatenated_files_single_halt() {
+        // Two files compiled together should only have ONE Halt at the end
+        let a = compile_source("let x = 1;").unwrap();
+        let b = compile_source("let y = 2;").unwrap();
+
+        // Simulate compile_all: strip halts, concatenate, add final halt
+        let mut combined = Vec::new();
+        for mut bc in [a, b] {
+            while bc.last() == Some(&0x0F) {
+                bc.pop();
+            }
+            combined.extend_from_slice(&bc);
+        }
+        combined.push(0x0F); // final halt
+
+        // Count Halts in combined bytecode
+        let halt_count = combined.iter().filter(|&&b| b == 0x0F).count();
+        assert_eq!(halt_count, 1, "Should have exactly 1 Halt, got {}", halt_count);
     }
 }

@@ -2111,6 +2111,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::Call { name, args } => {
+            // B5: typeof(expr) → lower arg, emit TypeOf opcode
+            if name == "typeof" && args.len() == 1 {
+                lower_expr(&args[0], ctx);
+                ctx.emit(Op::TypeOf);
+                return;
+            }
             // Built-in function mappings
             let builtin = match name.as_str() {
                 "len" => Some("__array_len"),
