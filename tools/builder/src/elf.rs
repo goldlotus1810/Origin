@@ -14,6 +14,8 @@ pub struct ElfConfig {
     pub entry_vaddr: u64,
     /// Total file size.
     pub file_size: u64,
+    /// ELF e_machine value (0x3E for x86_64, 0xB7 for ARM64).
+    pub e_machine: u16,
 }
 
 /// Generate a complete ELF64 header (64 + 56 = 120 bytes).
@@ -34,8 +36,8 @@ pub fn generate_elf64(config: &ElfConfig) -> [u8; TOTAL_HEADER_SIZE] {
 
     // e_type: ET_EXEC (2)
     write_u16(&mut buf, &mut pos, 2);
-    // e_machine: EM_X86_64 (0x3E)
-    write_u16(&mut buf, &mut pos, 0x3E);
+    // e_machine: EM_X86_64 (0x3E) or EM_AARCH64 (0xB7)
+    write_u16(&mut buf, &mut pos, config.e_machine);
     // e_version: EV_CURRENT (1)
     write_u32(&mut buf, &mut pos, 1);
     // e_entry: entry point virtual address
@@ -107,6 +109,7 @@ mod tests {
         let header = generate_elf64(&ElfConfig {
             entry_vaddr: LOAD_ADDR + 152,
             file_size: 1024,
+            e_machine: 0x3E,
         });
         assert_eq!(header.len(), 120);
         // ELF magic
@@ -124,8 +127,21 @@ mod tests {
         let header = generate_elf64(&ElfConfig {
             entry_vaddr: entry,
             file_size: 4096,
+            e_machine: 0x3E,
         });
         let stored = u64::from_le_bytes(header[24..32].try_into().unwrap());
         assert_eq!(stored, entry);
+    }
+
+    #[test]
+    fn test_elf_arm64() {
+        let header = generate_elf64(&ElfConfig {
+            entry_vaddr: LOAD_ADDR + 152,
+            file_size: 1024,
+            e_machine: 0xB7,
+        });
+        // Machine = ARM64
+        assert_eq!(header[18], 0xB7);
+        assert_eq!(header[19], 0x00);
     }
 }

@@ -3,11 +3,13 @@
 //
 // Usage: origin.olang runs this to build a new origin.olang
 //   o run builder.ol --stdlib stdlib/ --output origin_new.olang
+//   o run builder.ol --stdlib stdlib/ --arch arm64 --output origin_arm64.olang
 
 pub fn build(config) {
-  emit("Builder — origin.olang packer (Olang)\n");
+  let arch = config.arch;
+  emit("Builder — origin.olang packer (Olang) [" + arch + "]\n");
 
-  // 1. Compile all .ol → bytecode
+  // 1. Compile all .ol → bytecode (arch-independent)
   let bytecode = [];
   if config.stdlib_path != "" {
     emit("  Compiling stdlib: " + config.stdlib_path + "\n");
@@ -15,7 +17,7 @@ pub fn build(config) {
   }
   emit("  Bytecode: " + to_string(len(bytecode)) + " bytes\n");
 
-  // 2. Read VM code (pre-assembled binary)
+  // 2. Read VM code (pre-assembled binary for target arch)
   let vm_code = [];
   if config.vm_path != "" {
     emit("  Reading VM: " + config.vm_path + "\n");
@@ -31,14 +33,15 @@ pub fn build(config) {
   emit("  Knowledge: " + to_string(len(knowledge)) + " bytes\n");
 
   // 4. Pack
-  let origin_hdr = make_origin_header(
+  let origin_hdr = make_origin_header_arch(
     152,                          // vm_offset (after ELF 120 + origin 32)
     len(vm_code),
     152 + len(vm_code),           // bc_offset
     len(bytecode),
     152 + len(vm_code) + len(bytecode),  // kn_offset
     len(knowledge),
-    0                             // flags
+    0,                            // flags
+    arch
   );
 
   // Concat all sections
@@ -48,8 +51,8 @@ pub fn build(config) {
   concat_bytes(payload, bytecode);
   concat_bytes(payload, knowledge);
 
-  // Wrap in ELF
-  let binary = make_elf(payload, 32);  // entry = 32 bytes past origin header = VM start
+  // Wrap in ELF for target arch
+  let binary = make_elf_arch(payload, 32, arch);
 
   // 5. Write output
   file_write_bytes(config.output, binary);
@@ -129,6 +132,17 @@ pub fn default_config() {
     vm_path: "vm/x86_64/vm_x86_64.bin",
     stdlib_path: "stdlib",
     kn_path: "origin.olang",
-    output: "origin_new.olang"
+    output: "origin_new.olang",
+    arch: "x86_64"
+  };
+}
+
+pub fn arm64_config() {
+  return {
+    vm_path: "vm/arm64/vm_arm64.bin",
+    stdlib_path: "stdlib",
+    kn_path: "origin.olang",
+    output: "origin_arm64.olang",
+    arch: "arm64"
   };
 }

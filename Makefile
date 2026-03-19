@@ -16,7 +16,7 @@ STDLIB   = stdlib
 KNOWLEDGE = origin.olang
 OUTPUT   = origin_new.olang
 
-.PHONY: all vm build test clean clippy
+.PHONY: all vm build test intg clean clippy
 
 all: build
 
@@ -44,6 +44,10 @@ build: $(VM_BIN)
 # Run tests
 test:
 	$(CARGO) test --workspace
+
+# Integration tests only
+intg:
+	$(CARGO) test -p intg -- --show-output
 
 # Clippy
 clippy:
