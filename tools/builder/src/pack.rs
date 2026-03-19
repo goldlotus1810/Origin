@@ -131,13 +131,16 @@ fn pack_elf(config: &PackConfig) -> Vec<u8> {
     output
 }
 
-// ── Fat binary format ──
+// ── Fat binary format (planned: multi-arch support) ──
 
+#[allow(dead_code)]
 /// Fat header magic: same ○LNG but version 0x20
 const FAT_VERSION: u8 = 0x20;
+#[allow(dead_code)]
 const FAT_HEADER_SIZE: usize = 64;
 
 /// Per-arch entry in fat header (16 bytes)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FatArchEntry {
     pub arch_id: u8,
@@ -147,6 +150,7 @@ pub struct FatArchEntry {
 }
 
 /// Parsed fat header
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct FatHeader {
     pub arch_count: u8,
@@ -158,6 +162,7 @@ pub struct FatHeader {
 }
 
 /// Build a fat binary containing multiple arch VMs + shared bytecode + knowledge.
+#[allow(dead_code)]
 pub fn pack_fat(
     vms: &[(Arch, &[u8], u32)], // (arch, vm_code, entry_offset)
     bytecode: &[u8],
@@ -196,6 +201,7 @@ pub fn pack_fat(
     output
 }
 
+#[allow(dead_code)]
 fn build_fat_header(
     archs: &[FatArchEntry],
     bc_offset: u32, bc_size: u32,
@@ -227,6 +233,7 @@ fn build_fat_header(
 }
 
 /// Parse a fat binary header.
+#[allow(dead_code)]
 pub fn parse_fat_header(data: &[u8]) -> Option<FatHeader> {
     if data.len() < FAT_HEADER_SIZE { return None; }
     if &data[0..4] != ORIGIN_MAGIC { return None; }

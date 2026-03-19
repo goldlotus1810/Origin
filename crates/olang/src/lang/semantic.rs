@@ -77,6 +77,7 @@ impl SemError {
 
 /// Phase 6F: Effect classification derived from Relation dimension.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 enum EffectKind {
     /// No side effects — pure computation
     Pure,
@@ -88,6 +89,7 @@ enum EffectKind {
 
 /// Function definition cho scope tracking.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FnInfo {
     name: String,
     param_count: usize,
@@ -171,6 +173,7 @@ impl Scope {
         self.locals.push(LocalVar { name: name.to_string(), mutable: false, semantics: ValueSemantics::Copy, moved: false });
     }
 
+    #[allow(dead_code)]
     fn define_local_mut(&mut self, name: &str, mutable: bool) {
         self.locals.push(LocalVar { name: name.to_string(), mutable, semantics: ValueSemantics::Copy, moved: false });
     }
@@ -205,6 +208,7 @@ impl Scope {
         self.locals.iter().rev().find(|v| v.name == name).map_or(ValueSemantics::Copy, |v| v.semantics)
     }
 
+    #[allow(dead_code)]
     fn define_fn(&mut self, name: &str, param_count: usize) {
         self.fns.push(FnInfo {
             name: name.to_string(),
@@ -214,6 +218,7 @@ impl Scope {
         });
     }
 
+    #[allow(dead_code)]
     fn define_fn_with_constraints(&mut self, name: &str, param_count: usize, constraints: Vec<Option<crate::syntax::MolConstraint>>) {
         self.fns.push(FnInfo {
             name: name.to_string(),

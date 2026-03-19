@@ -21,8 +21,6 @@ pub struct ElfConfig {
 /// Generate a complete ELF64 header (64 + 56 = 120 bytes).
 pub fn generate_elf64(config: &ElfConfig) -> [u8; TOTAL_HEADER_SIZE] {
     let mut buf = [0u8; TOTAL_HEADER_SIZE];
-    let mut pos = 0;
-
     // ── ELF Header (64 bytes) ──────────────────────────────────────
 
     // e_ident: magic + class + data + version + OS/ABI + padding
@@ -32,7 +30,7 @@ pub fn generate_elf64(config: &ElfConfig) -> [u8; TOTAL_HEADER_SIZE] {
     buf[6] = 1;  // EV_CURRENT
     buf[7] = 3;  // ELFOSABI_LINUX
     // bytes 8-15: padding (already 0)
-    pos = 16;
+    let mut pos = 16;
 
     // e_type: ET_EXEC (2)
     write_u16(&mut buf, &mut pos, 2);
