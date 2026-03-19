@@ -278,7 +278,7 @@ vm_loop:
 dispatch_codegen:
     lea     codegen_table(%rip), %rcx
     movzbl  %al, %eax
-    cmp     $0x25, %al
+    cmp     $0x26, %al
     jae     op_unknown
     movslq  (%rcx, %rax, 4), %rdx
     add     %rcx, %rdx
@@ -324,6 +324,7 @@ codegen_table:
     .long op_nop        - codegen_table # 0x22 Explain
     .long op_nop        - codegen_table # 0x23 Ffi (stub)
     .long cg_call_closure - codegen_table # 0x24 CallClosure
+    .long cg_closure      - codegen_table # 0x25 Closure
 .section .text
 
 # codegen Push: [chain_len:2 u16 LE][chain_bytes:N] → push raw bytes as chain
@@ -348,13 +349,80 @@ cg_push:
     add     %rcx, %r13                  # PC += chain_len
     jmp     vm_loop
 
+# codegen Closure: [param_count:1][body_len:4]
+# Creates a closure marker on VM stack, jumps over body.
+# Marker: [ptr=body_pc as f64 bits][len=0xFFFFFFFFFFFFFFFE] (closure tag)
+.equ CLOSURE_MARKER, -2
+
+cg_closure:
+    movzbl  (%r12, %r13), %ecx         # param_count
+    inc     %r13
+    movl    (%r12, %r13), %eax          # body_len (u32 LE)
+    add     $4, %r13
+
+    # Push closure marker: body_pc in ptr, param_count in len high bits
+    # Encode: ptr = body_pc (current PC = start of body), len = CLOSURE_MARKER
+    sub     $16, %r14
+    # Store body_pc as raw u64 (NOT f64, just integer PC offset)
+    mov     %r13, (%r14)                # body_pc = current PC (start of body)
+    # Store closure marker with param_count encoded
+    movq    $CLOSURE_MARKER, 8(%r14)    # len = closure tag
+    # Save param_count in the byte after the marker
+    # Actually, encode param_count in the closure marker itself:
+    # We use a trick: len = 0xFFFFFFFFFFFFFFFE | (param_count << 48)
+    # Simpler: just store param_count alongside. Use top byte of len.
+    shl     $48, %rcx                   # param_count << 48
+    orq     $CLOSURE_MARKER, %rcx       # combine with marker
+    mov     %rcx, 8(%r14)              # store combined
+
+    # Jump over body
+    add     %eax, %r13d                 # PC += body_len
+    jmp     vm_loop
+
 # codegen CallClosure: [name_len:1][name:N][arity:1]
+# Pops closure marker + args from stack, jumps to body PC.
+# Uses CPU stack for return address.
 cg_call_closure:
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    add     %rcx, %r13                  # skip name
-    inc     %r13                        # skip arity byte
-    # Stub for now
+    # Hash the name to find the closure in var table
+    lea     (%r12, %r13), %rdi         # name ptr
+    mov     %ecx, %edx                  # name len
+    push    %rcx
+    call    hash_name                   # → rax = name hash
+    pop     %rcx
+    add     %rcx, %r13                  # PC += name_len
+    movzbl  (%r12, %r13), %ecx         # arity
+    inc     %r13                        # PC past arity byte
+
+    # Look up variable by hash → get closure marker
+    push    %rcx                        # save arity
+    call    var_load_hash               # rax=ptr, rdx=len
+    pop     %rcx                        # restore arity
+
+    # Check if it's a closure marker (len has CLOSURE_MARKER bits)
+    mov     %rdx, %rsi
+    and     $0xFFFF, %esi               # low 16 bits
+    cmp     $CLOSURE_MARKER, %si        # == 0xFFFE?
+    jne     .cc_not_closure
+
+    # It's a closure — rax = body_pc, rdx has param_count in high bits
+    # Extract body_pc
+    mov     %rax, %rdi                  # body_pc
+
+    # Save return address on CPU stack
+    push    %r13                        # save current PC (return point)
+
+    # Jump to body
+    mov     %edi, %r13d                 # PC = body_pc
+    jmp     vm_loop
+
+.cc_not_closure:
+    # Not a closure — push empty (like function not found)
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
     jmp     vm_loop
 
 # ── Dispatch sub-tables ──────────────────────────────────────────────────
@@ -1004,8 +1072,18 @@ op_call:
     jmp     vm_loop
 
 op_ret:
-    # Return from call — pop return address from CPU stack
-    # If no call was made, this is a no-op
+    # Return from closure call — pop return address from CPU stack.
+    # CPU stack top has the saved PC from cg_call_closure.
+    # Check if we have a return address (rsp points to saved PC).
+    # If the top of CPU stack looks like a valid PC (< bytecode size),
+    # restore it. Otherwise treat as no-op.
+    pop     %rax                        # potential saved PC
+    cmp     %rbx, %rax                  # compare with bc_size
+    jae     .ret_noop                   # not a valid PC → push back and continue
+    mov     %eax, %r13d                 # PC = saved return address
+    jmp     vm_loop
+.ret_noop:
+    push    %rax                        # restore stack (wasn't a return addr)
     jmp     vm_loop
 
 op_try_begin:
@@ -1655,6 +1733,57 @@ err_read_bc:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_halt:
+    # Print greeting + enter REPL if bytecode completed normally
+    lea     msg_greeting(%rip), %rsi
+    mov     $28, %edx                   # length of greeting
+    mov     $1, %edi                    # stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+
+    # ── REPL loop: read line → echo → repeat ──────────────────────
+.repl_loop:
+    # Print prompt: "○ > "
+    lea     msg_prompt(%rip), %rsi
+    mov     $6, %edx                    # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+
+    # Read line from stdin into heap
+    mov     %r15, %rsi                  # buf = heap ptr
+    mov     $256, %edx                  # max 256 bytes
+    xor     %edi, %edi                  # fd = stdin
+    mov     $SYS_READ, %eax
+    syscall
+
+    # Check for EOF or error
+    test    %rax, %rax
+    jle     .repl_exit                  # EOF → exit
+
+    # Check for "exit\n" or "quit\n"
+    mov     %rax, %rcx                  # save length
+    cmp     $5, %rcx
+    jne     .repl_echo
+    cmpl    $0x74697865, (%r15)         # "exit" little-endian
+    jne     .repl_check_quit
+    cmpb    $0x0A, 4(%r15)              # '\n'
+    je      .repl_exit
+.repl_check_quit:
+    cmpl    $0x74697571, (%r15)         # "quit" little-endian
+    jne     .repl_echo
+    cmpb    $0x0A, 4(%r15)
+    je      .repl_exit
+
+.repl_echo:
+    # Echo input back (placeholder for compile+execute)
+    mov     %r15, %rsi                  # buf
+    mov     %rcx, %rdx                  # len
+    mov     $1, %edi                    # stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .repl_loop
+
+.repl_exit:
     mov     $SYS_EXIT, %eax
     xor     %edi, %edi                  # exit(0)
     syscall
@@ -1694,6 +1823,13 @@ msg_readbc:
 
 msg_divzero:
     .ascii "Division by zero!\n"
+
+msg_greeting:
+    .ascii "origin.olang v0.1 ready\n\n"
+    .byte 0, 0, 0
+
+msg_prompt:
+    .ascii "\xe2\x97\x8b > "             # "○ > " (○ = 3 bytes UTF-8)
 
 # ── Builtin function names ───────────────────────────────────────────────
 bname_hyp_add:  .ascii "__hyp_add"
