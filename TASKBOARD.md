@@ -169,7 +169,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
 | 7.1 | Wiring: kết nối mọi thứ | `PLAN_7_1` | Phase 0-6 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | AUTH guard in process_text(), Maturity mark_matured() after Dream, Silk Vertical register_parent on QR promote. Builder --arch already done by Lyra. |
-| 7.2 | Mobile: Android + iOS | `PLAN_7_2` | 7.1 | FREE | | | ARM64 native on Android, WASM on iOS, < 2MB binary |
+| 7.2 | Mobile: Android + iOS | `PLAN_7_2` | 7.1 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | ARM64 native on Android, WASM on iOS, < 2MB binary |
 | 7.3 | Testing: hoàn thiện test suite | `PLAN_7_3` | Phase 0-6 | DONE | `claude/project-audit-review-2pN6F` | Lyra | INTG-11/12 + stdlib audit (50 files) + stress (12 tests) + fuzz (11 tests). 140 total intg tests, 0 failures. 17 known parse failures documented. |
 | 7.4 | Network: ISL over real transport | `PLAN_7_4` | 7.1 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | ISL TCP/WebSocket/BLE, discovery, AES-256-GCM |
 
