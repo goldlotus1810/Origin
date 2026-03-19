@@ -87,7 +87,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 2.1a | Stdlib: result.ol + iter.ol + sort.ol | `PLAN_2_1` | Phase 1 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
+| 2.1a | Stdlib: result.ol + iter.ol + sort.ol | `PLAN_2_1` | Phase 1 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 422 LOC. result(ok/err/unwrap), iter(reduce/zip/take/skip/chunk/window/range), sort(quicksort/binary_search). |
 | 2.1b | Stdlib: format.ol + json.ol | `PLAN_2_1` | Phase 1 | FREE | — | — | Group B — string/format |
 | 2.1c | Stdlib: hash.ol + mol.ol + chain.ol | `PLAN_2_1` | 2.1a | FREE | — | — | Group C — core helpers |
 | 2.2 | Emotion pipeline (emotion.ol, curve.ol, intent.ol) | `PLAN_2_2` | 2.1c | FREE | — | — | ~380 LOC |
