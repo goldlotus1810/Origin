@@ -483,8 +483,15 @@ INTG (song song với tất cả):
               ✓ vm_x86_64.S: cg_closure marker + jump, cg_call_closure hash→lookup→jump
               ✓ REPL: heap buffer (không stack overflow), exit/quit check đúng LE encoding
               ⚠ op_ret: pop+check heuristic — nếu Ret without Call có thể pop sai value
-                (có .ret_noop fallback nhưng fragile)
+                (có .ret_noop fallback nhưng fragile) [HIGH]
+              ✗ CRITICAL: Closure marker param_count encoding — shl $48 + OR marker
+                nhưng CallClosure chỉ check low 16 bits → param_count bị mất
+              ✗ CRITICAL: CallClosure KHÔNG truyền params cho closure body — arity
+                đọc xong bỏ, args trên VM stack không được bind
+              ⚠ REPL: heap buffer 256B không check overflow, string cmp < 5 bytes unsafe
+              ⚠ Variable hash table: không lưu name → collision = clobber silent
               ℹ msg_greeting: length 28 vs actual 26 chars — minor (null padding)
+              ℹ Opcode dual format: bytecode.rs 0x24/0x25 vs ir.rs 0x71/0x70 — documented
             ▸ 7.1 Wiring AUTH+Maturity+Silk (dSfvz, commit 9335bf4): PASS với ghi chú
               ✓ AUTH guard: SecurityGate trước mọi thứ, natural text bypass, auth unlock OK
               ✓ mark_matured(): loop matured_nodes → set Mature (thay no-op cũ)
