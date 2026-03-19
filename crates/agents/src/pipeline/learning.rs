@@ -191,6 +191,16 @@ impl ShortTermMemory {
         });
     }
 
+    /// Mark observation as Mature (called after Dream detects matured nodes).
+    pub fn mark_matured(&mut self, hash: u64) {
+        for obs in &mut self.observations {
+            if obs.chain.chain_hash() == hash {
+                obs.maturity = olang::mol::molecular::Maturity::Mature;
+                break;
+            }
+        }
+    }
+
     /// Xóa observations đã được promote lên QR.
     pub fn remove_promoted(&mut self, hashes: &[u64]) {
         self.observations
