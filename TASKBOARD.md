@@ -75,7 +75,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 1184 LOC ASM, 12KB static ELF no-libc. DoD 1-4 pass (assemble+link, hello print, 2+3=5, loop 3→1). Dual-format dispatch (ir.rs + codegen.ol). SSE2 math, string builtins, variable table, f64→ASCII, LCA 5D. DoD 5 (lexer.ol bytecode) needs var_store fix in codegen mode. |
 | 1.2 | vm_arm64.S | `PLAN_1_2` | 1.1 | CLAIMED | `claude/review-and-fix-project-erPD8` | erPD8 | Bắt đầu 2026-03-19 |
 | 1.3 | vm_wasm.wat | `PLAN_1_3` | 1.1 | FREE | — | — | Plan file có sẵn |
-| 1.4 | Builder tool (Rust) | `PLAN_1_4` | 1.1 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
+| 1.4 | Builder tool (Rust) | `PLAN_1_4` | 1.1 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 550 LOC Rust, 8 tests. ELF generator, packer, .ol compiler. |
 
 ## Song song — Auth (KHÔNG phụ thuộc Phase 0)
 
