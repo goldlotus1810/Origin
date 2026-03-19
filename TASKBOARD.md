@@ -151,10 +151,10 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 5.1 | JIT compilation | `PLAN_5_1` | Phase 4 | FREE | | | Hot loop → native code, profile + trace + compile |
-| 5.2 | Inline caching | `PLAN_5_2` | Phase 3 | FREE | | | Var IC + registry LRU + silk cache |
-| 5.3 | Memory optimization | `PLAN_5_3` | Phase 3 | FREE | | | Arena allocator + zero-copy + molecule pool |
-| 5.4 | Benchmark suite | `PLAN_5_4` | 5.1/5.2/5.3 | FREE | | | Micro + macro + memory benchmarks |
+| 5.1 | JIT compilation | `PLAN_5_1` | Phase 4 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Hot loop → native code, profile + trace + compile |
+| 5.2 | Inline caching | `PLAN_5_2` | Phase 3 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Var IC + registry LRU + silk cache |
+| 5.3 | Memory optimization | `PLAN_5_3` | Phase 3 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Arena allocator + zero-copy + molecule pool |
+| 5.4 | Benchmark suite | `PLAN_5_4` | 5.1/5.2/5.3 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Micro + macro + memory benchmarks |
 
 ## Phase 6 — Living system
 
