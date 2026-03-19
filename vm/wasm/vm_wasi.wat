@@ -57,6 +57,8 @@
   (global $heap      (mut i32) (i32.const 0xC000))
   (global $bc_start  (mut i32) (i32.const 0x10000))
   (global $bc_size   (mut i32) (i32.const 11))  ;; default test program size
+  ;; NOTE: Builder must patch $bc_size to match actual embedded bytecode length.
+  ;; The data section at 0x10000 and this global must be updated together.
   (global $steps     (mut i32) (i32.const 0))
   (global $halted    (mut i32) (i32.const 0))
   (global $var_count (mut i32) (i32.const 0))
@@ -459,6 +461,20 @@
     ;; __substr
     (if (i64.eq (local.get $hash) (i64.const -2051769843888937794))
       (then (call $builtin_substr) (return)))
+    ;; __push
+    (if (i64.eq (local.get $hash) (i64.const -6934319497420882281))
+      (then (call $builtin_push) (return)))
+    ;; __pop
+    (if (i64.eq (local.get $hash) (i64.const 5090665129273995654))
+      (then (call $builtin_pop) (return)))
+    ;; __cmp_ne
+    (if (i64.eq (local.get $hash) (i64.const -1943725272825911169))
+      (then
+        (local.set $b (call $pop_f64)) (local.set $a (call $pop_f64))
+        (if (f64.ne (local.get $a) (local.get $b))
+          (then (call $push_f64 (f64.const 1)))
+          (else (call $vm_push (i64.const 0) (i32.const 0) (i32.const 0))))
+        (return)))
   )
 
   ;; ═══════════════════════════════════════════════════════════════════════
@@ -532,6 +548,17 @@
     (call $vm_push
       (call $fnv1a (local.get $dst) (local.get $actual_len))
       (local.get $dst) (local.get $actual_len)))
+
+  ;; __push: push value onto array (stub — arrays not yet in VM)
+  (func $builtin_push
+    ;; For now: just keep value on stack (nop)
+  )
+
+  ;; __pop: pop value from array (stub)
+  (func $builtin_pop
+    ;; For now: push empty
+    (call $vm_push (i64.const 0) (i32.const 0) (i32.const 0))
+  )
 
   ;; ═══════════════════════════════════════════════════════════════════════
   ;; ERROR HANDLERS
