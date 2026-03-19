@@ -316,11 +316,22 @@
     (local $target i32)
     (local.set $target (call $read_u32))
     (call $vm_pop)
-    ;; Empty = hash==0 or len==0 → take jump
-    (if (i32.or
-          (i64.eqz (global.get $tmp_hash))
-          (i32.eqz (global.get $tmp_len)))
-      (then (global.set $pc (local.get $target)))))
+    ;; Check if "falsy": empty chain OR f64 zero
+    (if (i32.eqz (global.get $tmp_len))
+      (then
+        ;; len=0 → empty → take jump
+        (global.set $pc (local.get $target))
+        (return)))
+    (if (i64.eqz (global.get $tmp_hash))
+      (then
+        ;; hash=0 → empty → take jump
+        (global.set $pc (local.get $target))
+        (return)))
+    ;; f64 check: if len==8, check if value is 0.0
+    (if (i32.eq (global.get $tmp_len) (i32.const 8))
+      (then
+        (if (f64.eq (f64.load (global.get $tmp_ptr)) (f64.const 0))
+          (then (global.set $pc (local.get $target)))))))
 
   ;; 0x0B: Dup
   (func $op_dup
@@ -448,32 +459,32 @@
   (func $builtin_dispatch (param $hash i64)
     (local $a f64) (local $b f64)
 
-    ;; __hyp_add
-    (if (i64.eq (local.get $hash) (i64.const -4394791828366498724))
+    ;; __hyp_add (FNV-1a = 6279461061396250740)
+    (if (i64.eq (local.get $hash) (i64.const 6279461061396250740))
       (then
         (local.set $b (call $pop_f64))
         (local.set $a (call $pop_f64))
         (call $push_f64 (f64.add (local.get $a) (local.get $b)))
         (return)))
 
-    ;; __hyp_sub
-    (if (i64.eq (local.get $hash) (i64.const -4394791828332907669))
+    ;; __hyp_sub (FNV-1a = -969687268777616107)
+    (if (i64.eq (local.get $hash) (i64.const -969687268777616107))
       (then
         (local.set $b (call $pop_f64))
         (local.set $a (call $pop_f64))
         (call $push_f64 (f64.sub (local.get $a) (local.get $b)))
         (return)))
 
-    ;; __hyp_mul
-    (if (i64.eq (local.get $hash) (i64.const -4394791828349721234))
+    ;; __hyp_mul (FNV-1a = 8647125211697039873)
+    (if (i64.eq (local.get $hash) (i64.const 8647125211697039873))
       (then
         (local.set $b (call $pop_f64))
         (local.set $a (call $pop_f64))
         (call $push_f64 (f64.mul (local.get $a) (local.get $b)))
         (return)))
 
-    ;; __hyp_div
-    (if (i64.eq (local.get $hash) (i64.const -4394791828377378555))
+    ;; __hyp_div (FNV-1a = 4478715002052434856)
+    (if (i64.eq (local.get $hash) (i64.const 4478715002052434856))
       (then
         (local.set $b (call $pop_f64))
         (if (f64.eq (local.get $b) (f64.const 0))
@@ -482,8 +493,8 @@
         (call $push_f64 (f64.div (local.get $a) (local.get $b)))
         (return)))
 
-    ;; __eq
-    (if (i64.eq (local.get $hash) (i64.const 6293835889444872024))
+    ;; __eq (FNV-1a = 6467812567259650137)
+    (if (i64.eq (local.get $hash) (i64.const 6467812567259650137))
       (then
         (call $vm_pop)
         (local.set $b (f64.load (global.get $tmp_ptr)))
@@ -494,8 +505,8 @@
           (else (call $vm_push (i64.const 0) (i32.const 0) (i32.const 0))))
         (return)))
 
-    ;; __cmp_lt
-    (if (i64.eq (local.get $hash) (i64.const -3807292011824697569))
+    ;; __cmp_lt (FNV-1a = -1941734057267599498)
+    (if (i64.eq (local.get $hash) (i64.const -1941734057267599498))
       (then
         (local.set $b (call $pop_f64))
         (local.set $a (call $pop_f64))
@@ -504,8 +515,8 @@
           (else (call $vm_push (i64.const 0) (i32.const 0) (i32.const 0))))
         (return)))
 
-    ;; __cmp_gt
-    (if (i64.eq (local.get $hash) (i64.const -3807292011824734525))
+    ;; __cmp_gt (FNV-1a = -1934958866615887891)
+    (if (i64.eq (local.get $hash) (i64.const -1934958866615887891))
       (then
         (local.set $b (call $pop_f64))
         (local.set $a (call $pop_f64))
@@ -514,8 +525,8 @@
           (else (call $vm_push (i64.const 0) (i32.const 0) (i32.const 0))))
         (return)))
 
-    ;; __cmp_le
-    (if (i64.eq (local.get $hash) (i64.const -3807292011824700656))
+    ;; __cmp_le (FNV-1a = -1941750549942022663)
+    (if (i64.eq (local.get $hash) (i64.const -1941750549942022663))
       (then
         (local.set $b (call $pop_f64))
         (local.set $a (call $pop_f64))
@@ -524,8 +535,8 @@
           (else (call $vm_push (i64.const 0) (i32.const 0) (i32.const 0))))
         (return)))
 
-    ;; __cmp_ge
-    (if (i64.eq (local.get $hash) (i64.const -3807292011824737612))
+    ;; __cmp_ge (FNV-1a = -1934977558313567478)
+    (if (i64.eq (local.get $hash) (i64.const -1934977558313567478))
       (then
         (local.set $b (call $pop_f64))
         (local.set $a (call $pop_f64))
@@ -534,8 +545,8 @@
           (else (call $vm_push (i64.const 0) (i32.const 0) (i32.const 0))))
         (return)))
 
-    ;; __len
-    (if (i64.eq (local.get $hash) (i64.const 6578919763498122553))
+    ;; __len (FNV-1a = 2530744773748778130)
+    (if (i64.eq (local.get $hash) (i64.const 2530744773748778130))
       (then
         (call $vm_pop)
         (call $push_f64 (f64.convert_i32_u (global.get $tmp_len)))
