@@ -16,7 +16,7 @@ STDLIB   = stdlib
 KNOWLEDGE = origin.olang
 OUTPUT   = origin_new.olang
 
-.PHONY: all vm build test intg clean clippy eval smoke verify demo check-all
+.PHONY: all vm build test intg clean clippy eval smoke smoke-binary verify demo check-all
 
 all: build
 
@@ -61,6 +61,14 @@ eval:
 smoke:
 	@echo 'hello' | $(CARGO) run -p server -- --eval
 
+# Smoke test: native binary boots and shows prompt
+smoke-binary: build
+	@echo "Testing origin_new.olang boots..." && \
+	OUTPUT=$$(echo '' | ./$(OUTPUT) 2>&1) && \
+	echo "$$OUTPUT" | grep -q "origin.olang" && \
+	echo "PASS: origin_new.olang boots OK" || \
+	(echo "FAIL: origin_new.olang did not boot"; exit 1)
+
 # E2E demo — 10 scenarios (requires tools/demo/scenarios.sh)
 demo:
 	@bash tools/demo/scenarios.sh
@@ -69,8 +77,8 @@ demo:
 verify:
 	@$(CARGO) test -p intg --test t16_e2e_demo -- --show-output
 
-# Full check: unit + integration + E2E
-check-all: test intg verify
+# Full check: unit + integration + E2E + binary boot
+check-all: test intg verify smoke-binary
 	@echo "ALL CHECKS PASSED"
 
 # Clean
