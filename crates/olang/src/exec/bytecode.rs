@@ -252,12 +252,84 @@ pub fn decode_bytecode(bytes: &[u8]) -> Result<Vec<Op>, DecodeError> {
 
 /// Encode a list of IR ops into PLAN_0_5 bytecode format.
 /// This mirrors codegen.ol's `generate()` function for round-trip testing.
+///
+/// Two-pass encoding: first pass computes byte offset for each op index,
+/// second pass emits bytecode with correct jump targets (byte offsets
+/// instead of instruction indices).
 pub fn encode_bytecode(ops: &[Op]) -> Vec<u8> {
-    let mut out = Vec::new();
+    // Pass 1: compute byte offset for each instruction index
+    let mut offsets = Vec::with_capacity(ops.len() + 1);
+    let mut pos: usize = 0;
     for op in ops {
-        encode_op(&mut out, op);
+        offsets.push(pos);
+        pos += op_byte_size(op);
+    }
+    offsets.push(pos); // sentinel: offset past last op
+
+    // Pass 2: emit bytecode with resolved jump targets
+    let mut out = Vec::with_capacity(pos);
+    for (i, op) in ops.iter().enumerate() {
+        encode_op_resolved(&mut out, op, &offsets, i);
     }
     out
+}
+
+/// Calculate the byte size of an encoded op (without emitting).
+fn op_byte_size(op: &Op) -> usize {
+    match op {
+        Op::Push(chain) => {
+            let name = alloc::format!("{:?}", chain);
+            1 + 2 + name.len()          // tag + u16_len + data
+        }
+        Op::Load(name) | Op::Call(name) | Op::Store(name) | Op::LoadLocal(name) => {
+            1 + 1 + name.len()          // tag + u8_len + name
+        }
+        Op::StoreUpdate(name) => 1 + 1 + name.len(),
+        Op::Jmp(_) | Op::Jz(_) | Op::TryBegin(_) | Op::Loop(_) => 1 + 4, // tag + u32
+        Op::PushNum(_) => 1 + 8,        // tag + f64
+        Op::PushMol(..) => 1 + 5,        // tag + 5 bytes
+        Op::Edge(_) | Op::Query(_) => 1 + 1, // tag + u8 rel
+        Op::Closure(_, _) => 1 + 1 + 4,  // tag + u8_param_count + u32_body_len
+        Op::CallClosure(_) => 1 + 1 + 1, // tag + empty_name_len(0x00) + u8_arity
+        Op::Ffi(name, _) => 1 + 1 + name.len() + 1, // tag + name_len + name + arity
+        _ => 1,                          // single-byte ops
+    }
+}
+
+/// Emit a single op with jump targets resolved to byte offsets.
+fn encode_op_resolved(out: &mut Vec<u8>, op: &Op, offsets: &[usize], idx: usize) {
+    match op {
+        Op::Jmp(target) => {
+            emit_byte(out, 0x09);
+            let byte_target = if *target < offsets.len() { offsets[*target] } else { *target };
+            emit_u32_le(out, byte_target as u32);
+        }
+        Op::Jz(target) => {
+            emit_byte(out, 0x0A);
+            let byte_target = if *target < offsets.len() { offsets[*target] } else { *target };
+            emit_u32_le(out, byte_target as u32);
+        }
+        Op::TryBegin(target) => {
+            emit_byte(out, 0x1A);
+            let byte_target = if *target < offsets.len() { offsets[*target] } else { *target };
+            emit_u32_le(out, byte_target as u32);
+        }
+        Op::Closure(param_count, body_len) => {
+            emit_byte(out, 0x25);
+            emit_byte(out, *param_count);
+            // body_len is in op count — convert to byte count.
+            // Body starts at op idx+1, ends at idx+1+body_len.
+            let body_start = idx + 1;
+            let body_end = body_start + *body_len;
+            let byte_body_len = if body_end <= offsets.len() && body_start < offsets.len() {
+                offsets[body_end] - offsets[body_start]
+            } else {
+                *body_len // fallback
+            };
+            emit_u32_le(out, byte_body_len as u32);
+        }
+        _ => encode_op(out, op),
+    }
 }
 
 fn emit_byte(out: &mut Vec<u8>, b: u8) {
@@ -511,6 +583,9 @@ mod tests {
 
     #[test]
     fn roundtrip_complex() {
+        // Note: encode_bytecode converts Jmp/Jz/TryBegin targets from
+        // instruction indices to byte offsets. After decode, targets are
+        // byte offsets (correct for VM execution).
         let ops = alloc::vec![
             Op::PushNum(3.14),
             Op::Store("pi".into()),
@@ -548,7 +623,32 @@ mod tests {
         ];
         let bytes = encode_bytecode(&ops);
         let decoded = decode_bytecode(&bytes).unwrap();
-        assert_eq!(decoded, ops);
+        // Non-jump ops should match exactly
+        assert_eq!(decoded.len(), ops.len());
+        for (i, (d, o)) in decoded.iter().zip(ops.iter()).enumerate() {
+            match (d, o) {
+                (Op::Jmp(_), Op::Jmp(_)) | (Op::Jz(_), Op::Jz(_)) | (Op::TryBegin(_), Op::TryBegin(_)) => {
+                    // Jump targets are now byte offsets (not instruction indices)
+                    // Just verify they decoded successfully
+                }
+                _ => assert_eq!(d, o, "Mismatch at op {}", i),
+            }
+        }
+    }
+
+    #[test]
+    fn jmp_targets_are_byte_offsets() {
+        // Verify that Jmp targets are properly converted to byte offsets
+        let ops = alloc::vec![
+            Op::PushNum(42.0),  // 9 bytes (tag + f64)
+            Op::Jmp(2),         // 5 bytes, target=op[2] → byte offset 14
+            Op::Emit,           // 1 byte (byte offset 14)
+            Op::Halt,           // 1 byte
+        ];
+        let bytes = encode_bytecode(&ops);
+        let decoded = decode_bytecode(&bytes).unwrap();
+        // Op[2] (Emit) starts at byte 9+5=14
+        assert_eq!(decoded[1], Op::Jmp(14));
     }
 
     #[test]

@@ -94,6 +94,12 @@ fn compile_dir(dir: &Path, output: &mut Vec<u8>) -> Result<(), CompileError> {
                 while bytecode.last() == Some(&0x0F) {
                     bytecode.pop();
                 }
+                // Relocate jump targets: add the current output offset
+                // because bytecode was compiled with targets relative to 0.
+                let base_offset = output.len() as u32;
+                if base_offset > 0 {
+                    relocate_jumps(&mut bytecode, base_offset);
+                }
                 output.extend_from_slice(&bytecode);
             }
             Err(e) => {
@@ -105,9 +111,143 @@ fn compile_dir(dir: &Path, output: &mut Vec<u8>) -> Result<(), CompileError> {
     Ok(())
 }
 
+/// Adjust jump targets (Jmp, Jz, TryBegin) by adding a base offset.
+/// This is needed when multiple files' bytecodes are concatenated,
+/// since each file's internal jumps were encoded relative to offset 0.
+fn relocate_jumps(bytecode: &mut [u8], base: u32) {
+    let mut pc = 0;
+    while pc < bytecode.len() {
+        let tag = bytecode[pc];
+        pc += 1;
+        match tag {
+            0x01 => { // Push [chain_len:2 u16][chain:N]
+                if pc + 2 > bytecode.len() { break; }
+                let len = u16::from_le_bytes([bytecode[pc], bytecode[pc+1]]) as usize;
+                pc += 2 + len;
+            }
+            0x02 | 0x07 | 0x13 | 0x14 | 0x1C => { // Load/Call/Store/LoadLocal/StoreUpdate [len:1][name:N]
+                if pc >= bytecode.len() { break; }
+                let len = bytecode[pc] as usize;
+                pc += 1 + len;
+            }
+            0x09 | 0x0A | 0x1A => { // Jmp/Jz/TryBegin [target:4] — RELOCATE
+                if pc + 4 > bytecode.len() { break; }
+                let target = u32::from_le_bytes([bytecode[pc], bytecode[pc+1], bytecode[pc+2], bytecode[pc+3]]);
+                let relocated = target + base;
+                bytecode[pc..pc+4].copy_from_slice(&relocated.to_le_bytes());
+                pc += 4;
+            }
+            0x0E => { pc += 4; } // Loop [count:4] — NOT a jump target
+            0x15 => { pc += 8; } // PushNum [f64:8]
+            0x19 => { pc += 5; } // PushMol [5 bytes]
+            0x04 | 0x05 => { pc += 1; } // Edge/Query [rel:1]
+            0x25 => { // Closure [param:1][body_len:4] — body_len is byte count, NOT relocated
+                pc += 1 + 4;
+            }
+            0x26 => { // CallClosure [name_len:1][name:N][arity:1]
+                if pc >= bytecode.len() { break; }
+                let len = bytecode[pc] as usize;
+                pc += 1 + len + 1;
+            }
+            0x27 => { // Ffi [name_len:1][name:N][arity:1]
+                if pc >= bytecode.len() { break; }
+                let len = bytecode[pc] as usize;
+                pc += 1 + len + 1;
+            }
+            _ => { } // Single-byte ops (0x03, 0x06, 0x08, 0x0B-0x0D, 0x0F-0x12, 0x16-0x18, 0x1B, etc.)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_ol_jumps_land_on_opcodes() {
+        // Verify that all Jmp/Jz targets in semantic.ol's bytecode
+        // land on valid opcode positions (not in the middle of data).
+        let path = std::path::Path::new("stdlib/bootstrap/semantic.ol");
+        if !path.exists() { return; } // skip if not in workspace root
+        let bytecode = compile_file(path).unwrap();
+
+        // Build a set of valid opcode positions
+        let mut valid_positions = std::collections::HashSet::new();
+        let mut pc = 0;
+        while pc < bytecode.len() {
+            valid_positions.insert(pc);
+            let tag = bytecode[pc];
+            pc += 1;
+            match tag {
+                0x01 => {
+                    if pc + 2 > bytecode.len() { break; }
+                    let len = u16::from_le_bytes([bytecode[pc], bytecode[pc+1]]) as usize;
+                    pc += 2 + len;
+                }
+                0x02 | 0x07 | 0x13 | 0x14 | 0x1C => {
+                    if pc >= bytecode.len() { break; }
+                    let len = bytecode[pc] as usize;
+                    pc += 1 + len;
+                }
+                0x09 | 0x0A | 0x1A | 0x0E => { pc += 4; }
+                0x15 => { pc += 8; }
+                0x19 => { pc += 5; }
+                0x04 | 0x05 => { pc += 1; }
+                0x25 => { pc += 1 + 4; }
+                0x26 | 0x27 => {
+                    if pc >= bytecode.len() { break; }
+                    let len = bytecode[pc] as usize;
+                    pc += 1 + len + 1;
+                }
+                _ => {} // single byte
+            }
+        }
+        // Also add bytecode.len() as valid (jump past end = ok for Halt)
+        valid_positions.insert(bytecode.len());
+
+        // Now check all Jmp/Jz/TryBegin targets
+        pc = 0;
+        let mut bad = 0;
+        while pc < bytecode.len() {
+            let tag = bytecode[pc];
+            pc += 1;
+            match tag {
+                0x09 | 0x0A | 0x1A => {
+                    if pc + 4 > bytecode.len() { break; }
+                    let target = u32::from_le_bytes([bytecode[pc], bytecode[pc+1], bytecode[pc+2], bytecode[pc+3]]) as usize;
+                    if !valid_positions.contains(&target) && target < bytecode.len() {
+                        let tag_name = match tag { 0x09 => "Jmp", 0x0A => "Jz", _ => "TryBegin" };
+                        eprintln!("BAD {tag_name} at byte {}: target {target} is NOT a valid opcode position", pc - 1);
+                        bad += 1;
+                        if bad > 5 { break; }
+                    }
+                    pc += 4;
+                }
+                0x01 => {
+                    if pc + 2 > bytecode.len() { break; }
+                    let len = u16::from_le_bytes([bytecode[pc], bytecode[pc+1]]) as usize;
+                    pc += 2 + len;
+                }
+                0x02 | 0x07 | 0x13 | 0x14 | 0x1C => {
+                    if pc >= bytecode.len() { break; }
+                    let len = bytecode[pc] as usize;
+                    pc += 1 + len;
+                }
+                0x0E => { pc += 4; }
+                0x15 => { pc += 8; }
+                0x19 => { pc += 5; }
+                0x04 | 0x05 => { pc += 1; }
+                0x25 => { pc += 1 + 4; }
+                0x26 | 0x27 => {
+                    if pc >= bytecode.len() { break; }
+                    let len = bytecode[pc] as usize;
+                    pc += 1 + len + 1;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(bad, 0, "{bad} jump targets land on non-opcode positions");
+    }
 
     #[test]
     fn test_compile_simple() {
