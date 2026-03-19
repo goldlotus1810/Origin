@@ -65,8 +65,8 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 0.2 | Test parser.ol + module import | `PLAN_0_2` | 0.1 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | parse(tokenize("let x=42;"))→1 LetStmt, parse(tokenize("fn f(x){return x+1;}"))→1 FnDef, parse(tokenize("if x>0{emit x;}"))→1 IfStmt. Key fix: CallClosure LoadLocal for non-local vars. 2451 tests pass. |
 | 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: 3 roundtrip tests pass |
 | 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: semantic.ol 672 LOC, 4 DoD tests pass. analyze(parse(tokenize("let x=42;")))→PushNum+Store+Halt. analyze(parse(tokenize(lexer_src)))→323 ops, 0 errors. |
-| 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: codegen.ol 190 LOC, bytecode.rs decoder 280 LOC. 14 Rust decoder tests + 2 integration tests pass. generate(manual_ops) → valid bytecode → decode matches. Full pipeline (analyze→generate) has known CallClosure field-access limitation. |
-| 0.6 | Self-compile test | `PLAN_0_6` | 0.5 | CLAIMED | `claude/review-and-fix-project-erPD8` | erPD8 | Started 2026-03-19 |
+| 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: codegen.ol 190 LOC, bytecode.rs decoder 280 LOC. 14 Rust decoder tests + 2 integration tests pass. generate(manual_ops) → valid bytecode → decode matches. CallClosure field-access limitation FIXED in 0.6. |
+| 0.6 | Self-compile test | `PLAN_0_6` | 0.5 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: Fixed CallClosure Ret write-back bug (scope leak corrupting outer variables). 8 self-compile tests pass: simple_let, fn_def, deterministic, analyze_pipeline, lexer.ol, parser.ol, semantic.ol (compiles itself!), match_in_callclosure. Both Rust and Olang compilers produce valid decodable bytecode. 2482 workspace tests pass, 0 clippy errors. |
 
 ## Phase 1 — Machine code VM (SONG SONG với Phase 0)
 
@@ -169,6 +169,17 @@ Khi Session A xong 0.3:
             field-access issue in CallClosure mode (dict .name empty when
             struct passed across closure boundaries). Encoder works correctly
             with manually-created ops. 2474 workspace tests pass, 0 clippy errors.
+2026-03-19  0.6 DONE (session erPD8): Self-compile test.
+            CRITICAL BUG FIX: CallClosure Ret write-back was searching ALL outer
+            scopes for matching param names → corrupted unrelated variables.
+            Root cause: make_op("tag","name","value") Ret wrote "name"="" to
+            compile_stmt's "name"="x" binding. Fix: limit write-back to immediate
+            caller scope only.
+            8 self-compile tests: simple_let, fn_def, deterministic,
+            analyze_pipeline, lexer.ol, parser.ol, semantic.ol (compiles itself!),
+            match_in_callclosure regression test.
+            Both compilers produce valid decodable bytecode for all bootstrap files.
+            2482 workspace tests pass, 0 clippy errors.
 2026-03-19  1.1 → CLAIMED by Lyra (session 2pN6F). vm_x86_64.S bắt đầu.
             1.2, 1.3 có plan file từ erPDB (PLAN_1_2, PLAN_1_3).
 2026-03-19  1.1 → DONE (Lyra). 1184 LOC x86_64 ASM, 12KB static binary.
