@@ -475,6 +475,12 @@ fn validate_stmt(stmt: &Stmt, scope: &mut Scope, errors: &mut Vec<SemError>) {
             }
         }
 
+        Stmt::IndexAssign { object, index, value } => {
+            validate_expr(object, scope, errors);
+            validate_expr(index, scope, errors);
+            validate_expr(value, scope, errors);
+        }
+
         Stmt::TryCatch { try_block, catch_block } => {
             scope.enter();
             for s in try_block {
@@ -851,7 +857,7 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
             }
         }
         Expr::BitShl(l, r) | Expr::BitShr(l, r)
-        | Expr::BitAnd(l, r) | Expr::BitXor(l, r) => {
+        | Expr::BitAnd(l, r) | Expr::BitXor(l, r) | Expr::BitOr(l, r) => {
             validate_expr(l, scope, errors);
             validate_expr(r, scope, errors);
         }
@@ -933,7 +939,7 @@ pub fn infer_expr_kind(expr: &Expr) -> ChainKind {
         Expr::Tuple(_) => ChainKind::Unknown,
         Expr::FStr { .. } => ChainKind::Unknown,
         Expr::BitShl(..) | Expr::BitShr(..) | Expr::BitAnd(..)
-        | Expr::BitXor(..) | Expr::BitNot(..) => ChainKind::Numeric,
+        | Expr::BitXor(..) | Expr::BitOr(..) | Expr::BitNot(..) => ChainKind::Numeric,
         Expr::Slice { .. } => ChainKind::Unknown,
     }
 }
@@ -953,6 +959,7 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
         | Stmt::Break | Stmt::Continue
         | Stmt::Assign { .. }
         | Stmt::FieldAssign { .. }
+        | Stmt::IndexAssign { .. }
         | Stmt::Use { .. } | Stmt::ModDecl(_)
         | Stmt::StructDef { .. } | Stmt::EnumDef { .. }
         | Stmt::ImplBlock { .. } | Stmt::TraitDef { .. }
@@ -1622,6 +1629,20 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                     ctx.emit(Op::Call("__dict_set".into()));
                 }
                 ctx.emit(Op::StoreUpdate(object.clone()));
+            }
+        }
+
+        Stmt::IndexAssign { object, index, value } => {
+            // arr[idx] = value → load arr, push idx, push value, call __array_set, store back
+            lower_expr(object, ctx);
+            lower_expr(index, ctx);
+            lower_expr(value, ctx);
+            ctx.emit(Op::Call("__array_set".into()));
+            // __array_set pushes modified array back — store it if object is a simple ident
+            if let Expr::Ident(name) = object {
+                ctx.emit(Op::StoreUpdate(name.clone()));
+            } else {
+                ctx.emit(Op::Pop); // discard returned array if not assignable
             }
         }
 
@@ -3166,6 +3187,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
             ctx.emit(Op::Call("__bit_xor".into()));
+        }
+        Expr::BitOr(lhs, rhs) => {
+            lower_expr(lhs, ctx);
+            lower_expr(rhs, ctx);
+            ctx.emit(Op::Call("__bit_or".into()));
         }
         Expr::BitNot(inner) => {
             lower_expr(inner, ctx);
