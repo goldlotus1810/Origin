@@ -626,11 +626,19 @@ ISLQueue: urgent (Emergency, Tick) trước · normal FIFO sau
 # Build toàn bộ
 cargo build --workspace
 
-# Test toàn bộ (1786 tests)
+# Test toàn bộ
 cargo test --workspace
 
 # Clippy (phải 0 warnings)
 cargo clippy --workspace
+
+# ⚠️ BẮT BUỘC: Build + test binary boot TRƯỚC KHI commit
+make smoke-binary
+# → Build origin_new.olang và verify nó boot được ("origin.olang v0.1 ready")
+# → Nếu FAIL = code bạn viết làm hỏng native binary → PHẢI FIX trước khi push
+
+# Full check (unit + intg + E2E + binary boot)
+make check-all
 
 # Test 1 crate
 cargo test -p olang
@@ -777,4 +785,6 @@ NGOẠI LỆ cho phép viết Rust mới:
 6. Worker gửi chain, KHÔNG gửi raw data
 7. Skill stateless — state nằm trong Agent
 8. Silent by default — không polling, không heartbeat
-9. Test trước khi commit: `cargo test --workspace && cargo clippy --workspace`
+9. Test trước khi commit: `cargo test --workspace && cargo clippy --workspace && make smoke-binary`
+   ⚠️ `make smoke-binary` là BẮT BUỘC — verify origin_new.olang boot được.
+   Nếu binary không boot → code bạn viết đã phá vỡ pipeline → PHẢI FIX.
