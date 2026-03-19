@@ -4,4 +4,6 @@ origin.olang.log
 origin.olang.weights
 origin.olang.registry
 Cargo.lock
+# Local-only Claude Code settings (per-session, not shared)
+.claude/settings.local.json
 tools/server/origin.olang
