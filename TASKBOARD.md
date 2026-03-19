@@ -52,10 +52,10 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:391` | 5 min | DONE | claude/review-and-fix-project-erPD8 |
 | B2 | ModuleLoader thiếu file I/O | ~20 LOC `module.rs` | 1-2h | DONE | claude/review-and-fix-project-erPD8 |
 | B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | DONE | claude/review-and-fix-project-erPD8 |
-| B4 | Parser: negative number literals | `Arith(Sub)` ở expression start | 1-2h | FREE | |
-| B5 | Parser: `typeof` trong expression | `Command("typeof")` không parse | 1h | FREE | |
-| B6 | Parser: reserved words as identifiers | `Enum`, `Fn`, `From` conflict | 1h | FREE | |
-| B7 | VM: entry point dispatch | VM exit 0 sau load bytecode, không execute | 2-4h | FREE | |
+| B4 | Parser: negative number literals | `Arith(Sub)` ở expression start | 1-2h | FREE | | Kira (erPD8) ưu tiên — context nhiều nhất |
+| B5 | Parser: `typeof` trong expression | `Command("typeof")` không parse | 1h | FREE | | Kira (erPD8) ưu tiên |
+| B6 | Parser: reserved words as identifiers | `Enum`, `Fn`, `From` conflict | 1h | FREE | | Kira (erPD8) ưu tiên |
+| B7 | VM: entry point dispatch | VM exit 0 sau load bytecode, không execute | 2-4h | FREE | | Kira (erPD8) ưu tiên |
 
 **Lưu ý:** B1+B2+B3 đã DONE. B4+B5+B6 block 7/22 stdlib files. B7 block interactive mode.
 
@@ -144,7 +144,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | FREE | | | asm_emit_arm64.ol + fix ARM64 op_call + ELF ARM64 |
+| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | asm_emit_arm64.ol + fix ARM64 op_call + ELF ARM64 |
 | 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
 | 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | FREE | | | Bytecode embed + browser host + WASI |
 
@@ -191,6 +191,83 @@ Phase 6:
 
 ---
 
+## INTG — Integration Test Suite (Công cụ kiểm tra chéo)
+
+> **Vấn đề:** ~90 files unit test, TẤT CẢ test trong từng crate riêng lẻ.
+> CHỈ CÓ 1 integration test (emotion_tests.rs). Không có test nào kiểm tra
+> mối nối giữa các crate. Hậu quả: mỗi viên gạch đẹp, ghép lại thì vỡ.
+
+### Kiến trúc: workspace-level `tools/intg` crate
+
+```
+tools/intg/
+├── Cargo.toml          ← depends on ALL crates (runtime, olang, silk, context, agents, memory, isl, vsdf, ucd, hal)
+├── src/
+│   └── lib.rs          ← shared helpers (create_runtime, assert_chain_valid, etc.)
+└── tests/
+    ├── t01_ucd_olang.rs         ← UCD → encode → Registry roundtrip
+    ├── t02_olang_silk.rs        ← encode → chain_hash → Silk co_activate → lookup
+    ├── t03_silk_context.rs      ← EmotionTag edge → ConversationCurve → tone
+    ├── t04_agents_memory.rs     ← Learning → STM push → Dream cluster → promote
+    ├── t05_runtime_e2e.rs       ← text input → 7 tầng pipeline → response output
+    ├── t06_writer_reader.rs     ← Writer v0.05 → Reader parse → data khớp
+    ├── t07_isl_agents.rs        ← ISL messaging giữa Chief ↔ Worker
+    ├── t08_evolution.rs         ← Molecule.evolve() → new chain → Registry → Silk
+    ├── t09_persistence.rs       ← write origin.olang → read lại → verify tất cả records
+    ├── t10_invariants.rs        ← Kiểm tra 23 Quy Tắc Bất Biến từ CLAUDE.md
+    ├── t11_vm_stdlib.rs         ← VM load bytecode → execute stdlib functions → verify output
+    └── t12_build_roundtrip.rs   ← builder compile → pack → extract → verify bytecode
+```
+
+### Task breakdown
+
+| ID | Task | Mô tả | Effort | Status | Branch | Session | Notes |
+|----|------|--------|--------|--------|--------|---------|-------|
+| INTG-0 | Scaffold `tools/intg` crate | Cargo.toml, lib.rs helpers, thêm vào workspace | 30m | FREE | | | |
+| INTG-1 | `t01_ucd_olang.rs` — UCD → Olang | encode_codepoint() → Molecule valid, chain_hash unique, Registry insert+lookup roundtrip. Test 10+ codepoints (🔥●∈♩😀). | 1h | FREE | | | Depends: INTG-0 |
+| INTG-2 | `t02_olang_silk.rs` — Olang → Silk | 2 chains encode → co_activate → edge exists → walk_weighted returns both. chain_hash match giữa Registry và SilkGraph. | 1h | FREE | | | Depends: INTG-0 |
+| INTG-3 | `t03_silk_context.rs` — Silk → Context | Silk edge với EmotionTag → amplify_emotion → ConversationCurve.push() → tone đúng (Supportive khi V giảm, Celebratory khi V tăng). Variance window → Gentle khi unstable. | 1-2h | FREE | | | Depends: INTG-0 |
+| INTG-4 | `t04_agents_memory.rs` — Agents → Memory pipeline | SecurityGate.check() → ContentEncoder.encode() → STM.push() → verify observation. Dream.run() với ≥ fib(n) observations → cluster result. Co_activate trong learning → Hebbian weight tăng. | 2h | FREE | | | Depends: INTG-0 |
+| INTG-5 | `t05_runtime_e2e.rs` — Full pipeline E2E | HomeRuntime.process_text("tôi buồn vì mất việc") → response có tone Supportive. process_text("○{emit 🔥;}") → OlangResult có output. Multi-turn: 5 câu → ConversationCurve đúng trajectory. Crisis input → gate chặn, response phù hợp. | 2-3h | FREE | | | Depends: INTG-0. Quan trọng nhất. |
+| INTG-6 | `t06_writer_reader.rs` — Persistence roundtrip | Writer ghi 50 nodes (Node, Edge, Alias, Amend, NodeKind, STM, Hebbian, KnowTree, Curve) → Reader đọc lại → tất cả fields khớp. Test cả v0.03/v0.04 legacy + v0.05 tagged. Append-only: ghi thêm → đọc lại → cũ+mới đều đúng. | 1-2h | FREE | | | Depends: INTG-0 |
+| INTG-7 | `t07_isl_agents.rs` — ISL ↔ Agent hierarchy | ISLAddress encode/decode roundtrip. Chief gửi ISLMessage → Worker nhận đúng. Worker respond → Chief nhận. Emergency priority: urgent trước normal trong ISLQueue. Tier rules: AAM↔Chief OK, AAM↔Worker BLOCKED. | 1-2h | FREE | | | Depends: INTG-0 |
+| INTG-8 | `t08_evolution.rs` — Molecule Evolution chain | 🔥 encode → evolve(Valence, 0x40) → new Molecule valid. consistency_check ≥ 3/4. dimension_delta() đúng chiều thay đổi. New chain → Registry insert → Silk liên kết với parent. | 1h | FREE | | | Depends: INTG-0 |
+| INTG-9 | `t09_persistence.rs` — Origin file integrity | Tạo HomeRuntime → process 10 inputs → flush to file → drop runtime → tạo runtime mới từ cùng file → verify: Registry count, Silk edge count, STM observations, tất cả alias resolve đúng. | 2h | FREE | | | Depends: INTG-0, INTG-6 |
+| INTG-10 | `t10_invariants.rs` — 23 Quy Tắc Bất Biến | Test TỪ CLAUDE.md: ① 5 nhóm không thêm ④ Molecule từ encode ⑧ Node → registry ⑨ File trước RAM sau ⑩ Append-only ⑪ Silk cùng tầng ⑬ EmotionTag per edge ⑭ L0 không import L1 ⑱ BlackCurtain. Mỗi QT = 1+ test. | 2-3h | FREE | | | Depends: INTG-0. Bảo vệ kiến trúc. |
+| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | Load bytecode từ builder → VM execute: result.ol (ok/err/unwrap), iter.ol (range/reduce), sort.ol (quicksort), hash.ol (fnv1a). Verify output values. | 2h | FREE | | | Depends: INTG-0, B7 (VM entry point) |
+| INTG-12 | `t12_build_roundtrip.rs` — Builder → Binary → Verify | Compile .ol → bytecode → pack → extract bytecode → decode → verify opcodes match. ELF header valid. Wrap mode: trailer offset → header → bytecode → knowledge boundaries đúng. | 1-2h | FREE | | | Depends: INTG-0 |
+| INTG-CI | Makefile target `make intg` | Thêm `cargo test -p intg` vào Makefile. Chạy SAU `cargo test --workspace`. Output: bảng tổng kết pass/fail per mối nối. | 30m | FREE | | | Depends: INTG-0 |
+
+### Ưu tiên thực hiện
+
+```
+Đợt 1 (nền móng):
+  INTG-0 → INTG-1 → INTG-2 → INTG-6    ← scaffold + 3 mối nối cơ bản nhất
+
+Đợt 2 (pipeline xuyên suốt):
+  INTG-5 → INTG-4 → INTG-3              ← E2E trước, rồi từng tầng
+
+Đợt 3 (bảo vệ kiến trúc):
+  INTG-10 → INTG-7 → INTG-8 → INTG-9   ← invariants + ISL + evolution + persistence
+
+Đợt 4 (VM + build):
+  INTG-11 → INTG-12 → INTG-CI           ← cần B7 done trước
+```
+
+### DoD (Definition of Done)
+
+```
+✅ `cargo test -p intg` pass 100%
+✅ Mỗi test file có ≥ 3 test cases
+✅ Không mock — dùng API thật từ các crate
+✅ Test names mô tả rõ mối nối nào đang kiểm tra
+✅ Tổng ≥ 50 integration tests cover 12 mối nối
+✅ `make intg` chạy được và output rõ ràng
+✅ 0 clippy warnings
+```
+
+---
+
 ## Gợi ý phân việc cho 2-3 sessions
 
 ```
@@ -206,6 +283,9 @@ Phase 5:
 Phase 6:
   Session A: 6.1 (self-update) → 6.2 (self-optimize)
   Session B: 6.3 (reproduce)
+
+INTG (song song với tất cả):
+  AI 3: INTG-0 → INTG-1..12 → INTG-CI
 ```
 
 ---
@@ -290,6 +370,11 @@ Phase 6:
               PLAN_6_2 (self-optimize), PLAN_6_3 (reproduce).
             Updated TASKBOARD + plans/README with Phase 4-6 tasks.
             2491 workspace tests pass, 0 clippy errors.
+2026-03-19  Thêm INTG section — Integration Test Suite (13 tasks).
+            Công cụ kiểm tra chéo giữa các crate, cover 12 mối nối.
+            AI 3 sẽ implement. Scaffold → 12 test files → Makefile target.
+            B4-B7 → FREE for Kira (erPD8, context nhiều nhất).
+            4.1 → CLAIMED by Lyra (session 2pN6F).
 2026-03-19  🎉 origin.olang RA ĐỜI — build thành công lần đầu!
             VM: 15 KB (x86_64 ASM, no libc, static linked)
             Bytecode: 811 KB (15/22 stdlib files compiled)
