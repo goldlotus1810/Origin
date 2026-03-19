@@ -98,10 +98,10 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 3.1 | asm_emit.ol — emit x86_64 machine code | `PLAN_3_1` | Phase 2 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
-| 3.2 | elf_emit.ol — tạo ELF binary | `PLAN_3_2` | 3.1 | FREE | — | — | ~200 LOC |
-| 3.3 | builder.ol — thay Rust builder | `PLAN_3_3` | 3.1,3.2 | FREE | — | — | ~300 LOC |
-| 3.4 | Self-build test: v2 == v3 | `PLAN_3_3` | 3.3 | FREE | — | — | Fixed-point verification |
+| 3.1 | asm_emit.ol — emit x86_64 machine code | `PLAN_3_1` | Phase 2 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 355 LOC. 30+ instructions, REX/ModRM, SSE2 f64, labels+fixups. |
+| 3.2 | elf_emit.ol — tạo ELF binary | `PLAN_3_2` | 3.1 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 113 LOC. ELF64 header + program header + origin header. |
+| 3.3 | builder.ol — thay Rust builder | `PLAN_3_3` | 3.1,3.2 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 134 LOC. compile_all + pack + ELF wrap. |
+| 3.4 | Self-build test: v2 == v3 | `PLAN_3_3` | 3.3 | FREE | — | — | Cần integration test khi VM builtins đủ (__parse, __lower, __file_read) |
 
 ---
 
