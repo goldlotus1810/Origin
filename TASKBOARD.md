@@ -49,9 +49,9 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Blocker | Fix | Effort | Status | Branch |
 |----|---------|-----|--------|--------|--------|
-| B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:373` | 5 min | FREE | — |
-| B2 | ModuleLoader thiếu file I/O | ~20 LOC `module.rs` | 1-2h | FREE | — |
-| B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | FREE | — |
+| B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:391` | 5 min | DONE | claude/review-and-fix-project-erPD8 |
+| B2 | ModuleLoader thiếu file I/O | ~20 LOC `module.rs` | 1-2h | DONE | claude/review-and-fix-project-erPD8 |
+| B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | DONE | claude/review-and-fix-project-erPD8 |
 
 **Lưu ý:** B1+B2+B3 block toàn bộ Phase 0. Nên giải TRƯỚC.
 
@@ -61,11 +61,11 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 0.1 | Test lexer.ol trên Rust VM | `PLAN_0_1` | B1,B2,B3 | BLOCKED | — | — | Chờ blockers |
-| 0.2 | Test parser.ol + module import | `PLAN_0_2` | 0.1 | FREE | — | — | — |
-| 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | FREE | — | — | — |
-| 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | FREE | — | — | — |
-| 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | FREE | — | — | — |
+| 0.1 | Test lexer.ol trên Rust VM | `PLAN_0_1` | B1,B2,B3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | tokenize("let x = 42;")→6 tokens, tokenize("fn f(x){...}")→13 tokens. 2442 tests pass. |
+| 0.2 | Test parser.ol + module import | `PLAN_0_2` | 0.1 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | parse(tokenize("let x=42;"))→1 LetStmt, parse(tokenize("fn f(x){return x+1;}"))→1 FnDef, parse(tokenize("if x>0{emit x;}"))→1 IfStmt. Key fix: CallClosure LoadLocal for non-local vars. 2451 tests pass. |
+| 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: 3 roundtrip tests pass |
+| 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: semantic.ol 672 LOC, 4 DoD tests pass. analyze(parse(tokenize("let x=42;")))→PushNum+Store+Halt. analyze(parse(tokenize(lexer_src)))→323 ops, 0 errors. |
+| 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: codegen.ol 190 LOC, bytecode.rs decoder 280 LOC. 14 Rust decoder tests + 2 integration tests pass. generate(manual_ops) → valid bytecode → decode matches. Full pipeline (analyze→generate) has known CallClosure field-access limitation. |
 | 0.6 | Self-compile test | `PLAN_0_6` | 0.5 | FREE | — | — | — |
 
 ## Phase 1 — Machine code VM (SONG SONG với Phase 0)
@@ -73,8 +73,8 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
 | 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
-| 1.2 | vm_arm64.S | — | 1.1 | FREE | — | — | erPDB có thiết kế, chờ plan file |
-| 1.3 | vm_wasm.wat | — | 1.1 | FREE | — | — | erPDB có thiết kế, chờ plan file |
+| 1.2 | vm_arm64.S | `PLAN_1_2` | 1.1 | FREE | — | — | Plan file có sẵn |
+| 1.3 | vm_wasm.wat | `PLAN_1_3` | 1.1 | FREE | — | — | Plan file có sẵn |
 | 1.4 | Builder tool (Rust) | `PLAN_1_4` | 1.1 | FREE | — | — | — |
 
 ## Song song — Auth (KHÔNG phụ thuộc Phase 0)
@@ -125,6 +125,50 @@ Khi Session A xong 0.3:
 2026-03-18  AUTH → DONE (session 2pN6F). 7 files, 910 LOC, 21 tests.
             Ed25519 VerifyingKey extended (from_bytes, as_bytes, seed).
             Wire vào HomeRuntime chưa làm (origin.rs quá lớn, cần kế hoạch).
+2026-03-18  B1 DONE: thêm "union"→Enum, "type"→Struct vào alphabet.rs
+            B3 DONE: thêm "to_num"→"__to_number" vào semantic.rs
+            Bonus fixes: CmpOp::Eq (== as compare op), struct-style enum variants,
+            __eq VM builtin returns empty() for false (Jz-compatible).
+            Parser audit test audit_parse_bootstrap_lexer_ol PASSES.
+            All 2381 workspace tests pass. Còn lại B2 (ModuleLoader file I/O).
+2026-03-18  B2 DONE: thêm ModuleLoader.load() với file I/O (feature = "std").
+            lib.rs: cfg_attr(not(std), no_std) cho conditional std support.
+            2 tests mới (load_from_file, load_module_not_found).
+            PLAN_0_1 UNBLOCKED — tất cả B1+B2+B3 đã xong.
+2026-03-18  0.1 DONE (session erPD8): lexer.ol chạy trên Rust VM.
+            Fixes: while loop lowering (Jmp thay Loop), return_jumps cho
+            inlined functions, if-without-else stack fix, pub fn first-pass,
+            true/false literals, split_array_chain 0xFD tag skip.
+            tokenize("let x = 42;")→6 tokens, tokenize("fn f(x){...}")→13.
+            2442 workspace tests pass, 0 clippy errors.
+2026-03-18  0.2 DONE (session erPD8): parser.ol chạy trên Rust VM.
+            Fixes: CallClosure non-local vars dùng LoadLocal thay Load
+            (Op::Load pushes empty, Op::LoadLocal searches scopes),
+            CallClosure param write-back on Ret, while loop break stack fix,
+            CallClosure arg order fix, max_call_depth 512 for deep nesting.
+            3 DoD tests pass: LetStmt, FnDef, IfStmt.
+            2451 workspace tests pass, 0 clippy errors.
+2026-03-19  0.4 DONE (session erPD8): semantic.ol 672 LOC chạy trên Rust VM.
+            Viết semantic analyzer: Op type, SemanticState, scope tracking,
+            Pass 1 (collect_fns), Pass 1.5 (precompile_fns/CallClosure),
+            Pass 2 (compile_expr/compile_stmt), analyze() entry point.
+            Handles: all Expr/Stmt variants, builtins (len/push/pop/char_at/
+            substr/to_num/set_at), binary/comparison/logic ops, short-circuit
+            &&/||, match expr/stmt, struct/enum literals, field access/assign.
+            4 DoD tests: let_stmt, fn_def, undeclared_var, compile_lexer.
+            analyze(parse(tokenize(lexer_src))) → 323 ops, 0 errors.
+            All workspace tests pass, 0 clippy errors.
+2026-03-19  0.5 DONE (session erPD8): codegen.ol 190 LOC + bytecode.rs 280 LOC.
+            codegen.ol: bytecode encoder (36 opcodes, byte/u16/u32/f64/str helpers).
+            bytecode.rs: Rust decoder + Rust encoder for round-trip testing.
+            14 Rust decoder tests (roundtrip, edge cases, error handling).
+            2 integration tests: codegen_ol_let_x_42 + codegen_ol_byte_count.
+            VM builtins: __f64_to_le_bytes, __f64_from_le_bytes, __str_bytes,
+            __bytes_to_str, __array_concat (+ aliases in both builtin tables).
+            Known limitation: full pipeline analyze()→generate() has struct
+            field-access issue in CallClosure mode (dict .name empty when
+            struct passed across closure boundaries). Encoder works correctly
+            with manually-created ops. 2474 workspace tests pass, 0 clippy errors.
 2026-03-19  1.1 → CLAIMED by Lyra (session 2pN6F). vm_x86_64.S bắt đầu.
-            1.2, 1.3 có thiết kế từ erPDB nhưng chưa có plan file.
+            1.2, 1.3 có plan file từ erPDB (PLAN_1_2, PLAN_1_3).
 ```

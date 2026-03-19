@@ -229,7 +229,7 @@ impl core::fmt::Display for VmError {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STACK_MAX: usize = 256;
-const STEPS_MAX: u32 = 65_536;
+const STEPS_MAX: u32 = 500_000;
 
 /// Pop 1 chain từ stack, break nếu underflow.
 macro_rules! vm_pop {
@@ -333,26 +333,148 @@ fn split_iter_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
 /// Maps ShapeBase to Unicode group categories:
 /// Split an array-encoded MolecularChain by separator molecules (shape=0, relation=0).
 /// Split array chain by separator molecules (shape=0, relation=0, v=0, a=0, t=0).
+/// Create a heap-reference chain for a dict. Shape=0xFC marks dict refs.
+fn make_dict_ref(idx: usize) -> MolecularChain {
+    MolecularChain::single(Molecule::raw(0xFC, 0x01, (idx & 0xFF) as u8, ((idx >> 8) & 0xFF) as u8, 0))
+}
+
+/// Create a heap-reference chain for an array. Shape=0xFD, relation=0x01 marks array refs.
+fn make_array_ref(idx: usize) -> MolecularChain {
+    MolecularChain::single(Molecule::raw(0xFD, 0x01, (idx & 0xFF) as u8, ((idx >> 8) & 0xFF) as u8, 0))
+}
+
+/// Check if chain is a dict heap reference.
+fn as_dict_ref(chain: &MolecularChain) -> Option<usize> {
+    if chain.0.len() == 1 && chain.0[0].shape == 0xFC && chain.0[0].relation == 0x01 {
+        Some(chain.0[0].emotion.valence as usize | ((chain.0[0].emotion.arousal as usize) << 8))
+    } else {
+        None
+    }
+}
+
+/// Check if chain is an array heap reference.
+fn as_array_ref(chain: &MolecularChain) -> Option<usize> {
+    if chain.0.len() == 1 && chain.0[0].shape == 0xFD && chain.0[0].relation == 0x01 {
+        Some(chain.0[0].emotion.valence as usize | ((chain.0[0].emotion.arousal as usize) << 8))
+    } else {
+        None
+    }
+}
+
+/// Materialize a heap ref into a flat chain for external consumption (e.g. Emit).
+/// Recursively materializes nested heap refs.
+fn materialize_heap_value(
+    chain: &MolecularChain,
+    array_heap: &[Vec<MolecularChain>],
+    dict_heap: &[Vec<(MolecularChain, MolecularChain)>],
+) -> MolecularChain {
+    if let Some(arr_idx) = as_array_ref(chain) {
+        if arr_idx < array_heap.len() {
+            let sep = Molecule::raw(0, 0, 0, 0, 0);
+            let mut result = MolecularChain(Vec::new());
+            for (i, elem) in array_heap[arr_idx].iter().enumerate() {
+                if i > 0 { result.0.push(sep); }
+                let mat = materialize_heap_value(elem, array_heap, dict_heap);
+                result.0.extend(mat.0.iter().copied());
+            }
+            return result;
+        }
+    }
+    if let Some(dict_idx) = as_dict_ref(chain) {
+        if dict_idx < dict_heap.len() {
+            let sep = Molecule::raw(0, 0, 0, 0, 0);
+            let mut result = MolecularChain(Vec::new());
+            for (i, (k, v)) in dict_heap[dict_idx].iter().enumerate() {
+                if i > 0 { result.0.push(sep); }
+                let mk = materialize_heap_value(k, array_heap, dict_heap);
+                result.0.extend(mk.0.iter().copied());
+                result.0.push(sep);
+                let mv = materialize_heap_value(v, array_heap, dict_heap);
+                result.0.extend(mv.0.iter().copied());
+            }
+            return result;
+        }
+    }
+    chain.clone()
+}
+
+/// Check if a molecule is a null separator (used by dicts: key|null|val|null|key|null|val).
+fn is_null_separator(mol: &Molecule) -> bool {
+    mol.shape == 0 && mol.relation == 0
+        && mol.emotion.valence == 0 && mol.emotion.arousal == 0
+        && mol.time == 0
+}
+
+/// Check if a molecule is an array element separator (0xFE tag).
+fn is_array_separator(mol: &Molecule) -> bool {
+    mol.shape == 0xFE && mol.relation == 0
+        && mol.emotion.valence == 0 && mol.emotion.arousal == 0
+        && mol.time == 0
+}
+
+/// Split a chain by null separators (used for dicts AND legacy arrays without 0xFE separators).
 pub fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     if chain.is_empty() {
         return Vec::new();
     }
     let mut result = Vec::new();
     let mut current = Vec::new();
-    for mol in &chain.0 {
-        if mol.shape == 0 && mol.relation == 0
-            && mol.emotion.valence == 0 && mol.emotion.arousal == 0
-            && mol.time == 0
-        {
-            // Separator — finalize current element
-            result.push(MolecularChain(core::mem::take(&mut current)));
+    // Skip the 0xFD tag molecule used by __array_push to track element count
+    let start = if !chain.0.is_empty() && chain.0[0].shape == 0xFD { 1 } else { 0 };
+    // Check if this array uses 0xFE array separators (modern format)
+    let has_array_seps = chain.0[start..].iter().any(|m| is_array_separator(m));
+    for mol in &chain.0[start..] {
+        if has_array_seps {
+            // Modern array: split only on 0xFE, keep internal null separators
+            if is_array_separator(mol) {
+                result.push(MolecularChain(core::mem::take(&mut current)));
+            } else {
+                current.push(*mol);
+            }
         } else {
-            current.push(*mol);
+            // Legacy: split on null separators
+            if is_null_separator(mol) {
+                result.push(MolecularChain(core::mem::take(&mut current)));
+            } else {
+                current.push(*mol);
+            }
         }
     }
     // Last element (no trailing separator)
     result.push(MolecularChain(current));
     result
+}
+
+/// Split a chain by null separators only (for dict key-value extraction).
+/// This always splits on null (0,0,0,0,0) regardless of array separators.
+fn split_dict_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
+    if chain.is_empty() {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    let mut current = Vec::new();
+    for mol in &chain.0 {
+        if is_null_separator(mol) {
+            result.push(MolecularChain(core::mem::take(&mut current)));
+        } else {
+            current.push(*mol);
+        }
+    }
+    result.push(MolecularChain(current));
+    result
+}
+
+/// Get a field value from a dict chain. Keys at even indices, values at odd.
+fn get_dict_field(dict: &MolecularChain, key: &MolecularChain) -> MolecularChain {
+    let elements = split_dict_chain(dict);
+    let mut i = 0;
+    while i + 1 < elements.len() {
+        if elements[i].0 == key.0 {
+            return elements[i + 1].clone();
+        }
+        i += 2;
+    }
+    MolecularChain::empty()
 }
 
 /// - SDF shapes (Sphere●, Capsule▬, Box■, Cone▲) → geometric primitives
@@ -484,15 +606,41 @@ fn call_closure_inline(
                     "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                         let b = local_stack.pop().unwrap_or_default();
                         let a = local_stack.pop().unwrap_or_default();
-                        let fa = a.to_number().unwrap_or(0.0);
-                        let fb = b.to_number().unwrap_or(0.0);
-                        let result = match fname.as_str() {
-                            "__cmp_lt" => fa < fb,
-                            "__cmp_gt" => fa > fb,
-                            "__cmp_le" => fa <= fb,
-                            "__cmp_ge" => fa >= fb,
-                            "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
-                            _ => false,
+                        let result = if let (Some(sa), Some(sb)) =
+                            (chain_to_string(&a), chain_to_string(&b))
+                        {
+                            if a.to_number().is_none() || b.to_number().is_none() {
+                                match fname.as_str() {
+                                    "__cmp_lt" => sa < sb,
+                                    "__cmp_gt" => sa > sb,
+                                    "__cmp_le" => sa <= sb,
+                                    "__cmp_ge" => sa >= sb,
+                                    "__cmp_ne" => sa != sb,
+                                    _ => false,
+                                }
+                            } else {
+                                let fa = a.to_number().unwrap_or(0.0);
+                                let fb = b.to_number().unwrap_or(0.0);
+                                match fname.as_str() {
+                                    "__cmp_lt" => fa < fb,
+                                    "__cmp_gt" => fa > fb,
+                                    "__cmp_le" => fa <= fb,
+                                    "__cmp_ge" => fa >= fb,
+                                    "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                    _ => false,
+                                }
+                            }
+                        } else {
+                            let fa = a.to_number().unwrap_or(0.0);
+                            let fb = b.to_number().unwrap_or(0.0);
+                            match fname.as_str() {
+                                "__cmp_lt" => fa < fb,
+                                "__cmp_gt" => fa > fb,
+                                "__cmp_le" => fa <= fb,
+                                "__cmp_ge" => fa >= fb,
+                                "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                _ => false,
+                            }
                         };
                         let _ = local_stack.push(if result {
                             MolecularChain::from_number(1.0)
@@ -536,9 +684,9 @@ fn call_closure_inline(
 /// OlangVM — stack machine thực thi OlangProgram.
 pub struct OlangVM {
     /// Max steps để tránh infinite loop (QT2: ∞-1)
-    max_steps: u32,
+    pub max_steps: u32,
     /// Max call depth để tránh stack overflow từ recursion
-    max_call_depth: u32,
+    pub max_call_depth: u32,
 }
 
 #[allow(missing_docs)]
@@ -546,14 +694,14 @@ impl OlangVM {
     pub fn new() -> Self {
         Self {
             max_steps: STEPS_MAX,
-            max_call_depth: 256, // Fib-derived: prevent stack overflow
+            max_call_depth: 512, // Bootstrap parser needs deep scope nesting
         }
     }
 
     pub fn with_max_steps(n: u32) -> Self {
         Self {
             max_steps: n,
-            max_call_depth: 256,
+            max_call_depth: 512,
         }
     }
 
@@ -573,6 +721,8 @@ impl OlangVM {
         let mut steps = 0u32;
         let mut pc = 0usize;
         let mut call_depth = 0u32;
+        // Call stack for CallClosure: (saved_pc, scope_depth, stack_depth, param_count)
+        let mut closure_call_stack: Vec<(usize, usize, usize, usize)> = Vec::new();
         // Loop stack: (jump_back_pc, remaining_iterations)
         let mut loop_stack: Vec<(usize, u32)> = Vec::new();
         // Try/catch stack: catch handler PC targets
@@ -580,6 +730,11 @@ impl OlangVM {
         // Channel store: id → queue of messages (cooperative concurrency)
         let mut channels: Vec<Vec<MolecularChain>> = Vec::new();
         let mut next_channel_id: u64 = 1;
+        // Heap for dict/array objects (avoids in-band separator nesting issues)
+        // Dict: Vec<(key_chain, value_chain)>
+        // Array: Vec<element_chain>
+        let mut dict_heap: Vec<Vec<(MolecularChain, MolecularChain)>> = Vec::new();
+        let mut array_heap: Vec<Vec<MolecularChain>> = Vec::new();
 
         while pc < prog.ops.len() {
             if steps >= self.max_steps {
@@ -674,7 +829,9 @@ impl OlangVM {
 
                 Op::Emit => {
                     let c = vm_pop!(stack, events);
-                    events.push(VmEvent::Output(c));
+                    // Materialize heap refs before emitting
+                    let materialized = materialize_heap_value(&c, &array_heap, &dict_heap);
+                    events.push(VmEvent::Output(materialized));
                 }
 
                 Op::Dup => {
@@ -758,15 +915,44 @@ impl OlangVM {
                         "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
-                            let na = a.to_number().unwrap_or(0.0);
-                            let nb = b.to_number().unwrap_or(0.0);
-                            let truthy = match name.as_str() {
-                                "__cmp_lt" => na < nb,
-                                "__cmp_gt" => na > nb,
-                                "__cmp_le" => na <= nb,
-                                "__cmp_ge" => na >= nb,
-                                "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
-                                _ => false,
+                            // Try string comparison first (both must be string chains)
+                            let truthy = if let (Some(sa), Some(sb)) =
+                                (chain_to_string(&a), chain_to_string(&b))
+                            {
+                                // Both are strings AND at least one is non-numeric
+                                // (avoid treating "42" as string when comparing numbers)
+                                if a.to_number().is_none() || b.to_number().is_none() {
+                                    match name.as_str() {
+                                        "__cmp_lt" => sa < sb,
+                                        "__cmp_gt" => sa > sb,
+                                        "__cmp_le" => sa <= sb,
+                                        "__cmp_ge" => sa >= sb,
+                                        "__cmp_ne" => sa != sb,
+                                        _ => false,
+                                    }
+                                } else {
+                                    let na = a.to_number().unwrap_or(0.0);
+                                    let nb = b.to_number().unwrap_or(0.0);
+                                    match name.as_str() {
+                                        "__cmp_lt" => na < nb,
+                                        "__cmp_gt" => na > nb,
+                                        "__cmp_le" => na <= nb,
+                                        "__cmp_ge" => na >= nb,
+                                        "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
+                                        _ => false,
+                                    }
+                                }
+                            } else {
+                                let na = a.to_number().unwrap_or(0.0);
+                                let nb = b.to_number().unwrap_or(0.0);
+                                match name.as_str() {
+                                    "__cmp_lt" => na < nb,
+                                    "__cmp_gt" => na > nb,
+                                    "__cmp_le" => na <= nb,
+                                    "__cmp_ge" => na >= nb,
+                                    "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
+                                    _ => false,
+                                }
                             };
                             // true → non-empty chain (1.0), false → empty chain
                             // Jz checks is_empty() so empty = falsy
@@ -826,6 +1012,97 @@ impl OlangVM {
                                 let _ = stack.push(actual); // truthy
                             } else {
                                 let _ = stack.push(MolecularChain::empty()); // falsy
+                            }
+                        }
+                        "__match_enum" => {
+                            // Match user-defined enum variant by tag string
+                            // Stack: [subject, expected_tag_chain]
+                            // Expected tag = "EnumName::Variant" string chain
+                            let expected_tag = vm_pop!(stack, events);
+                            let subject = vm_pop!(stack, events);
+                            let expected_str = chain_to_string(&expected_tag).unwrap_or_default();
+
+                            // Extract tag from subject: everything before first null separator
+                            let mut tag_mols = Vec::new();
+                            for mol in &subject.0 {
+                                if mol.shape == 0 && mol.relation == 0
+                                    && mol.emotion.valence == 0 && mol.emotion.arousal == 0
+                                    && mol.time == 0
+                                {
+                                    break; // stop at first separator
+                                }
+                                tag_mols.push(*mol);
+                            }
+                            let actual_tag = chain_to_string(&MolecularChain(tag_mols)).unwrap_or_default();
+
+                            // Also check __type field for struct-tagged dicts
+                            let matches = if actual_tag == expected_str {
+                                true
+                            } else if let Some(dict_idx) = as_dict_ref(&subject) {
+                                // Heap-based dict: check __type field
+                                let type_key = string_to_chain("__type");
+                                if dict_idx < dict_heap.len() {
+                                    dict_heap[dict_idx].iter()
+                                        .find(|(k, _)| k.0 == type_key.0)
+                                        .map(|(_, v)| chain_to_string(v).unwrap_or_default() == expected_str)
+                                        .unwrap_or(false)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                // Legacy flat chain: check __type field
+                                let type_key = string_to_chain("__type");
+                                let type_val = get_dict_field(&subject, &type_key);
+                                if type_val.is_empty() {
+                                    false
+                                } else {
+                                    chain_to_string(&type_val).unwrap_or_default() == expected_str
+                                }
+                            };
+
+                            if matches {
+                                let _ = stack.push(subject); // truthy — keep subject for binding extraction
+                            } else {
+                                let _ = stack.push(MolecularChain::empty()); // falsy
+                            }
+                        }
+                        "__enum_field" => {
+                            // Extract nth payload field from enum variant
+                            // Stack: [enum_chain, index_num]
+                            let index_chain = vm_pop!(stack, events);
+                            let enum_chain = vm_pop!(stack, events);
+                            let index = index_chain.to_number().unwrap_or(0.0) as usize;
+
+                            if let Some(dict_idx) = as_dict_ref(&enum_chain) {
+                                // Heap dict (StructLiteral): skip __type, return nth other field's value
+                                let type_key = string_to_chain("__type");
+                                if dict_idx < dict_heap.len() {
+                                    let mut field_i = 0usize;
+                                    let mut found = false;
+                                    for (k, v) in &dict_heap[dict_idx] {
+                                        if k.0 == type_key.0 { continue; } // skip __type
+                                        if field_i == index {
+                                            let _ = stack.push(v.clone());
+                                            found = true;
+                                            break;
+                                        }
+                                        field_i += 1;
+                                    }
+                                    if !found {
+                                        let _ = stack.push(MolecularChain::empty());
+                                    }
+                                } else {
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
+                            } else {
+                                // Legacy flat chain: [tag][sep][field0][sep][field1]...
+                                let parts = split_array_chain(&enum_chain);
+                                let field_idx = index + 1; // +1 to skip tag
+                                if field_idx < parts.len() {
+                                    let _ = stack.push(parts[field_idx].clone());
+                                } else {
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
                             }
                         }
                         "__match_mol" => {
@@ -951,42 +1228,58 @@ impl OlangVM {
 
                         "__array_new" => {
                             // Stack: [... elem0, elem1, ..., elemN-1, count]
-                            // Pop count first (on top), then elements in reverse order
                             let count_chain = vm_pop!(stack, events);
                             let count = count_chain.to_number().unwrap_or(0.0) as usize;
                             let mut elements = Vec::new();
                             for _ in 0..count {
                                 elements.push(vm_pop!(stack, events));
                             }
-                            elements.reverse(); // restore original order
-                            // Build array chain: elem0 | sep | elem1 | sep | elem2 ...
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            for (i, elem) in elements.into_iter().enumerate() {
-                                if i > 0 {
-                                    result.0.push(sep);
-                                }
-                                result.0.extend(elem.0.iter().cloned());
-                            }
-                            let _ = stack.push(result);
+                            elements.reverse();
+                            // Store on array heap, push reference
+                            let idx = array_heap.len();
+                            array_heap.push(elements);
+                            let _ = stack.push(make_array_ref(idx));
                         }
                         "__array_get" => {
                             // Stack: [array, index]
                             let idx_chain = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
                             let idx = idx_chain.to_number().unwrap_or(0.0) as usize;
-                            // Split array by separator molecules (shape=0, relation=0)
-                            let elements = split_array_chain(&arr);
-                            if idx < elements.len() {
-                                let _ = stack.push(elements[idx].clone());
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                // Heap-based array
+                                if arr_idx < array_heap.len() && idx < array_heap[arr_idx].len() {
+                                    let _ = stack.push(array_heap[arr_idx][idx].clone());
+                                } else {
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
                             } else {
-                                let _ = stack.push(MolecularChain::empty());
+                                // Legacy flat chain array
+                                let elements = split_array_chain(&arr);
+                                if idx < elements.len() {
+                                    let _ = stack.push(elements[idx].clone());
+                                } else {
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
                             }
                         }
                         "__array_len" => {
                             let arr = vm_pop!(stack, events);
-                            if arr.is_empty() {
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                // Heap-based array
+                                let count = if arr_idx < array_heap.len() { array_heap[arr_idx].len() } else { 0 };
+                                let _ = stack.push(MolecularChain::from_number(count as f64));
+                            } else if arr.is_empty() {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
+                            } else if !arr.0.is_empty() && arr.0[0].shape == 0xFD {
+                                // Tagged array (from push): count is stored in tag molecule
+                                let count = arr.0[0].emotion.valence as f64;
+                                let _ = stack.push(MolecularChain::from_number(count));
+                            } else if !arr.0.is_empty()
+                                && arr.0[0].shape == 0x02 && arr.0[0].relation == 0x01
+                                && arr.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01)
+                            {
+                                // Pure string chain: length = number of characters
+                                let _ = stack.push(MolecularChain::from_number(arr.0.len() as f64));
                             } else {
                                 let count = split_array_chain(&arr).len();
                                 let _ = stack.push(MolecularChain::from_number(count as f64));
@@ -1022,13 +1315,26 @@ impl OlangVM {
                         "__array_push" => {
                             // Stack: [array, element]
                             let elem = vm_pop!(stack, events);
-                            let mut arr = vm_pop!(stack, events);
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            if !arr.is_empty() {
-                                arr.0.push(sep);
+                            let arr = vm_pop!(stack, events);
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                // Heap-based array: push in place
+                                if arr_idx < array_heap.len() {
+                                    array_heap[arr_idx].push(elem);
+                                }
+                                let _ = stack.push(arr); // return same ref
+                            } else if arr.is_empty() {
+                                // First push: create new heap array
+                                let idx = array_heap.len();
+                                array_heap.push(alloc::vec![elem]);
+                                let _ = stack.push(make_array_ref(idx));
+                            } else {
+                                // Legacy flat chain array: convert to heap
+                                let mut elements = split_array_chain(&arr);
+                                elements.push(elem);
+                                let idx = array_heap.len();
+                                array_heap.push(elements);
+                                let _ = stack.push(make_array_ref(idx));
                             }
-                            arr.0.extend(elem.0.iter().cloned());
-                            let _ = stack.push(arr);
                         }
                         "__dict_new" => {
                             // Stack: [key0, val0, key1, val1, ..., count]
@@ -1041,89 +1347,127 @@ impl OlangVM {
                                 pairs.push((key, val));
                             }
                             pairs.reverse();
-                            // Encode as flat chain: key0|sep|val0|sep|key1|sep|val1...
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            for (i, (key, val)) in pairs.into_iter().enumerate() {
-                                if i > 0 {
-                                    result.0.push(sep);
-                                }
-                                result.0.extend(key.0.iter().cloned());
-                                result.0.push(sep);
-                                result.0.extend(val.0.iter().cloned());
-                            }
-                            let _ = stack.push(result);
+                            // Store on dict heap, push reference
+                            let idx = dict_heap.len();
+                            dict_heap.push(pairs);
+                            let _ = stack.push(make_dict_ref(idx));
                         }
                         "__dict_get" => {
                             // Stack: [dict, key]
                             let key = vm_pop!(stack, events);
                             let dict = vm_pop!(stack, events);
-                            let elements = split_array_chain(&dict);
-                            // Keys at even indices, values at odd indices
-                            let mut found = false;
-                            let mut i = 0;
-                            while i + 1 < elements.len() {
-                                if elements[i].0 == key.0 {
-                                    let _ = stack.push(elements[i + 1].clone());
-                                    found = true;
-                                    break;
+                            if let Some(idx) = as_dict_ref(&dict) {
+                                // Heap-based dict lookup
+                                let mut found = false;
+                                if idx < dict_heap.len() {
+                                    for (k, v) in &dict_heap[idx] {
+                                        if k.0 == key.0 {
+                                            let _ = stack.push(v.clone());
+                                            found = true;
+                                            break;
+                                        }
+                                    }
                                 }
-                                i += 2;
-                            }
-                            if !found {
-                                let _ = stack.push(MolecularChain::empty());
+                                if !found {
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
+                            } else {
+                                // Legacy flat chain dict
+                                let elements = split_dict_chain(&dict);
+                                let mut found = false;
+                                let mut i = 0;
+                                while i + 1 < elements.len() {
+                                    if elements[i].0 == key.0 {
+                                        let _ = stack.push(elements[i + 1].clone());
+                                        found = true;
+                                        break;
+                                    }
+                                    i += 2;
+                                }
+                                if !found {
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
                             }
                         }
                         "__dict_keys" => {
                             // Stack: [dict]
-                            // Returns array of keys (even-indexed elements)
+                            // Returns array of keys
                             let dict = vm_pop!(stack, events);
-                            let elements = split_array_chain(&dict);
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            let mut key_idx = 0;
-                            let mut i = 0;
-                            while i < elements.len() {
-                                if key_idx > 0 {
-                                    result.0.push(sep);
+                            if let Some(idx) = as_dict_ref(&dict) {
+                                let keys: Vec<MolecularChain> = if idx < dict_heap.len() {
+                                    dict_heap[idx].iter().map(|(k, _)| k.clone()).collect()
+                                } else {
+                                    Vec::new()
+                                };
+                                let arr_idx = array_heap.len();
+                                array_heap.push(keys);
+                                let _ = stack.push(make_array_ref(arr_idx));
+                            } else {
+                                // Legacy flat chain dict
+                                let elements = split_dict_chain(&dict);
+                                let sep = Molecule::raw(0xFE, 0, 0, 0, 0);
+                                let mut result = MolecularChain(Vec::new());
+                                let mut key_idx = 0;
+                                let mut i = 0;
+                                while i < elements.len() {
+                                    if key_idx > 0 {
+                                        result.0.push(sep);
+                                    }
+                                    result.0.extend(elements[i].0.iter().cloned());
+                                    key_idx += 1;
+                                    i += 2;
                                 }
-                                result.0.extend(elements[i].0.iter().cloned());
-                                key_idx += 1;
-                                i += 2; // skip values
+                                let _ = stack.push(result);
                             }
-                            let _ = stack.push(result);
                         }
                         "__dict_set" => {
                             // Stack: [dict, key, value]
                             let value = vm_pop!(stack, events);
                             let key = vm_pop!(stack, events);
                             let dict = vm_pop!(stack, events);
-                            let mut elements = split_array_chain(&dict);
-                            // Find and update existing key, or append
-                            let mut found = false;
-                            let mut i = 0;
-                            while i + 1 < elements.len() {
-                                if elements[i].0 == key.0 {
-                                    elements[i + 1] = value.clone();
-                                    found = true;
-                                    break;
+                            if let Some(idx) = as_dict_ref(&dict) {
+                                // Heap-based dict: mutate in place
+                                if idx < dict_heap.len() {
+                                    let mut found = false;
+                                    for (k, v) in &mut dict_heap[idx] {
+                                        if k.0 == key.0 {
+                                            *v = value.clone();
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    if !found {
+                                        dict_heap[idx].push((key, value));
+                                    }
                                 }
-                                i += 2;
-                            }
-                            if !found {
-                                elements.push(key);
-                                elements.push(value);
-                            }
-                            // Rebuild chain from elements
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            for (j, elem) in elements.into_iter().enumerate() {
-                                if j > 0 {
-                                    result.0.push(sep);
+                                let _ = stack.push(dict); // return same ref
+                            } else {
+                                // Legacy flat chain dict
+                                let mut elements = split_dict_chain(&dict);
+                                let mut found = false;
+                                let mut i = 0;
+                                while i + 1 < elements.len() {
+                                    if elements[i].0 == key.0 {
+                                        elements[i + 1] = value.clone();
+                                        found = true;
+                                        break;
+                                    }
+                                    i += 2;
                                 }
-                                result.0.extend(elem.0.iter().cloned());
+                                if !found {
+                                    elements.push(key);
+                                    elements.push(value);
+                                }
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
+                                let mut result = MolecularChain(Vec::new());
+                                for (j, elem) in elements.into_iter().enumerate() {
+                                    if j > 0 {
+                                        result.0.push(sep);
+                                    }
+                                    result.0.extend(elem.0.iter().cloned());
+                                }
+                                let _ = stack.push(result);
                             }
-                            let _ = stack.push(result);
                         }
                         "__str_len" => {
                             // String length: count molecules in chain
@@ -1222,17 +1566,20 @@ impl OlangVM {
                             let idx_chain = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
                             let idx = idx_chain.to_number().unwrap_or(0.0) as usize;
-                            let mut elements = split_array_chain(&arr);
-                            if idx < elements.len() {
-                                elements[idx] = value;
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() && idx < array_heap[arr_idx].len() {
+                                    array_heap[arr_idx][idx] = value;
+                                }
+                                let _ = stack.push(arr);
+                            } else {
+                                let mut elements = split_array_chain(&arr);
+                                if idx < elements.len() {
+                                    elements[idx] = value;
+                                }
+                                let aidx = array_heap.len();
+                                array_heap.push(elements);
+                                let _ = stack.push(make_array_ref(aidx));
                             }
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            for (j, elem) in elements.into_iter().enumerate() {
-                                if j > 0 { result.0.push(sep); }
-                                result.0.extend(elem.0.iter().cloned());
-                            }
-                            let _ = stack.push(result);
                         }
                         "__array_slice" => {
                             // Stack: [array, start, end]
@@ -1241,18 +1588,16 @@ impl OlangVM {
                             let arr = vm_pop!(stack, events);
                             let start = start_chain.to_number().unwrap_or(0.0) as usize;
                             let end = end_chain.to_number().unwrap_or(0.0) as usize;
-                            let elements = split_array_chain(&arr);
-                            let sliced: Vec<_> = elements.into_iter()
-                                .skip(start)
-                                .take(end.saturating_sub(start))
-                                .collect();
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            for (j, elem) in sliced.into_iter().enumerate() {
-                                if j > 0 { result.0.push(sep); }
-                                result.0.extend(elem.0.iter().cloned());
-                            }
-                            let _ = stack.push(result);
+                            let elements: Vec<MolecularChain> = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() {
+                                    array_heap[arr_idx].iter().skip(start).take(end.saturating_sub(start)).cloned().collect()
+                                } else { Vec::new() }
+                            } else {
+                                split_array_chain(&arr).into_iter().skip(start).take(end.saturating_sub(start)).collect()
+                            };
+                            let aidx = array_heap.len();
+                            array_heap.push(elements);
+                            let _ = stack.push(make_array_ref(aidx));
                         }
                         "__is_empty" => {
                             let val = vm_pop!(stack, events);
@@ -1260,11 +1605,23 @@ impl OlangVM {
                             let _ = stack.push(MolecularChain::from_number(result));
                         }
                         "__eq" => {
-                            // Deep equality: compare two chains molecule by molecule
+                            // Equality: numeric comparison with epsilon, or deep chain compare
+                            // Returns non-empty (1.0) for true, empty for false
+                            // (consistent with __cmp_* builtins — Jz checks is_empty())
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
-                            let result = if a.0 == b.0 { 1.0 } else { 0.0 };
-                            let _ = stack.push(MolecularChain::from_number(result));
+                            let is_equal = if let (Some(na), Some(nb)) =
+                                (a.to_number(), b.to_number())
+                            {
+                                (na - nb).abs() < f64::EPSILON
+                            } else {
+                                a.0 == b.0
+                            };
+                            if is_equal {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
                         }
                         // ── String builtins ────────────────────────────────
                         "__str_split" => {
@@ -1434,17 +1791,16 @@ impl OlangVM {
                             let _ = stack.push(MolecularChain(mols));
                         }
                         "__str_substr" => {
-                            // Stack: [string, start, length]
-                            let len_chain = vm_pop!(stack, events);
+                            // Stack: [string, start, end]
+                            // substr(s, start, end) → s[start..end]
+                            let end_chain = vm_pop!(stack, events);
                             let start_chain = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
                             let start = start_chain.to_number().unwrap_or(0.0) as usize;
-                            let len = len_chain.to_number().unwrap_or(0.0) as usize;
-                            let mols: Vec<Molecule> = s.0.iter()
-                                .skip(start)
-                                .take(len)
-                                .copied()
-                                .collect();
+                            let end = end_chain.to_number().unwrap_or(0.0) as usize;
+                            let end = end.min(s.0.len());
+                            let start = start.min(end);
+                            let mols: Vec<Molecule> = s.0[start..end].to_vec();
                             let _ = stack.push(MolecularChain(mols));
                         }
                         // ── Math builtins ──────────────────────────────────
@@ -1495,16 +1851,18 @@ impl OlangVM {
                             // Stack: [dict, key] → 1.0 if key exists, empty if not
                             let key = vm_pop!(stack, events);
                             let dict = vm_pop!(stack, events);
-                            let elements = split_array_chain(&dict);
-                            let mut found = false;
-                            let mut i = 0;
-                            while i + 1 < elements.len() {
-                                if elements[i].0 == key.0 {
-                                    found = true;
-                                    break;
+                            let found = if let Some(idx) = as_dict_ref(&dict) {
+                                idx < dict_heap.len() && dict_heap[idx].iter().any(|(k, _)| k.0 == key.0)
+                            } else {
+                                let elements = split_dict_chain(&dict);
+                                let mut f = false;
+                                let mut i = 0;
+                                while i + 1 < elements.len() {
+                                    if elements[i].0 == key.0 { f = true; break; }
+                                    i += 2;
                                 }
-                                i += 2;
-                            }
+                                f
+                            };
                             if found {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
                             } else {
@@ -1587,39 +1945,53 @@ impl OlangVM {
                         "__array_pop" => {
                             // Stack: [array] → [array_without_last, last_element]
                             let arr = vm_pop!(stack, events);
-                            let mut elements = split_array_chain(&arr);
-                            if let Some(last) = elements.pop() {
-                                let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                                let mut rest = MolecularChain(Vec::new());
-                                for (j, elem) in elements.into_iter().enumerate() {
-                                    if j > 0 { rest.0.push(sep); }
-                                    rest.0.extend(elem.0.iter().cloned());
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() && !array_heap[arr_idx].is_empty() {
+                                    let last = array_heap[arr_idx].pop().unwrap();
+                                    let _ = stack.push(arr); // same ref (now shorter)
+                                    let _ = stack.push(last);
+                                } else {
+                                    let _ = stack.push(MolecularChain::empty());
+                                    let _ = stack.push(MolecularChain::empty());
                                 }
-                                let _ = stack.push(rest);
-                                let _ = stack.push(last);
                             } else {
-                                let _ = stack.push(MolecularChain::empty());
-                                let _ = stack.push(MolecularChain::empty());
+                                let mut elements = split_array_chain(&arr);
+                                if let Some(last) = elements.pop() {
+                                    let aidx = array_heap.len();
+                                    array_heap.push(elements);
+                                    let _ = stack.push(make_array_ref(aidx));
+                                    let _ = stack.push(last);
+                                } else {
+                                    let _ = stack.push(MolecularChain::empty());
+                                    let _ = stack.push(MolecularChain::empty());
+                                }
                             }
                         }
                         "__array_reverse" => {
                             let arr = vm_pop!(stack, events);
-                            let mut elements = split_array_chain(&arr);
-                            elements.reverse();
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            for (j, elem) in elements.into_iter().enumerate() {
-                                if j > 0 { result.0.push(sep); }
-                                result.0.extend(elem.0.iter().cloned());
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() {
+                                    array_heap[arr_idx].reverse();
+                                }
+                                let _ = stack.push(arr);
+                            } else {
+                                let mut elements = split_array_chain(&arr);
+                                elements.reverse();
+                                let aidx = array_heap.len();
+                                array_heap.push(elements);
+                                let _ = stack.push(make_array_ref(aidx));
                             }
-                            let _ = stack.push(result);
                         }
                         "__array_contains" => {
                             // Stack: [array, element] → 1.0 if found, empty if not
                             let elem = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
-                            let found = elements.iter().any(|e| e.0 == elem.0);
+                            let found = if let Some(arr_idx) = as_array_ref(&arr) {
+                                arr_idx < array_heap.len() && array_heap[arr_idx].iter().any(|e| e.0 == elem.0)
+                            } else {
+                                let elements = split_array_chain(&arr);
+                                elements.iter().any(|e| e.0 == elem.0)
+                            };
                             if found {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
                             } else {
@@ -1630,7 +2002,11 @@ impl OlangVM {
                             // Stack: [array, separator_string] → joined string
                             let sep_chain = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
+                            let elements: Vec<MolecularChain> = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else {
+                                split_array_chain(&arr)
+                            };
                             let mut result = MolecularChain(Vec::new());
                             for (j, elem) in elements.into_iter().enumerate() {
                                 if j > 0 {
@@ -1659,25 +2035,26 @@ impl OlangVM {
                                 let _ = stack.push(result);
                             } else {
                             // Eager array map
-                            let elements = split_array_chain(&arr);
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
+                            let mut mapped_elems: Vec<MolecularChain> = Vec::new();
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
                                     let body_pc = mol.emotion.valence as usize
                                         | ((mol.emotion.arousal as usize) << 8);
-                                    for (i, elem) in elements.iter().enumerate() {
-                                        if i > 0 { result.0.push(sep); }
-                                        // Execute closure with elem as argument
+                                    for elem in &elements {
                                         let mapped = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
                                             &scopes, &mut steps, self.max_steps,
                                         );
-                                        result.0.extend(mapped.0.iter().cloned());
+                                        mapped_elems.push(mapped);
                                     }
                                 }
                             }
-                            let _ = stack.push(result);
+                            let idx = array_heap.len();
+                            array_heap.push(mapped_elems);
+                            let _ = stack.push(make_array_ref(idx));
                             } // end else (eager array map)
                         }
                         "__array_filter" => {
@@ -1698,10 +2075,10 @@ impl OlangVM {
                                 let _ = stack.push(result);
                             } else {
                             // Eager array filter
-                            let elements = split_array_chain(&arr);
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result = MolecularChain(Vec::new());
-                            let mut count = 0usize;
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
+                            let mut filtered: Vec<MolecularChain> = Vec::new();
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
                                     let body_pc = mol.emotion.valence as usize
@@ -1712,14 +2089,14 @@ impl OlangVM {
                                             &scopes, &mut steps, self.max_steps,
                                         );
                                         if !keep.is_empty() {
-                                            if count > 0 { result.0.push(sep); }
-                                            result.0.extend(elem.0.iter().cloned());
-                                            count += 1;
+                                            filtered.push(elem.clone());
                                         }
                                     }
                                 }
                             }
-                            let _ = stack.push(result);
+                            let idx = array_heap.len();
+                            array_heap.push(filtered);
+                            let _ = stack.push(make_array_ref(idx));
                             } // end else (eager array filter)
                         }
                         "__array_fold" => {
@@ -1728,7 +2105,9 @@ impl OlangVM {
                             let closure_marker = vm_pop!(stack, events);
                             let init = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
                             let mut acc = init;
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
@@ -1749,7 +2128,9 @@ impl OlangVM {
                             // Returns 1.0 if any element satisfies predicate, else empty
                             let closure_marker = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
                             let mut found = false;
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
@@ -1775,7 +2156,9 @@ impl OlangVM {
                             // Returns 1.0 if all elements satisfy predicate, else empty
                             let closure_marker = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
                             let mut all_pass = true;
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
@@ -1801,7 +2184,9 @@ impl OlangVM {
                             // Returns first element satisfying predicate, or empty
                             let closure_marker = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
                             let mut found = MolecularChain::empty();
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
@@ -1825,7 +2210,9 @@ impl OlangVM {
                             // Stack: [array]
                             // Returns array of [index, element] pairs (flattened as [0, e0, 1, e1, ...])
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
                             let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (i, elem) in elements.iter().enumerate() {
@@ -1843,7 +2230,9 @@ impl OlangVM {
                             // Count elements satisfying predicate
                             let closure_marker = vm_pop!(stack, events);
                             let arr = vm_pop!(stack, events);
-                            let elements = split_array_chain(&arr);
+                            let elements = if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                            } else { split_array_chain(&arr) };
                             let mut count = 0usize;
                             if let Some(mol) = closure_marker.first() {
                                 if mol.shape == 0xFF {
@@ -1989,18 +2378,26 @@ impl OlangVM {
                             // Tag a dict with a struct type name
                             let name_chain = vm_pop!(stack, events);
                             let dict = vm_pop!(stack, events);
-                            // Prepend type tag as first key-value pair "__type" => name
-                            let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let type_key = string_to_chain("__type");
-                            let mut tagged = MolecularChain(Vec::new());
-                            tagged.0.extend(type_key.0.iter().copied());
-                            tagged.0.push(sep);
-                            tagged.0.extend(name_chain.0.iter().copied());
-                            if !dict.is_empty() {
+                            if let Some(idx) = as_dict_ref(&dict) {
+                                // Heap-based dict: prepend __type entry
+                                if idx < dict_heap.len() {
+                                    dict_heap[idx].insert(0, (type_key, name_chain));
+                                }
+                                let _ = stack.push(dict); // return same ref
+                            } else {
+                                // Legacy flat chain: prepend __type
+                                let sep = Molecule::raw(0, 0, 0, 0, 0);
+                                let mut tagged = MolecularChain(Vec::new());
+                                tagged.0.extend(type_key.0.iter().copied());
                                 tagged.0.push(sep);
-                                tagged.0.extend(dict.0.iter().copied());
+                                tagged.0.extend(name_chain.0.iter().copied());
+                                if !dict.is_empty() {
+                                    tagged.0.push(sep);
+                                    tagged.0.extend(dict.0.iter().copied());
+                                }
+                                let _ = stack.push(tagged);
                             }
-                            let _ = stack.push(tagged);
                         }
                         "__enum_def" => {
                             // Stack: [variants_array, name_chain]
@@ -2075,7 +2472,9 @@ impl OlangVM {
                                 let tag_str = chain_to_string(&parts[0]).unwrap_or_default();
                                 if tag_str == "__ITER__" {
                                     let source = &parts[1];
-                                    let mut elements = split_array_chain(source);
+                                    let mut elements = if let Some(arr_idx) = as_array_ref(source) {
+                                        if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                                    } else { split_array_chain(source) };
 
                                     // Apply transforms in order
                                     let mut i = 2;
@@ -2114,14 +2513,10 @@ impl OlangVM {
                                         }
                                     }
 
-                                    // Build result array
-                                    let sep = Molecule::raw(0, 0, 0, 0, 0);
-                                    let mut result = MolecularChain(Vec::new());
-                                    for (idx, elem) in elements.iter().enumerate() {
-                                        if idx > 0 { result.0.push(sep); }
-                                        result.0.extend(elem.0.iter().copied());
-                                    }
-                                    let _ = stack.push(result);
+                                    // Build result array on heap
+                                    let idx = array_heap.len();
+                                    array_heap.push(elements);
+                                    let _ = stack.push(make_array_ref(idx));
                                 } else {
                                     let _ = stack.push(iter_val);
                                 }
@@ -2136,7 +2531,9 @@ impl OlangVM {
                             let parts = split_iter_chain(&iter_val);
                             if parts.len() >= 2 {
                                 let source = &parts[1];
-                                let elements = split_array_chain(source);
+                                let elements = if let Some(arr_idx) = as_array_ref(source) {
+                                    if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                                } else { split_array_chain(source) };
                                 if elements.is_empty() {
                                     let _ = stack.push(string_to_chain("Option::None"));
                                 } else {
@@ -2162,15 +2559,14 @@ impl OlangVM {
                             let parts = split_iter_chain(&iter_val);
                             if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
                                 let source = &parts[1];
-                                let elements = split_array_chain(source);
+                                let elements = if let Some(arr_idx) = as_array_ref(source) {
+                                    if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                                } else { split_array_chain(source) };
                                 let taken: Vec<_> = elements.into_iter().take(n).collect();
-                                let sep = Molecule::raw(0, 0, 0, 0, 0);
-                                let mut new_source = MolecularChain(Vec::new());
-                                for (idx, elem) in taken.iter().enumerate() {
-                                    if idx > 0 { new_source.0.push(sep); }
-                                    new_source.0.extend(elem.0.iter().copied());
-                                }
-                                // Rebuild iterator with new source
+                                // Store taken elements on heap and rebuild iterator
+                                let new_arr_idx = array_heap.len();
+                                array_heap.push(taken);
+                                let new_source = make_array_ref(new_arr_idx);
                                 let tag = string_to_chain("__ITER__");
                                 let isep = iter_sep();
                                 let mut result = MolecularChain(Vec::new());
@@ -2195,14 +2591,13 @@ impl OlangVM {
                             let parts = split_iter_chain(&iter_val);
                             if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
                                 let source = &parts[1];
-                                let elements = split_array_chain(source);
+                                let elements = if let Some(arr_idx) = as_array_ref(source) {
+                                    if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                                } else { split_array_chain(source) };
                                 let skipped: Vec<_> = elements.into_iter().skip(n).collect();
-                                let sep = Molecule::raw(0, 0, 0, 0, 0);
-                                let mut new_source = MolecularChain(Vec::new());
-                                for (idx, elem) in skipped.iter().enumerate() {
-                                    if idx > 0 { new_source.0.push(sep); }
-                                    new_source.0.extend(elem.0.iter().copied());
-                                }
+                                let new_arr_idx = array_heap.len();
+                                array_heap.push(skipped);
+                                let new_source = make_array_ref(new_arr_idx);
                                 let tag = string_to_chain("__ITER__");
                                 let isep = iter_sep();
                                 let mut result = MolecularChain(Vec::new());
@@ -2224,7 +2619,9 @@ impl OlangVM {
                             let parts = split_iter_chain(&collected);
                             if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
                                 let source = &parts[1];
-                                let elements = split_array_chain(source);
+                                let elements = if let Some(arr_idx) = as_array_ref(source) {
+                                    if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                                } else { split_array_chain(source) };
                                 let mut total = 0.0f64;
                                 for elem in &elements {
                                     total += elem.to_number().unwrap_or(0.0);
@@ -2238,7 +2635,9 @@ impl OlangVM {
                             let iter_val = vm_pop!(stack, events);
                             let parts = split_iter_chain(&iter_val);
                             if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
-                                let elements = split_array_chain(&parts[1]);
+                                let elements = if let Some(arr_idx) = as_array_ref(&parts[1]) {
+                                    if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                                } else { split_array_chain(&parts[1]) };
                                 let min = elements.iter().filter_map(|e| e.to_number()).fold(f64::INFINITY, f64::min);
                                 if min == f64::INFINITY {
                                     let _ = stack.push(string_to_chain("Option::None"));
@@ -2253,7 +2652,9 @@ impl OlangVM {
                             let iter_val = vm_pop!(stack, events);
                             let parts = split_iter_chain(&iter_val);
                             if parts.len() >= 2 && chain_to_string(&parts[0]).unwrap_or_default() == "__ITER__" {
-                                let elements = split_array_chain(&parts[1]);
+                                let elements = if let Some(arr_idx) = as_array_ref(&parts[1]) {
+                                    if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
+                                } else { split_array_chain(&parts[1]) };
                                 let max = elements.iter().filter_map(|e| e.to_number()).fold(f64::NEG_INFINITY, f64::max);
                                 if max == f64::NEG_INFINITY {
                                     let _ = stack.push(string_to_chain("Option::None"));
@@ -3130,6 +3531,77 @@ impl OlangVM {
                             }
                         }
 
+                        // ── Bytecode encoding builtins (for codegen.ol) ──
+                        "__f64_to_le_bytes" => {
+                            // Stack: [number] → array of 8 bytes (LE)
+                            let n = vm_pop!(stack, events);
+                            let f = n.to_number().unwrap_or(0.0);
+                            let bytes = f.to_le_bytes();
+                            let idx = array_heap.len();
+                            let elems: Vec<MolecularChain> = bytes.iter()
+                                .map(|&b| MolecularChain::from_number(b as f64))
+                                .collect();
+                            array_heap.push(elems);
+                            let _ = stack.push(make_array_ref(idx));
+                        }
+                        "__f64_from_le_bytes" => {
+                            // Stack: [array_of_8_bytes] → number
+                            let arr = vm_pop!(stack, events);
+                            let mut bytes = [0u8; 8];
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() && array_heap[arr_idx].len() >= 8 {
+                                    for i in 0..8 {
+                                        bytes[i] = array_heap[arr_idx][i].to_number().unwrap_or(0.0) as u8;
+                                    }
+                                }
+                            }
+                            let _ = stack.push(MolecularChain::from_number(f64::from_le_bytes(bytes)));
+                        }
+                        "__str_bytes" => {
+                            // Stack: [string] → array of byte values (UTF-8)
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let idx = array_heap.len();
+                            let elems: Vec<MolecularChain> = s_str.bytes()
+                                .map(|b| MolecularChain::from_number(b as f64))
+                                .collect();
+                            array_heap.push(elems);
+                            let _ = stack.push(make_array_ref(idx));
+                        }
+                        "__bytes_to_str" => {
+                            // Stack: [array_of_bytes] → string
+                            let arr = vm_pop!(stack, events);
+                            let mut bytes = Vec::new();
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() {
+                                    for elem in &array_heap[arr_idx] {
+                                        bytes.push(elem.to_number().unwrap_or(0.0) as u8);
+                                    }
+                                }
+                            }
+                            let s = alloc::string::String::from_utf8_lossy(&bytes);
+                            let _ = stack.push(string_to_chain(&s));
+                        }
+                        "__array_concat" => {
+                            // Stack: [arr1, arr2] → concatenated array
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let mut result = Vec::new();
+                            if let Some(a_idx) = as_array_ref(&a) {
+                                if a_idx < array_heap.len() {
+                                    result.extend(array_heap[a_idx].iter().cloned());
+                                }
+                            }
+                            if let Some(b_idx) = as_array_ref(&b) {
+                                if b_idx < array_heap.len() {
+                                    result.extend(array_heap[b_idx].iter().cloned());
+                                }
+                            }
+                            let idx = array_heap.len();
+                            array_heap.push(result);
+                            let _ = stack.push(make_array_ref(idx));
+                        }
+
                         // ── Phase 3 B6: Bitwise operations ─────────────────
                         "__bit_and" => {
                             let b = vm_pop!(stack, events);
@@ -3457,7 +3929,51 @@ impl OlangVM {
                 }
 
                 Op::Ret => {
-                    break;
+                    if let Some((saved_pc, saved_scope_depth, saved_stack_depth, param_count)) = closure_call_stack.pop() {
+                        let ret_val = stack.pop().unwrap_or_else(|_| MolecularChain::empty());
+
+                        // Pop body scopes back to CallClosure's scope level
+                        while scopes.len() > saved_scope_depth {
+                            scopes.pop();
+                            call_depth = call_depth.saturating_sub(1);
+                        }
+
+                        // Write-back: copy ONLY parameter values (first `param_count` entries)
+                        // from the function's scope back to the caller's scope.
+                        // This propagates struct mutations (e.g., p.pos = p.pos + 1).
+                        if saved_scope_depth >= 2 && param_count > 0 {
+                            let fn_scope_idx = saved_scope_depth - 1;
+                            if fn_scope_idx < scopes.len() {
+                                // Only write back the first `param_count` entries (the params)
+                                let write_count = param_count.min(scopes[fn_scope_idx].len());
+                                let params_to_write: Vec<(String, MolecularChain)> =
+                                    scopes[fn_scope_idx][..write_count].to_vec();
+                                for (name, val) in &params_to_write {
+                                    for si in (0..fn_scope_idx).rev() {
+                                        if let Some(entry) = scopes[si].iter_mut().rev()
+                                            .find(|(n, _)| n == name) {
+                                            entry.1 = val.clone();
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Pop the function's param scope
+                        if scopes.len() == saved_scope_depth {
+                            scopes.pop();
+                        }
+
+                        // Restore stack depth
+                        while stack.data.len() > saved_stack_depth {
+                            let _ = stack.pop();
+                        }
+                        let _ = stack.push(ret_val);
+                        pc = saved_pc;
+                    } else {
+                        break;
+                    }
                 }
 
                 Op::Dream => {
@@ -3779,104 +4295,22 @@ impl OlangVM {
                         if mol.shape == 0xFF {
                             let body_pc = mol.emotion.valence as usize
                                 | ((mol.emotion.arousal as usize) << 8);
-                            // Push args back so body can Store them
-                            for arg in closure_args.into_iter().rev() {
+                            // Save stack depth BEFORE pushing args back — this is the caller's
+                            // clean stack depth. Ret will restore to this depth.
+                            let caller_stack_depth = stack.data.len();
+                            // Push args back so body can Store them.
+                            // Args are in order [arg0, arg1, ...]. Body does Store in
+                            // params.iter().rev() order, so we need arg_last on top.
+                            // Push in forward order: arg0 first, arg_last last (on top).
+                            for arg in closure_args.into_iter() {
                                 let _ = stack.push(arg);
                             }
-                            // New scope for closure execution
+                            // Push new scope for function params and body.
                             scopes.push(Vec::new());
-                            // Save current PC, jump to closure body
-                            let saved_pc = pc;
+                            // Save current PC, scope depth, and caller stack depth on call stack,
+                            // then jump to body.
+                            closure_call_stack.push((pc, scopes.len(), caller_stack_depth, arity_val));
                             pc = body_pc;
-                            // Execute closure body inline until Ret
-                            while pc < prog.ops.len() && steps < self.max_steps {
-                                let op = &prog.ops[pc];
-                                pc += 1;
-                                steps += 1;
-                                if matches!(op, Op::Ret) {
-                                    break;
-                                }
-                                match op {
-                                    Op::Store(name) => {
-                                        let val = vm_pop!(stack, events);
-                                        if let Some(scope) = scopes.last_mut() {
-                                            if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
-                                                entry.1 = val;
-                                            } else {
-                                                scope.push((name.clone(), val));
-                                            }
-                                        }
-                                    }
-                                    Op::LoadLocal(name) => {
-                                        let val = scopes.iter().rev()
-                                            .find_map(|s| s.iter().rev().find(|(n, _)| n == name).map(|(_, c)| c.clone()))
-                                            .unwrap_or_else(MolecularChain::empty);
-                                        let _ = stack.push(val);
-                                    }
-                                    Op::PushNum(n) => {
-                                        let _ = stack.push(MolecularChain::from_number(*n));
-                                    }
-                                    Op::Push(chain) => {
-                                        let _ = stack.push(chain.clone());
-                                    }
-                                    Op::Call(fname) => {
-                                        match fname.as_str() {
-                                            "__hyp_add" | "__hyp_sub" | "__hyp_mul" | "__hyp_div"
-                                            | "__hyp_mod" | "__phys_add" | "__phys_sub" => {
-                                                let b = vm_pop!(stack, events);
-                                                let a = vm_pop!(stack, events);
-                                                let fa = a.to_number().unwrap_or(0.0);
-                                                let fb = b.to_number().unwrap_or(0.0);
-                                                let result = match fname.as_str() {
-                                                    "__hyp_add" | "__phys_add" => fa + fb,
-                                                    "__hyp_sub" | "__phys_sub" => fa - fb,
-                                                    "__hyp_mul" => fa * fb,
-                                                    "__hyp_div" => if fb.abs() > f64::EPSILON { fa / fb } else { 0.0 },
-                                                    "__hyp_mod" => if fb.abs() > f64::EPSILON { fa % fb } else { 0.0 },
-                                                    _ => 0.0,
-                                                };
-                                                let _ = stack.push(MolecularChain::from_number(result));
-                                            }
-                                            "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
-                                                let b = vm_pop!(stack, events);
-                                                let a = vm_pop!(stack, events);
-                                                let fa = a.to_number().unwrap_or(0.0);
-                                                let fb = b.to_number().unwrap_or(0.0);
-                                                let result = match fname.as_str() {
-                                                    "__cmp_lt" => fa < fb,
-                                                    "__cmp_gt" => fa > fb,
-                                                    "__cmp_le" => fa <= fb,
-                                                    "__cmp_ge" => fa >= fb,
-                                                    "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
-                                                    _ => false,
-                                                };
-                                                let _ = stack.push(if result {
-                                                    MolecularChain::from_number(1.0)
-                                                } else {
-                                                    MolecularChain::empty()
-                                                });
-                                            }
-                                            _ => {
-                                                events.push(VmEvent::LookupAlias(fname.clone()));
-                                            }
-                                        }
-                                    }
-                                    Op::Lca => {
-                                        let b = vm_pop!(stack, events);
-                                        let a = vm_pop!(stack, events);
-                                        let _ = stack.push(lca(&a, &b));
-                                    }
-                                    Op::Pop => { let _ = vm_pop!(stack, events); }
-                                    Op::Dup => {
-                                        if let Some(top) = stack.peek() {
-                                            let _ = stack.push(top.clone());
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            scopes.pop(); // pop closure scope
-                            pc = saved_pc;
                         } else {
                             let _ = stack.push(MolecularChain::empty());
                         }
@@ -3885,7 +4319,7 @@ impl OlangVM {
                     }
                 }
 
-                // ── First-class channel opcodes ──────────────────────
+// ── First-class channel opcodes ──────────────────────
                 Op::ChanNew => {
                     let id = next_channel_id;
                     next_channel_id += 1;
@@ -4730,12 +5164,12 @@ pub mod tests {
     fn call_depth_exceeded_triggers_error() {
         // Build program with deeply nested ScopeBegin without ScopeEnd
         let mut prog = OlangProgram::new("test");
-        for _ in 0..260 {
+        for _ in 0..520 {
             prog.push_op(Op::ScopeBegin);
         }
         prog.push_op(Op::Halt);
         let result = vm().execute(&prog);
-        assert!(result.has_error(), "Should error on depth > 256");
+        assert!(result.has_error(), "Should error on depth > 512");
         let has_depth_err = result.events.iter().any(|e| {
             matches!(e, VmEvent::Error(VmError::MaxCallDepthExceeded))
         });

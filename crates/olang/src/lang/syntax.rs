@@ -320,6 +320,8 @@ pub enum CmpOp {
     Ge,
     /// `!=`
     Ne,
+    /// `==` — equality check (also used as Truth at top-level, QT3)
+    Eq,
 }
 
 /// Expression — mọi expression evaluate → MolecularChain.
@@ -852,7 +854,7 @@ impl<'a> Parser<'a> {
                 if self.check(&Token::ColonColon) {
                     self.advance();
                     let variant = self.expect_ident()?;
-                    // Optional payload bindings: Name::Variant(x, y)
+                    // Optional payload bindings: Name::Variant(x, y) or Name::Variant { x, y }
                     let mut bindings = Vec::new();
                     if self.check(&Token::LParen) {
                         self.advance();
@@ -861,6 +863,15 @@ impl<'a> Parser<'a> {
                             if self.check(&Token::Comma) { self.advance(); }
                         }
                         self.expect(&Token::RParen)?;
+                    } else if self.check(&Token::LBrace) {
+                        // Struct-style: Name::Variant { field1, field2 }
+                        // Used by parser.ol: TokenKind::Keyword { name }
+                        self.advance();
+                        while !self.check(&Token::RBrace) && !self.at_eof() {
+                            bindings.push(self.expect_ident()?);
+                            if self.check(&Token::Comma) { self.advance(); }
+                        }
+                        self.expect(&Token::RBrace)?;
                     }
                     Ok(MatchPattern::EnumPattern { enum_name: name, variant, bindings })
                 } else {
@@ -994,7 +1005,16 @@ impl<'a> Parser<'a> {
             let field_name = self.expect_ident()?;
             let type_name = if self.check(&Token::Colon) {
                 self.advance();
-                Some(self.expect_ident()?)
+                let tn = self.expect_ident()?;
+                // Skip generic params: Vec[T], Vec[Expr], etc.
+                if self.check(&Token::LBracket) {
+                    self.advance();
+                    while !self.check(&Token::RBracket) && !self.at_eof() {
+                        self.advance();
+                    }
+                    if self.check(&Token::RBracket) { self.advance(); }
+                }
+                Some(tn)
             } else {
                 None
             };
@@ -1010,7 +1030,7 @@ impl<'a> Parser<'a> {
 
     /// `enum Name { Variant1, Variant2(Type), ... }`
     fn parse_enum_def(&mut self) -> Result<Stmt, ParseError> {
-        self.advance(); // consume 'enum'
+        self.advance(); // consume 'enum' or 'union'
         let name = self.expect_ident()?;
         let type_params = self.parse_type_params()?;
         self.expect(&Token::LBrace)?;
@@ -1019,12 +1039,36 @@ impl<'a> Parser<'a> {
             let variant_name = self.expect_ident()?;
             let mut fields = Vec::new();
             if self.check(&Token::LParen) {
+                // Tuple-style: Variant(field1, field2)
                 self.advance();
                 while !self.check(&Token::RParen) && !self.at_eof() {
                     fields.push(self.expect_ident()?);
                     if self.check(&Token::Comma) { self.advance(); }
                 }
                 self.expect(&Token::RParen)?;
+            } else if self.check(&Token::LBrace) {
+                // Struct-style: Variant { field: Type, ... }
+                // Used by Olang bootstrap (union TokenKind { Keyword { name: Str }, ... })
+                self.advance();
+                while !self.check(&Token::RBrace) && !self.at_eof() {
+                    let field_name = self.expect_ident()?;
+                    // Optional `: Type` or `: Vec[Type]` annotation (ignored at runtime)
+                    if self.check(&Token::Colon) {
+                        self.advance();
+                        let _type_name = self.expect_ident()?;
+                        // Skip generic params: Vec[T], Vec[Expr], etc.
+                        if self.check(&Token::LBracket) {
+                            self.advance();
+                            while !self.check(&Token::RBracket) && !self.at_eof() {
+                                self.advance();
+                            }
+                            if self.check(&Token::RBracket) { self.advance(); }
+                        }
+                    }
+                    fields.push(field_name);
+                    if self.check(&Token::Comma) { self.advance(); }
+                }
+                self.expect(&Token::RBrace)?;
             }
             variants.push(EnumVariant { name: variant_name, fields });
             if self.check(&Token::Comma) { self.advance(); }
@@ -1521,18 +1565,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// truth = compose ('==' compose)?    (QT3: sự thật chắc chắn)
+    /// truth = logic_or    (QT3: == is now handled at compare level as CmpOp::Eq)
+    /// For QT3 truth assertions, `a == b` produces Compare { op: Eq } which
+    /// semantic.rs maps to `__eq` — semantically equivalent to Truth.
     fn parse_truth_expr(&mut self) -> Result<Expr, ParseError> {
-        let left = self.parse_logic_or()?;
-        if self.check(&Token::Truth) {
-            self.advance();
-            let right = self.parse_logic_or()?;
-            return Ok(Expr::Truth {
-                lhs: Box::new(left),
-                rhs: Box::new(right),
-            });
-        }
-        Ok(left)
+        self.parse_logic_or()
     }
 
     /// logic_or = logic_and ('||' logic_and)*
@@ -1570,8 +1607,9 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// compare = arith (('<' | '>' | '<=' | '>=' | '!=') arith)?
-    /// Note: '==' is handled at truth_expr level (QT3: sự thật chắc chắn)
+    /// compare = arith (('<' | '>' | '<=' | '>=' | '!=' | '==') arith)?
+    /// Note: '==' also works as Truth at top-level (QT3), but here it's a compare op
+    /// to support bootstrap Olang code like `ch == "_"` inside || chains.
     fn parse_compare_expr(&mut self) -> Result<Expr, ParseError> {
         let left = self.parse_arith_expr()?;
         let cmp_op = match self.peek() {
@@ -1580,6 +1618,7 @@ impl<'a> Parser<'a> {
             Token::Le => Some(CmpOp::Le),
             Token::Ge => Some(CmpOp::Ge),
             Token::Ne => Some(CmpOp::Ne),
+            Token::Truth => Some(CmpOp::Eq),
             _ => None,
         };
         if let Some(op) = cmp_op {
@@ -1657,12 +1696,29 @@ impl<'a> Parser<'a> {
                 if self.check(&Token::ColonColon) {
                     self.advance(); // consume ::
                     let variant = self.expect_ident()?;
-                    // Check for payload: Name::Variant(args)
+                    // Check for payload: Name::Variant(args) or Name::Variant { field: value }
                     if self.check(&Token::LParen) {
+                        // Tuple-style: Name::Variant(arg1, arg2)
                         self.advance();
                         let args = self.parse_args()?;
                         self.expect(&Token::RParen)?;
                         Expr::EnumVariantExpr { enum_name: name, variant, args }
+                    } else if self.check(&Token::LBrace) {
+                        // Struct-style: Name::Variant { field: value, ... }
+                        // Lower as StructLiteral with full tag name so it creates a dict
+                        // with __type = "VariantName" and named fields
+                        self.advance(); // consume {
+                        let mut fields = Vec::new();
+                        while !self.check(&Token::RBrace) && !self.at_eof() {
+                            let field_name = self.expect_ident()?;
+                            self.expect(&Token::Colon)?;
+                            let value = self.parse_expr()?;
+                            fields.push((field_name, value));
+                            if self.check(&Token::Comma) { self.advance(); }
+                        }
+                        self.expect(&Token::RBrace)?;
+                        let full_name = alloc::format!("{}::{}", name, variant);
+                        Expr::StructLiteral { name: full_name, fields }
                     } else {
                         Expr::EnumVariantExpr { enum_name: name, variant, args: Vec::new() }
                     }
@@ -1883,32 +1939,44 @@ impl<'a> Parser<'a> {
             ))),
         };
 
-        // Postfix: .field access or .method(args) (can chain: a.b.c, a.method())
-        while self.check(&Token::Dot) {
-            self.advance(); // consume .
-            let field = self.expect_ident()?;
-            // Check for method call: obj.method(args)
-            if self.check(&Token::LParen) {
-                self.advance(); // consume (
-                let mut args = Vec::new();
-                if !self.check(&Token::RParen) {
-                    args.push(self.parse_expr()?);
-                    while self.check(&Token::Comma) {
-                        self.advance();
+        // Postfix: .field, .method(args), [index] (can chain: a.b.c, a[i], a.b[i].c)
+        loop {
+            if self.check(&Token::Dot) {
+                self.advance(); // consume .
+                let field = self.expect_ident()?;
+                // Check for method call: obj.method(args)
+                if self.check(&Token::LParen) {
+                    self.advance(); // consume (
+                    let mut args = Vec::new();
+                    if !self.check(&Token::RParen) {
                         args.push(self.parse_expr()?);
+                        while self.check(&Token::Comma) {
+                            self.advance();
+                            args.push(self.parse_expr()?);
+                        }
                     }
+                    self.expect(&Token::RParen)?;
+                    expr = Expr::MethodCall {
+                        object: Box::new(expr),
+                        method: field,
+                        args,
+                    };
+                } else {
+                    expr = Expr::FieldAccess {
+                        object: Box::new(expr),
+                        field,
+                    };
                 }
-                self.expect(&Token::RParen)?;
-                expr = Expr::MethodCall {
-                    object: Box::new(expr),
-                    method: field,
-                    args,
+            } else if self.check(&Token::LBracket) {
+                self.advance(); // consume [
+                let index = self.parse_expr()?;
+                self.expect(&Token::RBracket)?;
+                expr = Expr::Index {
+                    array: Box::new(expr),
+                    index: Box::new(index),
                 };
             } else {
-                expr = Expr::FieldAccess {
-                    object: Box::new(expr),
-                    field,
-                };
+                break;
             }
         }
 
@@ -2606,11 +2674,13 @@ mod tests {
 
     #[test]
     fn parse_truth_assertion() {
+        // QT3: `==` now parsed as CmpOp::Eq at compare level (same semantics)
         let stmts = parse("fire == water").unwrap();
         assert_eq!(
             stmts,
-            vec![Stmt::Expr(Expr::Truth {
+            vec![Stmt::Expr(Expr::Compare {
                 lhs: Box::new(Expr::Ident("fire".into())),
+                op: CmpOp::Eq,
                 rhs: Box::new(Expr::Ident("water".into())),
             })]
         );
@@ -2666,9 +2736,9 @@ mod tests {
 
     #[test]
     fn parse_mol_literal_truth_assertion() {
-        // "lửa" == { S=1 R=6 T=4 }
+        // "lửa" == { S=1 R=6 T=4 } — now parsed as Compare(Eq) instead of Truth
         let stmts = parse("\"lửa\" == { S=1 R=6 T=4 }").unwrap();
-        assert!(matches!(stmts[0], Stmt::Expr(Expr::Truth { .. })));
+        assert!(matches!(stmts[0], Stmt::Expr(Expr::Compare { op: CmpOp::Eq, .. })));
     }
 
     #[test]
@@ -3168,21 +3238,32 @@ mod tests {
     }
 
     // ── Audit: bootstrap lexer.ol parse test ───────────────────────────
-    // AUDIT 2026-03-18: FAILS because parser lacks `union` and `type` keywords.
-    // `union TokenKind {` → parser sees `union` as Ident → expects `=` → gets `{` → error.
-    // Fix: add "union" → Keyword::Enum and "type" → Keyword::Struct in alphabet.rs
+    // AUDIT 2026-03-18: testing bootstrap lexer.ol parsing
     #[test]
-    #[ignore = "AUDIT: blocked on union/type keyword support in parser"]
     fn audit_parse_bootstrap_lexer_ol() {
-        // lexer.ol dùng: union, type, let, fn, pub fn, while, if/else,
-        // continue, return, array literal, struct literal, union variant
         let source = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let lines: Vec<&str> = source.lines().collect();
+
+        // Find exact failure point by testing function-by-function
+        let fragments = [
+            ("union", "union TokenKind {\n    Keyword { name: Str },\n    Ident { name: Str },\n    Number { value: Num },\n    StringLit { value: Str },\n    Symbol { ch: Str },\n    Eof,\n}"),
+            ("type", "type Token {\n    kind: TokenKind,\n    text: Str,\n    line: Num,\n    col: Num,\n}"),
+            ("let_array", "let KW = [\"let\", \"fn\", \"if\"];"),
+            ("fn_simple", "fn is_alpha(ch) {\n    return (ch >= \"a\" && ch <= \"z\") || ch == \"_\";\n}"),
+            ("fn_eq_chain", "fn is_whitespace(ch) {\n    return ch == \" \" || ch == \"\\n\";\n}"),
+        ];
+
+        for (name, frag) in &fragments {
+            if let Err(e) = parse(frag) {
+                panic!("Fragment '{}' failed: {:?}\nSource: {}", name, e, frag);
+            }
+        }
+
+        // Full parse
         match parse(source) {
             Ok(stmts) => {
                 assert!(!stmts.is_empty(), "lexer.ol should produce statements");
-                // Count expected constructs
                 let mut fn_count = 0u32;
-                let mut _let_count = 0u32;
                 for s in &stmts {
                     match s {
                         Stmt::FnDef { .. } => fn_count += 1,
@@ -3191,22 +3272,81 @@ mod tests {
                                 fn_count += 1;
                             }
                         }
-                        Stmt::Let { .. } => _let_count += 1,
                         _ => {}
                     }
                 }
                 assert!(fn_count >= 5, "lexer.ol has ≥5 fns, got {}", fn_count);
             }
             Err(e) => {
-                panic!("AUDIT FAIL: lexer.ol parse failed: {:?}", e);
+                // Binary search for failure line
+                let mut lo = 0usize;
+                let mut hi = lines.len();
+                while lo < hi {
+                    let mid = (lo + hi) / 2;
+                    let subset: alloc::string::String = lines[..=mid].iter().copied().collect::<Vec<_>>().join("\n");
+                    if parse(&subset).is_ok() {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                let ctx_start = if lo > 3 { lo - 3 } else { 0 };
+                let ctx_end = core::cmp::min(lo + 4, lines.len());
+                let mut context = alloc::string::String::new();
+                for i in ctx_start..ctx_end {
+                    let marker = if i == lo { ">>>" } else { "   " };
+                    context.push_str(&alloc::format!("{} {:3}: {}\n", marker, i + 1, lines[i]));
+                }
+                panic!("AUDIT FAIL at ~line {}: {:?}\n\nContext:\n{}", lo + 1, e, context);
             }
         }
     }
 
-    // AUDIT 2026-03-18: FAILS — same reason as lexer_ol (union/type keywords)
-    // Plus: parser.ol has `use olang.bootstrap.lexer;` (import needs module system)
     #[test]
-    #[ignore = "AUDIT: blocked on union/type keyword support + module import"]
+    fn audit_parse_lexer_ol_incremental() {
+        // Test: multi-line function from lexer.ol — line 42-50 (is_alpha + is_digit)
+        let alpha_digit = r#"fn is_alpha(ch) {
+    return (ch >= "a" && ch <= "z")
+        || (ch >= "A" && ch <= "Z")
+        || ch == "_";
+}
+
+fn is_digit(ch) {
+    return ch >= "0" && ch <= "9";
+}"#;
+        parse(alpha_digit).expect("is_alpha + is_digit");
+
+        // Test: tokenize body with comment skip pattern (lexer.ol:80-85)
+        let comment_skip = r#"fn f() {
+    while pos < src_len {
+        if ch == "/" && pos + 1 < src_len && char_at(source, pos + 1) == "/" {
+            while pos < src_len && char_at(source, pos) != "\n" {
+                let pos = pos + 1;
+            };
+            continue;
+        };
+    };
+}"#;
+        parse(comment_skip).expect("comment skip pattern");
+
+        // Test: if-expression returning value
+        parse("let x = if a { 1 } else { 2 };").expect("if-expr simple");
+
+        // Test: enum variant in let
+        parse("let x = TokenKind::Keyword { name: text };").expect("enum variant in let");
+
+        // Test: if-expr with enum variant (THE PROBLEMATIC PATTERN from lexer.ol:96-100)
+        // This is where `if` returns an enum variant with struct-like fields
+        let if_enum = "let kind = if is_keyword(text) { TokenKind::Keyword { name: text } } else { TokenKind::Ident { name: text } };";
+        match parse(if_enum) {
+            Ok(_) => {} // good
+            Err(e) => panic!("if-expr with enum variant failed: {:?}\nThis blocks lexer.ol lines 96-100", e),
+        }
+    }
+
+    // AUDIT 2026-03-18: FAILS — parser.ol needs union/type + module import + Vec[T] generic syntax
+    #[test]
+    #[ignore = "AUDIT: blocked on module import + Vec[T] syntax"]
     fn audit_parse_bootstrap_parser_ol() {
         let source = include_str!("../../../../stdlib/bootstrap/parser.ol");
         match parse(source) {
