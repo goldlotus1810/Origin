@@ -52,8 +52,45 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:391` | 5 min | DONE | claude/review-and-fix-project-erPD8 |
 | B2 | ModuleLoader thiếu file I/O | ~20 LOC `module.rs` | 1-2h | DONE | claude/review-and-fix-project-erPD8 |
 | B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | DONE | claude/review-and-fix-project-erPD8 |
+| B4 | Parser: negative number literals | `Arith(Sub)` ở expression start | 1-2h | FREE | |
+| B5 | Parser: `typeof` trong expression | `Command("typeof")` không parse | 1h | FREE | |
+| B6 | Parser: reserved words as identifiers | `Enum`, `Fn`, `From` conflict | 1h | FREE | |
+| B7 | VM: entry point dispatch | VM exit 0 sau load bytecode, không execute | 2-4h | FREE | |
 
-**Lưu ý:** B1+B2+B3 block toàn bộ Phase 0. Nên giải TRƯỚC.
+**Lưu ý:** B1+B2+B3 đã DONE. B4+B5+B6 block 7/22 stdlib files. B7 block interactive mode.
+
+### Vấn đề thực tế phát hiện khi build origin.olang (2026-03-19)
+
+```
+1. BYTECODE FORMAT MISMATCH (ĐÃ FIX)
+   → 2 format: ir.rs (0x00-0x83) vs codegen/PLAN_0_5 (0x01-0x24)
+   → VM detect qua flags bit 0 trong origin header
+   → Builder: --codegen flag BẮT BUỘC khi compile stdlib
+   → Fix: tools/builder/src/pack.rs + vm/x86_64/vm_x86_64.S
+
+2. VM KHÔNG TÌM ĐƯỢC ORIGIN HEADER (ĐÃ FIX)
+   → Wrap mode: [VM ELF][header][bytecode][knowledge][trailer 8B]
+   → VM mở /proc/self/exe → đọc first 4 bytes → nếu ELF magic
+     → đọc 8-byte trailer cuối file → lseek tới header offset
+   → Fix: vm_x86_64.S (ELF detection + trailer read)
+
+3. .RODATA STRINGS MẤT KHI EXTRACT .TEXT (ĐÃ FIX)
+   → Builder extract .text từ .o file → mất strings (.rodata section)
+   → Fix: dùng linked binary (wrap mode) thay vì .o file
+
+4. 7/22 STDLIB FILES PARSE FAIL (CHƯA FIX — B4+B5+B6)
+   → chain.ol, iter.ol: negative numbers (-1, -n)
+   → format.ol, json.ol: typeof keyword trong expression
+   → set.ol: "Enum" identifier conflicts with reserved word
+   → sort.ol: "Fn" identifier conflicts with reserved word
+   → string.ol: "From" identifier conflicts with reserved word
+   → Impact: 15/22 files compile OK = 811 KB bytecode
+
+5. VM KHÔNG CÓ ENTRY POINT (CHƯA FIX — B7)
+   → origin.olang load bytecode → exit 0 (không crash, không làm gì)
+   → Cần: dispatch tới main() hoặc auto-execute first function
+   → Hoặc: REPL mode đọc stdin → compile → execute
+```
 
 ---
 
@@ -253,4 +290,14 @@ Phase 6:
               PLAN_6_2 (self-optimize), PLAN_6_3 (reproduce).
             Updated TASKBOARD + plans/README with Phase 4-6 tasks.
             2491 workspace tests pass, 0 clippy errors.
+2026-03-19  🎉 origin.olang RA ĐỜI — build thành công lần đầu!
+            VM: 15 KB (x86_64 ASM, no libc, static linked)
+            Bytecode: 811 KB (15/22 stdlib files compiled)
+            Knowledge: 528 KB
+            Total: 1.35 MB single-file ELF executable
+            Fixed: ELF header detection, wrap mode trailer, bytecode format flag.
+            Phát hiện 5 vấn đề thực tế → cập nhật tất cả plans Phase 4-6.
+            Thêm blockers B4-B7 (parser + VM entry point).
+            Tạo Makefile cho build automation.
+            2198 workspace tests pass, 0 clippy errors.
 ```

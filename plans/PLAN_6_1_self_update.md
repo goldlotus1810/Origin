@@ -194,6 +194,25 @@ __exec(path, args)       → execve (optional, for restart)
    → Knowledge grows ~33 bytes/concept
    → 1M concepts = ~33 MB → acceptable trên điện thoại
    → 10M concepts = ~330 MB → cần compaction (defer)
+
+5. ⚠️ [THỰC TẾ] origin.olang wrap mode layout
+   → Layout: [VM ELF 15KB][origin header 32B][bytecode 811KB][knowledge 528KB][trailer 8B]
+   → Self-update cần: read trailer → find header → modify sections → rewrite
+   → __self_path() = readlink("/proc/self/exe") → ĐÃ có trong VM
+   → Append bytecode: cần update bc_size + kn_offset trong origin header
+   → Append knowledge: cần update kn_size trong origin header
+   → Re-write trailer nếu file size thay đổi (header offset không đổi)
+
+6. ⚠️ [THỰC TẾ] Hai bytecode format tồn tại
+   → ir.rs format vs codegen format — origin.olang dùng codegen format
+   → Module mới compile bằng codegen pipeline → same format → OK
+   → NHƯNG: nếu dùng Rust compiler (ir.rs) thì bytecode format khác!
+   → Self-update PHẢI compile bằng codegen pipeline (Olang compiler)
+
+7. ⚠️ [THỰC TẾ] 7 stdlib files không compile
+   → Parser thiếu: negative literals, typeof expr, reserved words as identifiers
+   → Self-update install module mới → nếu module dùng syntax chưa hỗ trợ → fail
+   → Cần fix parser TRƯỚC hoặc ĐỒNG THỜI với self-update
 ```
 
 ---

@@ -75,13 +75,22 @@ cargo test --workspace
 4. TASKBOARD.md                 ← xem task nào FREE
 5. plans/PLAN_4_1_*.md          ← plan tiếp theo cần làm
 
+# Build origin.olang (1.35 MB single-file executable)
+make                               ← assemble VM + compile stdlib + pack
+
 # File code quan trọng
 crates/olang/src/exec/vm.rs       ← Rust VM (6,083 LOC)
 crates/olang/src/exec/ir.rs       ← Op enum (36+ opcodes)
 crates/olang/src/lang/semantic.rs  ← Compiler (8,994 LOC)
-vm/x86_64/vm_x86_64.S             ← x86_64 ASM VM (1,680 LOC)
+vm/x86_64/vm_x86_64.S             ← x86_64 ASM VM (~1,700 LOC)
 vm/arm64/vm_arm64.S                ← ARM64 ASM VM (627 LOC)
 vm/wasm/vm_wasm.wat                ← WASM VM (655 LOC)
+tools/builder/                     ← Rust builder (pack VM+bytecode+knowledge)
 stdlib/bootstrap/                  ← Self-hosting compiler
 stdlib/homeos/                     ← HomeOS logic + builder
+Makefile                           ← Build automation
+
+# Vấn đề thực tế (xem TASKBOARD.md blockers B4-B7)
+# 7/22 stdlib files không compile (parser limitations)
+# VM exit ngay sau load (chưa có entry point dispatch)
 ```

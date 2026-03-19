@@ -151,6 +151,23 @@ Hiện tại `vm/arm64/vm_arm64.S:449` op_call là stub. Cần implement:
 3. ARM64 syscall numbers khác Linux x86_64
    → Linux ARM64: read=63, write=64, mmap=222, exit=93
    → Đã đúng trong vm_arm64.S (SYS_READ=63, SYS_WRITE=64, SYS_EXIT=93)
+
+4. ⚠️ [THỰC TẾ] VM cần detect ELF header khi mở /proc/self/exe
+   → x86_64 VM đã fix: đọc first 4 bytes, nếu ELF magic (7f454c46)
+     → đọc 8-byte trailer cuối file → lseek tới origin header offset
+   → ARM64 VM cần cùng logic! (copy từ x86_64 implementation)
+   → File: vm/x86_64/vm_x86_64.S lines 80-116 (reference)
+
+5. ⚠️ [THỰC TẾ] Builder wrap mode layout
+   → Layout: [VM ELF][origin header 32B][bytecode][knowledge][trailer 8B]
+   → Trailer = header_offset u64 LE ở cuối file
+   → VM PHẢI đọc trailer để tìm origin header
+   → Xem: tools/builder/src/pack.rs pack_wrap()
+
+6. ⚠️ [THỰC TẾ] .rodata strings mất khi extract .text
+   → Builder extract .text từ .o file → mất strings ở .rodata
+   → PHẢI dùng linked binary (wrap mode) HOẶC đặt strings trong .text
+   → ARM64 VM nên đặt tất cả strings trong .text section
 ```
 
 ---

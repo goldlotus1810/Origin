@@ -164,6 +164,12 @@ pub fn memo_score(cache, cluster_id, nodes) {
    → Registry cache: 55 entries × ~100 bytes = 5.5 KB
    → Silk cache: bounded by max_entries (configurable)
    → Total: < 50 KB → acceptable
+
+3. ⚠️ [THỰC TẾ] VM variable table hiện tại đơn giản
+   → x86_64 VM: var_table = linear array, FNV-1a hash → linear probe
+   → IC sẽ cải thiện đáng kể vì linear scan = O(n) per lookup
+   → IC table cần align với VM r13 (PC) → cần map PC → cache slot
+   → Bytecode PCs không liên tục (opcodes variable-length) → hash PC thay index
 ```
 
 ---

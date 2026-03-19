@@ -137,6 +137,16 @@ Thay đổi:
 3. Browser security (CORS, service worker)
    → Giải pháp: serve từ origin.olang HTTP server (Phase 6)
    → Dev mode: python3 -m http.server
+
+4. ⚠️ [THỰC TẾ] WASM VM cũng cần ELF/header detection giống native VM
+   → Trong browser: bytecode loaded qua JS, không đọc file → OK
+   → Trong WASI: cần đọc file → cần origin header parsing logic
+   → vm_wasm.wat chưa có origin header parser
+
+5. ⚠️ [THỰC TẾ] Bytecode format: PHẢI dùng codegen format (PLAN_0_5)
+   → vm_wasm.wat dispatch table phải match bytecode.rs opcodes (0x01-0x24)
+   → KHÔNG dùng ir.rs format (0x00-0x83)
+   → Builder flag: --codegen BẮT BUỘC khi build cho WASM
 ```
 
 ---
