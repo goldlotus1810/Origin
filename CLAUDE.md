@@ -719,7 +719,9 @@ KHÔNG TỰ Ý viết code mới nếu chưa đọc Plan tương ứng.
 📂 plans/PLAN_AUTH_*.md      ← Auth (song song được)
 
 QUY TRÌNH BẮT BUỘC:
-  0. git pull → đọc TASKBOARD.md → xem task nào FREE
+  0. git fetch origin main && git merge origin/main → CẬP NHẬT MAIN TRƯỚC
+     ⚠️ Luôn chạy bước này trước khi commit/push để tránh xung đột giữa các session.
+  0b. Đọc TASKBOARD.md → xem task nào FREE
   1. Claim task: cập nhật TASKBOARD.md → commit + push NGAY
   2. Đọc Plan tương ứng (plans/PLAN_*.md)
   3. Đọc TOÀN BỘ Plan đó (bối cảnh, rào cản, DoD)
