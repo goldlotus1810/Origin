@@ -1,5 +1,7 @@
 # HomeOS — Hướng dẫn cho AI Contributors
 
+> **Giao tiếp với user bằng tiếng Việt. User là người Việt.**
+
 > **Đọc file này TRƯỚC KHI viết bất kỳ dòng code nào.**
 > Mọi AI (Claude, GPT, Copilot...) mở project này đều phải hiểu những gì dưới đây.
 >
