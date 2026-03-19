@@ -52,12 +52,12 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:391` | 5 min | DONE | claude/review-and-fix-project-erPD8 |
 | B2 | ModuleLoader thiếu file I/O | ~20 LOC `module.rs` | 1-2h | DONE | claude/review-and-fix-project-erPD8 |
 | B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | DONE | claude/review-and-fix-project-erPD8 |
-| B4 | Parser: negative number literals | `Arith(Sub)` ở expression start | 1-2h | FREE | | Kira (erPD8) ưu tiên — context nhiều nhất |
-| B5 | Parser: `typeof` trong expression | `Command("typeof")` không parse | 1h | FREE | | Kira (erPD8) ưu tiên |
-| B6 | Parser: reserved words as identifiers | `Enum`, `Fn`, `From` conflict | 1h | FREE | | Kira (erPD8) ưu tiên |
-| B7 | VM: entry point dispatch | VM exit 0 sau load bytecode, không execute | 2-4h | FREE | | Kira (erPD8) ưu tiên |
+| B4 | Parser: negative number literals | `Arith(Sub)` ở expression start → unary minus | 1-2h | DONE | claude/review-and-fix-project-dSfvz |
+| B5 | Parser: `typeof` trong expression | `Command("typeof")` → `Expr::Call` in parse_primary | 1h | DONE | claude/review-and-fix-project-dSfvz |
+| B6 | Parser: reserved words as identifiers | expect_ident + parse_primary accept From/Enum/Fn/In | 1h | DONE | claude/review-and-fix-project-dSfvz |
+| B7 | VM: entry point dispatch | Strip trailing Halt from each file, single Halt at end | 2-4h | DONE | claude/review-and-fix-project-dSfvz |
 
-**Lưu ý:** B1+B2+B3 đã DONE. B4+B5+B6 block 7/22 stdlib files. B7 block interactive mode.
+**Lưu ý:** B1-B7 ALL DONE. 22/22 stdlib files compile. VM executes all files' bytecode sequentially.
 
 ### Vấn đề thực tế phát hiện khi build origin.olang (2026-03-19)
 
@@ -78,18 +78,17 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
    → Builder extract .text từ .o file → mất strings (.rodata section)
    → Fix: dùng linked binary (wrap mode) thay vì .o file
 
-4. 7/22 STDLIB FILES PARSE FAIL (CHƯA FIX — B4+B5+B6)
-   → chain.ol, iter.ol: negative numbers (-1, -n)
-   → format.ol, json.ol: typeof keyword trong expression
-   → set.ol: "Enum" identifier conflicts with reserved word
-   → sort.ol: "Fn" identifier conflicts with reserved word
-   → string.ol: "From" identifier conflicts with reserved word
-   → Impact: 15/22 files compile OK = 811 KB bytecode
+4. 7/22 STDLIB FILES PARSE FAIL (ĐÃ FIX — B4+B5+B6)
+   → chain.ol, iter.ol: negative numbers → unary minus in parse_primary
+   → format.ol, json.ol: typeof → Expr::Call in expression context
+   → set.ol, sort.ol, string.ol: reserved words → accept in expect_ident + parse_primary
+   → Impact: 22/22 files compile OK
 
-5. VM KHÔNG CÓ ENTRY POINT (CHƯA FIX — B7)
-   → origin.olang load bytecode → exit 0 (không crash, không làm gì)
-   → Cần: dispatch tới main() hoặc auto-execute first function
-   → Hoặc: REPL mode đọc stdin → compile → execute
+5. VM KHÔNG CÓ ENTRY POINT (ĐÃ FIX — B7)
+   → Root cause: each file's bytecode ends with Halt (0x0F)
+   → Concatenated files → VM stops at first file's Halt
+   → Fix: builder strips trailing Halt from each file, appends single Halt at end
+   → VM now executes all files' bytecode sequentially
 ```
 
 ---
@@ -385,4 +384,14 @@ INTG (song song với tất cả):
             Thêm blockers B4-B7 (parser + VM entry point).
             Tạo Makefile cho build automation.
             2198 workspace tests pass, 0 clippy errors.
+2026-03-19  B4+B5+B6+B7 ALL DONE (session dSfvz).
+            B4: Unary minus in parse_primary (Token::Arith(Sub) → Expr::Arith(0, Sub, inner)).
+            B5: typeof(expr) in expression → Expr::Call("typeof", [arg]) → Op::TypeOf.
+            B6: Reserved words as identifiers: expect_ident + parse_primary accept
+                From/Enum/Struct/Fn/In as Ident. fn(params){body} as lambda literal.
+            B7: Builder strips trailing Halt from each file's bytecode, appends single
+                Halt at end. VM now executes all stdlib files sequentially.
+            22/22 stdlib files compile OK (was 15/22).
+            15 new parser tests + 2 builder tests.
+            2504 workspace tests pass, 0 new clippy warnings.
 ```

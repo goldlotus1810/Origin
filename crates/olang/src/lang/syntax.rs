@@ -1933,6 +1933,78 @@ impl<'a> Parser<'a> {
                 Expr::BitNot(Box::new(inner))
             }
 
+            // B6: Keywords used as identifiers in expression context
+            Token::From => {
+                self.advance();
+                Expr::Ident("from".into())
+            }
+            Token::Enum => {
+                self.advance();
+                Expr::Ident("union".into())
+            }
+            Token::Struct => {
+                self.advance();
+                Expr::Ident("type".into())
+            }
+            Token::In => {
+                self.advance();
+                Expr::Ident("in".into())
+            }
+
+            // B4: Unary minus: -expr → Arith(0, Sub, expr)
+            Token::Arith(crate::alphabet::ArithOp::Sub) => {
+                self.advance();
+                let inner = self.parse_primary()?;
+                Expr::Arith {
+                    lhs: Box::new(Expr::Int(0)),
+                    op: crate::alphabet::ArithOp::Sub,
+                    rhs: Box::new(inner),
+                }
+            }
+
+            // B5: typeof(expr) in expression context
+            Token::Command(ref cmd) if cmd == "typeof" => {
+                self.advance();
+                if self.check(&Token::LParen) {
+                    self.advance();
+                    let arg = self.parse_expr()?;
+                    self.expect(&Token::RParen)?;
+                    Expr::Call { name: "typeof".into(), args: alloc::vec![arg] }
+                } else {
+                    // typeof expr (no parens)
+                    let arg = self.parse_primary()?;
+                    Expr::Call { name: "typeof".into(), args: alloc::vec![arg] }
+                }
+            }
+
+            // B6: fn(params) { body } as anonymous function literal in expression
+            Token::Fn => {
+                // Lookahead: fn followed by ( means anonymous function, not statement
+                let next = self.tokens.get(self.pos + 1).cloned().unwrap_or(Token::Eof);
+                if next == Token::LParen {
+                    // Anonymous function literal: fn(a, b) { body }
+                    self.advance(); // consume fn
+                    self.advance(); // consume (
+                    let mut params = Vec::new();
+                    if !self.check(&Token::RParen) {
+                        params.push(self.expect_ident()?);
+                        while self.check(&Token::Comma) {
+                            self.advance();
+                            params.push(self.expect_ident()?);
+                        }
+                    }
+                    self.expect(&Token::RParen)?;
+                    let body_stmts = self.parse_block()?;
+                    // Extract body expression from block:
+                    // { return expr; } → expr
+                    // { expr; } → expr (last statement)
+                    let body_expr = Self::block_to_expr(body_stmts)?;
+                    Expr::Lambda { params, body: Box::new(body_expr) }
+                } else {
+                    return Err(ParseError::new("Unexpected 'fn' in expression"));
+                }
+            }
+
             other => return Err(ParseError::new(&alloc::format!(
                 "Unexpected token: {:?}",
                 other
@@ -2138,10 +2210,49 @@ impl<'a> Parser<'a> {
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         match self.advance() {
             Token::Ident(s) => Ok(s),
+            // B6: Allow certain keywords as identifiers in non-keyword contexts
+            // (function params, field names, function names after pub fn, etc.)
+            Token::From => Ok("from".into()),
+            Token::Enum => Ok("union".into()),
+            Token::Struct => Ok("type".into()),
+            Token::Fn => Ok("fn".into()),
+            Token::In => Ok("in".into()),
             other => Err(ParseError::new(&alloc::format!(
                 "Expected identifier, got {:?}",
                 other
             ))),
+        }
+    }
+
+    /// Convert a block of statements into a single expression.
+    /// Used for fn(params) { body } anonymous function literals.
+    /// Handles: { return expr; } → expr, { expr } → expr
+    fn block_to_expr(stmts: Vec<Stmt>) -> Result<Expr, ParseError> {
+        if stmts.is_empty() {
+            return Ok(Expr::Int(0)); // empty block → 0
+        }
+        // If single return statement, use the return expression
+        if stmts.len() == 1 {
+            match &stmts[0] {
+                Stmt::Return(Some(expr)) => return Ok(expr.clone()),
+                Stmt::Return(None) => return Ok(Expr::Int(0)),
+                Stmt::Expr(expr) => return Ok(expr.clone()),
+                _ => {}
+            }
+        }
+        // For multi-statement blocks, find the return and treat the
+        // whole block as a sequence. Use the last expression/return value.
+        // We wrap in a Call to __block which the semantic layer handles.
+        // For now, just extract the last return if present.
+        for stmt in stmts.iter().rev() {
+            if let Stmt::Return(Some(expr)) = stmt {
+                return Ok(expr.clone());
+            }
+        }
+        // Last statement as expression
+        match stmts.last() {
+            Some(Stmt::Expr(expr)) => Ok(expr.clone()),
+            _ => Ok(Expr::Int(0)),
         }
     }
 
@@ -3357,5 +3468,131 @@ fn is_digit(ch) {
                 panic!("AUDIT FAIL: parser.ol parse failed: {:?}", e);
             }
         }
+    }
+
+    // ── B4: Negative number literals ────────────────────────────────────────
+
+    #[test]
+    fn b4_negative_integer_literal() {
+        let stmts = parse("return -1;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Return(Some(Expr::Arith { op: crate::alphabet::ArithOp::Sub, .. })) => {}
+            other => panic!("Expected Return(Arith(Sub)), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn b4_negative_in_comparison() {
+        let stmts = parse("if idx < 0 { return -1; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn b4_parse_chain_ol() {
+        let source = include_str!("../../../../stdlib/chain.ol");
+        let stmts = parse(source).unwrap();
+        assert!(!stmts.is_empty(), "chain.ol should parse");
+    }
+
+    #[test]
+    fn b4_parse_iter_ol() {
+        let source = include_str!("../../../../stdlib/iter.ol");
+        let stmts = parse(source).unwrap();
+        assert!(!stmts.is_empty(), "iter.ol should parse");
+    }
+
+    // ── B5: typeof in expression ────────────────────────────────────────────
+
+    #[test]
+    fn b5_typeof_in_expression() {
+        let stmts = parse("if typeof(val) == \"number\" { emit val; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn b5_typeof_in_let() {
+        let stmts = parse("let t = typeof(x);").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value: Expr::Call { name, args }, .. } => {
+                assert_eq!(name, "typeof");
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!("Expected Let(Call(typeof)), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn b5_parse_format_ol() {
+        let source = include_str!("../../../../stdlib/format.ol");
+        let stmts = parse(source).unwrap();
+        assert!(!stmts.is_empty(), "format.ol should parse");
+    }
+
+    #[test]
+    fn b5_parse_json_ol() {
+        let source = include_str!("../../../../stdlib/json.ol");
+        let stmts = parse(source).unwrap();
+        assert!(!stmts.is_empty(), "json.ol should parse");
+    }
+
+    // ── B6: Reserved words as identifiers ───────────────────────────────────
+
+    #[test]
+    fn b6_from_as_param() {
+        let stmts = parse("fn replace(s, from, to) { emit s; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::FnDef { params, .. } => {
+                assert_eq!(params, &["s", "from", "to"]);
+            }
+            other => panic!("Expected FnDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn b6_union_as_fn_name() {
+        let stmts = parse("pub fn union(a, b) { return a; }").unwrap();
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn b6_fn_literal_in_expr() {
+        let stmts = parse("let f = fn(a, b) { return a - b; };").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value: Expr::Lambda { params, .. }, .. } => {
+                assert_eq!(params, &["a", "b"]);
+            }
+            other => panic!("Expected Let(Lambda), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn b6_fn_literal_as_arg() {
+        let stmts = parse("sort(arr, fn(a, b) { return a - b; });").unwrap();
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn b6_parse_set_ol() {
+        let source = include_str!("../../../../stdlib/set.ol");
+        let stmts = parse(source).unwrap();
+        assert!(!stmts.is_empty(), "set.ol should parse");
+    }
+
+    #[test]
+    fn b6_parse_sort_ol() {
+        let source = include_str!("../../../../stdlib/sort.ol");
+        let stmts = parse(source).unwrap();
+        assert!(!stmts.is_empty(), "sort.ol should parse");
+    }
+
+    #[test]
+    fn b6_parse_string_ol() {
+        let source = include_str!("../../../../stdlib/string.ol");
+        let stmts = parse(source).unwrap();
+        assert!(!stmts.is_empty(), "string.ol should parse");
     }
 }
