@@ -66,7 +66,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: 3 roundtrip tests pass |
 | 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: semantic.ol 672 LOC, 4 DoD tests pass. analyze(parse(tokenize("let x=42;")))→PushNum+Store+Halt. analyze(parse(tokenize(lexer_src)))→323 ops, 0 errors. |
 | 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: codegen.ol 190 LOC, bytecode.rs decoder 280 LOC. 14 Rust decoder tests + 2 integration tests pass. generate(manual_ops) → valid bytecode → decode matches. Full pipeline (analyze→generate) has known CallClosure field-access limitation. |
-| 0.6 | Self-compile test | `PLAN_0_6` | 0.5 | FREE | — | — | — |
+| 0.6 | Self-compile test | `PLAN_0_6` | 0.5 | CLAIMED | `claude/review-and-fix-project-erPD8` | erPD8 | Started 2026-03-19 |
 
 ## Phase 1 — Machine code VM (SONG SONG với Phase 0)
 
