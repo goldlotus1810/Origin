@@ -21,6 +21,9 @@ fn leb128_u32(buf, val) {
 
 fn leb128_i32(buf, val) {
   // Signed LEB128 for i32
+  // NOTE: Only correct for non-negative values. Olang uses f64 division
+  // which truncates toward zero, so negative values won't encode properly.
+  // This is acceptable since all current callers pass non-negative offsets.
   let v = val;
   let more = 1;
   while more {
@@ -189,14 +192,13 @@ pub fn make_standalone_wasm(bytecode) {
   push(out, 0x01); push(out, 0x00); push(out, 0x00); push(out, 0x00);
 
   // ── Type section ──
-  // Type 0: () -> i32    (host_write, host_read, host_load_bytecode)
-  // Type 1: (i32,i32) -> i32   (host_write)
-  // Type 2: (i32,i32) -> ()    (host_log)
-  // Type 3: (i32,i32,i32) -> () (host_emit_event)
-  // Type 4: () -> ()           (init)
-  // Type 5: () -> i32          (run)
+  // Type 0: (i32,i32) -> i32   (host_write, host_read, host_load_bytecode)
+  // Type 1: (i32,i32) -> ()    (host_log)
+  // Type 2: (i32,i32,i32) -> () (host_emit_event)
+  // Type 3: () -> ()           (init)
+  // Type 4: () -> i32          (run)
   let type_sec = [];
-  leb128_u32(type_sec, 6);  // 6 types
+  leb128_u32(type_sec, 5);  // 5 types
 
   // Type 0: (i32,i32) -> i32
   push(type_sec, WASM_FUNC);
@@ -225,13 +227,6 @@ pub fn make_standalone_wasm(bytecode) {
   // Type 4: () -> i32
   push(type_sec, WASM_FUNC);
   leb128_u32(type_sec, 0);
-  leb128_u32(type_sec, 1);
-  push(type_sec, WASM_I32);
-
-  // Type 5: (i32,i32) -> i32 (duplicate of 0 for load_bytecode)
-  push(type_sec, WASM_FUNC);
-  leb128_u32(type_sec, 2);
-  push(type_sec, WASM_I32); push(type_sec, WASM_I32);
   leb128_u32(type_sec, 1);
   push(type_sec, WASM_I32);
 
