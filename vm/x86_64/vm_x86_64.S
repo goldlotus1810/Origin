@@ -47,9 +47,18 @@
 # ═══════════════════════════════════════════════════════════════════════════
 
 _start:
-    # ── 1. Read /proc/self/exe path to find ourselves ────────────────
-    # Open /proc/self/exe
+    # ── 1. Open bytecode file ────────────────────────────────────────
+    # Check argc: if argv[1] exists, open that file
+    # Otherwise fall back to /proc/self/exe
+    # Stack at _start: [argc][argv[0]][argv[1]]...
+    mov     (%rsp), %rax                # argc
+    cmp     $2, %rax
+    jb      .open_self                  # no args → open self
+    mov     16(%rsp), %rdi              # argv[1]
+    jmp     .do_open
+.open_self:
     lea     proc_self_exe(%rip), %rdi
+.do_open:
     mov     $O_RDONLY, %esi
     xor     %edx, %edx
     mov     $SYS_OPEN, %eax
@@ -81,10 +90,24 @@ _start:
     # offset 30: flags (2 bytes LE)
 
     movl    14(%rsp), %eax              # bc_offset
-    mov     %rax, %r8                   # r8 = bc_offset (saved)
-    movl    18(%rsp), %eax              # bc_size
-    mov     %rax, %rbx                  # rbx = bc_size (bounds)
-    add     $HEADER_SIZE, %rsp          # restore stack
+    push    %rax                        # save bc_offset on CPU stack
+    movl    18(%rsp), %eax              # bc_size (now at 18+8 because of push)
+    # Fix: header is still on stack, bc_size at original offset 18
+    # After push, stack is: [bc_offset][header...]
+    # So bc_size is at 8+18(%rsp) = 26(%rsp)
+    pop     %rax                        # get bc_offset back
+    push    %rax                        # re-push it
+    movl    26(%rsp), %ebx              # bc_size from header (offset 18 + 8 for pushed bc_offset)
+    # Actually let's re-read: header starts at 8(%rsp) now
+    # bc_offset is at 0(%rsp), header at 8(%rsp)
+    # bc_size field = header+18 = 8+18(%rsp) = 26(%rsp)
+    # This is getting complex. Simpler approach:
+    pop     %rax                        # bc_offset → rax
+    movl    18(%rsp), %ebx              # bc_size from header (stack still has header)
+    add     $HEADER_SIZE, %rsp          # free header from stack
+    # Now rax = bc_offset, rbx = bc_size
+    # Save bc_offset on stack for later (mmap clobbers r8)
+    push    %rax                        # save bc_offset
 
     # ── 2. mmap the bytecode section ─────────────────────────────────
     # We'll read the whole bytecode into heap memory
@@ -116,9 +139,10 @@ _start:
     mov     %rax, %r15                  # r15 = heap base (bump allocator)
 
     # ── 3. Read bytecode from file into heap ─────────────────────────
+    # Recover bc_offset from stack
+    pop     %rsi                        # bc_offset
     # lseek to bc_offset
     mov     %rbp, %rdi                  # fd
-    mov     %r8, %rsi                   # offset = bc_offset
     xor     %edx, %edx                  # SEEK_SET = 0
     mov     $8, %eax                    # sys_lseek
     syscall
@@ -142,7 +166,10 @@ _start:
     mov     $SYS_CLOSE, %eax
     syscall
 
-    # ── 4. Enter VM loop ─────────────────────────────────────────────
+    # ── 4. Initialize variable table ─────────────────────────────────
+    call    var_table_init
+
+    # ── 5. Enter VM loop ─────────────────────────────────────────────
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -356,34 +383,34 @@ op_swap:
     jmp     vm_loop
 
 op_load:
-    # [0x31, name_len_u8, name_bytes...]
-    # Variable lookup — for standalone VM, push empty
+op_load_local:
+    # [0x31/0x34, name_len_u8, name_bytes...]
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    add     %rcx, %r13                  # skip name bytes
-    # Push empty (null, 0)
+    lea     (%r12, %r13), %rsi         # name ptr in bytecode
+    push    %rcx
+    call    var_load                     # → rax=ptr, rdx=len
+    pop     %rcx
+    add     %rcx, %r13                  # PC += name_len
     sub     $16, %r14
-    xor     %eax, %eax
     mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    mov     %rdx, 8(%r14)
     jmp     vm_loop
-
-op_load_local:
-    # Same as load for now
-    jmp     op_load
 
 op_store:
-    # [0x33, name_len_u8, name_bytes...]
-    # Pop value and store — for standalone VM, just skip name + pop
-    movzbl  (%r12, %r13), %ecx
-    inc     %r13
-    add     %rcx, %r13                  # skip name
-    add     $16, %r14                   # pop
-    jmp     vm_loop
-
 op_store_upd:
-    # Same as store for now
-    jmp     op_store
+    # [0x33/0x39, name_len_u8, name_bytes...]
+    movzbl  (%r12, %r13), %ecx         # name_len
+    inc     %r13
+    lea     (%r12, %r13), %rsi         # name ptr
+    mov     (%r14), %r8                # value ptr
+    mov     8(%r14), %r9               # value len
+    add     $16, %r14                  # pop value
+    push    %rcx
+    call    var_store
+    pop     %rcx
+    add     %rcx, %r13                 # PC += name_len
+    jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Task 4: Control flow
@@ -475,13 +502,16 @@ op_emit:
 
 .emit_f64:
     # Convert f64 to decimal string and print
-    # For now, just print the raw 8 bytes (placeholder)
-    # TODO: proper f64 → ASCII conversion
-    lea     f64_placeholder(%rip), %rsi
-    mov     $7, %edx                   # "[f64]\n" len
-    mov     $1, %edi
+    movq    %rsi, %xmm0                # rsi has the f64 bits from stack
+    call    f64_to_ascii                # → eax = length, output at r15
+    mov     %r15, %rsi                  # buf
+    mov     %eax, %edx                  # len
+    mov     $1, %edi                    # stdout
+    push    %rax
     mov     $SYS_WRITE, %eax
     syscall
+    pop     %rax
+    add     %rax, %r15                  # bump heap past formatted string
     jmp     vm_loop
 
 # ── Syscall wrappers ─────────────────────────────────────────────────────
@@ -631,6 +661,422 @@ op_file_append:
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Task 7: Math ops (SSE2 — all x86_64 CPUs have this)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Binary math ops: pop 2 f64, compute, push result
+# Stack layout for f64: [f64_bits:8][F64_MARKER:8]
+
+op_add:
+    movsd   16(%r14), %xmm0            # B (deeper in stack)
+    movsd   (%r14), %xmm1              # A (top)
+    add     $16, %r14                   # pop 1
+    addsd   %xmm1, %xmm0
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+op_sub:
+    movsd   16(%r14), %xmm0            # B
+    movsd   (%r14), %xmm1              # A
+    add     $16, %r14
+    subsd   %xmm1, %xmm0              # B - A
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+op_mul:
+    movsd   16(%r14), %xmm0
+    movsd   (%r14), %xmm1
+    add     $16, %r14
+    mulsd   %xmm1, %xmm0
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+op_div:
+    movsd   (%r14), %xmm1              # A (divisor)
+    # Check zero
+    xorpd   %xmm2, %xmm2
+    ucomisd %xmm2, %xmm1
+    je      vm_error_div_zero
+    movsd   16(%r14), %xmm0            # B (dividend)
+    add     $16, %r14
+    divsd   %xmm1, %xmm0              # B / A
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+op_mod:
+    # f64 modulo: a - floor(a/b) * b
+    movsd   (%r14), %xmm1              # A (divisor)
+    xorpd   %xmm2, %xmm2
+    ucomisd %xmm2, %xmm1
+    je      vm_error_div_zero
+    movsd   16(%r14), %xmm0            # B (dividend)
+    add     $16, %r14
+    movapd  %xmm0, %xmm3              # save B
+    divsd   %xmm1, %xmm0              # B/A
+    roundsd $1, %xmm0, %xmm0          # floor(B/A)  (SSE4.1)
+    mulsd   %xmm1, %xmm0              # floor(B/A)*A
+    subsd   %xmm0, %xmm3              # B - floor(B/A)*A
+    movsd   %xmm3, (%r14)
+    jmp     vm_loop
+
+op_neg:
+    # Negate top f64
+    movsd   (%r14), %xmm0
+    mov     $0x8000000000000000, %rax   # sign bit mask
+    movq    %rax, %xmm1
+    xorpd   %xmm1, %xmm0
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+# ── Comparison ops (return f64: 1.0 = true, 0.0 = false) ────────────────
+
+op_cmp_eq:
+    movsd   16(%r14), %xmm0            # B
+    movsd   (%r14), %xmm1              # A
+    add     $16, %r14
+    ucomisd %xmm1, %xmm0
+    je      .cmp_true
+    jmp     .cmp_false
+
+op_cmp_lt:
+    movsd   16(%r14), %xmm0            # B
+    movsd   (%r14), %xmm1              # A
+    add     $16, %r14
+    ucomisd %xmm1, %xmm0
+    jb      .cmp_true
+    jmp     .cmp_false
+
+op_cmp_gt:
+    movsd   16(%r14), %xmm0
+    movsd   (%r14), %xmm1
+    add     $16, %r14
+    ucomisd %xmm1, %xmm0
+    ja      .cmp_true
+    jmp     .cmp_false
+
+op_cmp_le:
+    movsd   16(%r14), %xmm0
+    movsd   (%r14), %xmm1
+    add     $16, %r14
+    ucomisd %xmm1, %xmm0
+    jbe     .cmp_true
+    jmp     .cmp_false
+
+op_cmp_ge:
+    movsd   16(%r14), %xmm0
+    movsd   (%r14), %xmm1
+    add     $16, %r14
+    ucomisd %xmm1, %xmm0
+    jae     .cmp_true
+    jmp     .cmp_false
+
+.cmp_true:
+    mov     $0x3FF0000000000000, %rax   # 1.0 in f64
+    mov     %rax, (%r14)
+    jmp     vm_loop
+
+.cmp_false:
+    xor     %eax, %eax                  # 0.0 in f64
+    mov     %rax, (%r14)
+    jmp     vm_loop
+
+vm_error_div_zero:
+    lea     msg_divzero(%rip), %rsi
+    mov     $16, %edx
+    mov     $2, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     op_halt_err
+
+# ═══════════════════════════════════════════════════════════════════════════
+# f64 → ASCII decimal conversion
+# ═══════════════════════════════════════════════════════════════════════════
+# Input:  xmm0 = f64 value
+# Output: writes ASCII to heap at r15, returns length in eax
+# Clobbers: rax, rcx, rdx, rdi, xmm0-xmm3
+
+f64_to_ascii:
+    mov     %r15, %rdi                  # output buffer = heap
+
+    # Handle negative
+    xorpd   %xmm1, %xmm1
+    ucomisd %xmm1, %xmm0
+    jae     .f2a_positive
+    movb    $'-', (%rdi)
+    inc     %rdi
+    # Negate
+    mov     $0x8000000000000000, %rax
+    movq    %rax, %xmm1
+    xorpd   %xmm1, %xmm0
+
+.f2a_positive:
+    # Handle zero
+    xorpd   %xmm1, %xmm1
+    ucomisd %xmm1, %xmm0
+    jne     .f2a_nonzero
+    movb    $'0', (%rdi)
+    inc     %rdi
+    jmp     .f2a_done
+
+.f2a_nonzero:
+    # Split integer and fractional parts
+    # integer = (u64)f64
+    cvttsd2si %xmm0, %rax              # rax = integer part
+    test    %rax, %rax
+    js      .f2a_large                  # overflow → print "inf"
+
+    # Convert integer part via stack (reversed digits)
+    cvtsi2sd %rax, %xmm1               # xmm1 = (f64)integer
+    subsd   %xmm1, %xmm0              # xmm0 = fractional part
+    push    %rax                        # save for later
+
+    # Integer digits
+    mov     %rdi, %rcx                  # save start pos
+    mov     %rsp, %rdx                  # save rsp
+    # Push digits in reverse
+    mov     (%rdx), %rax                # restore integer
+    add     $8, %rsp                    # balance the push above
+    test    %rax, %rax
+    jnz     .f2a_int_digits
+    movb    $'0', (%rdi)
+    inc     %rdi
+    jmp     .f2a_frac
+
+.f2a_int_digits:
+    # We need to output digits. Use a temp buffer on stack.
+    sub     $24, %rsp                   # temp buffer for digits
+    mov     %rsp, %rcx                  # digit buffer
+    xor     %edx, %edx                  # digit count
+
+.f2a_int_loop:
+    test    %rax, %rax
+    jz      .f2a_int_copy
+    mov     $10, %r8
+    xor     %edx, %edx
+    push    %rdx
+    cqo
+    idiv    %r8                         # rax = quotient, rdx = remainder
+    pop     %r8                         # just balance (we don't use r8 here)
+    add     $'0', %dl
+    movb    %dl, (%rcx)
+    inc     %rcx
+    jmp     .f2a_int_loop
+
+.f2a_int_copy:
+    # Copy digits in reverse (they're backwards in buffer)
+.f2a_int_rev:
+    dec     %rcx
+    cmp     %rsp, %rcx
+    jb      .f2a_int_rev_done
+    movb    (%rcx), %al
+    movb    %al, (%rdi)
+    inc     %rdi
+    jmp     .f2a_int_rev
+
+.f2a_int_rev_done:
+    add     $24, %rsp
+
+.f2a_frac:
+    # Fractional part: multiply by 10, take integer, repeat (6 digits)
+    xorpd   %xmm1, %xmm1
+    ucomisd %xmm1, %xmm0
+    je      .f2a_done                   # no fractional part
+
+    movb    $'.', (%rdi)
+    inc     %rdi
+    mov     $6, %ecx                    # 6 decimal places
+
+    # Load 10.0
+    mov     $0x4024000000000000, %rax   # 10.0 in f64
+    movq    %rax, %xmm2
+
+.f2a_frac_loop:
+    mulsd   %xmm2, %xmm0              # frac *= 10
+    cvttsd2si %xmm0, %rax             # digit = (int)frac
+    cmp     $9, %rax
+    ja      .f2a_frac_clamp
+    jmp     .f2a_frac_store
+.f2a_frac_clamp:
+    mov     $9, %eax
+.f2a_frac_store:
+    add     $'0', %al
+    movb    %al, (%rdi)
+    inc     %rdi
+    # frac -= digit
+    sub     $'0', %al
+    movzbl  %al, %eax
+    cvtsi2sd %eax, %xmm1
+    subsd   %xmm1, %xmm0
+    dec     %ecx
+    jnz     .f2a_frac_loop
+
+    # Strip trailing zeros
+.f2a_strip:
+    dec     %rdi
+    cmpb    $'0', (%rdi)
+    je      .f2a_strip
+    cmpb    $'.', (%rdi)
+    je      .f2a_done                   # don't keep trailing dot
+    inc     %rdi                        # keep last non-zero
+
+.f2a_done:
+    # Calculate length
+    mov     %rdi, %rax
+    sub     %r15, %rax                  # length
+    ret
+
+.f2a_large:
+    # Number too large for i64 → print "inf"
+    movb    $'i', (%rdi)
+    movb    $'n', 1(%rdi)
+    movb    $'f', 2(%rdi)
+    add     $3, %rdi
+    jmp     .f2a_done
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Variable name table (simple linear search)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Layout on heap:
+#   var_table_ptr → [count:8][entries...]
+#   Each entry: [name_len:1][name:N][value_ptr:8][value_len:8]
+#
+# For standalone VM, we keep it simple: max 256 variables, linear scan.
+
+.equ VAR_TABLE_MAX, 256
+
+# Initialize variable table — called once from _start
+# Uses r15 (heap bump), stores table base in var_table_base
+var_table_init:
+    mov     %r15, %rax
+    lea     var_table_base(%rip), %rcx
+    mov     %rax, (%rcx)               # save table base address
+    movq    $0, (%r15)                  # count = 0
+    add     $8, %r15                    # bump past count
+    ret
+
+# var_store: name at rsi (len in ecx), value ptr in r8, value len in r9
+var_store:
+    push    %rbx
+    push    %r12
+    push    %r13
+    mov     %rsi, %r12                  # save name ptr
+    mov     %ecx, %r13d                 # save name len
+
+    # First check if variable exists (update)
+    lea     var_table_base(%rip), %rax
+    mov     (%rax), %rbx               # table base
+    mov     (%rbx), %rax               # count
+    test    %rax, %rax
+    jz      .vs_new                     # empty table
+
+    lea     8(%rbx), %rdi              # first entry
+    mov     %rax, %rcx                  # counter
+
+.vs_search:
+    movzbl  (%rdi), %edx               # entry name_len
+    cmp     %r13d, %edx
+    jne     .vs_next
+    # Compare names
+    push    %rcx
+    push    %rdi
+    lea     1(%rdi), %rsi
+    mov     %r12, %rdi
+    mov     %r13d, %ecx
+    repe    cmpsb
+    pop     %rdi
+    pop     %rcx
+    jne     .vs_next
+    # Found — update value
+    movzbl  (%rdi), %edx               # name_len again
+    lea     1(%rdi, %rdx), %rdi        # skip to value fields
+    mov     %r8, (%rdi)                # value ptr
+    mov     %r9, 8(%rdi)               # value len
+    jmp     .vs_done
+
+.vs_next:
+    # Skip this entry: 1 + name_len + 16
+    movzbl  (%rdi), %edx
+    lea     17(%rdi, %rdx), %rdi
+    dec     %rcx
+    jnz     .vs_search
+
+.vs_new:
+    # Add new entry at end of table (on heap)
+    # Entry at r15: [name_len:1][name:N][value_ptr:8][value_len:8]
+    movb    %r13b, (%r15)              # name_len
+    inc     %r15
+    # Copy name
+    mov     %r15, %rdi
+    mov     %r12, %rsi
+    mov     %r13d, %ecx
+    rep     movsb
+    mov     %rdi, %r15
+    # Value
+    mov     %r8, (%r15)
+    mov     %r9, 8(%r15)
+    add     $16, %r15
+    # Increment count
+    lea     var_table_base(%rip), %rax
+    mov     (%rax), %rbx
+    incq    (%rbx)
+
+.vs_done:
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    ret
+
+# var_load: name at rsi (len in ecx) → result ptr in rax, len in rdx
+var_load:
+    push    %rbx
+    lea     var_table_base(%rip), %rax
+    mov     (%rax), %rbx               # table base
+    mov     (%rbx), %rax               # count
+    test    %rax, %rax
+    jz      .vl_not_found
+
+    lea     8(%rbx), %rdi
+    mov     %rax, %r8                   # counter
+
+.vl_search:
+    movzbl  (%rdi), %edx
+    cmp     %ecx, %edx
+    jne     .vl_skip
+    # Compare names
+    push    %rcx
+    push    %rdi
+    push    %rsi
+    lea     1(%rdi), %rdi
+    mov     %ecx, %ecx                  # clear upper
+    push    %rcx
+    repe    cmpsb
+    pop     %rcx
+    pop     %rsi
+    pop     %rdi
+    pop     %rcx
+    jne     .vl_skip
+    # Found
+    movzbl  (%rdi), %edx
+    lea     1(%rdi, %rdx), %rdi
+    mov     (%rdi), %rax               # value ptr
+    mov     8(%rdi), %rdx              # value len
+    pop     %rbx
+    ret
+
+.vl_skip:
+    movzbl  (%rdi), %edx
+    lea     17(%rdi, %rdx), %rdi
+    dec     %r8
+    jnz     .vl_search
+
+.vl_not_found:
+    xor     %eax, %eax
+    xor     %edx, %edx
+    pop     %rbx
+    ret
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Utilities
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -729,6 +1175,10 @@ msg_readbc:
     .ascii "Bytecode read fail!\n"
     .byte 0
 
-f64_placeholder:
-    .ascii "[f64]\n"
-    .byte 0
+msg_divzero:
+    .ascii "Division by zero!\n"
+
+# ── BSS (writable, zero-initialized) ────────────────────────────────────
+.section .bss
+var_table_base:
+    .space 8                            # pointer to variable table on heap
