@@ -480,11 +480,15 @@ op_load_local:
     # [0x31/0x34, name_len_u8, name_bytes...]
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    lea     (%r12, %r13), %rsi         # name ptr in bytecode
-    push    %rcx
-    call    var_load                     # → rax=ptr, rdx=len
+    # Hash the name for lookup
+    lea     (%r12, %r13), %rdi         # name ptr
+    mov     %ecx, %edx                  # name len
+    push    %rcx                        # save name_len
+    call    hash_name                   # → rax = hash
     pop     %rcx
     add     %rcx, %r13                  # PC += name_len
+    # Search var table by hash
+    call    var_load_hash               # rax=hash → rax=ptr, rdx=len
     sub     $16, %r14
     mov     %rax, (%r14)
     mov     %rdx, 8(%r14)
@@ -495,14 +499,22 @@ op_store_upd:
     # [0x33/0x39, name_len_u8, name_bytes...]
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    lea     (%r12, %r13), %rsi         # name ptr
+    lea     (%r12, %r13), %rdi         # name ptr
+    mov     %ecx, %edx                  # name len
+    # Save value before hash call
     mov     (%r14), %r8                # value ptr
     mov     8(%r14), %r9               # value len
     add     $16, %r14                  # pop value
     push    %rcx
-    call    var_store
+    push    %r8
+    push    %r9
+    call    hash_name                   # → rax = hash
+    pop     %r9
+    pop     %r8
     pop     %rcx
     add     %rcx, %r13                 # PC += name_len
+    # Store by hash
+    call    var_store_hash              # rax=hash, r8=ptr, r9=len
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1447,125 +1459,97 @@ var_table_init:
     lea     var_table_base(%rip), %rcx
     mov     %rax, (%rcx)               # save table base address
     movq    $0, (%r15)                  # count = 0
-    add     $8, %r15                    # bump past count
+    # Reserve 256 entries × 24 bytes + 8 header = 6152 bytes
+    add     $6152, %r15                 # bump past reserved var table space
     ret
 
-# var_store: name at rsi (len in ecx), value ptr in r8, value len in r9
-var_store:
+# ── Hash-based variable table ──
+# Table layout: [count:8][entries...]
+# Entry: [name_hash:8][val_ptr:8][val_len:8] = 24 bytes
+# Simple, no string comparison needed.
+
+# hash_name: rdi=name ptr, edx=name len → rax=hash
+hash_name:
+    # FNV-1a
+    movabs  $0xcbf29ce484222325, %rax
+    movabs  $0x100000001b3, %rcx
+    add     %rdi, %rdx                  # end ptr
+.hn_loop:
+    cmp     %rdx, %rdi
+    jae     .hn_done
+    movzbl  (%rdi), %esi
+    xor     %rsi, %rax
+    imul    %rcx, %rax
+    inc     %rdi
+    jmp     .hn_loop
+.hn_done:
+    ret
+
+# var_store_hash: rax=hash, r8=val_ptr, r9=val_len
+var_store_hash:
     push    %rbx
-    push    %r12
-    push    %r13
-    mov     %rsi, %r12                  # save name ptr
-    mov     %ecx, %r13d                 # save name len
+    lea     var_table_base(%rip), %rbx
+    mov     (%rbx), %rbx               # table base
+    mov     (%rbx), %rcx               # count
+    test    %rcx, %rcx
+    jz      .vsh_new
 
-    # First check if variable exists (update)
-    lea     var_table_base(%rip), %rax
-    mov     (%rax), %rbx               # table base
-    mov     (%rbx), %rax               # count
-    test    %rax, %rax
-    jz      .vs_new                     # empty table
-
+    # Search for existing hash
     lea     8(%rbx), %rdi              # first entry
-    mov     %rax, %rcx                  # counter
-
-.vs_search:
-    movzbl  (%rdi), %edx               # entry name_len
-    cmp     %r13d, %edx
-    jne     .vs_next
-    # Compare names
-    push    %rcx
-    push    %rdi
-    lea     1(%rdi), %rsi
-    mov     %r12, %rdi
-    mov     %r13d, %ecx
-    repe    cmpsb
-    pop     %rdi
-    pop     %rcx
-    jne     .vs_next
-    # Found — update value
-    movzbl  (%rdi), %edx               # name_len again
-    lea     1(%rdi, %rdx), %rdi        # skip to value fields
-    mov     %r8, (%rdi)                # value ptr
-    mov     %r9, 8(%rdi)               # value len
-    jmp     .vs_done
-
-.vs_next:
-    # Skip this entry: 1 + name_len + 16
-    movzbl  (%rdi), %edx
-    lea     17(%rdi, %rdx), %rdi
+.vsh_search:
+    cmp     (%rdi), %rax               # compare hash
+    jne     .vsh_next
+    # Found — update
+    mov     %r8, 8(%rdi)
+    mov     %r9, 16(%rdi)
+    pop     %rbx
+    ret
+.vsh_next:
+    add     $24, %rdi
     dec     %rcx
-    jnz     .vs_search
+    jnz     .vsh_search
 
-.vs_new:
-    # Add new entry at end of table (on heap)
-    # Entry at r15: [name_len:1][name:N][value_ptr:8][value_len:8]
-    movb    %r13b, (%r15)              # name_len
-    inc     %r15
-    # Copy name
-    mov     %r15, %rdi
-    mov     %r12, %rsi
-    mov     %r13d, %ecx
-    rep     movsb
-    mov     %rdi, %r15
-    # Value
-    mov     %r8, (%r15)
-    mov     %r9, 8(%r15)
-    add     $16, %r15
-    # Increment count
-    lea     var_table_base(%rip), %rax
-    mov     (%rax), %rbx
-    incq    (%rbx)
-
-.vs_done:
-    pop     %r13
-    pop     %r12
+.vsh_new:
+    # New entry: append at table end
+    lea     var_table_base(%rip), %rbx
+    mov     (%rbx), %rbx
+    mov     (%rbx), %rcx              # current count
+    lea     8(%rbx), %rdi
+    imul    $24, %rcx, %rcx
+    add     %rcx, %rdi                 # ptr to new entry
+    mov     %rax, (%rdi)               # hash
+    mov     %r8, 8(%rdi)              # val_ptr
+    mov     %r9, 16(%rdi)             # val_len
+    lea     var_table_base(%rip), %rbx
+    mov     (%rbx), %rbx
+    incq    (%rbx)                     # count++
     pop     %rbx
     ret
 
-# var_load: name at rsi (len in ecx) → result ptr in rax, len in rdx
-var_load:
+# var_load_hash: rax=hash → rax=val_ptr, rdx=val_len
+var_load_hash:
     push    %rbx
-    lea     var_table_base(%rip), %rax
-    mov     (%rax), %rbx               # table base
-    mov     (%rbx), %rax               # count
-    test    %rax, %rax
-    jz      .vl_not_found
+    lea     var_table_base(%rip), %rbx
+    mov     (%rbx), %rbx
+    mov     (%rbx), %rcx
+    test    %rcx, %rcx
+    jz      .vlh_not_found
 
     lea     8(%rbx), %rdi
-    mov     %rax, %r8                   # counter
-
-.vl_search:
-    movzbl  (%rdi), %edx
-    cmp     %ecx, %edx
-    jne     .vl_skip
-    # Compare names
-    push    %rcx
-    push    %rdi
-    push    %rsi
-    lea     1(%rdi), %rdi
-    mov     %ecx, %ecx                  # clear upper
-    push    %rcx
-    repe    cmpsb
-    pop     %rcx
-    pop     %rsi
-    pop     %rdi
-    pop     %rcx
-    jne     .vl_skip
+.vlh_search:
+    cmp     (%rdi), %rax
+    jne     .vlh_next
     # Found
-    movzbl  (%rdi), %edx
-    lea     1(%rdi, %rdx), %rdi
-    mov     (%rdi), %rax               # value ptr
-    mov     8(%rdi), %rdx              # value len
+    mov     8(%rdi), %rax
+    mov     16(%rdi), %rdx
     pop     %rbx
     ret
+.vlh_next:
+    add     $24, %rdi
+    dec     %rcx
+    jnz     .vlh_search
 
-.vl_skip:
-    movzbl  (%rdi), %edx
-    lea     17(%rdi, %rdx), %rdi
-    dec     %r8
-    jnz     .vl_search
-
-.vl_not_found:
+.vlh_not_found:
     xor     %eax, %eax
     xor     %edx, %edx
     pop     %rbx
