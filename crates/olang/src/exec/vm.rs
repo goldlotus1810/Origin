@@ -2327,32 +2327,112 @@ impl OlangVM {
                         "__file_read" => {
                             let path_chain = vm_pop!(stack, events);
                             let path = chain_to_string(&path_chain).unwrap_or_default();
-                            events.push(VmEvent::FileReadRequest { path });
-                            let _ = stack.push(MolecularChain::empty());
+                            #[cfg(feature = "std")]
+                            {
+                                match std::fs::read(&path) {
+                                    Ok(bytes) => {
+                                        // Return as array of byte values
+                                        let elements: Vec<MolecularChain> = bytes
+                                            .iter()
+                                            .map(|&b| MolecularChain::from_number(b as f64))
+                                            .collect();
+                                        let idx = array_heap.len();
+                                        array_heap.push(elements);
+                                        let _ = stack.push(make_array_ref(idx));
+                                    }
+                                    Err(_) => {
+                                        let _ = stack.push(MolecularChain::empty());
+                                    }
+                                }
+                            }
+                            #[cfg(not(feature = "std"))]
+                            {
+                                events.push(VmEvent::FileReadRequest { path });
+                                let _ = stack.push(MolecularChain::empty());
+                            }
                         }
                         "__file_write" => {
                             let data_chain = vm_pop!(stack, events);
                             let path_chain = vm_pop!(stack, events);
                             let path = chain_to_string(&path_chain).unwrap_or_default();
-                            let data = if let Some(s) = chain_to_string(&data_chain) {
-                                s.into_bytes()
-                            } else {
-                                data_chain.to_tagged_bytes()
-                            };
-                            events.push(VmEvent::FileWriteRequest { path, data });
-                            let _ = stack.push(MolecularChain::from_number(1.0));
+                            #[cfg(feature = "std")]
+                            {
+                                // Collect bytes: if data is array ref, materialize byte values
+                                let data = if let Some(arr_idx) = as_array_ref(&data_chain) {
+                                    if arr_idx < array_heap.len() {
+                                        array_heap[arr_idx]
+                                            .iter()
+                                            .map(|c| c.to_number().unwrap_or(0.0) as u8)
+                                            .collect::<Vec<u8>>()
+                                    } else {
+                                        Vec::new()
+                                    }
+                                } else if let Some(s) = chain_to_string(&data_chain) {
+                                    s.into_bytes()
+                                } else {
+                                    data_chain.to_tagged_bytes()
+                                };
+                                match std::fs::write(&path, &data) {
+                                    Ok(()) => {
+                                        let _ = stack.push(MolecularChain::from_number(1.0));
+                                    }
+                                    Err(_) => {
+                                        let _ = stack.push(MolecularChain::from_number(0.0));
+                                    }
+                                }
+                            }
+                            #[cfg(not(feature = "std"))]
+                            {
+                                let data = if let Some(s) = chain_to_string(&data_chain) {
+                                    s.into_bytes()
+                                } else {
+                                    data_chain.to_tagged_bytes()
+                                };
+                                events.push(VmEvent::FileWriteRequest { path, data });
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            }
                         }
                         "__file_append" => {
                             let data_chain = vm_pop!(stack, events);
                             let path_chain = vm_pop!(stack, events);
                             let path = chain_to_string(&path_chain).unwrap_or_default();
-                            let data = if let Some(s) = chain_to_string(&data_chain) {
-                                s.into_bytes()
-                            } else {
-                                data_chain.to_tagged_bytes()
-                            };
-                            events.push(VmEvent::FileAppendRequest { path, data });
-                            let _ = stack.push(MolecularChain::from_number(1.0));
+                            #[cfg(feature = "std")]
+                            {
+                                use std::io::Write;
+                                let data = if let Some(arr_idx) = as_array_ref(&data_chain) {
+                                    if arr_idx < array_heap.len() {
+                                        array_heap[arr_idx]
+                                            .iter()
+                                            .map(|c| c.to_number().unwrap_or(0.0) as u8)
+                                            .collect::<Vec<u8>>()
+                                    } else {
+                                        Vec::new()
+                                    }
+                                } else if let Some(s) = chain_to_string(&data_chain) {
+                                    s.into_bytes()
+                                } else {
+                                    data_chain.to_tagged_bytes()
+                                };
+                                match std::fs::OpenOptions::new().append(true).create(true).open(&path) {
+                                    Ok(mut f) => {
+                                        let ok = f.write_all(&data).is_ok();
+                                        let _ = stack.push(MolecularChain::from_number(if ok { 1.0 } else { 0.0 }));
+                                    }
+                                    Err(_) => {
+                                        let _ = stack.push(MolecularChain::from_number(0.0));
+                                    }
+                                }
+                            }
+                            #[cfg(not(feature = "std"))]
+                            {
+                                let data = if let Some(s) = chain_to_string(&data_chain) {
+                                    s.into_bytes()
+                                } else {
+                                    data_chain.to_tagged_bytes()
+                                };
+                                events.push(VmEvent::FileAppendRequest { path, data });
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            }
                         }
                         // ── Compiler builtins (for builder.ol / self-compile) ──
                         "__parse" => {
@@ -2385,22 +2465,57 @@ impl OlangVM {
                             }
                         }
                         "__encode_bytecode" => {
-                            // Use cached lower result → encode → push bytecode length
+                            // Use cached lower result → encode → push bytecode as byte array
                             if let Some(ref program) = lower_cache {
                                 let bc = crate::exec::bytecode::encode_bytecode(&program.ops);
-                                let _ = stack.push(MolecularChain::from_number(bc.len() as f64));
+                                let elements: Vec<MolecularChain> = bc
+                                    .iter()
+                                    .map(|&b| MolecularChain::from_number(b as f64))
+                                    .collect();
+                                let idx = array_heap.len();
+                                array_heap.push(elements);
+                                let _ = stack.push(make_array_ref(idx));
                             } else {
                                 let _ = stack.push(MolecularChain::empty());
                             }
                         }
                         "__list_files" => {
-                            // Pop dir path, pop extension filter → push count
+                            // Pop dir path, pop extension filter → push array of file paths
                             let ext_chain = vm_pop!(stack, events);
                             let dir_chain = vm_pop!(stack, events);
-                            let _dir = chain_to_string(&dir_chain).unwrap_or_default();
-                            let _ext = chain_to_string(&ext_chain).unwrap_or_default();
-                            // Stub: push 0 (runtime handles file listing)
-                            let _ = stack.push(MolecularChain::from_number(0.0));
+                            let dir = chain_to_string(&dir_chain).unwrap_or_default();
+                            let ext = chain_to_string(&ext_chain).unwrap_or_default();
+                            #[cfg(feature = "std")]
+                            {
+                                let mut files: Vec<MolecularChain> = Vec::new();
+                                if let Ok(entries) = std::fs::read_dir(&dir) {
+                                    let mut paths: Vec<String> = Vec::new();
+                                    for entry in entries.flatten() {
+                                        let p = entry.path();
+                                        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                                            if ext.is_empty() || name.ends_with(&ext) {
+                                                if let Some(ps) = p.to_str() {
+                                                    paths.push(ps.to_string());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    paths.sort(); // deterministic order
+                                    for path_str in paths {
+                                        files.push(string_to_chain(&path_str));
+                                    }
+                                }
+                                let idx = array_heap.len();
+                                array_heap.push(files);
+                                let _ = stack.push(make_array_ref(idx));
+                            }
+                            #[cfg(not(feature = "std"))]
+                            {
+                                let _ = (dir, ext);
+                                let idx = array_heap.len();
+                                array_heap.push(Vec::new());
+                                let _ = stack.push(make_array_ref(idx));
+                            }
                         }
                         // ── Time builtins ────────────────────────────────
                         "__time" => {
@@ -6065,7 +6180,9 @@ pub mod tests {
             // Stack: [op_count]
             .push_op(Op::Emit)
             .push_op(Op::Call("__encode_bytecode".into()))
-            // Stack: [bytecode_len]
+            // Stack: [array_ref of bytecode bytes]
+            // Get length via __array_len builtin
+            .push_op(Op::Call("__array_len".into()))
             .push_op(Op::Emit)
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
@@ -6079,5 +6196,109 @@ pub mod tests {
 
         let bc_len = result.outputs()[2].to_number().unwrap_or(0.0);
         assert!(bc_len > 0.0, "encode should return > 0 bytes, got {}", bc_len);
+    }
+
+    // ── Phase 3 file I/O integration tests (std feature) ─────────────────
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn file_read_write_roundtrip() {
+        // Test __file_write → __file_read roundtrip
+        let dir = std::env::temp_dir().join("homeos_test_rw");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test_rw.txt");
+        let path_str = path.to_str().unwrap();
+
+        let mut prog = OlangProgram::new("test");
+        // Write "hello" to file
+        prog.push_op(Op::Push(key_chain(path_str)))
+            .push_op(Op::Push(key_chain("hello")))
+            .push_op(Op::Call("__file_write".into()))
+            .push_op(Op::Emit) // should be 1.0 (success)
+            // Read it back
+            .push_op(Op::Push(key_chain(path_str)))
+            .push_op(Op::Call("__file_read".into()))
+            .push_op(Op::Call("__array_len".into()))
+            .push_op(Op::Emit) // should be 5 (length of "hello")
+            .push_op(Op::Halt);
+
+        let result = vm().execute(&prog);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(result.outputs().len() >= 2, "need 2 outputs");
+        let write_ok = result.outputs()[0].to_number().unwrap_or(0.0);
+        assert!((write_ok - 1.0).abs() < f64::EPSILON, "write should succeed");
+        let read_len = result.outputs()[1].to_number().unwrap_or(0.0);
+        assert!((read_len - 5.0).abs() < f64::EPSILON, "read 5 bytes, got {}", read_len);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn list_files_in_directory() {
+        // Test __list_files returns sorted file list
+        let dir = std::env::temp_dir().join("homeos_test_ls");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("alpha.ol"), "// a").unwrap();
+        std::fs::write(dir.join("beta.ol"), "// b").unwrap();
+        std::fs::write(dir.join("gamma.txt"), "// c").unwrap(); // should be filtered out
+        let dir_str = dir.to_str().unwrap();
+
+        let mut prog = OlangProgram::new("test");
+        prog.push_op(Op::Push(key_chain(dir_str)))
+            .push_op(Op::Push(key_chain(".ol")))
+            .push_op(Op::Call("__list_files".into()))
+            .push_op(Op::Call("__array_len".into()))
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+
+        let result = vm().execute(&prog);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let count = result.outputs()[0].to_number().unwrap_or(0.0);
+        assert!((count - 2.0).abs() < f64::EPSILON, "should find 2 .ol files, got {}", count);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn builder_compile_write_roundtrip() {
+        // End-to-end: __parse → __lower → __encode_bytecode → __file_write → __file_read → verify
+        let dir = std::env::temp_dir().join("homeos_test_builder");
+        let _ = std::fs::create_dir_all(&dir);
+        let bc_path = dir.join("test.bc");
+        let bc_path_str = bc_path.to_str().unwrap();
+
+        let mut prog = OlangProgram::new("test");
+        // 1. Compile "let x = 42;"
+        prog.push_op(Op::Push(key_chain("let x = 42;")))
+            .push_op(Op::Call("__parse".into()))
+            .push_op(Op::Emit) // parse count
+            .push_op(Op::Call("__lower".into()))
+            .push_op(Op::Emit) // op count
+            .push_op(Op::Call("__encode_bytecode".into()))
+            // Stack: [bytecode array ref]
+            // 2. Write bytecode to file
+            .push_op(Op::Push(key_chain(bc_path_str)))
+            .push_op(Op::Swap) // [path, bytecode]
+            .push_op(Op::Call("__file_write".into()))
+            .push_op(Op::Emit) // write success
+            // 3. Read bytecode back
+            .push_op(Op::Push(key_chain(bc_path_str)))
+            .push_op(Op::Call("__file_read".into()))
+            .push_op(Op::Call("__array_len".into()))
+            .push_op(Op::Emit) // read length
+            .push_op(Op::Halt);
+
+        let result = vm().execute(&prog);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(result.outputs().len() >= 4, "need 4 outputs, got {}", result.outputs().len());
+        let parse_count = result.outputs()[0].to_number().unwrap_or(0.0);
+        assert!(parse_count > 0.0, "parse should succeed");
+        let op_count = result.outputs()[1].to_number().unwrap_or(0.0);
+        assert!(op_count > 0.0, "lower should succeed");
+        let write_ok = result.outputs()[2].to_number().unwrap_or(0.0);
+        assert!((write_ok - 1.0).abs() < f64::EPSILON, "write should succeed");
+        let read_len = result.outputs()[3].to_number().unwrap_or(0.0);
+        assert!(read_len > 0.0, "bytecode file should have content, got {}", read_len);
     }
 }
