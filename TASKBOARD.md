@@ -164,6 +164,15 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 6.2 | Self-optimize | `PLAN_6_2` | 5.1, 6.1 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | optimize.ol (160 LOC): runtime profiler, analysis, AAM approval, auto-apply. |
 | 6.3 | Reproduce | `PLAN_6_3` | 4.1, 6.1 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | reproduce.ol (195 LOC): spawn worker clones, skill packs, ISL addr alloc. |
 
+## Phase 7 — Integration & Production
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| 7.1 | Wiring: kết nối mọi thứ | `PLAN_7_1` | Phase 0-6 | FREE | | | AUTH wire, Maturity pipeline, Silk Vertical, VM CallClosure, Builder --arch, REPL mode |
+| 7.2 | Mobile: Android + iOS | `PLAN_7_2` | 7.1 | FREE | | | ARM64 native on Android, WASM on iOS, < 2MB binary |
+| 7.3 | Testing: hoàn thiện test suite | `PLAN_7_3` | Phase 0-6 | FREE | | | INTG-11/12, stdlib audit, stress tests, fuzz testing |
+| 7.4 | Network: ISL over real transport | `PLAN_7_4` | 7.1 | FREE | | | ISL TCP/WebSocket/BLE, discovery, AES-256-GCM |
+
 ---
 
 ## Dependency Graph (visual)
@@ -185,6 +194,11 @@ Phase 5: ALL DONE ✅
 Phase 6: ALL DONE ✅
   6.1 (self-update) → 6.2 (self-optimize)   ALL DONE ✅
                     → 6.3 (reproduce)
+
+Phase 7 (TIẾP THEO):
+  7.1 (wiring) ──→ 7.2 (mobile)
+               ├─→ 7.3 (testing)    ← song song
+               └─→ 7.4 (network)
 ```
 
 ---
