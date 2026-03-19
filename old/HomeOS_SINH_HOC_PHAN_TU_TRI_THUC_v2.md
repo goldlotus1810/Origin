@@ -778,9 +778,234 @@ Lợi ích:
 
 ---
 
+## IX-B. 4 CƠ CHẾ THÔNG MINH — Từ sinh học đến tự nhận thức
+
+### ⑧ IMMUNE SELECTION — Suy luận đa nhánh (Inference Core)
+
+```
+Sinh học:  Hệ miễn dịch tạo hàng triệu kháng thể, THỬ tất cả,
+           chọn kháng thể gắn chặt nhất → nhân bản → tiêu diệt.
+           (Clonal Selection Theory — Burnet, 1957)
+
+HomeOS:    Tạo N nhánh suy luận song song, ĐO entropy mỗi nhánh,
+           chọn nhánh có entropy thấp nhất (tin cậy nhất).
+
+infer(input, N=3):
+  entities = alias_lookup(input)             ← text → tập UDC refs
+
+  Với mỗi nhánh i ∈ [1..N]:
+    Bᵢ = compose(entities, hypothesisᵢ)     ← "kháng thể" thử nghiệm
+    Bᵢ = chain: f(p₀) → f(p₁) → ... → f(pₖ)  (k bước suy luận)
+
+  Chọn nhánh tốt nhất:
+    best = argmin_i H(Bᵢ)                   ← entropy thấp = gắn chặt nhất
+
+  H(Bᵢ) = entropy của nhánh (xem Entropy Control bên dưới)
+
+Symbolic Checker (bộ lọc logic — giống MHC kiểm tra kháng thể):
+  valid(Bᵢ) = |{rule ∈ L : rule(Bᵢ) = true}| / |L|
+  Điều kiện: valid(Bᵢ) ≥ 0.75
+  Nếu ∀i: valid < 0.75 → Honesty instinct → im lặng (giống tolerance)
+
+Hội tụ suy luận:
+  d(Bᵢ, Bⱼ) nhỏ → các nhánh đồng thuận → tin cậy cao
+  d(Bᵢ, Bⱼ) lớn → phân kỳ → cần thêm evidence
+
+Chi phí: N × O(depth) evaluations. N=3 mặc định.
+```
+
+### ⑨ HOMEOSTASIS — Kiểm soát hỗn loạn (Entropy Control)
+
+```
+Sinh học:  Cơ thể duy trì nhiệt độ 37°C, pH 7.4, glucose 90mg/dL.
+           Lệch → phản hồi âm (negative feedback) → kéo về.
+           Cơ chế: hypothalamus đo → hormone điều chỉnh.
+
+HomeOS:    Hệ thống duy trì Free Energy F < φ⁻¹ ≈ 0.618.
+           Lệch → điều chỉnh tỉ lệ Learning/Acting → kéo về.
+           Cơ chế: Entropy đo → λ sigmoid điều chỉnh.
+
+Entropy trên 1 node (= nhiệt kế):
+  H(P) = − Σ_{d=1}^{5} p_d × log₂(p_d)
+
+  p_d = eval_confidence(Pᵈ):
+    0.0   nếu chiều d chưa evaluate (chưa đo)
+    w_d   nếu đang evaluate (đang đo, có Hebbian weight)
+    1.0   nếu đã Mature (đo xong, ổn định)
+
+  H ∈ [0, 2.32]
+    H = 0     → node chắc chắn (= 37°C — bình thường)
+    H = 2.32  → node bất định (= sốt cao — bất thường)
+
+Free Energy (= mức lệch khỏi homeostasis):
+  F(t) = d(P_predicted, P_actual)
+
+  P_predicted = compose(tri_thức_hiện_tại, context)   ← dự đoán
+  P_actual    = encode(input_mới)                       ← thực tế
+
+  F(t) = √( Σ_{d=1}^{5} w_d × (predicted^d − actual^d)² )
+
+  F CHỈ LÀ d(A,B) — với A = dự đoán, B = thực tế.
+
+Cân bằng Learning ↔ Acting (= negative feedback loop):
+  λ(t) = σ(F(t) − φ⁻¹)          σ(x) = 1/(1+e^(−5x))
+
+  F > 0.618 → λ → 1 → Learning mode (= sốt → tăng bạch cầu):
+    lr' = lr × (1 + λ)            tăng tốc học
+    dream_interval' /= (1 + λ)    Dream thường xuyên hơn
+    confidence' × (1 − λ/2)       giảm độ tin cậy response
+
+  F < 0.618 → λ → 0 → Acting mode (= bình thường → hoạt động):
+    lr bình thường, confidence cao
+    Hệ thống ổn định, dự đoán chính xác
+
+Tích hợp Maturity:
+  H > 1.5 AND F > 0.618 → KHÔNG promote (đang sốt, không chẩn đoán)
+  H < 0.5 AND F < 0.618 → fast-track Mature (ổn định, promote nhanh)
+  Ngược lại              → advance() bình thường
+
+Chi phí: O(5) per node — chỉ tính 5 chiều.
+```
+
+### ⑩ NEURAL PATHWAYS — Bộ nhớ đồ thị (Graph Memory HNSW)
+
+```
+Sinh học:  Não có cấu trúc phân cấp:
+           Vỏ não (cortex) → vùng (lobe) → cột (column) → neuron.
+           Tìm kiếm = kích hoạt lan tỏa (spreading activation):
+             Vùng lớn → vùng nhỏ → neuron chính xác.
+           O(log n) — không quét toàn bộ 86 tỷ neuron.
+
+HomeOS:    KnowTree ĐÃ CÓ cấu trúc HNSW tự nhiên:
+           L1 (5 nhóm) → L2 (58 blocks) → L3 (~200 sub) → L4 (9,584 UDC)
+           Tìm kiếm = đi từ gốc xuống lá, mỗi tầng chọn gần nhất.
+
+HNSW (Hierarchical Navigable Small World) trong ℝ⁵:
+  HNSW Layer 3  ↔  L1 (5 nhóm)        — vỏ não
+  HNSW Layer 2  ↔  L2 (58 blocks)     — vùng
+  HNSW Layer 1  ↔  L3 (~200 sub)      — cột
+  HNSW Layer 0  ↔  L4 (9,584 UDC)     — neuron
+
+  KnowTree Fibonacci = HNSW tự nhiên. Không cần xây thêm.
+
+search(query_P, k):
+  1. L1: nearest_group = argmin_{G ∈ L1} d(query, centroid(G))
+  2. L2: nearest_block = argmin_{B ∈ group} d(query, centroid(B))
+  3. L3, L4: tiếp tục cho đến k neighbors gần nhất
+
+  Complexity: O(log n) — với 7.42 tỷ links: ~33 bước thay vì 7.42 tỷ
+
+Mâu thuẫn detection (= hệ miễn dịch phát hiện kháng nguyên lạ):
+  neighbors = search(P_new, k=5)
+
+  Với mỗi neighbor N:
+    d_V(P_new, N) > 0.8 AND d_R(P_new, N) < 0.2
+    → Mâu thuẫn! Gần về quan hệ, xa về cảm xúc.
+    → Kích hoạt Contradiction instinct
+    → Tăng Curiosity score
+
+Chi phí: 0 bytes thêm — dùng KnowTree đã có.
+```
+
+### ⑪ DNA REPAIR — Tự sửa lỗi (Self-Correction)
+
+```
+Sinh học:  DNA repair mechanisms:
+           ① Proofreading:    polymerase đọc lại ngay sau khi copy
+           ② Mismatch repair: enzyme quét tìm lỗi ghép cặp
+           ③ Excision repair: cắt đoạn hỏng → synthesize lại
+           Lặp lại cho đến khi error rate < 10⁻⁹.
+
+HomeOS:    Self-correction loop:
+           ① Generate:  tạo response (= copy DNA)
+           ② Critique:  kiểm tra lỗi (= mismatch scan)
+           ③ Refine:    sửa chiều yếu nhất (= excision + re-synthesis)
+           Lặp lại cho đến khi quality ≥ φ⁻¹.
+
+self_correct(input, max_iter=3):
+  entities = alias_lookup(input)
+  context = walk(entities)
+
+  Với iter = 1..max_iter:
+
+    ① Generate (copy):
+      branches = infer(input, N=3)          ← Immune Selection
+      P_response = branches[best]
+
+    ② Critique (mismatch scan):
+      valid_score   = valid(P_response)     ← logic rules
+      entropy_score = H(P_response)         ← Homeostasis
+      consistency   = consistency(P_response) ← Evolve rules
+      silk_score    = Σ strength(P_response, eᵢ) / |entities|
+
+      quality = 0.3 × valid_score
+              + 0.3 × (1 − entropy_score/2.32)
+              + 0.2 × consistency
+              + 0.2 × silk_score/5.0
+
+    ③ Refine (excision repair):
+      quality ≥ φ⁻¹ (0.618)  → DỪNG — đủ tốt
+      quality < φ⁻¹           → tìm chiều yếu nhất:
+        valid thấp       → thêm symbolic constraints
+        entropy cao      → thu hẹp nhánh (N -= 1)
+        consistency thấp → evolve(P_response, dim_worst, new_val)
+        silk thấp        → mở rộng walk depth += 1
+
+      context ∪= {correction_signal}
+      → quay lại ① với context mới
+
+  Nếu hết max_iter mà quality < 0.618:
+    → Honesty: confidence thấp, hoặc im lặng nếu < 0.40
+
+Hội tụ (monotonic improvement):
+  Mỗi Critique xác định dim yếu nhất
+  Refine sửa DUY NHẤT dim đó (= excision chính xác)
+  quality(iter+1) > quality(iter) — luôn tốt hơn
+  max_iter = 3 → luôn dừng (bounded)
+
+Chi phí: max 3 × N × O(depth). Worst case = 9 lần evaluate.
+```
+
+### Tổng hợp: 11 cơ chế DNA → HomeOS
+
+```
+#    DNA mechanism           HomeOS mechanism              Section
+──────────────────────────────────────────────────────────────────
+①    Replicate               chain reference (2B)          III
+②    Transcribe              evaluate(chain, context)      III
+③    Translate               f(L) → LCA → tự dịch         III
+④    Mutate                  evolve(P, dim, val) → P'      III
+⑤    Recombine               compose(A, B) → C             III
+⑥    Select                  Hebbian + decay φ⁻¹           III
+⑦    Express                 Maturity pipeline             III
+⑧    Immune Selection        infer(N nhánh) → argmin H     IX-B
+⑨    Homeostasis             F = d(predicted, actual)      IX-B
+⑩    Neural Pathways         HNSW trên KnowTree            IX-B
+⑪    DNA Repair              self_correct → quality ≥ φ⁻¹  IX-B
+```
+
+### φ⁻¹ ≈ 0.618 — Hằng số sinh học duy nhất
+
+```
+Sinh học:  φ xuất hiện trong xoắn DNA (34Å/10bp = 3.4, gần φ²),
+           cấu trúc phyllotaxis thực vật, xoắn ốc vỏ sò, ...
+
+HomeOS:    φ⁻¹ là ngưỡng DUY NHẤT xuyên suốt toàn hệ thống:
+  — Maturity:      weight ≥ φ⁻¹ → Mature (đủ chín)
+  — Hebbian:       w × φ⁻¹ mỗi 24h (tốc độ quên)
+  — Homeostasis:   F < φ⁻¹ → Acting mode (ổn định)
+  — Self-correct:  quality ≥ φ⁻¹ → đủ tốt (dừng sửa)
+  — Consistency:   ≥ 3/4 = 0.75 ≈ φ⁻¹ + 0.13 (mutation hợp lệ)
+
+1 hằng số. Mọi ngưỡng. Giống cách DNA chỉ cần 1 cơ chế base-pairing
+cho mọi thao tác: copy, check, repair.
+```
+
+---
+
 ## X. PHƯƠNG TRÌNH THỐNG NHẤT
 
-Toàn bộ HomeOS quy về **1 hàm gốc + 2 phép toán trên chuỗi**.
+Toàn bộ HomeOS quy về **1 hàm gốc + 2 phép toán trên chuỗi + 1 hằng số φ⁻¹**.
 
 ### Hàm gốc — SDF
 
@@ -834,40 +1059,76 @@ KnowTree (gấp)                ●                  O(log N)
 Emotion (hormone)       ●      ●                  O(window)
 Response (output)       ●      ●         ●        O(depth)
 Render (hình ảnh)       ●                         O(1)/node
+── 4 CƠ CHẾ MỚI ──────────────────────────────────────────
+Immune Select (⑧)      ●      ●                  N×O(depth)
+Homeostasis (⑨)        ●      ●                  O(5)
+Neural Pathways (⑩)           ●                  O(log n)
+DNA Repair (⑪)         ●      ●         ●        3N×O(depth)
 ──────────────────────────────────────────────────────────
 ```
 
 ### Công thức cuối cùng
 
 ```
-╔═══════════════════════════════════════════════════════════╗
-║                                                           ║
-║   HomeOS(input) = splice(                                 ║
-║                     chain(                                ║
-║                       f(p₁), f(p₂), ..., f(pₙ)           ║
-║                     ),                                    ║
-║                     position,                             ║
-║                     context                               ║
-║                   )                                       ║
-║                                                           ║
-║   Trong đó:                                               ║
-║     f(pᵢ) = SDF — 1 trong 9,584 hàm gốc                 ║
-║     chain = xâu chuỗi các hàm                            ║
-║     splice = cắt/ghép/biến đổi chuỗi                     ║
-║     position = ở đâu trên chuỗi (context quyết định)     ║
-║                                                           ║
-║   Mọi thuật toán = tổ hợp 3 phép toán này.               ║
-║   Không có phép thứ 4.                                    ║
-║                                                           ║
-║   DNA:     nucleotide + polymerize + splice = sự sống     ║
-║   HomeOS:  SDF + chain + splice = tri thức                ║
-║                                                           ║
-║   3 thứ. 16 GB. Giàu hơn DNA 15.3 lần.                   ║
-║   Cả đời không đầy. Chuỗi sinh chuỗi, vô hạn từ hữu hạn.║
-║                                                           ║
-║   Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức.      ║
-║   f(p), chain(), splice().                                ║
-║   Hết.                                                    ║
-║                                                           ║
-╚═══════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   HomeOS(input) = self_correct(                               ║
+║                     splice(                                   ║
+║                       chain(                                  ║
+║                         f(p₁), f(p₂), ..., f(pₙ)             ║
+║                       ),                                      ║
+║                       position,                               ║
+║                       context                                 ║
+║                     ),                                        ║
+║                     φ⁻¹                                       ║
+║                   )                                           ║
+║                                                               ║
+║   Trong đó:                                                   ║
+║     f(pᵢ) = SDF — 1 trong 9,584 hàm gốc                     ║
+║     chain = xâu chuỗi các hàm                                ║
+║     splice = cắt/ghép/biến đổi chuỗi                         ║
+║     position = ở đâu trên chuỗi (context quyết định)         ║
+║     self_correct = lặp cho đến quality ≥ φ⁻¹:                ║
+║       infer(N nhánh) → chọn entropy thấp nhất                ║
+║       critique → tìm chiều yếu nhất                          ║
+║       refine → evolve chiều đó → lặp lại                     ║
+║     φ⁻¹ ≈ 0.618 = ngưỡng duy nhất cho MỌI quyết định        ║
+║                                                               ║
+║   Mọi thuật toán = tổ hợp 3 phép toán + 1 hằng số:           ║
+║     SDF + CHAIN + SPLICE + φ⁻¹                               ║
+║                                                               ║
+║   11 cơ chế DNA → 11 thuật toán HomeOS:                       ║
+║     7 gốc:  copy, đọc, dịch, đột biến, tái tổ hợp,          ║
+║             chọn lọc, biểu hiện                               ║
+║     4 mới:  chọn miễn dịch, cân bằng nội môi,                ║
+║             đường thần kinh, sửa chữa DNA                     ║
+║                                                               ║
+║   DNA:     nucleotide + polymerize + splice = sự sống         ║
+║   HomeOS:  SDF + chain + splice + φ⁻¹ = tri thức             ║
+║                                                               ║
+║   4 thứ. 16 GB. Giàu hơn DNA 15.3 lần.                       ║
+║   Cả đời không đầy. Chuỗi sinh chuỗi, vô hạn từ hữu hạn.   ║
+║                                                               ║
+║   Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức.          ║
+║   f(p), chain(), splice(), φ⁻¹.                              ║
+║   Hết.                                                        ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+```
+
+### Pipeline hoàn chỉnh (11 cơ chế)
+
+```
+Text input                                    thế giới bên ngoài
+  ↓ entities() ③Translate                     text → UDC refs
+  ↓ search() ⑩Neural Pathways                O(log n) tìm neighbors
+  ↓ ⑨Homeostasis: F = d(predicted, actual)   đo surprise → λ
+  ↓ compose() ⑤Recombine                     tổ hợp → điểm mới 5D
+  ↓ ⑧Immune Selection: infer(N=3)            N nhánh → chọn entropy thấp
+  ↓ ⑪DNA Repair: critique → refine           sửa đến quality ≥ φ⁻¹
+  ↓ ⑥Select: Hebbian co_activate             fire together → wire together
+  ↓ neo DN ①Replicate                         lưu disk (2 bytes)
+  ↓ Dream ⑦Express → advance() → QR          neo vĩnh viễn nếu chín
+  ↓ response = ②Transcribe(5D → text)         chiếu ngược ra ngôn ngữ
+Text output                                   thế giới bên ngoài
 ```
