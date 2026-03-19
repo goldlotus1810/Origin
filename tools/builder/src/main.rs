@@ -192,6 +192,7 @@ fn main() {
         knowledge: &knowledge,
         codegen_format: args.codegen_format,
         is_linked_elf,
+        arch: pack::Arch::X86_64,
     });
 
     // 5. Write output
