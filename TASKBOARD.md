@@ -178,9 +178,9 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
 | 8 | Parser Upgrade: hex literals, ==, keywords | `PLAN_8_PARSER_UPGRADE` | Phase 0 | DONE | `claude/project-audit-review-2pN6F` | Lyra | ALL 54/54 files parse. Added: hex literals, indexed assignment, dict keyword keys, commands as idents, bitwise OR. KNOWN_PARSE_FAILURES = 0. |
-| 9 | Native REPL: ./origin interactive | `PLAN_9_NATIVE_REPL` | 8 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | repl.ol + VM array/dict builtins + hash dispatch + nested execution + REPL wire. ~1100 LOC ASM + 110 LOC Olang. |
+| 9 | Native REPL: ./origin interactive | `PLAN_9_NATIVE_REPL` | 8 | DONE | `claude/project-audit-review-2pN6F` | Lyra | repl.ol + VM array/dict builtins + hash dispatch + nested execution + REPL wire. ~1100 LOC ASM + 110 LOC Olang. |
 | 10 | Browser E2E: origin.html works | `PLAN_10_BROWSER_E2E` | 8 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | 10.1 boot/eval/alloc/get_output WAT exports. 10.2 JS wiring (evalInput→WASM→output). 10.3 chat-style UI, dark theme, mobile responsive. 10.4 drag&drop .ol/.wasm/.bin. Còn: 10.5 WASI parity (optional). |
-| 11 | E2E Verification & Demo | `PLAN_11_E2E_VERIFY` | 8,9,10 | BLOCKED | `claude/review-and-fix-project-dSfvz` | dSfvz | Done: 11.1 demo, 11.2 E2E tests, 11.3 server --eval, 11.5 Makefile, 11.6 README, 11.7 CI. BLOCKED: 11.4 native --eval (chờ P9). |
+| 11 | E2E Verification & Demo | `PLAN_11_E2E_VERIFY` | 8,9,10 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | ALL DONE: 11.1 demo, 11.2 E2E tests, 11.3 server --eval, 11.4 native --eval (vm_x86_64.S --eval flag + stdin read + repl_eval dispatch), 11.5 Makefile, 11.6 README, 11.7 CI. |
 | 12 | Response Intelligence | `PLAN_12_RESPONSE_INTELLIGENCE` | Phase 0 | CLAIMED | `claude/update-audit-context-2MKRJ` | 2MKRJ | Wire 5 mắt xích bị đứt: walk_emotion, STM recall, intent v2, response composer, lang fix. ~560 LOC Rust. Song song với Phase 8-11. |
 
 ---
