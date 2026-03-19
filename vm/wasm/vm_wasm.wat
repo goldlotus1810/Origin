@@ -586,55 +586,55 @@
         ;; Fetch tag
         (local.set $tag (call $read_u8))
 
-        ;; Dispatch via br_table (codegen.ol format: 0x01-0x24)
-        (block $default
-        (block $b1C (block $b1B (block $b1A (block $b19
-        (block $b18 (block $b17 (block $b16 (block $b15
-        (block $b14 (block $b13 (block $b12 (block $b11
-        (block $b10 (block $b0F (block $b0E (block $b0D
-        (block $b0C (block $b0B (block $b0A (block $b09
-        (block $b08 (block $b07 (block $b06 (block $b05
-        (block $b04 (block $b03 (block $b02 (block $b01
-        (block $b00
-          (br_table $b00 $b01 $b02 $b03 $b04 $b05 $b06 $b07
-                    $b08 $b09 $b0A $b0B $b0C $b0D $b0E $b0F
-                    $b10 $b11 $b12 $b13 $b14 $b15 $b16 $b17
-                    $b18 $b19 $b1A $b1B $b1C $default
-                    (local.get $tag)))
-
-        ) (br $lp)                     ;; 0x00 reserved
-        ) (call $op_push) (br $lp)     ;; 0x01
-        ) (call $op_load) (br $lp)     ;; 0x02
-        ) (call $op_lca) (br $lp)      ;; 0x03
-        ) (call $op_edge) (br $lp)     ;; 0x04
-        ) (call $op_query) (br $lp)    ;; 0x05
-        ) (call $op_emit) (br $lp)     ;; 0x06
-        ) (call $op_call) (br $lp)     ;; 0x07
-        ) (br $lp)                     ;; 0x08 Ret (stub)
-        ) (call $op_jmp) (br $lp)      ;; 0x09
-        ) (call $op_jz) (br $lp)       ;; 0x0A
-        ) (call $op_dup) (br $lp)      ;; 0x0B
-        ) (call $op_pop) (br $lp)      ;; 0x0C
-        ) (call $op_swap) (br $lp)     ;; 0x0D
-        ) (call $op_loop) (br $lp)     ;; 0x0E
-        ) (global.set $halted (i32.const 1)) (br $lp) ;; 0x0F Halt
-        ) (br $lp)                     ;; 0x10 Dream (stub)
-        ) (br $lp)                     ;; 0x11 Stats (stub)
-        ) (br $lp)                     ;; 0x12 Nop
-        ) (call $op_store) (br $lp)    ;; 0x13
-        ) (call $op_load_local) (br $lp) ;; 0x14
-        ) (call $op_push_num) (br $lp) ;; 0x15
-        ) (br $lp)                     ;; 0x16 Fuse (stub)
-        ) (br $lp)                     ;; 0x17 ScopeBegin (stub)
-        ) (br $lp)                     ;; 0x18 ScopeEnd (stub)
-        ) (call $op_push_mol) (br $lp) ;; 0x19
-        ) (call $op_try_begin) (br $lp) ;; 0x1A
-        ) (br $lp)                     ;; 0x1B CatchEnd (stub)
-        ) (call $op_store_update) (br $lp) ;; 0x1C
-
-        ;; inside $default block, $lp is parent scope
-        (call $err_unknown_op)
-        (br $lp))  ;; br to loop, close $default
+        ;; Dispatch via if-chain (simpler, guaranteed correct)
+        (if (i32.eq (local.get $tag) (i32.const 0x01))
+          (then (call $op_push))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x02))
+          (then (call $op_load))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x03))
+          (then (call $op_lca))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x04))
+          (then (call $op_edge))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x05))
+          (then (call $op_query))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x06))
+          (then (call $op_emit))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x07))
+          (then (call $op_call))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x09))
+          (then (call $op_jmp))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x0A))
+          (then (call $op_jz))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x0B))
+          (then (call $op_dup))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x0C))
+          (then (call $op_pop))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x0D))
+          (then (call $op_swap))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x0E))
+          (then (call $op_loop))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x0F))
+          (then (global.set $halted (i32.const 1)))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x13))
+          (then (call $op_store))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x14))
+          (then (call $op_load_local))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x15))
+          (then (call $op_push_num))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x19))
+          (then (call $op_push_mol))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x1A))
+          (then (call $op_try_begin))
+        (else (if (i32.eq (local.get $tag) (i32.const 0x1C))
+          (then (call $op_store_update))
+        (else
+          ;; 0x00,0x08,0x10-0x12,0x16-0x18,0x1B = nop/stub
+          ;; unknown = error (if > 0x1C)
+          (if (i32.gt_u (local.get $tag) (i32.const 0x1C))
+            (then (call $err_unknown_op)))
+        ))))))))))))))))))))))))))))))))))))))))
+        (br $lp)
+      ) ;; end loop $lp
     ) ;; end block $exit
 
     ;; Return: 0=normal halt, 1=step limit, 2=error
