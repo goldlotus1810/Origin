@@ -51,6 +51,15 @@
   ;; Each: [name_hash:8][val_ptr:4][val_len:4] = 16 bytes
   (global $var_count (mut i32) (i32.const 0))
 
+  ;; Output capture buffer: 0xF0000..0xF8000 (32KB)
+  (global $out_ptr   (mut i32) (i32.const 0xF0000))
+  (global $out_len   (mut i32) (i32.const 0))
+  (global $out_base  i32 (i32.const 0xF0000))
+  (global $out_max   i32 (i32.const 0x8000))  ;; 32KB max output
+
+  ;; Boot state
+  (global $booted    (mut i32) (i32.const 0))
+
   ;; Constants
   (global $SP_BASE   i32 (i32.const 0x1000))
   (global $SP_MAX    i32 (i32.const 0x4000))  ;; 12KB stack = 768 entries
@@ -311,12 +320,24 @@
     (global.set $pc (i32.add (global.get $pc) (local.get $name_len)))
     (call $var_load (call $fnv1a (local.get $name_ptr) (local.get $name_len))))
 
-  ;; 0x06: Emit
+  ;; 0x06: Emit — write to host AND capture to output buffer
   (func $op_emit
     (call $vm_pop)
     (if (i32.gt_u (global.get $tmp_len) (i32.const 0))
       (then
-        (drop (call $host_write (global.get $tmp_ptr) (global.get $tmp_len))))))
+        ;; Write to host (for direct display)
+        (drop (call $host_write (global.get $tmp_ptr) (global.get $tmp_len)))
+        ;; Also capture to output buffer (for get_output)
+        (if (i32.lt_u
+              (i32.add (global.get $out_len) (global.get $tmp_len))
+              (global.get $out_max))
+          (then
+            (memory.copy
+              (i32.add (global.get $out_base) (global.get $out_len))
+              (global.get $tmp_ptr)
+              (global.get $tmp_len))
+            (global.set $out_len
+              (i32.add (global.get $out_len) (global.get $tmp_len))))))))
 
   ;; 0x07: Call [name_len:1][name:N]
   (func $op_call
@@ -815,4 +836,96 @@
     (if (result i32) (global.get $halted)
       (then (i32.const 0))
       (else (i32.const 1))))
+
+  ;; ═══════════════════════════════════════════════════════════════════════
+  ;; BOOT — execute pre-loaded bytecode (stdlib), mark booted
+  ;; Returns: number of registered variables (proxy for module count)
+  ;; ═══════════════════════════════════════════════════════════════════════
+
+  (func $boot (export "boot") (result i32)
+    ;; Reset output buffer
+    (global.set $out_len (i32.const 0))
+
+    ;; Run pre-loaded bytecode
+    (drop (call $run))
+
+    ;; Mark as booted
+    (global.set $booted (i32.const 1))
+
+    ;; Return variable count as proxy for "modules loaded"
+    (global.get $var_count))
+
+  ;; ═══════════════════════════════════════════════════════════════════════
+  ;; EVAL — accept user input string, execute as bytecode or text
+  ;;
+  ;; Strategy: User input is treated as raw bytecode to execute.
+  ;;   For text compilation, host JS compiles via Rust WASM bindings
+  ;;   or we push string + call repl_eval if registered.
+  ;;
+  ;; param $ptr: pointer to UTF-8 input in WASM memory
+  ;; param $len: length of input
+  ;; Returns: 0=ok, 1=error
+  ;; ═══════════════════════════════════════════════════════════════════════
+
+  (func $eval (export "eval") (param $ptr i32) (param $len i32) (result i32)
+    ;; Reset output capture
+    (global.set $out_len (i32.const 0))
+
+    ;; Reset VM execution state (keep variables from previous evals)
+    (global.set $pc (i32.const 0))
+    (global.set $sp (global.get $SP_BASE))
+    (global.set $steps (i32.const 0))
+    (global.set $halted (i32.const 0))
+
+    ;; Copy input to bytecode area and set as current bytecode
+    (memory.copy (i32.const 0x10000) (local.get $ptr) (local.get $len))
+    (global.set $bc_start (i32.const 0x10000))
+    (global.set $bc_size (local.get $len))
+
+    ;; Execute
+    (call $run))
+
+  ;; ═══════════════════════════════════════════════════════════════════════
+  ;; EVAL_TEXT — push input string onto stack, useful for text processing
+  ;; Host calls this to make input available as stack value before eval
+  ;; ═══════════════════════════════════════════════════════════════════════
+
+  (func $eval_text (export "eval_text") (param $ptr i32) (param $len i32)
+    ;; Push input string onto VM stack as a chain value
+    (call $vm_push
+      (call $fnv1a (local.get $ptr) (local.get $len))
+      (local.get $ptr)
+      (local.get $len)))
+
+  ;; ═══════════════════════════════════════════════════════════════════════
+  ;; ALLOC — bump allocator for JS to write data into WASM memory
+  ;; Returns: pointer to allocated region
+  ;; ═══════════════════════════════════════════════════════════════════════
+
+  (func $alloc (export "alloc") (param $size i32) (result i32)
+    (call $heap_alloc (local.get $size)))
+
+  ;; ═══════════════════════════════════════════════════════════════════════
+  ;; GET_OUTPUT — return captured output (ptr, len)
+  ;; After reading, caller should reset via reset_output
+  ;; ═══════════════════════════════════════════════════════════════════════
+
+  (func $get_output_ptr (export "get_output_ptr") (result i32)
+    (global.get $out_base))
+
+  (func $get_output_len (export "get_output_len") (result i32)
+    (global.get $out_len))
+
+  (func $reset_output (export "reset_output")
+    (global.set $out_len (i32.const 0)))
+
+  ;; ═══════════════════════════════════════════════════════════════════════
+  ;; GET_VAR_COUNT — number of variables stored (for stats display)
+  ;; ═══════════════════════════════════════════════════════════════════════
+
+  (func $get_var_count (export "get_var_count") (result i32)
+    (global.get $var_count))
+
+  (func $get_steps (export "get_steps") (result i32)
+    (global.get $steps))
 )
