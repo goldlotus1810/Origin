@@ -13,10 +13,18 @@ union Expr {
     Ident { name: Str },
     NumLit { value: Num },
     StrLit { value: Str },
+    BoolLit { value: Num },
     BinOp { op: Str, lhs: Expr, rhs: Expr },
+    UnaryNot { expr: Expr },
     Call { callee: Expr, args: Vec[Expr] },
     FieldAccess { object: Expr, field: Str },
+    Index { object: Expr, index: Expr },
+    ArrayLit { items: Vec[Expr] },
+    PathExpr { base: Str, member: Str },
+    StructLit { path: Str, fields: Vec[FieldInit] },
+    IfExpr { cond: Expr, then_expr: Expr, else_expr: Expr },
     MolLiteral { s: Num, r: Num, v: Num, a: Num, t: Num },
+    MatchExpr { subject: Expr, arms: Vec[MatchArm] },
 }
 
 union Stmt {
@@ -29,6 +37,11 @@ union Stmt {
     EmitStmt { expr: Expr },
     TypeDef { name: Str, fields: Vec[Field] },
     UnionDef { name: Str, variants: Vec[Variant] },
+    BreakStmt,
+    ContinueStmt,
+    UseStmt { path: Str },
+    MatchStmt { subject: Expr, arms: Vec[MatchArm] },
+    FieldAssign { object: Str, field: Str, value: Expr },
 }
 
 type Field {
@@ -39,6 +52,17 @@ type Field {
 type Variant {
     name: Str,
     fields: Vec[Field],
+}
+
+type FieldInit {
+    name: Str,
+    value: Expr,
+}
+
+type MatchArm {
+    pattern: Str,
+    bindings: Vec[Str],
+    body: Vec[Stmt],
 }
 
 // ── Parser state ─────────────────────────────────────────────────
@@ -122,6 +146,34 @@ fn is_eof(tok) {
     };
 }
 
+fn is_ident_tok(tok) {
+    match tok.kind {
+        TokenKind::Ident { name } => { return true; },
+        _ => { return false; },
+    };
+}
+
+// ── Type annotation helper (skip type annotations) ──────────────
+
+fn skip_type_annotation(p) {
+    // Skip a type annotation like "Str", "Num", "Vec[Expr]", "Vec[Vec[Str]]"
+    let tok = advance(p); // consume type name
+    // Handle Vec[...] or other parameterized types
+    if is_symbol_tok(peek(p), "[") {
+        advance(p); // consume [
+        let depth = 1;
+        while depth > 0 && !is_eof(peek(p)) {
+            if is_symbol_tok(peek(p), "[") {
+                let depth = depth + 1;
+            };
+            if is_symbol_tok(peek(p), "]") {
+                let depth = depth - 1;
+            };
+            advance(p);
+        };
+    };
+}
+
 // ── Expression parsing (precedence climbing) ─────────────────────
 
 fn parse_primary(p) {
@@ -136,42 +188,140 @@ fn parse_primary(p) {
             advance(p);
             return Expr::StrLit { value: value };
         },
+        TokenKind::Keyword { name } => {
+            // true/false literals
+            if name == "true" {
+                advance(p);
+                return Expr::BoolLit { value: 1 };
+            };
+            if name == "false" {
+                advance(p);
+                return Expr::BoolLit { value: 0 };
+            };
+            // if-expression: if cond { expr } else { expr }
+            if name == "if" {
+                advance(p);
+                let cond = parse_expr(p);
+                expect_symbol(p, "{");
+                let then_val = parse_expr(p);
+                expect_symbol(p, "}");
+                let else_val = Expr::NumLit { value: 0 };
+                if is_keyword_tok(peek(p), "else") {
+                    advance(p);
+                    expect_symbol(p, "{");
+                    let else_val = parse_expr(p);
+                    expect_symbol(p, "}");
+                };
+                return Expr::IfExpr { cond: cond, then_expr: then_val, else_expr: else_val };
+            };
+            // match expression
+            if name == "match" {
+                return parse_match_expr(p);
+            };
+            // Other keywords used as identifiers (fallthrough to emit error)
+            emit "Parse error: unexpected keyword '" + name + "'";
+            advance(p);
+            return Expr::NumLit { value: 0 };
+        },
         TokenKind::Ident { name } => {
             advance(p);
-            // Check for function call: name(...)
-            if is_symbol_tok(peek(p), "(") {
-                advance(p); // consume (
-                let args = [];
-                while !is_symbol_tok(peek(p), ")") && !is_eof(peek(p)) {
-                    push(args, parse_expr(p));
-                    if is_symbol_tok(peek(p), ",") {
-                        advance(p);
+            let result = Expr::Ident { name: name };
+
+            // Path expression: Name::Member or Name::Member { fields }
+            if is_symbol_tok(peek(p), "::") {
+                advance(p); // consume ::
+                let member = expect_ident(p);
+                // Struct constructor: Name::Member { field: value, ... }
+                if is_symbol_tok(peek(p), "{") {
+                    advance(p); // consume {
+                    let fields = [];
+                    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
+                        let fname = expect_ident(p);
+                        expect_symbol(p, ":");
+                        let fvalue = parse_expr(p);
+                        push(fields, FieldInit { name: fname, value: fvalue });
+                        if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
-                };
-                expect_symbol(p, ")");
-                return Expr::Call {
-                    callee: Expr::Ident { name: name },
-                    args: args,
-                };
-            };
-            // Check for field access: name.field
-            if is_symbol_tok(peek(p), ".") {
-                advance(p); // consume .
-                let field = expect_ident(p);
-                return Expr::FieldAccess {
-                    object: Expr::Ident { name: name },
-                    field: field,
+                    expect_symbol(p, "}");
+                    let result = Expr::StructLit { path: name + "::" + member, fields: fields };
+                } else {
+                    let result = Expr::PathExpr { base: name, member: member };
                 };
             };
-            return Expr::Ident { name: name };
+
+            // Struct literal: Name { field: value, ... }
+            // Only when Name starts with uppercase (heuristic)
+            if is_symbol_tok(peek(p), "{") {
+                let first_ch = char_at(name, 0);
+                if first_ch >= "A" && first_ch <= "Z" {
+                    advance(p); // consume {
+                    let fields = [];
+                    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
+                        let fname = expect_ident(p);
+                        expect_symbol(p, ":");
+                        let fvalue = parse_expr(p);
+                        push(fields, FieldInit { name: fname, value: fvalue });
+                        if is_symbol_tok(peek(p), ",") { advance(p); };
+                    };
+                    expect_symbol(p, "}");
+                    let result = Expr::StructLit { path: name, fields: fields };
+                };
+            };
+
+            // Postfix chain: .field, [index], (args) — can repeat
+            // Use is_postfix helper to check loop condition without mutable flag
+            while is_symbol_tok(peek(p), ".") || is_symbol_tok(peek(p), "[") || is_symbol_tok(peek(p), "(") {
+                if is_symbol_tok(peek(p), ".") {
+                    advance(p);
+                    let field = expect_ident(p);
+                    let result = Expr::FieldAccess { object: result, field: field };
+                };
+                if is_symbol_tok(peek(p), "[") {
+                    advance(p);
+                    let index = parse_expr(p);
+                    expect_symbol(p, "]");
+                    let result = Expr::Index { object: result, index: index };
+                };
+                if is_symbol_tok(peek(p), "(") {
+                    advance(p);
+                    let args = [];
+                    while !is_symbol_tok(peek(p), ")") && !is_eof(peek(p)) {
+                        push(args, parse_expr(p));
+                        if is_symbol_tok(peek(p), ",") { advance(p); };
+                    };
+                    expect_symbol(p, ")");
+                    let result = Expr::Call { callee: result, args: args };
+                };
+            };
+
+            return result;
         },
         TokenKind::Symbol { ch } => {
+            // Unary NOT: !expr
+            if ch == "!" {
+                advance(p);
+                let expr = parse_primary(p);
+                return Expr::UnaryNot { expr: expr };
+            };
             // Parenthesized expression
             if ch == "(" {
                 advance(p);
                 let expr = parse_expr(p);
                 expect_symbol(p, ")");
                 return expr;
+            };
+            // Array literal: [expr, expr, ...]
+            if ch == "[" {
+                advance(p);
+                let items = [];
+                while !is_symbol_tok(peek(p), "]") && !is_eof(peek(p)) {
+                    push(items, parse_expr(p));
+                    if is_symbol_tok(peek(p), ",") {
+                        advance(p);
+                    };
+                };
+                expect_symbol(p, "]");
+                return Expr::ArrayLit { items: items };
             };
             // Molecular literal: { S=1 R=2 V=128 A=128 T=3 }
             if ch == "{" {
@@ -256,6 +406,61 @@ pub fn parse_expr(p) {
     return parse_expr_prec(p, 1);
 }
 
+// ── Match expression parsing ────────────────────────────────────
+
+fn parse_match_expr(p) {
+    advance(p); // consume 'match'
+    let subject = parse_expr(p);
+    expect_symbol(p, "{");
+    let arms = [];
+    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
+        // Parse pattern: Name::Variant { bindings } or _ (wildcard)
+        let pattern = "";
+        let bindings = [];
+        let ptok = peek(p);
+
+        // Wildcard: _
+        if is_ident_tok(ptok) {
+            let pname = expect_ident(p);
+            if pname == "_" {
+                let pattern = "_";
+            } else {
+                // Could be Name::Variant { ... } or just Name
+                let pattern = pname;
+                if is_symbol_tok(peek(p), "::") {
+                    advance(p); // consume ::
+                    let variant = expect_ident(p);
+                    let pattern = pname + "::" + variant;
+                };
+                // Parse bindings: { field1, field2 } or { field1 }
+                if is_symbol_tok(peek(p), "{") {
+                    advance(p); // consume {
+                    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
+                        push(bindings, expect_ident(p));
+                        if is_symbol_tok(peek(p), ",") { advance(p); };
+                    };
+                    expect_symbol(p, "}");
+                };
+            };
+        };
+
+        expect_symbol(p, "=>");
+        let body = [];
+        // Arm body: { stmts }
+        if is_symbol_tok(peek(p), "{") {
+            let body = parse_block(p);
+        } else {
+            // Single expression
+            push(body, Stmt::ExprStmt { expr: parse_expr(p) });
+            if is_symbol_tok(peek(p), ";") { advance(p); };
+        };
+        push(arms, MatchArm { pattern: pattern, bindings: bindings, body: body });
+        if is_symbol_tok(peek(p), ",") { advance(p); };
+    };
+    expect_symbol(p, "}");
+    return Expr::MatchExpr { subject: subject, arms: arms };
+}
+
 // ── Statement parsing ────────────────────────────────────────────
 
 fn parse_block(p) {
@@ -270,6 +475,20 @@ fn parse_block(p) {
 
 pub fn parse_stmt(p) {
     let tok = peek(p);
+
+    // use path;
+    if is_keyword_tok(tok, "use") {
+        advance(p);
+        let path = expect_ident(p);
+        // Consume dotted path: use a.b.c
+        while is_symbol_tok(peek(p), ".") {
+            advance(p);
+            let segment = expect_ident(p);
+            let path = path + "." + segment;
+        };
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::UseStmt { path: path };
+    };
 
     // let name = expr;
     if is_keyword_tok(tok, "let") {
@@ -309,6 +528,7 @@ pub fn parse_stmt(p) {
             advance(p);
             let else_block = parse_block(p);
         };
+        if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::IfStmt { cond: cond, then_block: then_block, else_block: else_block };
     };
 
@@ -317,6 +537,7 @@ pub fn parse_stmt(p) {
         advance(p);
         let cond = parse_expr(p);
         let body = parse_block(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::WhileStmt { cond: cond, body: body };
     };
 
@@ -336,6 +557,27 @@ pub fn parse_stmt(p) {
         return Stmt::EmitStmt { expr: expr };
     };
 
+    // break;
+    if is_keyword_tok(tok, "break") {
+        advance(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::BreakStmt;
+    };
+
+    // continue;
+    if is_keyword_tok(tok, "continue") {
+        advance(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::ContinueStmt;
+    };
+
+    // match subject { arms }
+    if is_keyword_tok(tok, "match") {
+        let mexpr = parse_match_expr(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::MatchStmt { subject: mexpr, arms: [] };
+    };
+
     // type Name { fields }
     if is_keyword_tok(tok, "type") {
         advance(p);
@@ -345,7 +587,19 @@ pub fn parse_stmt(p) {
         while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
             let fname = expect_ident(p);
             expect_symbol(p, ":");
+            // Parse type annotation (may be complex like Vec[Expr])
             let tname = expect_ident(p);
+            if is_symbol_tok(peek(p), "[") {
+                // Skip generic params: Vec[Type]
+                advance(p);
+                let depth = 1;
+                while depth > 0 && !is_eof(peek(p)) {
+                    if is_symbol_tok(peek(p), "[") { let depth = depth + 1; };
+                    if is_symbol_tok(peek(p), "]") { let depth = depth - 1; };
+                    if depth > 0 { advance(p); };
+                };
+                expect_symbol(p, "]");
+            };
             push(fields, Field { name: fname, type_name: tname });
             if is_symbol_tok(peek(p), ",") { advance(p); };
         };
@@ -368,6 +622,17 @@ pub fn parse_stmt(p) {
                     let fname = expect_ident(p);
                     expect_symbol(p, ":");
                     let tname = expect_ident(p);
+                    // Skip generic params
+                    if is_symbol_tok(peek(p), "[") {
+                        advance(p);
+                        let depth = 1;
+                        while depth > 0 && !is_eof(peek(p)) {
+                            if is_symbol_tok(peek(p), "[") { let depth = depth + 1; };
+                            if is_symbol_tok(peek(p), "]") { let depth = depth - 1; };
+                            if depth > 0 { advance(p); };
+                        };
+                        expect_symbol(p, "]");
+                    };
                     push(vfields, Field { name: fname, type_name: tname });
                     if is_symbol_tok(peek(p), ",") { advance(p); };
                 };
@@ -378,6 +643,34 @@ pub fn parse_stmt(p) {
         };
         expect_symbol(p, "}");
         return Stmt::UnionDef { name: name, variants: variants };
+    };
+
+    // Check for field assignment: name.field = expr;
+    // Must check before expression statement since it starts with ident
+    match tok.kind {
+        TokenKind::Ident { name } => {
+            // Look ahead for name.field = expr pattern
+            if p.pos + 2 < len(p.tokens) {
+                let next1 = p.tokens[p.pos + 1];
+                let next2 = p.tokens[p.pos + 2];
+                if is_symbol_tok(next1, ".") && is_ident_tok(next2) {
+                    // Check if it's assignment: name.field = expr
+                    if p.pos + 3 < len(p.tokens) {
+                        let next3 = p.tokens[p.pos + 3];
+                        if is_symbol_tok(next3, "=") {
+                            advance(p); // consume name
+                            advance(p); // consume .
+                            let field = expect_ident(p);
+                            expect_symbol(p, "=");
+                            let value = parse_expr(p);
+                            if is_symbol_tok(peek(p), ";") { advance(p); };
+                            return Stmt::FieldAssign { object: name, field: field, value: value };
+                        };
+                    };
+                };
+            };
+        },
+        _ => {},
     };
 
     // Expression statement
