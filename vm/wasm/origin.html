@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HomeOS — origin.olang</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a; color: #e0e0e0;
+    font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+    font-size: 14px; height: 100vh; display: flex; flex-direction: column;
+  }
+  #header {
+    padding: 8px 16px; background: #1a1a2e;
+    border-bottom: 1px solid #333; font-size: 12px; color: #888;
+  }
+  #header span { color: #7fdbca; }
+  #output {
+    flex: 1; overflow-y: auto; padding: 12px 16px;
+    white-space: pre-wrap; word-wrap: break-word; line-height: 1.5;
+  }
+  #input-line {
+    display: flex; align-items: center;
+    padding: 8px 16px; background: #111; border-top: 1px solid #333;
+  }
+  #prompt { color: #c792ea; margin-right: 8px; font-weight: bold; }
+  #input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: #e0e0e0; font-family: inherit; font-size: 14px;
+  }
+  .out-text { color: #c3e88d; }
+  .out-err  { color: #ff5370; }
+  .out-sys  { color: #546e7a; font-style: italic; }
+  .out-mol  { color: #ffcb6b; }
+  #status {
+    padding: 4px 16px; background: #0d0d1a;
+    border-top: 1px solid #222; font-size: 11px; color: #555;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <span>○</span> HomeOS WASM VM — <span id="version">v0.05</span>
+  | Memory: <span id="mem-usage">0</span> KB
+  | Steps: <span id="step-count">0</span>
+</div>
+
+<div id="output" id="output"></div>
+
+<div id="input-line">
+  <span id="prompt">○ &gt;</span>
+  <input id="input" type="text" placeholder="Type Olang expression..." autofocus />
+</div>
+
+<div id="status">Ready — load .wasm to start</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// HomeOS Browser Host
+// ═══════════════════════════════════════════════════════════════
+
+const outputEl = document.getElementById('output');
+const inputEl  = document.getElementById('input');
+const statusEl = document.getElementById('status');
+
+let instance = null;
+let memory = null;
+let bytecodeData = null;
+
+function appendOutput(text, cls) {
+  const span = document.createElement('span');
+  span.className = cls || 'out-text';
+  span.textContent = text;
+  outputEl.appendChild(span);
+  outputEl.scrollTop = outputEl.scrollHeight;
+}
+
+function readString(ptr, len) {
+  return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
+}
+
+// Host imports for WASM VM
+const importObject = {
+  env: {
+    host_write: (ptr, len) => {
+      appendOutput(readString(ptr, len), 'out-text');
+      return len;
+    },
+    host_read: (ptr, maxLen) => {
+      // In browser: return 0 (async input handled separately)
+      return 0;
+    },
+    host_load_bytecode: (ptr, maxLen) => {
+      if (!bytecodeData) return 0;
+      const copyLen = Math.min(bytecodeData.length, maxLen);
+      new Uint8Array(memory.buffer, ptr, copyLen)
+        .set(bytecodeData.slice(0, copyLen));
+      return copyLen;
+    },
+    host_log: (ptr, len) => {
+      appendOutput('[log] ' + readString(ptr, len) + '\n', 'out-sys');
+    },
+    host_emit_event: (type, ptr, len) => {
+      const data = len > 0 ? readString(ptr, len) : '';
+      appendOutput('[event:' + type + '] ' + data + '\n', 'out-mol');
+    },
+  },
+};
+
+// ── Load WASM ──
+
+async function loadWasm(wasmSource, bytecode) {
+  bytecodeData = bytecode;
+
+  let result;
+  if (wasmSource instanceof ArrayBuffer || wasmSource instanceof Uint8Array) {
+    result = await WebAssembly.instantiate(wasmSource, importObject);
+  } else if (typeof wasmSource === 'string') {
+    result = await WebAssembly.instantiateStreaming(
+      fetch(wasmSource), importObject);
+  } else {
+    result = await WebAssembly.instantiate(wasmSource, importObject);
+  }
+
+  instance = result.instance || result;
+  memory = instance.exports.memory;
+
+  // Check for embedded bytecode
+  if (instance.exports.init_embedded && bytecode && bytecode.length > 0) {
+    // If we have bytecode, set it as embedded before init
+    const bcOffset = 0x90000;  // temp area
+    const view = new Uint8Array(memory.buffer, bcOffset, bytecode.length);
+    view.set(bytecode);
+    instance.exports.init_embedded(bcOffset, bytecode.length);
+  }
+
+  instance.exports.init();
+
+  statusEl.textContent = 'VM loaded — type Olang expressions';
+  appendOutput('HomeOS WASM VM ready.\n', 'out-sys');
+  updateStats();
+}
+
+function runVM() {
+  if (!instance) return -1;
+  const result = instance.exports.run();
+  updateStats();
+  return result;
+}
+
+function updateStats() {
+  if (!memory) return;
+  document.getElementById('mem-usage').textContent =
+    Math.round(memory.buffer.byteLength / 1024);
+}
+
+// ── Input handling ──
+
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = '';
+
+    appendOutput('○ > ' + text + '\n', 'out-sys');
+
+    if (!instance) {
+      appendOutput('Error: VM not loaded. Drop a .wasm file to start.\n', 'out-err');
+      return;
+    }
+
+    // For now: display the input (full REPL needs runtime compile)
+    appendOutput('[input received — REPL compile not yet wired]\n', 'out-sys');
+  }
+});
+
+// ── Drag & drop .wasm / .bin files ──
+
+document.body.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+document.body.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer.files);
+
+  let wasmFile = null;
+  let bcFile = null;
+
+  for (const f of files) {
+    if (f.name.endsWith('.wasm')) wasmFile = f;
+    else if (f.name.endsWith('.bin') || f.name.endsWith('.bc')) bcFile = f;
+  }
+
+  if (!wasmFile) {
+    appendOutput('Drop a .wasm file (and optionally a .bin bytecode file)\n', 'out-err');
+    return;
+  }
+
+  statusEl.textContent = 'Loading ' + wasmFile.name + '...';
+  const wasmBytes = new Uint8Array(await wasmFile.arrayBuffer());
+  const bcBytes = bcFile ? new Uint8Array(await bcFile.arrayBuffer()) : null;
+
+  try {
+    await loadWasm(wasmBytes, bcBytes);
+    if (bcBytes) {
+      appendOutput('Bytecode loaded: ' + bcBytes.length + ' bytes\n', 'out-sys');
+    }
+    const result = runVM();
+    appendOutput('\nVM exited with code: ' + result + '\n', 'out-sys');
+  } catch (err) {
+    appendOutput('Error: ' + err.message + '\n', 'out-err');
+    statusEl.textContent = 'Error loading VM';
+  }
+});
+
+// ── Auto-load if served alongside .wasm ──
+
+(async () => {
+  try {
+    // Try loading vm_wasm.wasm from same directory
+    const resp = await fetch('vm_wasm.wasm');
+    if (resp.ok) {
+      statusEl.textContent = 'Loading vm_wasm.wasm...';
+      await loadWasm('vm_wasm.wasm', null);
+      appendOutput('Auto-loaded vm_wasm.wasm\n', 'out-sys');
+    }
+  } catch (e) {
+    // Not available — wait for drag & drop
+    appendOutput('Drag & drop a .wasm file to start, or serve vm_wasm.wasm alongside this HTML.\n', 'out-sys');
+  }
+})();
+</script>
+</body>
+</html>
