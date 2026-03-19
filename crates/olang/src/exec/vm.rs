@@ -3531,6 +3531,77 @@ impl OlangVM {
                             }
                         }
 
+                        // ── Bytecode encoding builtins (for codegen.ol) ──
+                        "__f64_to_le_bytes" => {
+                            // Stack: [number] → array of 8 bytes (LE)
+                            let n = vm_pop!(stack, events);
+                            let f = n.to_number().unwrap_or(0.0);
+                            let bytes = f.to_le_bytes();
+                            let idx = array_heap.len();
+                            let elems: Vec<MolecularChain> = bytes.iter()
+                                .map(|&b| MolecularChain::from_number(b as f64))
+                                .collect();
+                            array_heap.push(elems);
+                            let _ = stack.push(make_array_ref(idx));
+                        }
+                        "__f64_from_le_bytes" => {
+                            // Stack: [array_of_8_bytes] → number
+                            let arr = vm_pop!(stack, events);
+                            let mut bytes = [0u8; 8];
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() && array_heap[arr_idx].len() >= 8 {
+                                    for i in 0..8 {
+                                        bytes[i] = array_heap[arr_idx][i].to_number().unwrap_or(0.0) as u8;
+                                    }
+                                }
+                            }
+                            let _ = stack.push(MolecularChain::from_number(f64::from_le_bytes(bytes)));
+                        }
+                        "__str_bytes" => {
+                            // Stack: [string] → array of byte values (UTF-8)
+                            let s = vm_pop!(stack, events);
+                            let s_str = chain_to_string(&s).unwrap_or_default();
+                            let idx = array_heap.len();
+                            let elems: Vec<MolecularChain> = s_str.bytes()
+                                .map(|b| MolecularChain::from_number(b as f64))
+                                .collect();
+                            array_heap.push(elems);
+                            let _ = stack.push(make_array_ref(idx));
+                        }
+                        "__bytes_to_str" => {
+                            // Stack: [array_of_bytes] → string
+                            let arr = vm_pop!(stack, events);
+                            let mut bytes = Vec::new();
+                            if let Some(arr_idx) = as_array_ref(&arr) {
+                                if arr_idx < array_heap.len() {
+                                    for elem in &array_heap[arr_idx] {
+                                        bytes.push(elem.to_number().unwrap_or(0.0) as u8);
+                                    }
+                                }
+                            }
+                            let s = alloc::string::String::from_utf8_lossy(&bytes);
+                            let _ = stack.push(string_to_chain(&s));
+                        }
+                        "__array_concat" => {
+                            // Stack: [arr1, arr2] → concatenated array
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let mut result = Vec::new();
+                            if let Some(a_idx) = as_array_ref(&a) {
+                                if a_idx < array_heap.len() {
+                                    result.extend(array_heap[a_idx].iter().cloned());
+                                }
+                            }
+                            if let Some(b_idx) = as_array_ref(&b) {
+                                if b_idx < array_heap.len() {
+                                    result.extend(array_heap[b_idx].iter().cloned());
+                                }
+                            }
+                            let idx = array_heap.len();
+                            array_heap.push(result);
+                            let _ = stack.push(make_array_ref(idx));
+                        }
+
                         // ── Phase 3 B6: Bitwise operations ─────────────────
                         "__bit_and" => {
                             let b = vm_pop!(stack, events);

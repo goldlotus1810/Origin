@@ -65,7 +65,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 0.2 | Test parser.ol + module import | `PLAN_0_2` | 0.1 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | parse(tokenize("let x=42;"))→1 LetStmt, parse(tokenize("fn f(x){return x+1;}"))→1 FnDef, parse(tokenize("if x>0{emit x;}"))→1 IfStmt. Key fix: CallClosure LoadLocal for non-local vars. 2451 tests pass. |
 | 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: 3 roundtrip tests pass |
 | 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: semantic.ol 672 LOC, 4 DoD tests pass. analyze(parse(tokenize("let x=42;")))→PushNum+Store+Halt. analyze(parse(tokenize(lexer_src)))→323 ops, 0 errors. |
-| 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | CLAIMED | `claude/review-and-fix-project-erPD8` | erPD8 | Bắt đầu 2026-03-19 |
+| 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: codegen.ol 190 LOC, bytecode.rs decoder 280 LOC. 14 Rust decoder tests + 2 integration tests pass. generate(manual_ops) → valid bytecode → decode matches. Full pipeline (analyze→generate) has known CallClosure field-access limitation. |
 | 0.6 | Self-compile test | `PLAN_0_6` | 0.5 | FREE | — | — | — |
 
 ## Phase 1 — Machine code VM (SONG SONG với Phase 0)
@@ -158,4 +158,15 @@ Khi Session A xong 0.3:
             4 DoD tests: let_stmt, fn_def, undeclared_var, compile_lexer.
             analyze(parse(tokenize(lexer_src))) → 323 ops, 0 errors.
             All workspace tests pass, 0 clippy errors.
+2026-03-19  0.5 DONE (session erPD8): codegen.ol 190 LOC + bytecode.rs 280 LOC.
+            codegen.ol: bytecode encoder (36 opcodes, byte/u16/u32/f64/str helpers).
+            bytecode.rs: Rust decoder + Rust encoder for round-trip testing.
+            14 Rust decoder tests (roundtrip, edge cases, error handling).
+            2 integration tests: codegen_ol_let_x_42 + codegen_ol_byte_count.
+            VM builtins: __f64_to_le_bytes, __f64_from_le_bytes, __str_bytes,
+            __bytes_to_str, __array_concat (+ aliases in both builtin tables).
+            Known limitation: full pipeline analyze()→generate() has struct
+            field-access issue in CallClosure mode (dict .name empty when
+            struct passed across closure boundaries). Encoder works correctly
+            with manually-created ops. 2474 workspace tests pass, 0 clippy errors.
 ```
