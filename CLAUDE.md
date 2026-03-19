@@ -23,12 +23,19 @@ Mọi thứ là Node. Mọi Node kết nối bằng Silk.
 
 ---
 
-## Nguyên lý cốt lõi: Molecule = Công thức
+## Nguyên lý cốt lõi: Molecule = Công thức [Node & SILK](old/archive/SPEC_NODE_SILK.md)
 
 **Đây là điều quan trọng nhất cần hiểu trước khi đọc tiếp.**
 
 ```
 Molecule [S][R][V][A][T] = 5 bytes = CÔNG THỨC, không phải dữ liệu.
+Shape    = f_s(inputs...)    ← công thức hình dạng
+Relation = f_r(inputs...)    ← công thức quan hệ
+Valence  = f_v(inputs...)    ← công thức cảm xúc
+Arousal  = f_a(inputs...)    ← công thức cường độ
+Time     = f_t(inputs...)    ← công thức thời gian
+
+Chưa có input → TIỀM NĂNG    Có input → GIÁ TRỊ CỤ THỂ    Đủ → node CHÍN
 
 5 bytes này là tọa độ trong không gian 5 chiều.
 Từ tọa độ này, MỌI THỨ về một khái niệm đều TÍNH ĐƯỢC:
@@ -42,7 +49,14 @@ Từ tọa độ này, MỌI THỨ về một khái niệm đều TÍNH ĐƯỢC
 
 ```
 ❌ Cách truyền thống: lưu "lửa là khí ion hóa ở nhiệt độ cao..." = ~5 KB
+
 ✅ Cách HomeOS:       lưu [Sphere, Causes, 0xC0, 0xC0, Fast]     = 5 bytes
+
+Dream = đánh giá công thức nào đã "chín" (đủ evidence) → promote QR
+LeoAI program() = tổ hợp công thức A ∘ B → công thức C mới, chờ dữ liệu
+evolve() = thay 1 biến trong công thức → loài mới
+16GB budget: 100M concept × 7 bytes công thức = 700 MB (thay vì TB nếu lưu giá trị)
+→ Áp dụng cho Gap #3: Dream phải evaluate công thức (MolSummary 5D), không so sánh bytes.
 
 Từ 5 bytes:
   Shape=Sphere      → SDF tính ra hình cầu
@@ -68,19 +82,10 @@ Molecule.evolve(dim, new_value) → EvolveResult
 
 ```
 Molecule [S][R][V][A][T]
-    │
-    ├── SDF      → công thức hình dạng (hữu hình)
-    │               Shape byte → SdfKind + params → render
-    │
-    ├── Spline   → công thức biến đổi (vô hình)
-    │               6 curves: intensity, force, temperature,
-    │               frequency, emotion_v, emotion_a
-    │
-    └── Silk     → công thức quan hệ (kết nối)
-                    So sánh 5D → Silk tự tồn tại, 0 bytes
+
 ```
 
-### Bài toán 16GB — Tại sao HomeOS chạy trên điện thoại
+### Bài toán 16GB — Tại sao HomeOS chạy trên điện thoại [Node & SILK](old/archive/SPEC_NODE_SILK.md)
 
 ```
 Tri thức nhân loại (text thô):
