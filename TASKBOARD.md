@@ -221,22 +221,22 @@ tools/intg/
 
 ### Task breakdown
 
-| ID | Task | Mô tả | Effort | Status | Branch | Session | Notes |
-|----|------|--------|--------|--------|--------|---------|-------|
-| INTG-0 | Scaffold `tools/intg` crate | Cargo.toml, lib.rs helpers, thêm vào workspace | 30m | FREE | | | |
-| INTG-1 | `t01_ucd_olang.rs` — UCD → Olang | encode_codepoint() → Molecule valid, chain_hash unique, Registry insert+lookup roundtrip. Test 10+ codepoints (🔥●∈♩😀). | 1h | FREE | | | Depends: INTG-0 |
-| INTG-2 | `t02_olang_silk.rs` — Olang → Silk | 2 chains encode → co_activate → edge exists → walk_weighted returns both. chain_hash match giữa Registry và SilkGraph. | 1h | FREE | | | Depends: INTG-0 |
-| INTG-3 | `t03_silk_context.rs` — Silk → Context | Silk edge với EmotionTag → amplify_emotion → ConversationCurve.push() → tone đúng (Supportive khi V giảm, Celebratory khi V tăng). Variance window → Gentle khi unstable. | 1-2h | FREE | | | Depends: INTG-0 |
-| INTG-4 | `t04_agents_memory.rs` — Agents → Memory pipeline | SecurityGate.check() → ContentEncoder.encode() → STM.push() → verify observation. Dream.run() với ≥ fib(n) observations → cluster result. Co_activate trong learning → Hebbian weight tăng. | 2h | FREE | | | Depends: INTG-0 |
-| INTG-5 | `t05_runtime_e2e.rs` — Full pipeline E2E | HomeRuntime.process_text("tôi buồn vì mất việc") → response có tone Supportive. process_text("○{emit 🔥;}") → OlangResult có output. Multi-turn: 5 câu → ConversationCurve đúng trajectory. Crisis input → gate chặn, response phù hợp. | 2-3h | FREE | | | Depends: INTG-0. Quan trọng nhất. |
-| INTG-6 | `t06_writer_reader.rs` — Persistence roundtrip | Writer ghi 50 nodes (Node, Edge, Alias, Amend, NodeKind, STM, Hebbian, KnowTree, Curve) → Reader đọc lại → tất cả fields khớp. Test cả v0.03/v0.04 legacy + v0.05 tagged. Append-only: ghi thêm → đọc lại → cũ+mới đều đúng. | 1-2h | FREE | | | Depends: INTG-0 |
-| INTG-7 | `t07_isl_agents.rs` — ISL ↔ Agent hierarchy | ISLAddress encode/decode roundtrip. Chief gửi ISLMessage → Worker nhận đúng. Worker respond → Chief nhận. Emergency priority: urgent trước normal trong ISLQueue. Tier rules: AAM↔Chief OK, AAM↔Worker BLOCKED. | 1-2h | FREE | | | Depends: INTG-0 |
-| INTG-8 | `t08_evolution.rs` — Molecule Evolution chain | 🔥 encode → evolve(Valence, 0x40) → new Molecule valid. consistency_check ≥ 3/4. dimension_delta() đúng chiều thay đổi. New chain → Registry insert → Silk liên kết với parent. | 1h | FREE | | | Depends: INTG-0 |
-| INTG-9 | `t09_persistence.rs` — Origin file integrity | Tạo HomeRuntime → process 10 inputs → flush to file → drop runtime → tạo runtime mới từ cùng file → verify: Registry count, Silk edge count, STM observations, tất cả alias resolve đúng. | 2h | FREE | | | Depends: INTG-0, INTG-6 |
-| INTG-10 | `t10_invariants.rs` — 23 Quy Tắc Bất Biến | Test TỪ CLAUDE.md: ① 5 nhóm không thêm ④ Molecule từ encode ⑧ Node → registry ⑨ File trước RAM sau ⑩ Append-only ⑪ Silk cùng tầng ⑬ EmotionTag per edge ⑭ L0 không import L1 ⑱ BlackCurtain. Mỗi QT = 1+ test. | 2-3h | FREE | | | Depends: INTG-0. Bảo vệ kiến trúc. |
-| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | Load bytecode từ builder → VM execute: result.ol (ok/err/unwrap), iter.ol (range/reduce), sort.ol (quicksort), hash.ol (fnv1a). Verify output values. | 2h | FREE | | | Depends: INTG-0, B7 (VM entry point) |
-| INTG-12 | `t12_build_roundtrip.rs` — Builder → Binary → Verify | Compile .ol → bytecode → pack → extract bytecode → decode → verify opcodes match. ELF header valid. Wrap mode: trailer offset → header → bytecode → knowledge boundaries đúng. | 1-2h | FREE | | | Depends: INTG-0 |
-| INTG-CI | Makefile target `make intg` | Thêm `cargo test -p intg` vào Makefile. Chạy SAU `cargo test --workspace`. Output: bảng tổng kết pass/fail per mối nối. | 30m | FREE | | | Depends: INTG-0 |
+| ID | Task | Tests | Status | Branch | Session | Lỗi phát hiện khi implement |
+|----|------|-------|--------|--------|---------|------------------------------|
+| INTG-0 | Scaffold `tools/intg` crate | — | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `isl` chưa có trong workspace.dependencies → dùng path trực tiếp |
+| INTG-1 | `t01_ucd_olang.rs` — UCD → Olang | 12 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Registry API khác spec: `insert()` cần 5 args (thêm `is_qr`), không có `contains()`/`get()`/`resolve()` — dùng `lookup_hash()`/`lookup_name()`/`register_alias()`. MolecularChain không có `.molecules()` — dùng `.0` (pub Vec) |
+| INTG-2 | `t02_olang_silk.rs` — Olang → Silk | 6 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `SilkGraph.neighbors()` trả `Vec<u64>` không phải struct `.hash`. Không có `edge_weight()` — dùng `find_edge().weight` |
+| INTG-3 | `t03_silk_context.rs` — Silk → Context | 6 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `ResponseTone::Neutral` không tồn tại — đúng tên là `ResponseTone::Engaged` |
+| INTG-4 | `t04_agents_memory.rs` — Agents → Memory | 7 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `ContentEncoder.encode()` text khác nhau có thể ra cùng chain_hash (word-level encoding). `ShortTermMemory` nằm ở `agents::learning` không phải `memory::build`. `ContentInput::Text` cần cả `timestamp` field. STM dedup theo chain_hash → push cùng chain 5 lần vẫn len=1 |
+| INTG-5 | `t05_runtime_e2e.rs` — Full pipeline E2E | 9 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `ResponseTone::Neutral` → `Engaged` (như INTG-3) |
+| INTG-6 | `t06_writer_reader.rs` — Persistence roundtrip | 9 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi — API khớp spec |
+| INTG-7 | `t07_isl_agents.rs` — ISL ↔ Agent hierarchy | 8 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `ISLMessage::new()` chỉ 3 args (không có payload arg). `from_bytes()` trả `Option<Self>` |
+| INTG-8 | `t08_evolution.rs` — Molecule Evolution | 8 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi — `evolve()`, `dimension_delta()`, `evolve_and_apply()` khớp spec |
+| INTG-9 | `t09_persistence.rs` — Origin file integrity | 6 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | RuntimeMetrics không có `registry_count` — dùng `stm_observations`, `silk_edges`, `turns` |
+| INTG-10 | `t10_invariants.rs` — Quy Tắc Bất Biến | 11 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `silk::hebbian::fib()` bắt đầu từ (1,1) không phải (0,1): fib(0)=1, fib(5)=8, fib(7)=21. `olang::lca::lca()` nhận 2 args không phải slice |
+| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | — | FREE | | | Blocked: B7 (VM entry point dispatch) |
+| INTG-12 | `t12_build_roundtrip.rs` — Builder → Binary | — | FREE | | | |
+| INTG-CI | Makefile target `make intg` | — | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi |
 
 ### Ưu tiên thực hiện
 
@@ -385,4 +385,17 @@ INTG (song song với tất cả):
             Thêm blockers B4-B7 (parser + VM entry point).
             Tạo Makefile cho build automation.
             2198 workspace tests pass, 0 clippy errors.
+2026-03-19  INTG-0..10 + INTG-CI → DONE (session 2MKRJ).
+            tools/intg crate: 10 test files, 82 integration tests, 0 failures.
+            Phát hiện 8 lỗi spec vs thực tế khi implement:
+              ① Registry API: thiếu contains()/get()/resolve() — dùng lookup_hash()/lookup_name()
+              ② Registry.insert(): cần 5 args (is_qr bị thiếu trong spec)
+              ③ MolecularChain: không có .molecules() — pub field .0
+              ④ SilkGraph.neighbors(): trả Vec<u64> không phải struct
+              ⑤ ResponseTone::Neutral không tồn tại → Engaged
+              ⑥ ContentEncoder: text khác có thể cùng chain_hash (word-level)
+              ⑦ ShortTermMemory: nằm ở agents::learning, không phải memory::build
+              ⑧ silk::hebbian::fib(): (1,1) sequence, không phải (0,1)
+            INTG-11, INTG-12 → FREE (INTG-11 blocked by B7).
+            Makefile: thêm `make intg` target.
 ```

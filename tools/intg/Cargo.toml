@@ -1,0 +1,17 @@
+[package]
+name = "intg"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ucd     = { workspace = true }
+olang   = { workspace = true, features = ["std"] }
+silk    = { workspace = true }
+context = { workspace = true }
+agents  = { workspace = true }
+memory  = { workspace = true }
+runtime = { workspace = true, features = ["std"] }
+isl     = { path = "../../crates/isl" }
+vsdf    = { workspace = true }
+hal     = { workspace = true }
+homemath = { workspace = true }
