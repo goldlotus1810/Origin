@@ -144,7 +144,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
 | 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: asm_emit_arm64.ol 470 LOC, elf_emit.ol + builder.ol extended, VM op_call 15 builtins + ELF detection. 7KB ARM64 binary. **AUDIT (2MKRJ): 2 lỗi CRITICAL** — ① builder.ol tham chiếu `vm/arm64/vm_arm64.bin` nhưng file CHƯA TỒN TẠI (chỉ có .S source) ② Rust builder (`main.rs`) KHÔNG có `--arch`/`--arm64` flag — hardcode x86_64, chỉ Olang builder mới cross-compile được. |
-| 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
+| 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | fat_header.ol (180 LOC), fat_loader.ol (220 LOC), builder.ol build_fat(), pack.rs fat support + 4 Rust tests. Tên: Kaze. |
 | 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: wasm_emit.ol 250 LOC, vm_wasi.wat 400 LOC, origin.html browser host, 6 new builtins (__concat/__char_at/__substr/__push/__pop/__cmp_ne), bytecode embedding, --arch wasm/wasi in builder. |
 
 ## Phase 5 — Optimization
@@ -469,4 +469,12 @@ INTG (song song với tất cả):
                 (camera/light/door/sensor/network), skill selection, ISL addr alloc.
             Builder: compile homeos/ subdirectory (was only bootstrap/ + root).
             50/50 stdlib+homeos files compile. Bytecode total now includes all modules.
+2026-03-19  4.2 DONE (session 2MKRJ, Kaze). Fat binary multi-arch format:
+            fat_header.ol (180 LOC): make/parse fat header 64B, per-arch entries 16B,
+                find_arch(), extract_vm(), extract_bytecode(), extract_knowledge().
+            fat_loader.ol (220 LOC): x86_64 + ARM64 ELF loader stubs
+                (open→fstat→mmap→parse fat header→jump to VM entry).
+            builder.ol: build_fat() + fat_config() for multi-arch packing.
+            pack.rs: Rust fat binary support (pack_fat, parse_fat_header, 4 tests).
+            All workspace tests pass, 0 new clippy warnings.
 ```
