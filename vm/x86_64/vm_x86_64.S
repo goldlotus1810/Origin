@@ -57,13 +57,35 @@
 
 _start:
     # ── 1. Open bytecode file ────────────────────────────────────────
-    # Check argc: if argv[1] exists, open that file
+    # Check argc: if argv[1] exists, check for --eval or open that file
     # Otherwise fall back to /proc/self/exe
     # Stack at _start: [argc][argv[0]][argv[1]]...
     mov     (%rsp), %rax                # argc
     cmp     $2, %rax
     jb      .open_self                  # no args → open self
+
+    # Check if argv[1] == "--eval" (bytes: 2d 2d 65 76 61 6c 00)
     mov     16(%rsp), %rdi              # argv[1]
+    # Compare first 4 bytes: "--ev" = 0x76652d2d (little-endian)
+    cmpl    $0x76652d2d, (%rdi)         # "--ev"
+    jne     .not_eval
+    # Compare next 2 bytes: "al" = 0x6c61
+    movzwl  4(%rdi), %eax
+    cmp     $0x6c61, %eax               # "al" little-endian
+    jne     .not_eval
+    # Check null terminator
+    cmpb    $0, 6(%rdi)
+    jne     .not_eval
+
+    # --eval mode detected: set flag, use argv[2] or /proc/self/exe
+    movb    $1, eval_mode(%rip)
+    cmpq    $3, (%rsp)                  # argc >= 3? (argv[2] = file)
+    jb      .open_self
+    mov     24(%rsp), %rdi              # argv[2]
+    jmp     .do_open
+
+.not_eval:
+    mov     16(%rsp), %rdi              # argv[1] = filename
     jmp     .do_open
 .open_self:
     lea     proc_self_exe(%rip), %rdi
@@ -2675,6 +2697,10 @@ op_halt:
     # Not nested — this is the boot completion.
     push    %rax                        # restore CPU stack
 
+    # Check eval_mode: if set, process stdin and exit (no REPL)
+    cmpb    $0, eval_mode(%rip)
+    jne     .eval_stdin
+
     # Print greeting
     lea     msg_greeting(%rip), %rsi
     movzbl  msg_greeting_len(%rip), %edx
@@ -2819,6 +2845,164 @@ op_halt:
     pop     %r12                        # restore bytecode base
     jmp     vm_loop                     # continue outer execution
 
+# ── --eval mode: read ALL stdin → process each line → exit ─────────
+.eval_stdin:
+    # Pop the value that op_halt pushed back (prevents stack leak)
+    pop     %rax
+
+    # Check if this is a re-entry (buffer already read)
+    cmpq    $0, eval_buf(%rip)
+    jne     .eval_next_line             # re-entry → continue from saved offset
+
+    # First entry: allocate 64KB buffer and read all stdin
+    mov     %r15, %rax
+    mov     %rax, eval_buf(%rip)        # save buffer base in BSS
+    add     $0x10000, %r15              # reserve 64KB
+
+    # Read all stdin into buffer
+    mov     %rax, %rsi                  # buf
+    mov     $0x10000, %edx             # max 64KB
+    xor     %edi, %edi                  # fd = stdin (0)
+    mov     $SYS_READ, %eax
+    syscall
+    test    %rax, %rax
+    jle     .eval_exit                  # EOF or error → exit
+
+    mov     %rax, eval_total(%rip)      # save total length
+    movq    $0, eval_offset(%rip)       # start at offset 0
+
+.eval_next_line:
+    mov     eval_offset(%rip), %rcx     # current offset
+    mov     eval_total(%rip), %r9       # total length
+    mov     eval_buf(%rip), %r8         # buffer base
+    cmp     %r9, %rcx
+    jge     .eval_exit                  # processed all input
+
+    # Find end of current line (scan for \n or end of input)
+    mov     %rcx, %rdi                  # save line start offset
+.eval_scan:
+    cmp     %r9, %rcx
+    jge     .eval_got_line              # end of input = end of line
+    cmpb    $0x0A, (%r8,%rcx)          # newline?
+    je      .eval_got_line
+    inc     %rcx
+    jmp     .eval_scan
+
+.eval_got_line:
+    # rdi = line start offset, rcx = line end offset (at \n or end)
+    # Save next offset (past \n) for after execution
+    mov     %rcx, %rax
+    cmp     %r9, %rcx
+    jge     .eval_no_skip_nl
+    inc     %rax                        # skip past \n
+.eval_no_skip_nl:
+    mov     %rax, eval_offset(%rip)     # save offset for next iteration
+
+    mov     %rcx, %rax
+    sub     %rdi, %rax                  # rax = line length
+    test    %rax, %rax
+    jz      .eval_next_line             # skip empty lines
+
+    # Set up line pointer and length
+    lea     (%r8,%rdi), %rdi            # rdi = line start ptr
+    mov     %rax, %rcx                  # rcx = line length
+
+    # Strip trailing \r if present
+    cmpb    $0x0D, -1(%rdi,%rcx)
+    jne     .eval_no_cr
+    dec     %rcx
+    test    %rcx, %rcx
+    jz      .eval_next_line             # empty after CR strip
+.eval_no_cr:
+
+    # Check if repl_eval exists
+    push    %rcx                        # save line len
+    push    %rdi                        # save line ptr
+    lea     bname_repl_eval(%rip), %rdi
+    mov     $9, %edx
+    call    hash_name
+    call    var_load_hash
+    mov     %rdx, %rsi
+    and     $0xFFFF, %esi
+    pop     %rdi                        # restore line ptr
+    pop     %rcx                        # restore line len
+    cmp     $CLOSURE_MARKER, %si
+    jne     .eval_fallback_echo
+
+    # Build trampoline: Push string → CallClosure repl_eval → Emit → Halt
+    mov     %r15, %r8                   # trampoline base
+    movb    $0x01, (%r15)               # Push opcode
+    movw    %cx, 1(%r15)                # string length (u16 LE)
+    add     $3, %r15
+
+    # Copy line bytes into trampoline
+    push    %rcx
+    push    %rdi
+    mov     %rdi, %rsi                  # src = line ptr
+    mov     %r15, %rdi                  # dest = trampoline
+    mov     %ecx, %ecx
+    rep     movsb
+    mov     %rdi, %r15
+    pop     %rdi
+    pop     %rcx
+
+    # CallClosure "repl_eval" arity=1
+    movb    $0x24, (%r15)
+    movb    $9, 1(%r15)
+    push    %rcx
+    lea     bname_repl_eval(%rip), %rsi
+    lea     2(%r15), %rdi
+    mov     $9, %ecx
+    rep     movsb
+    pop     %rcx
+    movb    $1, 11(%r15)                # arity = 1
+    add     $12, %r15
+
+    # Emit + Halt
+    movb    $0x06, (%r15)
+    inc     %r15
+    movb    $0x0F, (%r15)
+    inc     %r15
+
+    # Calculate trampoline size
+    mov     %r15, %rcx
+    sub     %r8, %rcx
+
+    # Execute as nested bytecode
+    push    %r12
+    push    %r13
+    push    %rbx
+    pushq   $1                          # nested flag
+
+    mov     %r8, %r12                   # bytecode base = trampoline
+    xor     %r13d, %r13d               # PC = 0
+    mov     %rcx, %rbx                  # bytecode size
+    jmp     vm_loop
+    # Flow: trampoline → Halt(nested) → .halt_nested → restore r12/r13/rbx
+    #       → vm_loop → boot bytecode Halt → op_halt → not nested
+    #       → eval_mode check → .eval_stdin → .eval_next_line (reads from BSS)
+
+.eval_fallback_echo:
+    # repl_eval not found — echo input
+    mov     %rdi, %rsi                  # line ptr
+    mov     %rcx, %rdx                  # line len
+    mov     $1, %edi                    # stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Write newline
+    lea     str_newline(%rip), %rsi
+    mov     $1, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .eval_next_line
+
+.eval_exit:
+    # Exit silently (no greeting, no goodbye)
+    mov     $SYS_EXIT, %eax
+    xor     %edi, %edi                  # exit code 0
+    syscall
+
 .repl_exit:
     # Print goodbye
     lea     msg_bye(%rip), %rsi
@@ -2913,3 +3097,12 @@ var_table_base:
     .space 8                            # pointer to variable table on heap
 bc_format:
     .space 1                            # 0 = ir.rs format, 1 = codegen.ol format
+eval_mode:
+    .space 1                            # 0 = REPL mode, 1 = --eval mode (stdin)
+    .align 8
+eval_buf:
+    .space 8                            # pointer to stdin buffer on heap
+eval_total:
+    .space 8                            # total bytes read from stdin
+eval_offset:
+    .space 8                            # current processing offset in buffer
