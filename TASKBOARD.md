@@ -72,9 +72,9 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | FREE | — | — | Cần bytecode format cố định |
-| 1.2 | vm_arm64.S | — | 1.1 | FREE | — | — | Chưa có plan chi tiết |
-| 1.3 | vm_wasm.wat | — | 1.1 | FREE | — | — | Chưa có plan chi tiết |
+| 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
+| 1.2 | vm_arm64.S | — | 1.1 | FREE | — | — | erPDB có thiết kế, chờ plan file |
+| 1.3 | vm_wasm.wat | — | 1.1 | FREE | — | — | erPDB có thiết kế, chờ plan file |
 | 1.4 | Builder tool (Rust) | `PLAN_1_4` | 1.1 | FREE | — | — | — |
 
 ## Song song — Auth (KHÔNG phụ thuộc Phase 0)
@@ -125,4 +125,6 @@ Khi Session A xong 0.3:
 2026-03-18  AUTH → DONE (session 2pN6F). 7 files, 910 LOC, 21 tests.
             Ed25519 VerifyingKey extended (from_bytes, as_bytes, seed).
             Wire vào HomeRuntime chưa làm (origin.rs quá lớn, cần kế hoạch).
+2026-03-19  1.1 → CLAIMED by Lyra (session 2pN6F). vm_x86_64.S bắt đầu.
+            1.2, 1.3 có thiết kế từ erPDB nhưng chưa có plan file.
 ```
