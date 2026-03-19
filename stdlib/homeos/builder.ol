@@ -17,6 +17,11 @@ pub fn build(config) {
   }
   emit("  Bytecode: " + to_string(len(bytecode)) + " bytes\n");
 
+  // WASM/WASI arch: embed bytecode into WASM binary
+  if arch == "wasm" || arch == "wasi" {
+    return build_wasm(config, bytecode);
+  }
+
   // 2. Read VM code (pre-assembled binary for target arch)
   let vm_code = [];
   if config.vm_path != "" {
@@ -55,6 +60,25 @@ pub fn build(config) {
   let binary = make_elf_arch(payload, 32, arch);
 
   // 5. Write output
+  file_write_bytes(config.output, binary);
+  emit("  Output: " + config.output + " (" + to_string(len(binary)) + " bytes)\n");
+  emit("Done!\n");
+}
+
+fn build_wasm(config, bytecode) {
+  // Read pre-compiled WASM VM binary
+  let vm_wasm = [];
+  if config.vm_path != "" {
+    emit("  Reading WASM VM: " + config.vm_path + "\n");
+    vm_wasm = file_read_bytes(config.vm_path);
+  }
+  emit("  WASM VM: " + to_string(len(vm_wasm)) + " bytes\n");
+
+  // Embed bytecode into WASM
+  let binary = make_wasm_with_bytecode(vm_wasm, bytecode);
+  emit("  WASM + bytecode: " + to_string(len(binary)) + " bytes\n");
+
+  // Write output
   file_write_bytes(config.output, binary);
   emit("  Output: " + config.output + " (" + to_string(len(binary)) + " bytes)\n");
   emit("Done!\n");
@@ -144,5 +168,25 @@ pub fn arm64_config() {
     kn_path: "origin.olang",
     output: "origin_arm64.olang",
     arch: "arm64"
+  };
+}
+
+pub fn wasm_config() {
+  return {
+    vm_path: "vm/wasm/vm_wasm.wasm",
+    stdlib_path: "stdlib",
+    kn_path: "",
+    output: "origin.wasm",
+    arch: "wasm"
+  };
+}
+
+pub fn wasi_config() {
+  return {
+    vm_path: "vm/wasm/vm_wasi.wasm",
+    stdlib_path: "stdlib",
+    kn_path: "",
+    output: "origin_wasi.wasm",
+    arch: "wasi"
   };
 }

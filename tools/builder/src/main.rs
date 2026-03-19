@@ -22,6 +22,7 @@ struct Args {
     output: String,
     codegen_format: bool,
     wrap_mode: bool,
+    arch: String,
 }
 
 fn parse_args() -> Args {
@@ -34,6 +35,7 @@ fn parse_args() -> Args {
     #[allow(unused_assignments)]
     let mut codegen_format = false;
     let mut wrap_mode = false;
+    let mut arch = String::from("x86_64");
 
     let mut i = 1;
     while i < args.len() {
@@ -43,10 +45,11 @@ fn parse_args() -> Args {
             "--bytecode" => { i += 1; bytecode_path = Some(args[i].clone()); }
             "--knowledge" | "--kn" => { i += 1; knowledge_path = Some(args[i].clone()); }
             "--output" | "-o" => { i += 1; output = args[i].clone(); }
+            "--arch" => { i += 1; arch = args[i].clone(); }
             "--codegen" => { codegen_format = true; }
             "--wrap" => { wrap_mode = true; }
             "--help" | "-h" => {
-                eprintln!("Usage: builder --vm <vm.bin> [--stdlib <dir>] [--bytecode <file>] [--knowledge <file>] [-o <output>] [--codegen] [--wrap]");
+                eprintln!("Usage: builder --vm <vm.bin> [--stdlib <dir>] [--bytecode <file>] [--knowledge <file>] [-o <output>] [--arch <x86_64|arm64|wasm>] [--codegen] [--wrap]");
                 process::exit(0);
             }
             other => {
@@ -62,7 +65,7 @@ fn parse_args() -> Args {
         process::exit(1);
     }
 
-    Args { vm_path, stdlib_path, bytecode_path, knowledge_path, output, codegen_format, wrap_mode }
+    Args { vm_path, stdlib_path, bytecode_path, knowledge_path, output, codegen_format, wrap_mode, arch }
 }
 
 /// Check if an ELF is a relocatable object file (ET_REL=1) vs executable (ET_EXEC=2).
@@ -186,13 +189,18 @@ fn main() {
     let is_linked_elf = args.wrap_mode ||
         (is_elf && !is_object_file(&vm_raw));
 
+    let arch = match args.arch.as_str() {
+        "arm64" | "aarch64" => pack::Arch::Arm64,
+        _ => pack::Arch::X86_64,
+    };
+
     let binary = pack::pack(&pack::PackConfig {
         vm_code: &vm_code,
         bytecode: &bytecode,
         knowledge: &knowledge,
         codegen_format: args.codegen_format,
         is_linked_elf,
-        arch: pack::Arch::X86_64,
+        arch,
     });
 
     // 5. Write output

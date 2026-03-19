@@ -146,7 +146,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 |----|------|------|---------|--------|--------|---------|-------|
 | 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: asm_emit_arm64.ol 470 LOC, elf_emit.ol + builder.ol extended, VM op_call 15 builtins + ELF detection. 7KB ARM64 binary. |
 | 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
-| 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bytecode embed + browser host + WASI |
+| 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: wasm_emit.ol 250 LOC, vm_wasi.wat 400 LOC, origin.html browser host, 6 new builtins (__concat/__char_at/__substr/__push/__pop/__cmp_ne), bytecode embedding, --arch wasm/wasi in builder. |
 
 ## Phase 5 — Optimization
 
