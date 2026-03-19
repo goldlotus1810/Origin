@@ -154,6 +154,9 @@ pub enum Stmt {
     /// `obj.field = expr;` or `obj.a.b.c = expr;` — assign to field of dict/record
     FieldAssign { object: String, fields: Vec<String>, value: Expr },
 
+    /// `arr[idx] = expr;` — assign to array index
+    IndexAssign { object: Expr, index: Expr, value: Expr },
+
     /// `struct Name[T] { field1, field2, ... }` — struct definition (with optional generics)
     StructDef { name: String, type_params: Vec<String>, fields: Vec<StructField> },
 
@@ -475,6 +478,8 @@ pub enum Expr {
     BitAnd(Box<Expr>, Box<Expr>),
     /// Bitwise XOR: `a ^ b`
     BitXor(Box<Expr>, Box<Expr>),
+    /// Bitwise OR: `a | b`
+    BitOr(Box<Expr>, Box<Expr>),
     /// Bitwise NOT: `~a`
     BitNot(Box<Expr>),
 }
@@ -533,6 +538,12 @@ impl<'a> Parser<'a> {
 
     /// Extract root ident and field path from a nested FieldAccess expression.
     /// `a.b.c` → Some(("a", ["b", "c"]))
+    /// Check if an expression is a compound lvalue (can be assigned to).
+    /// Does NOT include simple Ident — that's handled separately as Stmt::Assign.
+    fn is_lvalue(expr: &Expr) -> bool {
+        matches!(expr, Expr::FieldAccess { .. } | Expr::Index { .. })
+    }
+
     fn extract_field_path(expr: &Expr) -> Option<(String, Vec<String>)> {
         match expr {
             Expr::FieldAccess { object, field } => {
@@ -668,7 +679,15 @@ impl<'a> Parser<'a> {
             }
             Token::Spawn => self.parse_spawn(),
             Token::Select => self.parse_select(),
-            Token::Command(_) => self.parse_command(),
+            Token::Command(_) => {
+                // Look ahead: if followed by . [ ( = → it's a variable, not a command
+                let next = self.tokens.get(self.pos + 1).cloned().unwrap_or(Token::Eof);
+                if matches!(next, Token::Dot | Token::LBracket | Token::LParen | Token::Eq) {
+                    return self.parse_expr_or_symbol_stmt();
+                } else {
+                    return self.parse_command();
+                }
+            }
 
             // Symbol style
             Token::Circle => self.parse_emit_sym(),   // ○ expr;
@@ -1253,13 +1272,30 @@ impl<'a> Parser<'a> {
 
         // ident = expr → reassignment (not `let`, not `==`)
         // obj.field = expr → field assignment (supports a.b.c = value)
+        // arr[idx] = expr → index assignment
+        // compound: obj.field[i].sub = expr → index assign (general lvalue)
         if self.check(&Token::Eq) {
-            // Check if it's a (nested) field assign: extract root + path
+            // Check if it's a (nested) field assign: extract root + field path
             if let Some((root, fields)) = Self::extract_field_path(&expr) {
                 self.advance(); // consume =
                 let value = self.parse_expr()?;
                 self.expect(&Token::Semi)?;
                 return Ok(Stmt::FieldAssign { object: root, fields, value });
+            }
+            // General lvalue: any expr ending in Index or FieldAccess
+            // arr[idx] = value, obj.field[i].sub = value, etc.
+            if Self::is_lvalue(&expr) {
+                self.advance(); // consume =
+                let value = self.parse_expr()?;
+                self.expect(&Token::Semi)?;
+                // Decompose: if top-level is Index, use IndexAssign
+                // Otherwise wrap as IndexAssign with a dummy index (FieldAccess on complex expr)
+                if let Expr::Index { array, index } = expr {
+                    return Ok(Stmt::IndexAssign { object: *array, index: *index, value });
+                }
+                // FieldAccess on complex expr (e.g., arr[i].field = val)
+                // Lower as IndexAssign with field-access wrapper
+                return Ok(Stmt::IndexAssign { object: expr, index: Expr::Int(0), value });
             }
             let is_assign = matches!(&expr, Expr::Ident(_));
             if is_assign {
@@ -1678,6 +1714,12 @@ impl<'a> Parser<'a> {
                     let right = self.parse_primary()?;
                     left = Expr::BitXor(Box::new(left), Box::new(right));
                 }
+                // | as bitwise OR (when after an expression, not as lambda delimiter)
+                Token::Pipe => {
+                    self.advance();
+                    let right = self.parse_primary()?;
+                    left = Expr::BitOr(Box::new(left), Box::new(right));
+                }
                 _ => break,
             }
         }
@@ -2005,6 +2047,16 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            // Keywords/commands used as variable names in expression context
+            Token::Command(s) => {
+                self.advance();
+                Expr::Ident(s)
+            }
+            Token::Spawn => {
+                self.advance();
+                Expr::Ident("spawn".into())
+            }
+
             other => return Err(ParseError::new(&alloc::format!(
                 "Unexpected token: {:?}",
                 other
@@ -2077,12 +2129,57 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Check if a token can be used as a dict key (ident or keyword).
+    fn is_dict_key(token: &Token) -> bool {
+        matches!(token, Token::Ident(_)
+            | Token::Struct | Token::Enum | Token::Impl | Token::Trait
+            | Token::For | Token::In | Token::While | Token::Break | Token::Continue
+            | Token::Return | Token::Use | Token::Match | Token::Try | Token::Catch
+            | Token::Spawn | Token::Select | Token::From | Token::Mut
+            | Token::SelfKw | Token::Fn | Token::Let | Token::If | Token::Else
+            | Token::Loop | Token::Emit
+        )
+    }
+
+    /// Extract string name from a dict key token.
+    fn dict_key_name(token: &Token) -> Option<String> {
+        match token {
+            Token::Ident(s) => Some(s.clone()),
+            Token::Struct => Some("type".into()),
+            Token::Enum => Some("enum".into()),
+            Token::Impl => Some("impl".into()),
+            Token::Trait => Some("trait".into()),
+            Token::For => Some("for".into()),
+            Token::In => Some("in".into()),
+            Token::While => Some("while".into()),
+            Token::Break => Some("break".into()),
+            Token::Continue => Some("continue".into()),
+            Token::Return => Some("return".into()),
+            Token::Use => Some("use".into()),
+            Token::Match => Some("match".into()),
+            Token::Try => Some("try".into()),
+            Token::Catch => Some("catch".into()),
+            Token::Spawn => Some("spawn".into()),
+            Token::Select => Some("select".into()),
+            Token::From => Some("from".into()),
+            Token::Mut => Some("mut".into()),
+            Token::SelfKw => Some("self".into()),
+            Token::Fn => Some("fn".into()),
+            Token::Let => Some("let".into()),
+            Token::If => Some("if".into()),
+            Token::Else => Some("else".into()),
+            Token::Loop => Some("loop".into()),
+            Token::Emit => Some("emit".into()),
+            _ => None,
+        }
+    }
+
     /// Look ahead to determine if `{` starts a Dict literal (`{ key: value }`)
     /// vs a MolLiteral (`{ S=1 R=2 }`).
     fn is_dict_literal(&self) -> bool {
-        // pos is at LBrace. Check tokens[pos+1] = Ident, tokens[pos+2] = Colon
+        // pos is at LBrace. Check tokens[pos+1] = ident/keyword, tokens[pos+2] = Colon
         if self.pos + 2 < self.tokens.len() {
-            matches!(&self.tokens[self.pos + 1], Token::Ident(_))
+            Self::is_dict_key(&self.tokens[self.pos + 1])
                 && matches!(&self.tokens[self.pos + 2], Token::Colon)
         } else {
             false
@@ -2090,12 +2187,19 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse dict literal: `{ key: value, key2: value2 }`
+    /// Keys can be identifiers or keywords used as field names.
     fn parse_dict_literal(&mut self) -> Result<Expr, ParseError> {
         self.advance(); // consume {
         let mut fields = Vec::new();
         if !self.check(&Token::RBrace) {
             loop {
-                let key = self.expect_ident()?;
+                // Accept ident or keyword as dict key
+                let key = if let Some(name) = Self::dict_key_name(&self.peek()) {
+                    self.advance();
+                    name
+                } else {
+                    self.expect_ident()?
+                };
                 self.expect(&Token::Colon)?;
                 let value = self.parse_expr()?;
                 fields.push((key, value));
@@ -2217,6 +2321,14 @@ impl<'a> Parser<'a> {
             Token::Struct => Ok("type".into()),
             Token::Fn => Ok("fn".into()),
             Token::In => Ok("in".into()),
+            // Commands used as identifiers (learn, trace, inspect, etc.)
+            Token::Command(s) => Ok(s),
+            // Keywords used as identifiers in non-keyword position
+            Token::Spawn => Ok("spawn".into()),
+            Token::Match => Ok("match".into()),
+            Token::Select => Ok("select".into()),
+            Token::Mut => Ok("mut".into()),
+            Token::SelfKw => Ok("self".into()),
             other => Err(ParseError::new(&alloc::format!(
                 "Expected identifier, got {:?}",
                 other
