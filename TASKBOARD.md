@@ -232,8 +232,8 @@ tools/intg/
 | INTG-8 | `t08_evolution.rs` — Molecule Evolution | 8 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi — `evolve()`, `dimension_delta()`, `evolve_and_apply()` khớp spec |
 | INTG-9 | `t09_persistence.rs` — Origin file integrity | 6 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | RuntimeMetrics không có `registry_count` — dùng `stm_observations`, `silk_edges`, `turns` |
 | INTG-10 | `t10_invariants.rs` — Quy Tắc Bất Biến | 11 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `silk::hebbian::fib()` bắt đầu từ (1,1) không phải (0,1): fib(0)=1, fib(5)=8, fib(7)=21. `olang::lca::lca()` nhận 2 args không phải slice |
-| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | — | FREE | | | UNBLOCKED — B7 done (dSfvz) |
-| INTG-12 | `t12_build_roundtrip.rs` — Builder → Binary | — | FREE | | | |
+| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | 15 pass | DONE | `claude/project-audit-review-2pN6F` | Lyra | VM exec, bytecode roundtrip, IR direct exec, B7 halt stripping, step limit. Push/Load decode asymmetry noted. |
+| INTG-12 | `t12_build_roundtrip.rs` — Builder → Binary | 12 pass | DONE | `claude/project-audit-review-2pN6F` | Lyra | ELF mode (magic/header/offsets/extract), wrap mode (preserve ELF/trailer/extract), full roundtrip compile→pack→extract→decode, ARM64 arch byte. |
 | INTG-CI | Makefile target `make intg` | — | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi |
 
 ### Ưu tiên thực hiện
