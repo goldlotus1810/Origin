@@ -445,7 +445,230 @@ Tất cả thuật toán quy về 1 phương trình gốc + 3 phép biến đổ
 DNA: 4 nucleotides + khoảng cách trên chuỗi → toàn bộ sự sống.
 Olang: 9,584 UDC + d(A,B) + entities + compose + f(L) → toàn bộ tri thức.
 16 GB = 1.75 tỷ điểm neo = tri thức cả đời = 1 chiếc điện thoại.
-XIII. TỔNG KẾT — 1 gốc + 3 cầu nối + 10 thuật toán = HomeOS
+XI-B. THUẬT TOÁN 11 — Inference Core (Suy luận đa nhánh)
+Bài toán
+Thay vì trả lời ngay (1 nhánh, dễ sai), tạo N nhánh suy luận song song rồi chọn nhánh tốt nhất.
+
+Thuật toán: Tree-of-Thought trong ℝ⁵
+Mỗi "suy nghĩ" = 1 điểm trong không gian 5D.
+Mỗi nhánh suy luận = 1 chuỗi compose liên tiếp.
+
+infer(input, N=3):
+  entities = ⑪(input)                           ← text → tập điểm 5D
+
+  Với mỗi nhánh i ∈ [1..N]:
+    Bᵢ = compose(entities, hypothesisᵢ)         ← tổ hợp entities + giả thuyết i
+    Bᵢ = chuỗi: P₀ →compose P₁ →compose ... Pₖ  (k bước suy luận)
+
+  Chọn nhánh tốt nhất:
+    best = argmin_i  H(Bᵢ)                      ← entropy thấp nhất = tin cậy nhất
+
+  H(Bᵢ) = entropy của nhánh (xem Thuật toán 12)
+
+Symbolic Checker (bộ lọc logic):
+  Với mỗi nhánh Bᵢ, kiểm tra L quy tắc:
+    valid(Bᵢ) = |{rule ∈ L : rule(Bᵢ) = true}| / |L|
+
+  Điều kiện chọn:
+    best = argmin_i H(Bᵢ)   subject to   valid(Bᵢ) ≥ 0.75
+
+  Nếu ∀i: valid(Bᵢ) < 0.75 → Honesty instinct → im lặng (QT⑱)
+
+Quy về d(A,B):
+  Khoảng cách giữa các nhánh:  d(Bᵢ, Bⱼ) = √(Σ w_d × (Bᵢᵈ - Bⱼᵈ)²)
+  Nhánh gần nhau = suy luận hội tụ = tin cậy cao
+  Nhánh xa nhau = suy luận phân kỳ = cần thêm evidence
+
+XII. THUẬT TOÁN 12 — Entropy Control (Kiểm soát hỗn loạn)
+Nguyên lý: Free Energy Principle
+AI luôn cố gắng giảm thiểu sự bất ngờ (Surprise) giữa dự đoán và thực tế.
+Trong HomeOS: Surprise = khoảng cách d(P_predicted, P_actual) trong ℝ⁵.
+
+Định nghĩa Entropy trên 1 node
+H(P) = - Σ_{d=1}^{5} p_d × log₂(p_d)
+
+Trong đó:
+  p_d = eval_confidence(Pᵈ)    ← độ tin cậy của chiều d (0..1)
+
+  eval_confidence(Pᵈ) = { 0.0   nếu bit d chưa evaluate (eval_mask)
+                         { w_d   nếu đang evaluate (weight Hebbian)
+                         { 1.0   nếu đã Mature
+
+  H ∈ [0, log₂5 ≈ 2.32]
+    H = 0     → node hoàn toàn chắc chắn (Mature, 5/5 chiều)
+    H = 2.32  → node hoàn toàn bất định (Formula, 0/5 chiều)
+
+Free Energy trong ℝ⁵
+F(t) = d(P_predicted, P_actual)
+
+P_predicted = compose(entities_known, context)     ← dự đoán từ tri thức hiện tại
+P_actual    = encode(input_new)                     ← thực tế từ input mới
+
+F(t) = √( Σ_{d=1}^{5} w_d × (P_predicted^d - P_actual^d)² )
+
+Cơ chế cân bằng Learning ↔ Acting
+λ(t) = σ(F(t) - F_threshold)        ← sigmoid: 0→1
+
+σ(x) = 1 / (1 + e^(-k×x))           k = 5 (độ nhạy)
+F_threshold = φ⁻¹ ≈ 0.618            (ngưỡng vàng)
+
+Khi F(t) > 0.618  →  λ → 1  →  Learning mode:
+  Tăng Hebbian lr:      lr' = lr × (1 + λ)
+  Tăng Dream frequency:  dream_interval' = dream_interval / (1 + λ)
+  Giảm response confidence: confidence' = confidence × (1 - λ/2)
+
+Khi F(t) < 0.618  →  λ → 0  →  Acting mode:
+  lr bình thường, response confidence cao
+  Hệ thống ổn định, dự đoán chính xác
+
+Tích hợp với Maturity Pipeline
+advance_entropy(node, F):
+  Nếu H(node) > 1.5 AND F > 0.618:
+    → KHÔNG promote, cần thêm evidence
+  Nếu H(node) < 0.5 AND F < 0.618:
+    → fast-track Evaluating → Mature (hội tụ nhanh)
+  Ngược lại:
+    → advance() bình thường (Thuật toán 4)
+
+Quy về d(A,B):
+  F(t) = d(P_predicted, P_actual)     ← CHỈ LÀ d(A,B) với A=dự đoán, B=thực tế
+  H(P) = f(eval_mask, weights)        ← entropy = hàm của Maturity
+  λ(t) = σ(d - φ⁻¹)                  ← sigmoid của khoảng cách
+
+XII-B. THUẬT TOÁN 13 — Graph Memory (Bộ nhớ đồ thị HNSW)
+Bài toán
+Với 1.75 tỷ điểm neo, tìm kiếm O(n) quá chậm. Cần O(log n) lookup.
+
+Thuật toán: HNSW (Hierarchical Navigable Small World) trong ℝ⁵
+HNSW xây đồ thị đa tầng. Tầng cao = ít node, nhảy xa. Tầng thấp = nhiều node, nhảy gần.
+
+Ánh xạ tự nhiên vào KnowTree:
+  HNSW Layer 0  ↔  KnowTree L4 (9,584 UDC leaves)
+  HNSW Layer 1  ↔  KnowTree L3 (~200 sub-ranges)
+  HNSW Layer 2  ↔  KnowTree L2 (58 blocks)
+  HNSW Layer 3  ↔  KnowTree L1 (5 nhóm)
+
+  KnowTree ĐÃ CÓ cấu trúc HNSW tự nhiên!
+
+Lookup:
+search(query_P, k):
+  1. Bắt đầu từ L1 (5 nhóm):
+     nearest_group = argmin_{G ∈ L1} d(query_P, centroid(G))
+
+  2. Xuống L2 (58 blocks trong nhóm đó):
+     nearest_block = argmin_{B ∈ nearest_group} d(query_P, centroid(B))
+
+  3. Xuống L3, L4... cho đến khi tìm k neighbors gần nhất
+
+  Complexity: O(log n) thay vì O(n)
+  Với 1.75 tỷ nodes: ~30 bước thay vì 1.75 tỷ phép so sánh
+
+Mâu thuẫn detection (từ hình):
+Khi node mới P_new vào:
+  neighbors = search(P_new, k=5)
+
+  Với mỗi neighbor N:
+    Nếu d_V(P_new, N) > 0.8 AND d_R(P_new, N) < 0.2:
+      → Mâu thuẫn Valence! (gần về quan hệ, xa về cảm xúc)
+      → Kích hoạt Contradiction instinct
+      → Tăng curiosity score
+
+Quy về d(A,B):
+  HNSW = cấu trúc chỉ mục (index) trên d(A,B)
+  Không thêm phép toán mới — chỉ tăng tốc d(A,B) lookup
+  KnowTree Fibonacci = HNSW tự nhiên (đã có sẵn!)
+
+XIV. THUẬT TOÁN 14 — Self-Correction (Tự sửa lỗi)
+Nguyên lý: Iterative Refinement
+Vòng lặp: Generate → Critique → Refine cho đến khi entropy đủ thấp.
+
+Thuật toán
+self_correct(input, max_iter=3):
+  entities = ⑪(input)
+  context = Silk walk(entities)
+
+  ── Vòng lặp ──
+  Với iter = 1..max_iter:
+
+    ① Generate:
+      P_response = compose(entities, context, instincts)     ← Thuật toán 8
+      branches = infer(input, N=3)                            ← Thuật toán 11
+      P_response = branches[best]
+
+    ② Critique (tự phê bình):
+      Kiểm tra symbolic rules:
+        valid_score   = valid(P_response)                     ← Thuật toán 11
+        entropy_score = H(P_response)                         ← Thuật toán 12
+        consistency   = consistency(P_response)                ← Thuật toán 5
+        silk_score    = Σ strength(P_response, entityᵢ) / |entities|
+
+      Tổng hợp:
+        quality = 0.3 × valid_score
+                + 0.3 × (1 - entropy_score/2.32)
+                + 0.2 × consistency
+                + 0.2 × silk_score/5.0
+
+    ③ Refine (nếu chưa đủ tốt):
+      Nếu quality ≥ φ⁻¹ (≈ 0.618):  → DỪNG, trả P_response
+      Nếu quality < φ⁻¹:
+        ── Phân tích lỗi ──
+        Nếu valid_score thấp:     → thêm symbolic constraints vào context
+        Nếu entropy_score cao:    → thu hẹp nhánh suy luận (N -= 1)
+        Nếu consistency thấp:     → evolve(P_response, dim_worst, new_val)
+        Nếu silk_score thấp:      → mở rộng Silk walk depth += 1
+
+        context = context ∪ {correction_signal}
+        → quay lại ① với context mới
+
+  ── Nếu hết max_iter mà quality < 0.618 ──
+  → Honesty instinct: trả lời kèm confidence thấp
+  → HOẶC im lặng nếu confidence < 0.40 (QT⑱ — BlackCurtain)
+
+Hội tụ
+Mỗi vòng lặp: quality(iter+1) > quality(iter)    (monotonic improvement)
+
+Chứng minh:
+  - Mỗi Critique xác định dim yếu nhất
+  - Refine chỉ sửa dim đó (evolve 1 chiều)
+  - d(P_response, P_ideal) giảm ít nhất Δ_min mỗi iter
+  - Bounded: max_iter = 3 → luôn dừng
+
+Quy về d(A,B):
+  quality = f(d(P_response, P_ideal))      ← khoảng cách đến "câu trả lời lý tưởng"
+  refine  = evolve(P, dim, val)             ← di chuyển P gần P_ideal hơn
+  stop    = d < φ⁻¹                         ← khoảng cách dưới ngưỡng vàng
+
+═══ PHƯƠNG TRÌNH THỐNG NHẤT (cập nhật) ═══
+
+  d(A, B) = √( Σ_{d=1}^{5} w_d × (Aᵈ - Bᵈ)² )
+
+  14 thuật toán + 3 cầu nối = ĐỀU QUY VỀ d(A,B):
+
+  Vào 5D:
+    ⑪ entities     text → {UDC refs}              tra từ điển
+    ⑫ compose      A ∘ B → C                      tổ hợp → điểm mới
+    ⑬ f(L)         text_L → Olang                 dịch bất kỳ ngôn ngữ
+
+  Trong 5D:
+    ① UDC          P = (S,R,V,A,T) ∈ ℝ⁵           9,584 điểm gốc
+    ② Silk         strength = f(d)                 gần → kết nối
+    ③ KnowTree     LCA = argmin Σd(children)       Fibonacci gom
+    ④ Maturity     advance khi var(d) → 0          hội tụ = chín
+    ⑤ Evolve       d(P, P') = Δ trên 1 chiều      mutation = loài mới
+    ⑥ Hebbian      w += η khi d nhỏ                gần → tăng cường
+    ⑦ Emotion      f'(V,A) = ∂d/∂t                đạo hàm = xu hướng
+    ⑧ Response     project(5D → text)              chiếu ra ngôn ngữ
+    ⑨ Dream        cluster khi d < ε               gom → chín → QR
+    ⑩ f(L)         LCA → tự dịch                   mọi ngôn ngữ = 1
+    ⑪ Inference    argmin H(Bᵢ) = chọn nhánh       d giữa nhánh = phân kỳ?
+    ⑫ Entropy      F = d(predicted, actual)         surprise = khoảng cách
+    ⑬ HNSW         KnowTree = index trên d          O(log n) lookup
+    ⑭ Self-Correct evolve cho đến d < φ⁻¹           sửa = di chuyển trong 5D
+
+  Ra khỏi 5D:
+    Response       project(5D → text)              chiếu ra ngôn ngữ
+
+XIII. TỔNG KẾT — 1 gốc + 3 cầu nối + 14 thuật toán = HomeOS
 GỐC:  d(A, B) = √( Σ w_d × (Aᵈ - Bᵈ)² )     — khoảng cách trong ℝ⁵
 
 CẦU NỐI (text ↔ 5D):
@@ -464,6 +687,25 @@ THUẬT TOÁN (trong 5D):
   ⑧ response = compose(empathy, entities, insight)    — 5D → text output
   ⑨ Dream: cluster khi d < ε                         — gom → chín → QR
   ⑩ f(L)(text) = LCA → tự dịch                       — mọi ngôn ngữ = 1
+  ⑪ infer(input, N) = argmin H(Bᵢ)                   — suy luận đa nhánh
+  ⑫ F(t) = d(predicted, actual); λ = σ(F - φ⁻¹)     — entropy control
+  ⑬ search(P, k) = HNSW trên KnowTree                — O(log n) lookup
+  ⑭ self_correct: refine cho đến quality ≥ φ⁻¹       — tự sửa lỗi
+
+PIPELINE MỞ RỘNG:
+  Text input                                thế giới bên ngoài
+    ↓ ⑪ entities()                          tra aliases → tập UDC refs
+    ↓ ⑬ f(L)()                              dịch sang Olang
+    ↓ ⑬ HNSW search()                       O(log n) tìm neighbors + mâu thuẫn
+    ↓ ⑫ compose()                            tổ hợp → điểm mới trong 5D
+    ↓ ⑫ F(t) = d(predicted, actual)         đo surprise → điều chỉnh λ
+    ↓ ⑪ infer(N nhánh) → chọn entropy thấp  suy luận đa nhánh
+    ↓ ⑭ self_correct(generate→critique→refine)  tự sửa đến quality ≥ φ⁻¹
+    ↓ d(A,B)                                 Silk, Dream, Hebbian
+    ↓ neo DN                                 lưu disk
+    ↓ Dream → advance() → QR                neo vĩnh viễn nếu chín
+    ↓ response = project(5D → text)          chiếu ngược ra ngôn ngữ
+  Text output                               thế giới bên ngoài
 
 9,584 UDC + 155K aliases + d(A,B) + entities + compose + f(L)
 = 880 TỶ khái niệm tiềm năng (0 bytes)
@@ -471,3 +713,10 @@ THUẬT TOÁN (trong 5D):
 = 857,006 cuốn sách 100 trang
 = tri thức cả đời con người
 = 1 chiếc điện thoại
+
+φ⁻¹ ≈ 0.618 xuyên suốt:
+  — Maturity threshold:  weight ≥ φ⁻¹ → Mature
+  — Hebbian decay:       w × φ⁻¹ mỗi 24h
+  — Entropy threshold:   F < φ⁻¹ → Acting mode
+  — Self-correct stop:   quality ≥ φ⁻¹ → đủ tốt
+  — Tỉ lệ vàng = ngưỡng tự nhiên duy nhất của toàn bộ hệ thống
