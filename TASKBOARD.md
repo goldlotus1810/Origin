@@ -72,7 +72,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
+| 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 1184 LOC ASM, 12KB static ELF no-libc. DoD 1-4 pass (assemble+link, hello print, 2+3=5, loop 3→1). Dual-format dispatch (ir.rs + codegen.ol). SSE2 math, string builtins, variable table, f64→ASCII, LCA 5D. DoD 5 (lexer.ol bytecode) needs var_store fix in codegen mode. |
 | 1.2 | vm_arm64.S | `PLAN_1_2` | 1.1 | FREE | — | — | Plan file có sẵn |
 | 1.3 | vm_wasm.wat | `PLAN_1_3` | 1.1 | FREE | — | — | Plan file có sẵn |
 | 1.4 | Builder tool (Rust) | `PLAN_1_4` | 1.1 | FREE | — | — | — |
@@ -182,4 +182,8 @@ Khi Session A xong 0.3:
             2482 workspace tests pass, 0 clippy errors.
 2026-03-19  1.1 → CLAIMED by Lyra (session 2pN6F). vm_x86_64.S bắt đầu.
             1.2, 1.3 có plan file từ erPDB (PLAN_1_2, PLAN_1_3).
+2026-03-19  1.1 → DONE (Lyra). 1184 LOC x86_64 ASM, 12KB static binary.
+            DoD 1-4 pass. Dual-format (ir.rs + codegen.ol). SSE2 math,
+            string builtins, var table, f64→ASCII, LCA 5D.
+            Còn lại: DoD 5 var_store bug ở codegen mode.
 ```

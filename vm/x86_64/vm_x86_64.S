@@ -104,8 +104,18 @@ _start:
     # This is getting complex. Simpler approach:
     pop     %rax                        # bc_offset → rax
     movl    18(%rsp), %ebx              # bc_size from header (stack still has header)
+    # Read flags (offset 30 in header) before freeing
+    movzwl  30(%rsp), %ecx             # flags (u16 LE)
+    lea     bc_format(%rip), %rdx
+    test    $1, %ecx                    # bit 0 = codegen format?
+    jz      .fmt_irrs
+    movb    $1, (%rdx)
+    jmp     .fmt_done
+.fmt_irrs:
+    movb    $0, (%rdx)
+.fmt_done:
     add     $HEADER_SIZE, %rsp          # free header from stack
-    # Now rax = bc_offset, rbx = bc_size
+
     # Save bc_offset on stack for later (mmap clobbers r8)
     push    %rax                        # save bc_offset
 
@@ -185,12 +195,12 @@ vm_loop:
     movzbl  (%r12, %r13), %eax         # al = bytecode[PC]
     inc     %r13                        # PC++
 
-    # Dispatch via jump table
-    # Opcodes are sparse (0x00-0x09, 0x0A-0x0F, 0x10-0x14,
-    #                      0x20-0x22, 0x30-0x39, 0x40-0x42,
-    #                      0x50-0x53, 0x60-0x61, 0x70-0x71, 0x80-0x83)
-    # Use cascading comparisons for sparse ranges
+    # Check format flag (set during header parse)
+    lea     bc_format(%rip), %rcx
+    cmpb    $1, (%rcx)
+    je      dispatch_codegen
 
+    # ── ir.rs format dispatch ──
     # Range 0x00-0x0F: basic ops
     cmp     $0x10, %al
     jb      dispatch_basic
@@ -215,7 +225,7 @@ vm_loop:
     cmp     $0x40, %al
     jb      op_unknown
     cmp     $0x43, %al
-    jb      op_nop                      # device ops = nop in standalone VM
+    jb      op_nop
 
     # Range 0x50-0x53: file ops
     cmp     $0x50, %al
@@ -225,6 +235,89 @@ vm_loop:
 
     # Everything else
     jmp     op_unknown
+
+# ── codegen.ol format dispatch (tags 0x01-0x24) ─────────────────────────
+dispatch_codegen:
+    lea     codegen_table(%rip), %rcx
+    movzbl  %al, %eax
+    cmp     $0x25, %al
+    jae     op_unknown
+    movslq  (%rcx, %rax, 4), %rdx
+    add     %rcx, %rdx
+    jmp     *%rdx
+
+.section .rodata
+.align 4
+codegen_table:
+    .long op_unknown    - codegen_table # 0x00 (unused)
+    .long cg_push       - codegen_table # 0x01 Push (name string, u16 len)
+    .long op_load       - codegen_table # 0x02 Load
+    .long op_lca        - codegen_table # 0x03 Lca
+    .long op_edge       - codegen_table # 0x04 Edge
+    .long op_query      - codegen_table # 0x05 Query
+    .long op_emit       - codegen_table # 0x06 Emit
+    .long op_call       - codegen_table # 0x07 Call
+    .long op_ret        - codegen_table # 0x08 Ret
+    .long op_jmp        - codegen_table # 0x09 Jmp
+    .long op_jz         - codegen_table # 0x0A Jz
+    .long op_dup        - codegen_table # 0x0B Dup
+    .long op_pop        - codegen_table # 0x0C Pop
+    .long op_swap       - codegen_table # 0x0D Swap
+    .long op_loop       - codegen_table # 0x0E Loop
+    .long op_halt       - codegen_table # 0x0F Halt
+    .long op_nop        - codegen_table # 0x10 Dream
+    .long op_nop        - codegen_table # 0x11 Stats
+    .long op_nop        - codegen_table # 0x12 Nop
+    .long op_store      - codegen_table # 0x13 Store
+    .long op_load_local - codegen_table # 0x14 LoadLocal
+    .long op_push_num   - codegen_table # 0x15 PushNum
+    .long op_nop        - codegen_table # 0x16 Fuse
+    .long op_nop        - codegen_table # 0x17 ScopeBegin
+    .long op_nop        - codegen_table # 0x18 ScopeEnd
+    .long op_push_mol   - codegen_table # 0x19 PushMol
+    .long op_try_begin  - codegen_table # 0x1A TryBegin
+    .long op_catch_end  - codegen_table # 0x1B CatchEnd
+    .long op_store_upd  - codegen_table # 0x1C StoreUpdate
+    .long op_nop        - codegen_table # 0x1D Trace
+    .long op_nop        - codegen_table # 0x1E Inspect
+    .long op_nop        - codegen_table # 0x1F Assert
+    .long op_nop        - codegen_table # 0x20 TypeOf
+    .long op_nop        - codegen_table # 0x21 Why
+    .long op_nop        - codegen_table # 0x22 Explain
+    .long op_nop        - codegen_table # 0x23 Ffi (stub)
+    .long cg_call_closure - codegen_table # 0x24 CallClosure
+.section .text
+
+# codegen Push: [chain_len:2 u16 LE][chain_bytes:N] → push raw bytes as chain
+cg_push:
+    # Read u16 len
+    movzwl  (%r12, %r13), %ecx         # u16 LE chain_len
+    add     $2, %r13
+
+    # Copy chain bytes to heap
+    mov     %r15, %rdi                  # dest = heap
+    lea     (%r12, %r13), %rsi         # src = bytecode
+    mov     %ecx, %edx
+    push    %rcx
+    call    memcpy_small
+    pop     %rcx
+
+    # Push (ptr, len) onto VM stack
+    sub     $16, %r14
+    mov     %r15, (%r14)                # ptr
+    mov     %rcx, 8(%r14)               # len
+    add     %rcx, %r15                  # bump heap
+    add     %rcx, %r13                  # PC += chain_len
+    jmp     vm_loop
+
+# codegen CallClosure: [name_len:1][name:N][arity:1]
+cg_call_closure:
+    movzbl  (%r12, %r13), %ecx         # name_len
+    inc     %r13
+    add     %rcx, %r13                  # skip name
+    inc     %r13                        # skip arity byte
+    # Stub for now
+    jmp     vm_loop
 
 # ── Dispatch sub-tables ──────────────────────────────────────────────────
 
@@ -458,8 +551,406 @@ op_call:
     # [0x32, name_len_u8, name_bytes...]
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    add     %rcx, %r13                  # skip name
-    # Stub: no function table in standalone VM yet
+    lea     (%r12, %r13), %rsi         # name ptr
+
+    # Check builtin names
+    # __hyp_add (9 chars)
+    cmp     $9, %ecx
+    jne     .call_check_7
+    push    %rcx
+    lea     bname_hyp_add(%rip), %rdi
+    mov     $9, %ecx
+    push    %rsi
+    repe    cmpsb
+    pop     %rsi
+    pop     %rcx
+    je      .call_add
+    push    %rcx
+    lea     bname_hyp_sub(%rip), %rdi
+    mov     %rsi, %rax
+    mov     %rax, %rsi                  # restore rsi
+    mov     $9, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_sub
+    push    %rcx
+    lea     bname_hyp_mul(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $9, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_mul
+    push    %rcx
+    lea     bname_hyp_div(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $9, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_div
+    jmp     .call_check_7
+
+.call_check_7:
+    # __eq (4), __cmp_lt (8), __cmp_gt (8), __cmp_le (8), __cmp_ge (8)
+    cmp     $4, %ecx
+    jne     .call_check_8
+    push    %rcx
+    lea     bname_eq(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $4, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_eq
+    jmp     .call_skip
+
+.call_check_8:
+    cmp     $8, %ecx
+    jne     .call_check_str
+    push    %rcx
+    lea     bname_cmp_lt(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $8, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_lt
+    push    %rcx
+    lea     bname_cmp_gt(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $8, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_gt
+    push    %rcx
+    lea     bname_cmp_le(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $8, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_le
+    push    %rcx
+    lea     bname_cmp_ge(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $8, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_ge
+    jmp     .call_check_str
+
+.call_check_str:
+    # String builtins: __len (5), __concat (8), __char_at (9), __substr (8)
+    cmp     $5, %ecx
+    jne     .call_check_str8
+    push    %rcx
+    lea     bname_len(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $5, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_len
+    jmp     .call_skip
+
+.call_check_str8:
+    cmp     $8, %ecx
+    jne     .call_check_str9
+    push    %rcx
+    lea     bname_concat(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $8, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_concat
+    push    %rcx
+    lea     bname_substr(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $8, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_substr
+    jmp     .call_skip
+
+.call_check_str9:
+    cmp     $9, %ecx
+    jne     .call_skip
+    push    %rcx
+    lea     bname_char_at(%rip), %rdi
+    mov     %rsi, %rax
+    mov     $9, %ecx
+    repe    cmpsb
+    mov     %rax, %rsi
+    pop     %rcx
+    je      .call_char_at
+    # Fall through to skip
+
+.call_skip:
+    # Unknown function — skip
+    add     %rcx, %r13                  # PC += name_len
+    jmp     vm_loop
+
+# ── Math builtins ────────────────────────────────────────────────────────
+
+.call_add:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1              # b
+    movsd   16(%r14), %xmm0            # a
+    add     $16, %r14
+    addsd   %xmm1, %xmm0
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+.call_sub:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1              # b
+    movsd   16(%r14), %xmm0            # a
+    add     $16, %r14
+    subsd   %xmm1, %xmm0              # a - b
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+.call_mul:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    mulsd   %xmm1, %xmm0
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+.call_div:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1              # b (divisor)
+    xorpd   %xmm2, %xmm2
+    ucomisd %xmm2, %xmm1
+    je      vm_error_div_zero
+    movsd   16(%r14), %xmm0            # a (dividend)
+    add     $16, %r14
+    divsd   %xmm1, %xmm0              # a / b
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+# ── Comparison builtins ──────────────────────────────────────────────────
+
+.call_eq:
+    add     %rcx, %r13
+    # Check if both are f64
+    mov     8(%r14), %rax              # b len
+    mov     24(%r14), %rcx             # a len
+    cmp     $F64_MARKER, %rax
+    jne     .eq_chain
+    cmp     $F64_MARKER, %rcx
+    jne     .eq_chain
+    # Both f64
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    ucomisd %xmm1, %xmm0
+    je      .eq_true_chain
+    jmp     .eq_false_chain
+
+.eq_chain:
+    # Compare chains byte-by-byte
+    mov     8(%r14), %rax              # b len
+    mov     24(%r14), %rcx             # a len
+    cmp     %rax, %rcx
+    jne     .eq_false                   # different lengths → not equal
+    # Same length — compare bytes
+    mov     (%r14), %rsi               # b ptr
+    mov     16(%r14), %rdi             # a ptr
+    add     $16, %r14                  # pop 1
+    mov     %rax, %rcx                  # count
+    test    %rcx, %rcx
+    jz      .eq_true_chain              # both empty → equal
+    repe    cmpsb
+    je      .eq_true_chain
+.eq_false_chain:
+    # Push empty (false)
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.eq_true_chain:
+    # Push 1.0 (true)
+    mov     $0x3FF0000000000000, %rax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.eq_false:
+    add     $16, %r14                  # pop 1
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.call_lt:
+    add     %rcx, %r13
+    jmp     op_cmp_lt
+
+.call_gt:
+    add     %rcx, %r13
+    jmp     op_cmp_gt
+
+.call_le:
+    add     %rcx, %r13
+    jmp     op_cmp_le
+
+.call_ge:
+    add     %rcx, %r13
+    jmp     op_cmp_ge
+
+# ── String builtins ──────────────────────────────────────────────────────
+
+.call_len:
+    # Pop chain, push its length as f64
+    add     %rcx, %r13
+    mov     8(%r14), %rax              # len
+    cmp     $F64_MARKER, %rax
+    jne     .call_len_chain
+    # f64 → len = 1? or 8? Let's say 1
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    jmp     vm_loop
+.call_len_chain:
+    # Convert len to f64
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_concat:
+    # Pop b, pop a, concatenate a+b on heap, push result
+    add     %rcx, %r13
+    mov     (%r14), %rsi               # b ptr
+    mov     8(%r14), %rdx              # b len
+    mov     16(%r14), %rdi             # a ptr
+    mov     24(%r14), %rcx             # a len
+    add     $32, %r14                  # pop 2
+
+    # Copy a to heap
+    mov     %r15, %rax                  # result ptr
+    push    %rcx
+    push    %rdx
+    push    %rsi
+    mov     %r15, %rdi                  # dest
+    mov     16(%r14), %rsi             # Hmm, a ptr was popped. Use saved values
+    # Actually let me redo: save before pop
+    # This is getting complex. Simpler approach:
+    pop     %rsi                        # b ptr
+    pop     %rdx                        # b len
+    pop     %rcx                        # a len
+
+    # We already popped the stack. Need original pointers.
+    # Let's re-read from where they were before pop.
+    # a was at 16(%r14) before pop → now at -16(%r14)
+    # Actually after add $32, r14 points past both entries.
+    # a_ptr = -32(%r14), a_len = -24(%r14)
+    # b_ptr = -16(%r14), b_len = -8(%r14)
+    mov     -32(%r14), %rdi            # a ptr
+    mov     -24(%r14), %rcx            # a len
+    mov     -16(%r14), %rsi            # b ptr
+    mov     -8(%r14), %rdx             # b len
+
+    # Copy a
+    mov     %r15, %rax                  # result start
+    push    %rdx
+    push    %rsi
+    mov     %r15, %rdi
+    mov     -32(%r14), %rsi            # a ptr
+    mov     %rcx, %rdx
+    mov     %ecx, %ecx
+    rep     movsb
+    mov     %rdi, %r15                  # bump
+
+    # Copy b
+    pop     %rsi                        # b ptr
+    pop     %rdx                        # b len
+    mov     %r15, %rdi
+    mov     %edx, %ecx
+    rep     movsb
+    mov     %rdi, %r15                  # bump
+
+    # Total len
+    mov     -24(%r14), %rcx            # a len
+    add     %rdx, %rcx                  # a+b len
+
+    # Push result
+    sub     $16, %r14
+    mov     %rax, (%r14)               # ptr
+    mov     %rcx, 8(%r14)              # len
+    jmp     vm_loop
+
+.call_char_at:
+    # Pop index (f64), pop string, push char
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0             # index
+    cvttsd2si %xmm0, %rax             # index as int
+    mov     16(%r14), %rsi            # string ptr
+    mov     24(%r14), %rcx            # string len
+    add     $32, %r14                 # pop 2
+
+    # Bounds check
+    cmp     %rcx, %rax
+    jae     .char_at_empty
+
+    # Get char (1 byte)
+    movzbl  (%rsi, %rax), %edx
+    movb    %dl, (%r15)
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $1, 8(%r14)
+    inc     %r15
+    jmp     vm_loop
+
+.char_at_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.call_substr:
+    # Pop len (f64), pop start (f64), pop string → push substring
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0             # sub_len
+    cvttsd2si %xmm0, %rdx
+    movsd   16(%r14), %xmm0           # start
+    cvttsd2si %xmm0, %rax
+    mov     32(%r14), %rsi            # string ptr
+    mov     40(%r14), %rcx            # string len
+    add     $48, %r14                 # pop 3
+
+    # Bounds
+    cmp     %rcx, %rax
+    jae     .char_at_empty
+    add     %rax, %rdx
+    cmp     %rcx, %rdx
+    jbe     .substr_ok
+    mov     %rcx, %rdx
+.substr_ok:
+    sub     %rax, %rdx                 # actual length
+    lea     (%rsi, %rax), %rsi        # start ptr
+
+    # Copy to heap
+    mov     %r15, %rax
+    mov     %r15, %rdi
+    mov     %edx, %ecx
+    push    %rdx
+    rep     movsb
+    mov     %rdi, %r15
+    pop     %rdx
+
+    sub     $16, %r14
+    mov     %rax, (%r14)
+    mov     %rdx, 8(%r14)
     jmp     vm_loop
 
 op_ret:
@@ -731,16 +1222,16 @@ op_neg:
 # ── Comparison ops (return f64: 1.0 = true, 0.0 = false) ────────────────
 
 op_cmp_eq:
-    movsd   16(%r14), %xmm0            # B
-    movsd   (%r14), %xmm1              # A
-    add     $16, %r14
+    movsd   16(%r14), %xmm0            # B (deeper)
+    movsd   (%r14), %xmm1              # A (top)
+    add     $16, %r14                   # pop 1, result overwrites remaining
     ucomisd %xmm1, %xmm0
     je      .cmp_true
     jmp     .cmp_false
 
 op_cmp_lt:
-    movsd   16(%r14), %xmm0            # B
-    movsd   (%r14), %xmm1              # A
+    movsd   16(%r14), %xmm0
+    movsd   (%r14), %xmm1
     add     $16, %r14
     ucomisd %xmm1, %xmm0
     jb      .cmp_true
@@ -771,13 +1262,17 @@ op_cmp_ge:
     jmp     .cmp_false
 
 .cmp_true:
+    # Rust VM returns non-empty chain (1.0) for true
     mov     $0x3FF0000000000000, %rax   # 1.0 in f64
     mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
 .cmp_false:
-    xor     %eax, %eax                  # 0.0 in f64
-    mov     %rax, (%r14)
+    # Rust VM returns empty chain for false → Jz compatible
+    xor     %eax, %eax
+    mov     %rax, (%r14)               # ptr = 0
+    mov     %rax, 8(%r14)              # len = 0 (empty = false)
     jmp     vm_loop
 
 vm_error_div_zero:
@@ -1178,7 +1673,24 @@ msg_readbc:
 msg_divzero:
     .ascii "Division by zero!\n"
 
+# ── Builtin function names ───────────────────────────────────────────────
+bname_hyp_add:  .ascii "__hyp_add"
+bname_hyp_sub:  .ascii "__hyp_sub"
+bname_hyp_mul:  .ascii "__hyp_mul"
+bname_hyp_div:  .ascii "__hyp_div"
+bname_eq:       .ascii "__eq"
+bname_cmp_lt:   .ascii "__cmp_lt"
+bname_cmp_gt:   .ascii "__cmp_gt"
+bname_cmp_le:   .ascii "__cmp_le"
+bname_cmp_ge:   .ascii "__cmp_ge"
+bname_len:      .ascii "__len"
+bname_concat:   .ascii "__concat"
+bname_char_at:  .ascii "__char_at"
+bname_substr:   .ascii "__substr"
+
 # ── BSS (writable, zero-initialized) ────────────────────────────────────
 .section .bss
 var_table_base:
     .space 8                            # pointer to variable table on heap
+bc_format:
+    .space 1                            # 0 = ir.rs format, 1 = codegen.ol format
