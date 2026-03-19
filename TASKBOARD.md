@@ -89,7 +89,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 |----|------|------|---------|--------|--------|---------|-------|
 | 2.1a | Stdlib: result.ol + iter.ol + sort.ol | `PLAN_2_1` | Phase 1 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 422 LOC. result(ok/err/unwrap), iter(reduce/zip/take/skip/chunk/window/range), sort(quicksort/binary_search). |
 | 2.1b | Stdlib: format.ol + json.ol | `PLAN_2_1` | Phase 1 | FREE | — | — | Group B — string/format |
-| 2.1c | Stdlib: hash.ol + mol.ol + chain.ol | `PLAN_2_1` | 2.1a | FREE | — | — | Group C — core helpers |
+| 2.1c | Stdlib: hash.ol + mol.ol + chain.ol | `PLAN_2_1` | 2.1a | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 294 LOC. hash(fnv1a/distance_5d/similarity), mol(evolve/lca/consistency), chain(lca/concat/split/compare). |
 | 2.2 | Emotion pipeline (emotion.ol, curve.ol, intent.ol) | `PLAN_2_2` | 2.1c | FREE | — | — | ~380 LOC |
 | 2.3 | Knowledge layer (silk_ops.ol, dream.ol, instinct.ol, learning.ol) | `PLAN_2_3` | 2.1a,2.1c | FREE | — | — | ~650 LOC |
 | 2.4 | Agent behavior (gate.ol, response.ol, leo.ol, chief.ol, worker.ol) | `PLAN_2_4` | 2.2,2.3 | FREE | — | — | ~500 LOC |
