@@ -8281,6 +8281,121 @@ mod tests {
         assert!((len - 1.0).abs() < f64::EPSILON, "Expected 1 IfStmt, got {}: {:?}", len, output_strs);
     }
 
+    // ── Task 0.3: Round-trip self-parse tests ───────────────────────────
+
+    /// Helper: escape an Olang source string for embedding as a string literal.
+    /// Escapes backslashes, double quotes, and newlines.
+    fn escape_olang_str(s: &str) -> alloc::string::String {
+        let mut out = alloc::string::String::new();
+        for ch in s.chars() {
+            match ch {
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn roundtrip_lexer_ol_self_tokenize() {
+        // Task 0.3.1: lexer.ol tokenizes itself — must produce >100 tokens
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let lexer_escaped = escape_olang_str(lexer_src);
+        let test_src = alloc::format!(
+            "{}\n\
+            let my_source = \"{}\";\n\
+            let tokens = tokenize(my_source);\n\
+            emit len(tokens);\n",
+            lexer_src, lexer_escaped
+        );
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 50_000_000;
+        vm.max_call_depth = 16_384;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        let token_count = outputs[0].to_number().expect("should be number") as usize;
+        assert!(token_count > 100, "lexer.ol should produce >100 tokens, got {}", token_count);
+    }
+
+    #[test]
+    fn roundtrip_lexer_ol_self_parse() {
+        // Task 0.3.2: parser.ol parses lexer.ol tokens
+        // First: test that the updated parser.ol can parse a simple union
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+        let lexer_escaped = escape_olang_str(lexer_src);
+        let test_src = alloc::format!(
+            "{}\n{}\n\
+            let my_source = \"{}\";\n\
+            let program = parse(tokenize(my_source));\n\
+            emit len(program);\n",
+            lexer_src, parser_src_clean, lexer_escaped
+        );
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 50_000_000;
+        vm.max_call_depth = 16_384;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
+        let len = outputs.last().unwrap().to_number().expect("should be number") as usize;
+        assert!(len >= 8, "lexer.ol should have ≥8 top-level stmts, got {}: {:?}", len, output_strs);
+    }
+
+    #[test]
+    fn roundtrip_parser_ol_self_parse() {
+        // Task 0.3.3: parser.ol parses itself
+        // First, test with a small fragment containing match
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+        // Use actual parser.ol source
+        let parser_escaped = escape_olang_str(parser_src_clean.as_str());
+        let test_src = alloc::format!(
+            "{}\n{}\n\
+            let my_source = \"{}\";\n\
+            let program = parse(tokenize(my_source));\n\
+            emit len(program);\n",
+            lexer_src, parser_src_clean, parser_escaped
+        );
+        let stmts = parse(&test_src).expect("should parse");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 200_000_000;
+        vm.max_call_depth = 16_384;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        let last_val = outputs.last().and_then(|o| o.to_number()).unwrap_or(-1.0) as i64;
+        assert!(last_val >= 15, "parser.ol should have ≥15 top-level stmts, got {}: {:?}", last_val, output_strs);
+    }
+
     #[test]
     fn enum_match_unit_variant() {
         let src = r#"
