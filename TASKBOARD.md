@@ -173,32 +173,33 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 7.3 | Testing: hoàn thiện test suite | `PLAN_7_3` | Phase 0-6 | DONE | `claude/project-audit-review-2pN6F` | Lyra | INTG-11/12 + stdlib audit (50 files) + stress (12 tests) + fuzz (11 tests). 140 total intg tests, 0 failures. 17 known parse failures documented. |
 | 7.4 | Network: ISL over real transport | `PLAN_7_4` | 7.1 | DONE | `claude/project-audit-review-2pN6F` | Lyra | 4 Olang files (~820 LOC): isl_tcp.ol (TCP wire+XOR+AES stubs), isl_ws.ol (WebSocket binary frames), isl_ble.ol (BLE GATT+fragmentation), isl_discovery.ol (mDNS+BLE scan+handshake). 24 known parse failures total. |
 
+## Phase 8-11 — End-to-End (MỚI — làm cho origin.olang THỰC SỰ chạy được)
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| 8 | Parser Upgrade: hex literals, ==, keywords | `PLAN_8_PARSER_UPGRADE` | Phase 0 | FREE | — | — | Unlock 24/54 failing files. hex (13 files), == context (9 files), keywords+struct (2 files). ~250-400 LOC Rust. |
+| 9 | Native REPL: ./origin interactive | `PLAN_9_NATIVE_REPL` | 8 | FREE | — | — | VM reads stdin → compile via bootstrap → execute → output. Missing builtins, bytecode layering, emotion pipeline. ~500-700 LOC ASM/Olang. |
+| 10 | Browser E2E: origin.html works | `PLAN_10_BROWSER_E2E` | 8 | FREE | — | — | Wire input → WASM compile → execute → display. boot+eval exports, JS bridge, UI redesign. ~400-600 LOC WAT/JS/HTML. |
+| 11 | E2E Verification & Demo | `PLAN_11_E2E_VERIFY` | 8,9,10 | FREE | — | — | make demo (10 scenarios), make verify (Rust E2E tests), server --eval, CI/CD. ~600-800 LOC. 11.3 (server --eval) can start NOW. |
+
 ---
 
 ## Dependency Graph (visual)
 
 ```
-Phase 0-3: ALL DONE ✅
-  0.1 → ... → 0.6 → 1.1 → 1.4 → 3.1 → 3.2 → 3.3 → 3.4 ✅
-  AUTH ✅  |  1.2 ✅  |  1.3 ✅  |  2.1-2.4 ✅
+Phase 0-7: ALL DONE ✅ (trừ 7.2 Mobile đang làm)
+  0.1 → ... → 0.6 → 1.x → 2.x → 3.x → 4.x → 5.x → 6.x → 7.x ✅
 
-Phase 4 (TIẾP THEO):
-  4.1 (cross ARM64) ──→ 4.2 (fat binary, optional)
-  4.3 (WASM universal) ← song song với 4.1
+Phase 8-11: End-to-End (MỚI)
 
-Phase 5: ALL DONE ✅
-  5.1 (JIT) ───┐
-  5.2 (cache)  ├→ 5.4 (benchmark)   ALL DONE ✅
-  5.3 (memory) ┘
+  8 (parser upgrade)  ← PHẢI xong trước 9, 10
+       ↓
+  9 (native REPL) ←→ 10 (browser E2E)    ← song song được
+       ↓                    ↓
+  11 (E2E verify + demo + CI)             ← tổng kết
 
-Phase 6: ALL DONE ✅
-  6.1 (self-update) → 6.2 (self-optimize)   ALL DONE ✅
-                    → 6.3 (reproduce)
-
-Phase 7 (TIẾP THEO):
-  7.1 (wiring) ──→ 7.2 (mobile)
-               ├─→ 7.3 (testing)    ← song song
-               └─→ 7.4 (network)
+  11.3 (server --eval) có thể làm NGAY, song song với 8
+  7.2 (mobile, Kira) song song với tất cả
 ```
 
 ---
@@ -505,4 +506,13 @@ INTG (song song với tất cả):
             ▸ 7.4 Network (Lyra): CHƯA CÓ CODE — chỉ claimed, chưa push
             ▸ Fix: t13 file count 50→52, fat_header/fat_loader added to KNOWN_PARSE_FAILURES,
               builder.ol fat_config() hex→decimal. All workspace tests pass.
+2026-03-19  Phase 8-11 PLANS CREATED (session 2pN6F, Lyra):
+            Goal: "ai cũng thấy origin.olang hoạt động" — end-to-end proof of life.
+            PLAN_8_PARSER_UPGRADE: Unlock 24/54 failing files (hex, ==, keywords).
+            PLAN_9_NATIVE_REPL: ./origin → real REPL, compile+execute user input.
+            PLAN_10_BROWSER_E2E: origin.html → WASM compile, no backend needed.
+            PLAN_11_E2E_VERIFY: make demo (10 scenarios), make verify, CI/CD.
+            Key insight: chỉ có `cargo run -p server` (Rust) hoạt động E2E.
+            Native binary (vm_x86_64.S) chỉ echo. Browser chưa wire compile.
+            Parser block 44% files → Phase 8 PHẢI xong trước mọi thứ.
 ```

@@ -19,27 +19,40 @@ PLAN_4_1 → 4_3                                 ← Multi-architecture ✅
 PLAN_5_1 → 5_2 → 5_3 → 5_4                    ← Optimization ✅
 PLAN_6_1 → 6_2 → 6_3                          ← Living system ✅
 
-Phase 7: Integration & Production (TIẾP THEO)
+Phase 7: Integration & Production ✅ (trừ 7.2 đang làm)
 
-PLAN_7_1 (wiring)       ← Kết nối mọi thứ: AUTH, Maturity, Silk Vertical, REPL
+PLAN_7_1 (wiring)       ✅ DONE
+PLAN_7_2 (mobile)       ← Android ARM64 + iOS WASM (Kira đang làm)
+PLAN_7_3 (testing)      ✅ DONE — 140 intg tests
+PLAN_7_4 (network)      ✅ DONE — 4 Olang files (~820 LOC)
+
+Phase 8-11: End-to-End (MỚI — làm cho origin.olang THỰC SỰ chạy được)
+
+PLAN_8 (parser upgrade)    ← Unlock 24/54 files: hex literals, ==, keywords
     ↓
-PLAN_7_2 (mobile)       ← Android ARM64 + iOS WASM
-PLAN_7_3 (testing)      ← INTG-11/12, stress, fuzz, audit
-PLAN_7_4 (network)      ← ISL over TCP/WebSocket/BLE
+PLAN_9 (native REPL)      ← ./origin → compile + execute user input
+PLAN_10 (browser E2E)     ← origin.html → WASM compile + execute
+    ↓
+PLAN_11 (E2E verify)      ← make demo, make verify, CI/CD
 
-    7_2, 7_3, 7_4 song song được (sau 7_1)
-    4_2 (fat binary) optional, có thể làm bất kỳ lúc nào
+    8 PHẢI xong trước 9, 10
+    9, 10 song song được
+    11 phần đầu (server --eval) làm song song với 8
 ```
 
 ## Phân việc
 
 | Plan | Skill cần | Ước tính | Song song? | Status |
 |------|-----------|----------|------------|--------|
-| **4_2** | Binary format | 2-3 ngày | Optional | FREE |
-| **7_1** | Rust + ASM wiring | 1-2 tuần | ĐẦU TIÊN | FREE |
-| **7_2** | Android/iOS, Swift | 2-3 tuần | Sau 7_1 | FREE |
-| **7_3** | Testing, Rust | 3-5 ngày | Sau 7_1 | FREE |
-| **7_4** | Networking, Olang | 1-2 tuần | Sau 7_1 | FREE |
+| ~~4_2~~ | Binary format | — | — | DONE (Kaze) |
+| ~~7_1~~ | Rust + ASM wiring | — | — | DONE (Kira) |
+| **7_2** | Android/iOS | 2-3 tuần | Song song | CLAIMED (Kira) |
+| ~~7_3~~ | Testing | — | — | DONE (Lyra) |
+| ~~7_4~~ | Networking | — | — | DONE (Lyra) |
+| **8** | Rust parser | 4-8h | ĐẦU TIÊN | FREE |
+| **9** | x86_64 ASM | 12-20h | Sau 8 | FREE |
+| **10** | WAT + JS + HTML | 10-16h | Song song với 9 | FREE |
+| **11** | Shell + Rust + CI | 8-12h | Phần đầu song song với 8 | FREE |
 
 ## Quick start cho developer mới
 
@@ -75,6 +88,7 @@ stdlib/                            ← Core stdlib (18 files)
 stdlib/homeos/                     ← HomeOS modules (28 files)
 Makefile                           ← Build automation
 
-# Status: Phase 0-6 DONE. 50 .ol files compile. B1-B7 fixed.
-# Next: Phase 7 — wire everything, mobile, testing, network.
+# Status: Phase 0-7 mostly DONE. 54 .ol files (30 compile, 24 known parse failures).
+# Next: Phase 8-11 — Parser upgrade, native REPL, browser E2E, verification.
+# Goal: anyone can run ./origin and SEE it work.
 ```
