@@ -46,38 +46,15 @@ fn stdlib_dir() -> std::path::PathBuf {
 }
 
 /// Files that use syntax not yet supported by the parser.
-/// These are KNOWN limitations, not bugs — tracked for future parser work.
+/// Phase 8 parser upgrade resolved ALL previously known failures:
+///   - Hex literals (0xFF) — lex_number() now supports 0x prefix
+///   - Indexed assignment (arr[i] = val) — new IndexAssign statement
+///   - Dict keyword keys ({ type: "jit" }) — keywords accepted as dict keys
+///   - Commands as identifiers (trace, learn) — Command tokens in expr/ident context
+///   - Bitwise OR (a | b) — Pipe token as infix operator in expressions
+///   - Keywords as identifiers (spawn, match, etc.) — expanded expect_ident()
 const KNOWN_PARSE_FAILURES: &[&str] = &[
-    // Hex literal syntax (0xFF) — parser tokenizes "0" then "xB8" as separate tokens
-    "asm_emit.ol",
-    "asm_emit_arm64.ol",
-    "elf_emit.ol",
-    "fat_header.ol",
-    "fat_loader.ol",
-    "reproduce.ol",
-    "wasm_emit.ol",
-    // Hex escape in strings (\x01) — parser doesn't handle escape sequences
-    "fat_header.ol",
-    "fat_loader.ol",
-    // == in match expressions or comparisons — parser sees Eq token unexpectedly
-    "benchmark.ol",
-    "dream.ol",
-    "dream_cache.ol",
-    "install.ol",
-    "jit.ol",
-    "module_index.ol",
-    "mol_pool.ol",
-    "optimize.ol",
-    "registry_cache.ol",
-    "silk_cache.ol",
-    // Keywords used as identifiers or struct field syntax
-    "intent.ol",      // "learn" is a Command keyword
-    "silk_ops.ol",    // colon syntax in struct literal
-    // ISL network transport (hex literals, ==, struct colon syntax)
-    "isl_tcp.ol",
-    "isl_ws.ol",
-    "isl_ble.ol",
-    "isl_discovery.ol",
+    // All 54 .ol files now parse successfully!
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -145,8 +122,8 @@ fn audit_all_parseable_files_compile_and_decode() {
         );
     }
 
-    // At least 30 files should compile (50 total - 17 known parse failures)
-    assert!(pass >= 30, "only {} files passed (expected ≥30)", pass);
+    // All files should compile now (Phase 8 parser upgrade resolved all parse failures)
+    assert!(pass >= 50, "only {} files passed (expected ≥50)", pass);
 }
 
 #[test]
@@ -263,7 +240,7 @@ fn audit_bytecode_roundtrip_decode_succeeds_for_all_parseable() {
         decoded_count += 1;
     }
 
-    assert!(decoded_count >= 30, "only {} files decoded (expected ≥30)", decoded_count);
+    assert!(decoded_count >= 50, "only {} files decoded (expected ≥50)", decoded_count);
 }
 
 // ═══════════════════════════════════════════════════════════════════

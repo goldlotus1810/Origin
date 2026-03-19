@@ -14,7 +14,7 @@
 
 let MDNS_SERVICE = "_homeos._tcp.local";
 let MDNS_PORT = 5353;
-let HOMEOS_DEFAULT_PORT = 4F4C;  // "OL" in hex = 20300 dec
+let HOMEOS_DEFAULT_PORT = 0x4F4C;  // "OL" in hex = 20300 dec
 let BLE_SCAN_DURATION = 5000;
 
 // ISL handshake message types

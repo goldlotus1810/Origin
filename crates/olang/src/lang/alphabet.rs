@@ -877,6 +877,38 @@ impl<'a> Lexer<'a> {
 
     fn lex_number(&mut self) -> Token {
         let mut n: u32 = 0;
+        // First digit
+        if let Some(&(_, c)) = self.chars.peek() {
+            if let Some(d) = c.to_digit(10) {
+                n = d;
+                self.chars.next();
+            }
+        }
+        // Check for hex prefix: 0x or 0X
+        if n == 0 {
+            if let Some(&(_, c)) = self.chars.peek() {
+                if c == 'x' || c == 'X' {
+                    self.chars.next(); // consume 'x'
+                    let mut hex_n: u32 = 0;
+                    let mut has_digits = false;
+                    while let Some(&(_, c)) = self.chars.peek() {
+                        if let Some(d) = c.to_digit(16) {
+                            hex_n = hex_n.saturating_mul(16).saturating_add(d);
+                            has_digits = true;
+                            self.chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if has_digits {
+                        return Token::Int(hex_n);
+                    }
+                    // 0x with no digits — return 0
+                    return Token::Int(0);
+                }
+            }
+        }
+        // Continue reading decimal digits
         while let Some(&(_, c)) = self.chars.peek() {
             if let Some(d) = c.to_digit(10) {
                 n = n.saturating_mul(10).saturating_add(d);
@@ -1597,5 +1629,67 @@ mod tests {
         assert_eq!(PhysOp::PhysAdd.as_char(), '⧺');
         assert_eq!(PhysOp::PhysSub.as_char(), '⊖');
         assert_eq!(PhysOp::from_char('x'), None);
+    }
+
+    // ── Hex literal tests ─────────────────────────────────────────────────
+
+    fn tokenize(src: &str) -> Vec<Token> {
+        Lexer::tokenize_all(src)
+    }
+
+    #[test]
+    fn lex_hex_literal_0xff() {
+        let tokens = tokenize("0xFF");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(255))),
+            "0xFF should produce Int(255), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_literal_0x00() {
+        let tokens = tokenize("0x00");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(0))),
+            "0x00 should produce Int(0), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_literal_0x4f4c() {
+        let tokens = tokenize("0x4F4C");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(20300))),
+            "0x4F4C should produce Int(20300), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_uppercase_prefix() {
+        let tokens = tokenize("0XFF");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(255))),
+            "0XFF should produce Int(255), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_in_let_statement() {
+        let tokens = tokenize("let x = 0xFF;");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(255))),
+            "let x = 0xFF should contain Int(255), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_plain_zero_still_works() {
+        let tokens = tokenize("0");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(0))),
+            "plain 0 should produce Int(0), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_decimal_unchanged() {
+        let tokens = tokenize("42");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(42))),
+            "42 should produce Int(42), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_0x01() {
+        let tokens = tokenize("0x01");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(1))),
+            "0x01 should produce Int(1), got {:?}", tokens);
     }
 }
