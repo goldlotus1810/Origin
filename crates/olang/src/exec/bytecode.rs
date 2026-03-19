@@ -232,6 +232,12 @@ pub fn decode_bytecode(bytes: &[u8]) -> Result<Vec<Op>, DecodeError> {
                 let arity = dec.read_u8()?;
                 Op::CallClosure(arity)
             }
+            0x25 => {
+                // Closure: [param_count:1][body_len:4]
+                let param_count = dec.read_u8()?;
+                let body_len = dec.read_u32_le()? as usize;
+                Op::Closure(param_count, body_len)
+            }
             _ => return Err(DecodeError::UnknownOpcode(tag)),
         };
         ops.push(op);
@@ -370,11 +376,18 @@ fn encode_op(out: &mut Vec<u8>, op: &Op) {
             emit_str(out, "");
             emit_byte(out, *arity);
         }
+        // 0x25: Closure [param_count:1][body_len:4]
+        // Creates closure marker on stack, jumps over body.
+        Op::Closure(param_count, body_len) => {
+            emit_byte(out, 0x25);
+            emit_byte(out, *param_count);
+            emit_u32_le(out, *body_len as u32);
+        }
         // Opcodes not in PLAN_0_5 format — skip silently
         Op::DeviceWrite(_) | Op::DeviceRead(_) | Op::DeviceList
         | Op::FileRead | Op::FileWrite | Op::FileAppend
         | Op::SpawnBegin | Op::SpawnEnd
-        | Op::Closure(..) | Op::ChanNew | Op::ChanSend | Op::ChanRecv
+        | Op::ChanNew | Op::ChanSend | Op::ChanRecv
         | Op::Select(_) => {}
     }
 }
