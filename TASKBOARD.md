@@ -180,7 +180,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 8 | Parser Upgrade: hex literals, ==, keywords | `PLAN_8_PARSER_UPGRADE` | Phase 0 | DONE | `claude/project-audit-review-2pN6F` | Lyra | ALL 54/54 files parse. Added: hex literals, indexed assignment, dict keyword keys, commands as idents, bitwise OR. KNOWN_PARSE_FAILURES = 0. |
 | 9 | Native REPL: ./origin interactive | `PLAN_9_NATIVE_REPL` | 8 | FREE | — | — | VM reads stdin → compile via bootstrap → execute → output. Missing builtins, bytecode layering, emotion pipeline. ~500-700 LOC ASM/Olang. |
 | 10 | Browser E2E: origin.html works | `PLAN_10_BROWSER_E2E` | 8 | FREE | — | — | Wire input → WASM compile → execute → display. boot+eval exports, JS bridge, UI redesign. ~400-600 LOC WAT/JS/HTML. |
-| 11 | E2E Verification & Demo (11.1+11.2+11.3+11.5) | `PLAN_11_E2E_VERIFY` | 8,9,10 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | 11.3 server --eval, 11.5 Makefile, 11.2 E2E tests (9 pass), 11.1 demo script (10/10 pass). Còn lại: 11.4 native --eval (cần P9), 11.6 README, 11.7 CI. |
+| 11 | E2E Verification & Demo (ALL except 11.4) | `PLAN_11_E2E_VERIFY` | 8,9,10 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | 11.1 demo (10/10), 11.2 E2E tests (9 pass), 11.3 server --eval, 11.5 Makefile, 11.6 README Quick Start, 11.7 CI pipeline. Còn: 11.4 native --eval (chờ P9). |
 | 12 | Response Intelligence | `PLAN_12_RESPONSE_INTELLIGENCE` | Phase 0 | CLAIMED | `claude/update-audit-context-2MKRJ` | 2MKRJ | Wire 5 mắt xích bị đứt: walk_emotion, STM recall, intent v2, response composer, lang fix. ~560 LOC Rust. Song song với Phase 8-11. |
 
 ---
