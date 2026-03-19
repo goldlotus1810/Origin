@@ -52,10 +52,10 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | B1 | Parser thiếu `union`/`type` keywords | 2 dòng `alphabet.rs:391` | 5 min | DONE | claude/review-and-fix-project-erPD8 |
 | B2 | ModuleLoader thiếu file I/O | ~20 LOC `module.rs` | 1-2h | DONE | claude/review-and-fix-project-erPD8 |
 | B3 | `to_num()` alias thiếu | 1 dòng `semantic.rs` | 1 min | DONE | claude/review-and-fix-project-erPD8 |
-| B4 | Parser: negative number literals | `Arith(Sub)` ở expression start | 1-2h | CLAIMED | `claude/project-audit-review-2pN6F` |
-| B5 | Parser: `typeof` trong expression | `Command("typeof")` không parse | 1h | CLAIMED | `claude/project-audit-review-2pN6F` |
-| B6 | Parser: reserved words as identifiers | `Enum`, `Fn`, `From` conflict | 1h | CLAIMED | `claude/project-audit-review-2pN6F` |
-| B7 | VM: entry point dispatch | VM exit 0 sau load bytecode, không execute | 2-4h | CLAIMED | `claude/project-audit-review-2pN6F` |
+| B4 | Parser: negative number literals | `Arith(Sub)` ở expression start | 1-2h | FREE | | Kira (erPD8) ưu tiên — context nhiều nhất |
+| B5 | Parser: `typeof` trong expression | `Command("typeof")` không parse | 1h | FREE | | Kira (erPD8) ưu tiên |
+| B6 | Parser: reserved words as identifiers | `Enum`, `Fn`, `From` conflict | 1h | FREE | | Kira (erPD8) ưu tiên |
+| B7 | VM: entry point dispatch | VM exit 0 sau load bytecode, không execute | 2-4h | FREE | | Kira (erPD8) ưu tiên |
 
 **Lưu ý:** B1+B2+B3 đã DONE. B4+B5+B6 block 7/22 stdlib files. B7 block interactive mode.
 
@@ -144,7 +144,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | FREE | | | asm_emit_arm64.ol + fix ARM64 op_call + ELF ARM64 |
+| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | asm_emit_arm64.ol + fix ARM64 op_call + ELF ARM64 |
 | 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
 | 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | FREE | | | Bytecode embed + browser host + WASI |
 
@@ -373,7 +373,8 @@ INTG (song song với tất cả):
 2026-03-19  Thêm INTG section — Integration Test Suite (13 tasks).
             Công cụ kiểm tra chéo giữa các crate, cover 12 mối nối.
             AI 3 sẽ implement. Scaffold → 12 test files → Makefile target.
-            B4-B7 → CLAIMED by Lyra (session 2pN6F).
+            B4-B7 → FREE for Kira (erPD8, context nhiều nhất).
+            4.1 → CLAIMED by Lyra (session 2pN6F).
 2026-03-19  🎉 origin.olang RA ĐỜI — build thành công lần đầu!
             VM: 15 KB (x86_64 ASM, no libc, static linked)
             Bytecode: 811 KB (15/22 stdlib files compiled)
