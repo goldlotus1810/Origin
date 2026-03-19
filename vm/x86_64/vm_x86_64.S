@@ -26,6 +26,7 @@
 .equ STACK_SIZE,    0x100000        # 1 MB VM stack
 .equ HEAP_SIZE,     0x1000000       # 16 MB heap arena
 .equ HEADER_SIZE,   32
+.equ ELF_HEADER_SIZE, 120           # ELF64 header + 1 program header
 .equ F64_MARKER,    -1              # len = 0xFFFFFFFFFFFFFFFF means f64
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
@@ -77,8 +78,45 @@ _start:
     cmp     $HEADER_SIZE, %rax
     jne     err_header
 
+    # Check magic: if ELF (7f 45 4c 46), find origin header via trailer
+    cmpl    $0x464c457f, (%rsp)         # "\x7fELF" in little-endian
+    jne     .header_ok                  # not ELF → already origin header
+
+    # ELF detected → read 8-byte trailer from end of file
+    # lseek(fd, -8, SEEK_END) to find header_offset
+    mov     %rbp, %rdi                  # fd
+    mov     $-8, %rsi                   # offset = -8
+    mov     $2, %edx                    # SEEK_END = 2
+    mov     $8, %eax                    # sys_lseek
+    syscall
+
+    # Read 8 bytes (header_offset u64 LE) into stack buffer
+    mov     %rbp, %rdi                  # fd
+    mov     %rsp, %rsi                  # reuse stack buf
+    mov     $8, %edx                    # count = 8
+    mov     $SYS_READ, %eax
+    syscall
+
+    # Get header_offset from buffer
+    mov     (%rsp), %rsi               # header_offset (u64 LE)
+
+    # lseek(fd, header_offset, SEEK_SET)
+    mov     %rbp, %rdi                  # fd
+    xor     %edx, %edx                  # SEEK_SET = 0
+    mov     $8, %eax                    # sys_lseek
+    syscall
+
+    # Re-read 32 bytes origin header
+    mov     %rbp, %rdi                  # fd
+    mov     %rsp, %rsi                  # buf = stack (overwrite)
+    mov     $HEADER_SIZE, %edx          # count
+    mov     $SYS_READ, %eax
+    syscall
+    cmp     $HEADER_SIZE, %rax
+    jne     err_header
+
+.header_ok:
     # Parse header fields
-    # offset  0: magic "○LNG" (4 bytes) — skip validation for now
     # offset  4: version (1 byte)
     # offset  5: arch (1 byte) — should be 0x01 for x86_64
     # offset  6: vm_offset (4 bytes LE)
