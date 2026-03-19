@@ -10,7 +10,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use crate::response_template::{render, detect_language, Lang, ResponseParams};
+use crate::response_template::{render, compose_response, detect_language, Lang, ResponseContext, ResponseParams};
 use agents::encoder::ContentInput;
 use agents::gate::GateVerdict;
 use agents::learning::{LearningLoop, ProcessResult};
@@ -2850,36 +2850,53 @@ impl HomeRuntime {
         found
     }
 
-    /// Tổng hợp emotion từ SilkWalk result.
+    /// Tổng hợp emotion từ Silk walk — AMPLIFY, không trung bình.
+    ///
+    /// Dùng silk::walk::sentence_affect() để walk qua graph:
+    /// mỗi từ → hash → tìm Silk edges → amplify emotion.
     fn walk_emotion(&self, query: &str) -> Option<silk::edge::EmotionTag> {
-        let results = self.silk_walk_query(query);
-        if results.is_empty() {
+        let words: alloc::vec::Vec<&str> = query
+            .split_whitespace()
+            .filter(|w| w.chars().count() > 1)
+            .take(8)
+            .collect();
+
+        if words.is_empty() {
             return None;
         }
 
-        let _n = results.len() as f32;
-        let (sv, sa, sd, si) = results.iter().fold(
-            (0.0f32, 0.0f32, 0.0f32, 0.0f32),
-            |(v, a, d, i), (_, e, w)| {
-                (
-                    v + e.valence * w,
-                    a + e.arousal * w,
-                    d + e.dominance * w,
-                    i + e.intensity * w,
-                )
-            },
+        // Tính hash và base emotion cho mỗi từ
+        let mut word_hashes = alloc::vec::Vec::new();
+        let mut word_emotions = alloc::vec::Vec::new();
+
+        for w in &words {
+            let low = w.to_lowercase();
+            let h = olang::hash::fnv1a_str(&low);
+            word_hashes.push(h);
+
+            // Lấy emotion từ STM nếu có, fallback context::emotion::word_affect
+            let emo = if let Some(obs) = self.learning.stm().find_by_hash(h) {
+                obs.emotion
+            } else {
+                let raw = context::emotion::word_affect(&low);
+                silk::edge::EmotionTag::new(raw.valence, raw.arousal, 0.5, raw.arousal.abs().max(0.3))
+            };
+            word_emotions.push(emo);
+        }
+
+        // Walk qua Silk graph — amplify, KHÔNG trung bình
+        let result = silk::walk::sentence_affect(
+            self.learning.graph(),
+            &word_hashes,
+            &word_emotions,
+            8, // max_depth = Fib[6]
         );
-        let tw: f32 = results.iter().map(|r| r.2).sum();
-        if tw < 0.001 {
+
+        if result.total_weight < 0.001 {
             return None;
         }
 
-        Some(silk::edge::EmotionTag {
-            valence: sv / tw,
-            arousal: sa / tw,
-            dominance: sd / tw,
-            intensity: si / tw,
-        })
+        Some(result.composite)
     }
 
     // ── Universal input — BẢN NĂNG cho mọi modality ──────────────────────────
@@ -3263,6 +3280,64 @@ impl HomeRuntime {
         let lang = match &input {
             ContentInput::Text { content, .. } => detect_language(content),
             _ => Lang::Vi,
+        };
+
+        // ── T7a: Build ResponseContext từ STM + Silk + Instincts ────────
+        let resp_ctx = {
+            let input_text = match &input {
+                ContentInput::Text { content, .. } => content.as_str(),
+                _ => "",
+            };
+            let mut ctx = ResponseContext::default();
+
+            // Topics: extract content words (bỏ stop words)
+            if !input_text.is_empty() {
+                ctx.topics = input_text
+                    .split_whitespace()
+                    .filter(|w| w.chars().count() > 1 && !is_vn_stop_word(w))
+                    .take(4)
+                    .map(|w| w.to_string())
+                    .collect();
+            }
+
+            // Repetition: fire_count cao nhất từ STM cho topic words
+            if let ProcessResult::Ok { ref chain, .. } = proc_result {
+                let hash = chain.chain_hash();
+                if let Some(obs) = self.learning.stm().find_by_hash(hash) {
+                    ctx.repetition_count = obs.fire_count;
+                }
+            }
+
+            // Walk emotion → amplified valence
+            if let Some(wt) = walk_tag {
+                ctx.walk_valence = Some(wt.valence);
+            }
+
+            // Novelty: nếu fire_count = 1 → novelty cao
+            ctx.novelty = if ctx.repetition_count <= 1 { 0.85 } else {
+                (1.0 / (ctx.repetition_count as f32)).min(0.80)
+            };
+
+            // Instinct results
+            if let Some(ref insight) = instinct_ctx {
+                ctx.contradiction = insight.has_contradiction;
+                // Causality từ instinct — nếu có topic + emotion < 0 → causality heuristic
+                if !ctx.topics.is_empty() && raw_tag.valence < -0.20 {
+                    // "buồn vì mất việc" → topics = ["buồn", "mất", "việc"]
+                    // Causality: last content words = cause
+                    let cause_words: alloc::vec::Vec<&str> = input_text
+                        .split_whitespace()
+                        .filter(|w| w.chars().count() > 1 && !is_vn_stop_word(w))
+                        .skip(1) // skip emotion word
+                        .take(3)
+                        .collect();
+                    if !cause_words.is_empty() {
+                        ctx.causality = Some(cause_words.join(" "));
+                    }
+                }
+            }
+
+            ctx
         };
 
         // ── T7b: Reference resolution — "bà ấy", "anh ta"... ─────────────

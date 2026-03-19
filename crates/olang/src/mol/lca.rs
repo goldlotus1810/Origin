@@ -215,12 +215,14 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
             time_byte
         };
 
-        let mut mol = Molecule::raw(shape, relation, valence, arousal, time);
+        let mut mol = Molecule::formula(shape, relation, valence, arousal, time);
         mol.fs = fs;
         mol.fr = fr;
         mol.fv = fv;
         mol.fa = fa;
         mol.ft = ft;
+        // LCA result = CÔNG THỨC MỚI — chờ evidence để evaluate
+        // evaluated = 0x00 (từ Molecule::formula)
         result_mols.push(mol);
     }
 

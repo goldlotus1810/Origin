@@ -54,7 +54,7 @@ impl Default for Lang {
 /// Detect language from input text.
 ///
 /// Heuristic: nếu có Vietnamese diacritics (ă, ơ, ư, đ, ê, ô, ấ, ầ, ể, ữ...)
-/// hoặc common Vietnamese words → Vi. Ngược lại → En.
+/// hoặc common Vietnamese words (kể cả KHÔNG DẤU) → Vi. Ngược lại → En.
 pub fn detect_language(text: &str) -> Lang {
     let lo = text.to_lowercase();
     // Vietnamese diacritics: characters with combining marks typical of Vietnamese
@@ -62,12 +62,36 @@ pub fn detect_language(text: &str) -> Lang {
     if lo.chars().any(|c| vi_chars.contains(&c)) {
         return Lang::Vi;
     }
-    // Common Vietnamese words
+    // Common Vietnamese words (CÓ DẤU)
     let vi_words = ["tôi", "bạn", "mình", "không", "được", "này", "của", "cho", "với", "và"];
     for w in vi_words {
         if lo.contains(w) {
             return Lang::Vi;
         }
+    }
+    // Common Vietnamese words KHÔNG DẤU — "xin chào", "tôi", etc.
+    // Phải check word boundary để tránh false positive
+    let vi_nodiac = [
+        "xin chao", "cam on", "tam biet", "xin", "chao", "buon", "vui",
+        "giup", "sao", "nhe", "da", "vang", "roi",
+    ];
+    let words_lo: alloc::vec::Vec<&str> = lo.split_whitespace().collect();
+    let joined = words_lo.join(" ");
+    for phrase in vi_nodiac {
+        if joined.contains(phrase) {
+            return Lang::Vi;
+        }
+    }
+    // Single-word check: "toi", "ban" cần >= 2 match để tránh false positive
+    let vi_single = ["toi", "ban", "khong", "duoc", "lam"];
+    let mut vi_single_count = 0;
+    for w in &words_lo {
+        if vi_single.contains(w) {
+            vi_single_count += 1;
+        }
+    }
+    if vi_single_count >= 2 {
+        return Lang::Vi;
     }
     Lang::En
 }
@@ -117,6 +141,201 @@ pub fn render(p: &ResponseParams) -> String {
                 Lang::En => String::from("○ Command sent."),
             })
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ResponseContext — ngữ cảnh phong phú cho response intelligence
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Context phong phú từ STM + Silk + Instincts, dùng để compose response.
+#[derive(Debug, Clone, Default)]
+pub struct ResponseContext {
+    /// Từ khóa chính user nhắc đến (extracted từ input, bỏ stop words)
+    pub topics: alloc::vec::Vec<String>,
+    /// Số lần user nhắc topic tương tự (từ STM fire_count)
+    pub repetition_count: u32,
+    /// Causality detected: "mất việc" causes "buồn"
+    pub causality: Option<String>,
+    /// User nói trái ngược turn trước?
+    pub contradiction: bool,
+    /// 0.0 = đã nói nhiều, 1.0 = hoàn toàn mới
+    pub novelty: f32,
+    /// Walk emotion amplified valence (từ Silk walk)
+    pub walk_valence: Option<f32>,
+}
+
+/// Compose response từ ResponseContext — thay thế template cứng.
+///
+/// Ghép 3 phần: acknowledgment + topic_phrase + follow_up.
+/// Mỗi phần tự sinh từ data (V → descriptor, topic → phrase).
+pub fn compose_response(p: &ResponseParams, ctx: &ResponseContext) -> String {
+    let lang = p.language;
+    let v = p.valence;
+
+    // Dùng walk_valence nếu có (amplified qua Silk)
+    let effective_v = ctx.walk_valence.unwrap_or(v);
+
+    // 1. Acknowledgment (ngắn gọn, từ tone + V)
+    let ack = match lang {
+        Lang::Vi => acknowledgment_vi(p.tone, effective_v),
+        Lang::En => acknowledgment_en(p.tone, effective_v),
+    };
+
+    // 2. Topic-specific phrase
+    let topic_phrase = if let Some(topic) = ctx.topics.first() {
+        match lang {
+            Lang::Vi => topic_phrase_vi(topic, effective_v, ctx),
+            Lang::En => topic_phrase_en(topic, effective_v, ctx),
+        }
+    } else {
+        String::new()
+    };
+
+    // 3. Follow-up (dựa vào context: repetition, novelty, causality)
+    let follow_up = match lang {
+        Lang::Vi => follow_up_vi(ctx, effective_v),
+        Lang::En => follow_up_en(ctx, effective_v),
+    };
+
+    // Ghép — bỏ phần rỗng
+    let mut parts: alloc::vec::Vec<&str> = alloc::vec::Vec::new();
+    if !ack.is_empty() {
+        parts.push(&ack);
+    }
+    if !topic_phrase.is_empty() {
+        parts.push(&topic_phrase);
+    }
+    if !follow_up.is_empty() {
+        parts.push(&follow_up);
+    }
+
+    if parts.is_empty() {
+        return tone_fallback_lang(p.tone, v, lang);
+    }
+    parts.join(" ")
+}
+
+fn acknowledgment_vi(tone: ResponseTone, v: f32) -> String {
+    match tone {
+        ResponseTone::Supportive | ResponseTone::Pause => {
+            if v < -0.60 { "Mình nghe bạn.".to_string() }
+            else if v < -0.30 { "Mình hiểu.".to_string() }
+            else { String::new() }
+        }
+        ResponseTone::Gentle => "Cứ từ từ.".to_string(),
+        ResponseTone::Reinforcing => "Tốt đấy.".to_string(),
+        ResponseTone::Celebratory => "Tuyệt!".to_string(),
+        ResponseTone::Engaged => String::new(),
+    }
+}
+
+fn acknowledgment_en(tone: ResponseTone, v: f32) -> String {
+    match tone {
+        ResponseTone::Supportive | ResponseTone::Pause => {
+            if v < -0.60 { "I hear you.".to_string() }
+            else if v < -0.30 { "I understand.".to_string() }
+            else { String::new() }
+        }
+        ResponseTone::Gentle => "Take your time.".to_string(),
+        ResponseTone::Reinforcing => "That's good.".to_string(),
+        ResponseTone::Celebratory => "Great!".to_string(),
+        ResponseTone::Engaged => String::new(),
+    }
+}
+
+fn emotion_descriptor_vi(v: f32) -> &'static str {
+    if v < -0.70 { "nặng nề" }
+    else if v < -0.50 { "khó khăn" }
+    else if v < -0.30 { "không dễ dàng" }
+    else if v < -0.10 { "bận tâm" }
+    else if v > 0.60 { "tuyệt vời" }
+    else if v > 0.30 { "vui" }
+    else { "" }
+}
+
+fn emotion_descriptor_en(v: f32) -> &'static str {
+    if v < -0.70 { "really tough" }
+    else if v < -0.50 { "difficult" }
+    else if v < -0.30 { "not easy" }
+    else if v < -0.10 { "on your mind" }
+    else if v > 0.60 { "wonderful" }
+    else if v > 0.30 { "great" }
+    else { "" }
+}
+
+fn topic_phrase_vi(topic: &str, v: f32, _ctx: &ResponseContext) -> String {
+    let desc = emotion_descriptor_vi(v);
+    if desc.is_empty() {
+        format!("Về \"{}\".", topic)
+    } else if v < -0.10 {
+        format!("{} là chuyện {} thật.", topic, desc)
+    } else {
+        format!("{} — {} đấy.", topic, desc)
+    }
+}
+
+fn topic_phrase_en(topic: &str, v: f32, _ctx: &ResponseContext) -> String {
+    let desc = emotion_descriptor_en(v);
+    if desc.is_empty() {
+        format!("About \"{}\".", topic)
+    } else if v < -0.10 {
+        format!("{} — that's {}.", topic, desc)
+    } else {
+        format!("{} — that's {}.", topic, desc)
+    }
+}
+
+fn follow_up_vi(ctx: &ResponseContext, v: f32) -> String {
+    if ctx.repetition_count > 2 {
+        if let Some(topic) = ctx.topics.first() {
+            return format!("Bạn đã nhắc đến {} nhiều lần — có điều gì cụ thể bạn muốn chia sẻ?", topic);
+        }
+    }
+    if let Some(ref cause) = ctx.causality {
+        return format!("{} ảnh hưởng đến bạn thế nào?", cause);
+    }
+    if ctx.contradiction {
+        return "Trước đó bạn nói khác — bây giờ sao rồi?".to_string();
+    }
+    if ctx.novelty > 0.70 {
+        if let Some(topic) = ctx.topics.first() {
+            return format!("Kể cho mình nghe thêm về {}?", topic);
+        }
+    }
+    // Default follow-up based on emotion
+    if v < -0.30 {
+        "Bạn muốn kể thêm không?".to_string()
+    } else if v > 0.30 {
+        "Có chuyện gì vui vậy?".to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn follow_up_en(ctx: &ResponseContext, v: f32) -> String {
+    if ctx.repetition_count > 2 {
+        if let Some(topic) = ctx.topics.first() {
+            return format!("You've mentioned {} several times — anything specific you'd like to share?", topic);
+        }
+    }
+    if let Some(ref cause) = ctx.causality {
+        return format!("How is {} affecting you?", cause);
+    }
+    if ctx.contradiction {
+        return "You said something different before — what changed?".to_string();
+    }
+    if ctx.novelty > 0.70 {
+        if let Some(topic) = ctx.topics.first() {
+            return format!("Tell me more about {}?", topic);
+        }
+    }
+    if v < -0.30 {
+        "Would you like to tell me more?".to_string()
+    } else if v > 0.30 {
+        "What's the good news?".to_string()
+    } else {
+        String::new()
     }
 }
 
