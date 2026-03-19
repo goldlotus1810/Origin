@@ -348,9 +348,15 @@ chain_hash(C) ≠ chain_hash(A) ≠ chain_hash(B)
 Quy tắc tổ hợp
 Cˢ = Union(Aˢ, Bˢ)              (hình dạng hợp nhất)
 Cᴿ = Compose                     (quan hệ = tổ hợp)
-Cⱽ = (Aⱽ + Bⱽ) / 2              (cảm xúc trung bình)
+Cⱽ = amplify(Aⱽ, Bⱽ, w_AB)     (cảm xúc AMPLIFY qua Silk — KHÔNG trung bình)
 Cᴬ = max(Aᴬ, Bᴬ)                (cường độ lấy cao hơn)
 Cᵀ = dominant(Aᵀ, Bᵀ)           (thời gian lấy chủ đạo)
+
+amplify(Va, Vb, w):
+  base = (Va + Vb) / 2
+  boost = |Va − base| × w × 0.5
+  Cⱽ = base + sign(Va + Vb) × boost
+  → Cùng dấu: đẩy mạnh hơn. Trái dấu: kéo về phía dominant.
 
 dominant(a, b) = a nếu |a - Medium| > |b - Medium|, b ngược lại
 ZWJ sequence (Unicode compose)
@@ -603,19 +609,27 @@ self_correct(input, max_iter=3):
         silk_score    = Σ strength(P_response, entityᵢ) / |entities|
 
       Tổng hợp:
-        quality = 0.3 × valid_score
-                + 0.3 × (1 - entropy_score/2.32)
-                + 0.2 × consistency
-                + 0.2 × silk_score/5.0
+        quality = w₁ × valid_score
+                + w₂ × (1 - entropy_score/2.32)
+                + w₃ × consistency
+                + w₄ × silk_score/5.0
 
-    ③ Refine (nếu chưa đủ tốt):
+        w₁=0.30, w₂=0.30, w₃=0.20, w₄=0.20 (Σ=1.0, cần A/B testing)
+        Cơ sở: ĐÚNG+CHẮC (60%) > HỢP LÝ+PHÙ HỢP (40%)
+
+    ③ Refine (có ROLLBACK GUARD):
       Nếu quality ≥ φ⁻¹ (≈ 0.618):  → DỪNG, trả P_response
       Nếu quality < φ⁻¹:
-        ── Phân tích lỗi ──
+        P_backup = P_response        ← snapshot trước khi sửa
+        ── Sửa dim yếu nhất ──
         Nếu valid_score thấp:     → thêm symbolic constraints vào context
         Nếu entropy_score cao:    → thu hẹp nhánh suy luận (N -= 1)
         Nếu consistency thấp:     → evolve(P_response, dim_worst, new_val)
         Nếu silk_score thấp:      → mở rộng Silk walk depth += 1
+
+        ── Rollback check ──
+        Nếu quality_new < quality_old → ROLLBACK: P_response = P_backup
+           → thử dim thứ 2, nếu hết dim → giữ P_backup
 
         context = context ∪ {correction_signal}
         → quay lại ① với context mới
@@ -624,10 +638,11 @@ self_correct(input, max_iter=3):
   → Honesty instinct: trả lời kèm confidence thấp
   → HOẶC im lặng nếu confidence < 0.40 (QT⑱ — BlackCurtain)
 
-Hội tụ
-Mỗi vòng lặp: quality(iter+1) > quality(iter)    (monotonic improvement)
+Hội tụ (có rollback guard — KHÔNG giả định monotonic)
+  Rollback đảm bảo: quality KHÔNG BAO GIỜ giảm qua các iter
+  Worst case: quality giữ nguyên (backup), best case: quality tăng
 
-Chứng minh:
+Chi tiết:
   - Mỗi Critique xác định dim yếu nhất
   - Refine chỉ sửa dim đó (evolve 1 chiều)
   - d(P_response, P_ideal) giảm ít nhất Δ_min mỗi iter
