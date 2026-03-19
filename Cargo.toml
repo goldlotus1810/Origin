@@ -19,6 +19,7 @@ members = [
     "tools/bench",
     "tools/migrate",
     "tools/builder",
+    "tools/intg",
 ]
 
 [workspace.package]
