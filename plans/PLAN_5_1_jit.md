@@ -190,6 +190,18 @@ Syscall sequence:
 3. Code cache management
    → Simple: fixed-size arena (1 MB), evict LRU
    → Fibonacci-based eviction: keep most-fired, evict least-fired
+
+4. ⚠️ [THỰC TẾ] Hai bytecode format → JIT phải hỗ trợ cả hai
+   → ir.rs format (flags bit 0 = 0): opcodes 0x00-0x83
+   → codegen format (flags bit 0 = 1): opcodes 0x01-0x24
+   → JIT trace recording cần biết format đang chạy
+   → Đề xuất: JIT chỉ hỗ trợ codegen format trước (simpler, denser)
+   → VM đã có bc_format flag (vm_x86_64.S) → JIT đọc flag này
+
+5. ⚠️ [THỰC TẾ] VM hiện tại exit ngay sau khi load bytecode nếu không có entry point
+   → origin.olang hiện tại: load 811KB bytecode → exit 0 (không crash, nhưng không làm gì)
+   → JIT cần bytecode CÓ hot loops → cần entry point function hoặc main()
+   → Phụ thuộc: stdlib cần fn main() hoặc VM auto-execute first function
 ```
 
 ---

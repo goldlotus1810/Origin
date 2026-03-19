@@ -149,6 +149,18 @@ Compaction strategy:
 
 3. Pool fragmentation
    → Fixed-size slots → NO fragmentation (Molecule = always 5 bytes)
+
+4. ⚠️ [THỰC TẾ] VM heap layout hiện tại
+   → r15 = bump allocator, 16 MB mmap (MAP_PRIVATE|MAP_ANONYMOUS)
+   → VM stack = r14, 1 MB mmap, grows downward
+   → Arena cần 3rd memory region (separate mmap)
+   → Hoặc: split r15 heap: [0, 8MB) = arena, [8MB, 16MB) = persistent
+   → Xem: vm_x86_64.S lines 126-150 (mmap setup)
+
+5. ⚠️ [THỰC TẾ] origin.olang hiện tại = 1.35 MB
+   → VM: 15 KB, Bytecode: 811 KB, Knowledge: 528 KB
+   → Runtime memory: 16 MB heap + 1 MB stack = 17 MB working set
+   → Arena 1 MB per turn + pool 32 KB = reasonable overhead
 ```
 
 ---

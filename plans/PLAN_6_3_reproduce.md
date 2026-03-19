@@ -259,6 +259,18 @@ pub fn deploy(worker_path, target_host) {
 4. ISL address conflict
    → allocate_address() cần scan network
    → Fallback: random address + collision detection
+
+5. ⚠️ [THỰC TẾ] Worker clone cần wrap mode layout
+   → Worker binary phải theo layout: [VM ELF][header][bytecode][config][trailer]
+   → VM cho target arch (ARM64/x86) phải có ELF detection logic
+   → Nếu ARM64 VM chưa fix → Worker ARM64 không chạy được
+   → Phụ thuộc cứng: PLAN 4.1 phải hoàn thành ARM64 VM ELF detection
+
+6. ⚠️ [THỰC TẾ] Skill bytecode phải compile được
+   → 7/22 stdlib files hiện tại parse fail
+   → Worker skills (isl, sensor, actuator...) PHẢI compile thành công
+   → Cần verify: tất cả skill .ol files dùng syntax được hỗ trợ
+   → Hoặc: viết skill files với syntax đơn giản (tránh typeof, negative literals)
 ```
 
 ---

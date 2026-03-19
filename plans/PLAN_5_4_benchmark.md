@@ -151,6 +151,20 @@ pub fn run_bench(name, fn, iterations) {
 3. Variance cao (cold cache, OS scheduling)
    → Warm-up: chạy 10 iterations trước khi đo
    → Median of 5 runs thay vì mean
+
+4. ⚠️ [THỰC TẾ] origin.olang chưa có interactive mode
+   → VM load bytecode → execute → exit 0
+   → Benchmark cần run loop, nhưng VM exit ngay
+   → Giải pháp: benchmark chạy qua Rust VM (cargo test) trước
+   → Hoặc: thêm entry point dispatch vào ASM VM
+
+5. ⚠️ [THỰC TẾ] 7/22 stdlib files không compile được
+   → chain.ol, iter.ol: negative numbers (Arith(Sub) in expression position)
+   → format.ol, json.ol: typeof keyword chưa hỗ trợ trong expression
+   → set.ol: "Enum" là reserved word, dùng làm identifier
+   → sort.ol: "Fn" là reserved word, dùng làm type annotation
+   → string.ol: "From" là reserved word, dùng làm identifier
+   → Benchmark cần stdlib → cần fix parser hoặc rename identifiers
 ```
 
 ---
