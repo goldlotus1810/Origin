@@ -28,6 +28,14 @@
 .equ HEADER_SIZE,   32
 .equ ELF_HEADER_SIZE, 120           # ELF64 header + 1 program header
 .equ F64_MARKER,    -1              # len = 0xFFFFFFFFFFFFFFFF means f64
+.equ ARRAY_MARKER,  -3              # len = 0xFFFFFFFFFFFFFFFD means array
+.equ DICT_MARKER,   -4              # len = 0xFFFFFFFFFFFFFFFC means dict
+# Note: CLOSURE_MARKER = -2 is defined near cg_closure
+
+# Array heap layout: [count:8][elem_0_ptr:8][elem_0_len:8]...
+# Dict heap layout:  [count:8][entry: key_ptr:8 key_len:8 val_ptr:8 val_len:8]...
+# Max initial capacity: 16 elements (grows on demand)
+.equ ARRAY_INIT_CAP, 16
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
 .equ SYS_READ,      0
@@ -666,148 +674,156 @@ op_loop:
     jmp     vm_loop
 
 op_call:
-    # [0x32, name_len_u8, name_bytes...]
+    # [0x32/0x07, name_len_u8, name_bytes...]
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    lea     (%r12, %r13), %rsi         # name ptr
+    lea     (%r12, %r13), %rdi         # name ptr
 
-    # Check builtin names
-    # __hyp_add (9 chars)
-    cmp     $9, %ecx
-    jne     .call_check_7
-    push    %rcx
-    lea     bname_hyp_add(%rip), %rdi
-    mov     $9, %ecx
-    push    %rsi
-    repe    cmpsb
-    pop     %rsi
+    # Hash-based builtin dispatch (FNV-1a)
+    mov     %ecx, %edx                  # name len for hash_name
+    push    %rcx                        # save name_len
+    call    hash_name                   # → rax = hash
     pop     %rcx
+
+    # ── Math builtins ──
+    movabs  $0x57252090B96BC074, %rdx   # __hyp_add
+    cmp     %rdx, %rax
     je      .call_add
-    push    %rcx
-    lea     bname_hyp_sub(%rip), %rdi
-    mov     %rsi, %rax
-    mov     %rax, %rsi                  # restore rsi
-    mov     $9, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0xF28AFA91114A9D15, %rdx   # __hyp_sub
+    cmp     %rdx, %rax
     je      .call_sub
-    push    %rcx
-    lea     bname_hyp_mul(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $9, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0x7800C290CB86CA01, %rdx   # __hyp_mul
+    cmp     %rdx, %rax
     je      .call_mul
-    push    %rcx
-    lea     bname_hyp_div(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $9, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0x3E279790AB8C5BA8, %rdx   # __hyp_div
+    cmp     %rdx, %rax
     je      .call_div
-    jmp     .call_check_7
 
-.call_check_7:
-    # __eq (4), __cmp_lt (8), __cmp_gt (8), __cmp_le (8), __cmp_ge (8)
-    cmp     $4, %ecx
-    jne     .call_check_8
-    push    %rcx
-    lea     bname_eq(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $4, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    # ── Comparison builtins ──
+    movabs  $0x59C2494311519859, %rdx   # __eq
+    cmp     %rdx, %rax
     je      .call_eq
-    jmp     .call_skip
-
-.call_check_8:
-    cmp     $8, %ecx
-    jne     .call_check_str
-    push    %rcx
-    lea     bname_cmp_lt(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $8, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0xE50D9329A4496776, %rdx   # __cmp_lt
+    cmp     %rdx, %rax
     je      .call_lt
-    push    %rcx
-    lea     bname_cmp_gt(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $8, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0xE525A529A45E17ED, %rdx   # __cmp_gt
+    cmp     %rdx, %rax
     je      .call_gt
-    push    %rcx
-    lea     bname_cmp_le(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $8, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0xE50D8429A4494DF9, %rdx   # __cmp_le
+    cmp     %rdx, %rax
     je      .call_le
-    push    %rcx
-    lea     bname_cmp_ge(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $8, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0xE5259429A45DFB0A, %rdx   # __cmp_ge
+    cmp     %rdx, %rax
     je      .call_ge
-    jmp     .call_check_str
+    movabs  $0xE5068029A443287F, %rdx   # __cmp_ne
+    cmp     %rdx, %rax
+    je      .call_ne
 
-.call_check_str:
-    # String builtins: __len (5), __concat (8), __char_at (9), __substr (8)
-    cmp     $5, %ecx
-    jne     .call_check_str8
-    push    %rcx
-    lea     bname_len(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $5, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    # ── String builtins ──
+    movabs  $0x231F02F69878E492, %rdx   # __len
+    cmp     %rdx, %rax
     je      .call_len
-    jmp     .call_skip
-
-.call_check_str8:
-    cmp     $8, %ecx
-    jne     .call_check_str9
-    push    %rcx
-    lea     bname_concat(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $8, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0xA51ED5C2BDE7E73B, %rdx   # __concat
+    cmp     %rdx, %rax
     je      .call_concat
-    push    %rcx
-    lea     bname_substr(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $8, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
-    je      .call_substr
-    jmp     .call_skip
-
-.call_check_str9:
-    cmp     $9, %ecx
-    jne     .call_skip
-    push    %rcx
-    lea     bname_char_at(%rip), %rdi
-    mov     %rsi, %rax
-    mov     $9, %ecx
-    repe    cmpsb
-    mov     %rax, %rsi
-    pop     %rcx
+    movabs  $0x9FC9B1482B01D5E9, %rdx   # __char_at
+    cmp     %rdx, %rax
     je      .call_char_at
-    # Fall through to skip
+    movabs  $0xE386A6329E2424BE, %rdx   # __substr
+    cmp     %rdx, %rax
+    je      .call_substr
+    movabs  $0xFBE159BD1C6EBFA7, %rdx   # __str_trim
+    cmp     %rdx, %rax
+    je      .call_str_trim
+    movabs  $0x74AEDE408DC6787F, %rdx   # __str_slice
+    cmp     %rdx, %rax
+    je      .call_substr                 # str_slice = substr alias
+    movabs  $0x53416FC92E4E354A, %rdx   # __str_bytes
+    cmp     %rdx, %rax
+    je      .call_str_bytes
+    movabs  $0x3EA9B2DCA6EB46A2, %rdx   # __to_number
+    cmp     %rdx, %rax
+    je      .call_to_number
+    movabs  $0xE811320261AE416D, %rdx   # __type_of
+    cmp     %rdx, %rax
+    je      .call_type_of
+
+    # ── Array builtins ──
+    movabs  $0xF10E316E51D66791, %rdx   # __array_new
+    cmp     %rdx, %rax
+    je      .call_array_new
+    movabs  $0xA4B7BF6E270F2A57, %rdx   # __array_get
+    cmp     %rdx, %rax
+    je      .call_array_get
+    movabs  $0x5210E36E8946BE83, %rdx   # __array_set
+    cmp     %rdx, %rax
+    je      .call_array_set
+    movabs  $0x90134D214B786D0F, %rdx   # __set_at (alias)
+    cmp     %rdx, %rax
+    je      .call_array_set
+    movabs  $0xF8BB87C89678B27D, %rdx   # __array_push
+    cmp     %rdx, %rax
+    je      .call_array_push
+    movabs  $0x9FC459281D29BE97, %rdx   # __push (alias)
+    cmp     %rdx, %rax
+    je      .call_array_push
+    movabs  $0x476FB46E82B22CB0, %rdx   # __array_pop
+    cmp     %rdx, %rax
+    je      .call_array_pop
+    movabs  $0x46A5ACF6ACD83186, %rdx   # __pop (alias)
+    cmp     %rdx, %rax
+    je      .call_array_pop
+    movabs  $0xDEE1C66E474DB2AC, %rdx   # __array_len
+    cmp     %rdx, %rax
+    je      .call_len                    # same as __len
+
+    # ── Dict builtins ──
+    movabs  $0x061BEB9B86B295B2, %rdx   # __dict_new
+    cmp     %rdx, %rax
+    je      .call_dict_new
+    movabs  $0xC8B4C99B63B3BB90, %rdx   # __dict_get
+    cmp     %rdx, %rax
+    je      .call_dict_get
+    movabs  $0x5FCEDD9B2804CF1C, %rdx   # __dict_set
+    cmp     %rdx, %rax
+    je      .call_dict_set
+    movabs  $0x234A766F8747B620, %rdx   # __dict_keys
+    cmp     %rdx, %rax
+    je      .call_dict_keys
+
+    # ── Bitwise builtins ──
+    movabs  $0x31F6E47C4AE5A082, %rdx   # __bit_or
+    cmp     %rdx, %rax
+    je      .call_bit_or
+    movabs  $0x7551B73312F1D4D4, %rdx   # __bit_and
+    cmp     %rdx, %rax
+    je      .call_bit_and
+    movabs  $0x4E03A6338DB8ADC8, %rdx   # __bit_xor
+    cmp     %rdx, %rax
+    je      .call_bit_xor
+
+    # ── Eval bytecode (nested execution) ──
+    movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
+    cmp     %rdx, %rax
+    je      .call_eval_bytecode
+
+    # ── Not a builtin: try var_table lookup ──
+    # rax still has the hash from hash_name
+    push    %rcx                        # save name_len
+    call    var_load_hash               # rax=ptr, rdx=len
+    pop     %rcx
+
+    # Check if it's a closure
+    mov     %rdx, %rsi
+    and     $0xFFFF, %esi
+    cmp     $CLOSURE_MARKER, %si
+    jne     .call_skip
+
+    # Found closure in var_table — call it
+    add     %rcx, %r13                  # PC past name bytes
+    push    %r13                        # save return address
+    mov     %eax, %r13d                 # PC = body_pc
+    jmp     vm_loop
 
 .call_skip:
     # Unknown function — skip
@@ -928,17 +944,39 @@ op_call:
 # ── String builtins ──────────────────────────────────────────────────────
 
 .call_len:
-    # Pop chain, push its length as f64
+    # Pop value, push its length as f64
     add     %rcx, %r13
-    mov     8(%r14), %rax              # len
+    mov     8(%r14), %rax              # len/marker
     cmp     $F64_MARKER, %rax
-    jne     .call_len_chain
-    # f64 → len = 1? or 8? Let's say 1
+    je      .call_len_f64
+    cmp     $ARRAY_MARKER, %rax
+    je      .call_len_array
+    cmp     $DICT_MARKER, %rax
+    je      .call_len_dict
+    jmp     .call_len_chain
+.call_len_f64:
+    # f64 → len = 1
     mov     $0x3FF0000000000000, %rax   # 1.0
     mov     %rax, (%r14)
     jmp     vm_loop
+.call_len_array:
+    # Array: read count from heap
+    mov     (%r14), %rdi               # array base ptr
+    mov     (%rdi), %rax               # count
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.call_len_dict:
+    # Dict: read entry count from heap
+    mov     (%r14), %rdi               # dict base ptr
+    mov     (%rdi), %rax               # count
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
 .call_len_chain:
-    # Convert len to f64
+    # String: len is already in rax
     cvtsi2sd %rax, %xmm0
     movsd   %xmm0, (%r14)
     movq    $F64_MARKER, 8(%r14)
@@ -1071,6 +1109,813 @@ op_call:
     mov     %rdx, 8(%r14)
     jmp     vm_loop
 
+# ── Not-equal builtin ───────────────────────────────────────────────────
+
+.call_ne:
+    add     %rcx, %r13
+    # Check if both are f64
+    mov     8(%r14), %rax              # b len
+    mov     24(%r14), %rdx             # a len
+    cmp     $F64_MARKER, %rax
+    jne     .ne_chain
+    cmp     $F64_MARKER, %rdx
+    jne     .ne_chain
+    # Both f64 — compare
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    ucomisd %xmm1, %xmm0
+    jne     .ne_true
+    # Equal → false
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.ne_true:
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.ne_chain:
+    # Compare chains by content
+    mov     8(%r14), %rax
+    mov     24(%r14), %rdx
+    cmp     %rax, %rdx
+    jne     .ne_chain_diff
+    # Same length — compare bytes
+    mov     (%r14), %rsi
+    mov     16(%r14), %rdi
+    add     $16, %r14
+    mov     %rax, %rcx
+    test    %rcx, %rcx
+    jz      .ne_chain_eq
+    repe    cmpsb
+    jne     .ne_true
+.ne_chain_eq:
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.ne_chain_diff:
+    add     $16, %r14
+    mov     $0x3FF0000000000000, %rax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── Type-of builtin ─────────────────────────────────────────────────────
+
+.call_type_of:
+    add     %rcx, %r13
+    mov     8(%r14), %rax              # len/marker
+    add     $16, %r14                  # pop value
+    sub     $16, %r14                  # push result
+    cmp     $F64_MARKER, %rax
+    je      .typeof_number
+    cmp     $ARRAY_MARKER, %rax
+    je      .typeof_array
+    cmp     $DICT_MARKER, %rax
+    je      .typeof_dict
+    cmp     $CLOSURE_MARKER, %rax
+    je      .typeof_fn
+    test    %rax, %rax
+    jz      .typeof_nil
+    # Default: string
+    lea     str_string(%rip), %rax
+    mov     %rax, (%r14)
+    movq    $6, 8(%r14)
+    jmp     vm_loop
+.typeof_number:
+    lea     str_number(%rip), %rax
+    mov     %rax, (%r14)
+    movq    $6, 8(%r14)
+    jmp     vm_loop
+.typeof_array:
+    lea     str_array(%rip), %rax
+    mov     %rax, (%r14)
+    movq    $5, 8(%r14)
+    jmp     vm_loop
+.typeof_dict:
+    lea     str_dict(%rip), %rax
+    mov     %rax, (%r14)
+    movq    $4, 8(%r14)
+    jmp     vm_loop
+.typeof_fn:
+    lea     str_fn(%rip), %rax
+    mov     %rax, (%r14)
+    movq    $8, 8(%r14)
+    jmp     vm_loop
+.typeof_nil:
+    lea     str_nil(%rip), %rax
+    mov     %rax, (%r14)
+    movq    $3, 8(%r14)
+    jmp     vm_loop
+
+# ── To-number builtin ───────────────────────────────────────────────────
+
+.call_to_number:
+    add     %rcx, %r13
+    # Pop string, parse as decimal number
+    mov     (%r14), %rsi               # string ptr
+    mov     8(%r14), %rcx              # string len
+    add     $16, %r14                  # pop
+
+    # Simple decimal parser: sign + digits + optional '.' + digits
+    xor     %eax, %eax                  # negative flag
+    xorpd   %xmm0, %xmm0              # result = 0.0
+    test    %rcx, %rcx
+    jz      .to_num_done
+    # Check minus sign
+    cmpb    $'-', (%rsi)
+    jne     .to_num_loop
+    mov     $1, %eax                    # negative
+    inc     %rsi
+    dec     %rcx
+.to_num_loop:
+    test    %rcx, %rcx
+    jz      .to_num_sign
+    movzbl  (%rsi), %edx
+    cmp     $'.', %edx
+    je      .to_num_frac
+    sub     $'0', %edx
+    cmp     $10, %edx
+    jae     .to_num_sign
+    # result = result * 10 + digit
+    movsd   const_ten(%rip), %xmm1
+    mulsd   %xmm1, %xmm0
+    cvtsi2sd %edx, %xmm1
+    addsd   %xmm1, %xmm0
+    inc     %rsi
+    dec     %rcx
+    jmp     .to_num_loop
+.to_num_frac:
+    inc     %rsi
+    dec     %rcx
+    movsd   const_one(%rip), %xmm2      # divisor = 1.0
+.to_num_frac_loop:
+    test    %rcx, %rcx
+    jz      .to_num_sign
+    movzbl  (%rsi), %edx
+    sub     $'0', %edx
+    cmp     $10, %edx
+    jae     .to_num_sign
+    movsd   const_ten(%rip), %xmm1
+    mulsd   %xmm1, %xmm2               # divisor *= 10
+    cvtsi2sd %edx, %xmm1               # digit
+    divsd   %xmm2, %xmm1               # digit / divisor
+    addsd   %xmm1, %xmm0               # result += digit/divisor
+    inc     %rsi
+    dec     %rcx
+    jmp     .to_num_frac_loop
+.to_num_sign:
+    test    %eax, %eax
+    jz      .to_num_done
+    # Negate
+    movsd   const_neg_one(%rip), %xmm1
+    mulsd   %xmm1, %xmm0
+.to_num_done:
+    sub     $16, %r14
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── String-trim builtin ─────────────────────────────────────────────────
+
+.call_str_trim:
+    add     %rcx, %r13
+    mov     (%r14), %rsi               # string ptr
+    mov     8(%r14), %rcx              # string len
+    add     $16, %r14                  # pop
+    # Trim leading spaces
+    mov     %rsi, %rdi                  # start
+    add     %rcx, %rsi                  # end
+.trim_lead:
+    cmp     %rsi, %rdi
+    jae     .trim_empty
+    movzbl  (%rdi), %eax
+    cmp     $32, %eax                   # space
+    je      .trim_lead_next
+    cmp     $9, %eax                    # tab
+    je      .trim_lead_next
+    cmp     $10, %eax                   # newline
+    je      .trim_lead_next
+    cmp     $13, %eax                   # CR
+    je      .trim_lead_next
+    jmp     .trim_trail
+.trim_lead_next:
+    inc     %rdi
+    jmp     .trim_lead
+.trim_trail:
+    # rdi = trimmed start, rsi = past end
+.trim_trail_loop:
+    cmp     %rdi, %rsi
+    jbe     .trim_done
+    movzbl  -1(%rsi), %eax
+    cmp     $32, %eax
+    je      .trim_trail_dec
+    cmp     $9, %eax
+    je      .trim_trail_dec
+    cmp     $10, %eax
+    je      .trim_trail_dec
+    cmp     $13, %eax
+    je      .trim_trail_dec
+    jmp     .trim_done
+.trim_trail_dec:
+    dec     %rsi
+    jmp     .trim_trail_loop
+.trim_done:
+    mov     %rsi, %rcx
+    sub     %rdi, %rcx                  # new length
+    # Copy to heap
+    mov     %r15, %rax
+    push    %rcx
+    mov     %r15, %rsi
+    xchg    %rsi, %rdi                  # rdi=dest=heap, rsi=src=trimmed
+    mov     %ecx, %ecx
+    rep     movsb
+    mov     %rdi, %r15                  # bump
+    pop     %rcx
+    sub     $16, %r14
+    mov     %rax, (%r14)
+    mov     %rcx, 8(%r14)
+    jmp     vm_loop
+.trim_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# ── String-bytes builtin ────────────────────────────────────────────────
+
+.call_str_bytes:
+    add     %rcx, %r13
+    # Pop string, create array of byte values
+    mov     (%r14), %rsi               # string ptr
+    mov     8(%r14), %rcx              # string len
+    add     $16, %r14                  # pop
+
+    # Create array on heap: [count:8][elem_0_ptr:8][elem_0_len:8]...
+    mov     %r15, %rdi                  # array base
+    mov     %rcx, (%r15)               # count = string length
+    add     $8, %r15                    # past count header
+
+    # Each byte → f64 on heap
+    xor     %edx, %edx
+.str_bytes_loop:
+    cmp     %rcx, %rdx
+    jae     .str_bytes_done
+    movzbl  (%rsi, %rdx), %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r15)              # ptr slot = f64 bits
+    movq    $F64_MARKER, 8(%r15)       # len slot = F64_MARKER
+    add     $16, %r15
+    inc     %rdx
+    jmp     .str_bytes_loop
+.str_bytes_done:
+    sub     $16, %r14
+    mov     %rdi, (%r14)               # array base ptr
+    movq    $ARRAY_MARKER, 8(%r14)     # marker
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Array builtins
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_array_new:
+    # Stack: [elem0, elem1, ..., elemN-1, count]
+    # count is f64 on top of stack
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax              # count
+    add     $16, %r14                   # pop count
+
+    # Create array on heap
+    mov     %r15, %rdi                  # array base
+    mov     %rax, (%r15)               # store count
+    add     $8, %r15                    # past count
+
+    # Copy elements from stack (they are in reverse order on stack)
+    # Stack has elem[N-1] on top, elem[0] deepest.
+    # We want array[0] = elem0 (deepest), array[N-1] = elemN-1 (top).
+    # Reverse: first calculate offset to deepest element, then copy forward.
+    test    %rax, %rax
+    jz      .array_new_done
+    mov     %rax, %rdx                  # save count
+    # Deepest element is at r14 + (count-1)*16
+    lea     -16(%r14, %rax, 8), %rsi   # wrong offset, let me recalc
+    # Actually: elem0 is at offset (count-1)*16 from current r14
+    dec     %rax
+    shl     $4, %rax                    # (count-1) * 16
+    lea     (%r14, %rax), %rsi         # pointer to deepest element (elem0)
+    mov     %rdx, %rcx                  # loop counter
+
+.array_new_copy:
+    # Copy from rsi (stack, deepest first) to heap
+    mov     (%rsi), %rax               # elem ptr
+    mov     8(%rsi), %r8               # elem len
+    mov     %rax, (%r15)
+    mov     %r8, 8(%r15)
+    add     $16, %r15                   # heap forward
+    sub     $16, %rsi                   # stack backward (toward top)
+    dec     %rcx
+    jnz     .array_new_copy
+
+    # Pop all elements from stack
+    shl     $4, %rdx                    # count * 16
+    add     %rdx, %r14
+
+.array_new_done:
+    # Push array
+    sub     $16, %r14
+    mov     %rdi, (%r14)               # array base ptr
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_array_get:
+    # Stack: [array, index] → pop both, push array[index]
+    add     %rcx, %r13
+    # Pop index
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax              # index
+    # Pop array
+    mov     16(%r14), %rdi              # array base ptr
+    add     $32, %r14                   # pop 2
+
+    # Check array marker was valid
+    test    %rdi, %rdi
+    jz      .array_get_empty
+
+    # Read count
+    mov     (%rdi), %rcx               # count
+    cmp     %rcx, %rax
+    jae     .array_get_empty            # out of bounds
+
+    # Element at offset 8 + index*16
+    shl     $4, %rax
+    add     $8, %rax
+    mov     (%rdi, %rax), %rdx         # elem ptr
+    mov     8(%rdi, %rax), %rcx        # elem len
+
+    sub     $16, %r14
+    mov     %rdx, (%r14)
+    mov     %rcx, 8(%r14)
+    jmp     vm_loop
+
+.array_get_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.call_array_set:
+    # Stack: [array, index, value] → set array[index] = value, push array
+    add     %rcx, %r13
+    # Pop value
+    mov     (%r14), %r8                # val ptr
+    mov     8(%r14), %r9               # val len
+    # Pop index
+    movsd   16(%r14), %xmm0
+    cvttsd2si %xmm0, %rax              # index
+    # Pop array
+    mov     32(%r14), %rdi              # array base
+    add     $48, %r14                   # pop 3
+
+    test    %rdi, %rdi
+    jz      .array_set_done
+
+    # Bounds check
+    mov     (%rdi), %rcx               # count
+    cmp     %rcx, %rax
+    jae     .array_set_done
+
+    # Write at offset 8 + index*16
+    shl     $4, %rax
+    add     $8, %rax
+    mov     %r8, (%rdi, %rax)
+    mov     %r9, 8(%rdi, %rax)
+
+.array_set_done:
+    # Push array back
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_array_push:
+    # Stack: [array, value] → append value to array, push array
+    add     %rcx, %r13
+    # Pop value
+    mov     (%r14), %r8                # val ptr
+    mov     8(%r14), %r9               # val len
+    # Pop array
+    mov     16(%r14), %rdi              # array base
+    mov     24(%r14), %rax             # should be ARRAY_MARKER
+    add     $32, %r14                   # pop 2
+
+    test    %rdi, %rdi
+    jz      .array_push_create_new
+
+    # Read count, write element at end
+    mov     (%rdi), %rcx               # count
+    # Element position: 8 + count*16
+    mov     %rcx, %rax
+    shl     $4, %rax
+    add     $8, %rax
+    mov     %r8, (%rdi, %rax)          # write val ptr
+    mov     %r9, 8(%rdi, %rax)         # write val len
+    incq    (%rdi)                      # count++
+
+    # Push array back
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.array_push_create_new:
+    # Create new array with 1 element
+    mov     %r15, %rdi                  # array base
+    movq    $1, (%r15)                  # count = 1
+    mov     %r8, 8(%r15)               # elem ptr
+    mov     %r9, 16(%r15)              # elem len
+    add     $24, %r15                   # bump heap
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_array_pop:
+    # Stack: [array] → pop last element, push it
+    add     %rcx, %r13
+    mov     (%r14), %rdi               # array base
+    add     $16, %r14                   # pop array
+
+    test    %rdi, %rdi
+    jz      .array_pop_empty
+    mov     (%rdi), %rcx               # count
+    test    %rcx, %rcx
+    jz      .array_pop_empty
+
+    # Get last element
+    dec     %rcx
+    mov     %rcx, (%rdi)               # count--
+    shl     $4, %rcx
+    add     $8, %rcx
+    mov     (%rdi, %rcx), %rax         # elem ptr
+    mov     8(%rdi, %rcx), %rdx        # elem len
+    sub     $16, %r14
+    mov     %rax, (%r14)
+    mov     %rdx, 8(%r14)
+    jmp     vm_loop
+
+.array_pop_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dict builtins
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_dict_new:
+    # Stack: [key0, val0, key1, val1, ..., count]
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax              # count (number of pairs)
+    add     $16, %r14                   # pop count
+
+    # Create dict on heap: [count:8][entries: key_ptr:8 key_len:8 val_ptr:8 val_len:8]
+    mov     %r15, %rdi                  # dict base
+    mov     %rax, (%r15)               # store count
+    add     $8, %r15                    # past count header
+
+    test    %rax, %rax
+    jz      .dict_new_done
+    mov     %rax, %rdx                  # save count
+
+    # Pairs are on stack in reverse: top = last_val, then last_key, ...
+    # Stack (top to bottom): valN-1, keyN-1, ..., val0, key0
+    # We need dict entries in order: key0,val0, key1,val1, ...
+    # Deepest pair (key0,val0) is at offset (count-1)*32 from r14
+    dec     %rax
+    shl     $5, %rax                    # (count-1) * 32
+    lea     (%r14, %rax), %rsi         # ptr to deepest pair (key0)
+    mov     %rdx, %rcx
+
+.dict_new_copy:
+    # key at (%rsi), val at 16(%rsi)
+    mov     (%rsi), %rax               # key ptr
+    mov     8(%rsi), %r8               # key len
+    mov     16(%rsi), %r9              # val ptr
+    mov     24(%rsi), %r10             # val len
+    mov     %rax, (%r15)               # store key ptr
+    mov     %r8, 8(%r15)               # store key len
+    mov     %r9, 16(%r15)              # store val ptr
+    mov     %r10, 24(%r15)             # store val len
+    add     $32, %r15                   # next entry
+    sub     $32, %rsi                   # prev pair on stack
+    dec     %rcx
+    jnz     .dict_new_copy
+
+    # Pop all pairs from stack
+    mov     %rdx, %rcx
+    shl     $5, %rcx                    # count * 32
+    add     %rcx, %r14
+
+.dict_new_done:
+    sub     $16, %r14
+    mov     %rdi, (%r14)               # dict base ptr
+    movq    $DICT_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_dict_get:
+    # Stack: [dict, key] → pop both, push dict[key]
+    add     %rcx, %r13
+    # Pop key
+    mov     (%r14), %rsi               # key ptr
+    mov     8(%r14), %rdx              # key len
+    # Pop dict
+    mov     16(%r14), %rdi              # dict base
+    add     $32, %r14                   # pop 2
+
+    test    %rdi, %rdi
+    jz      .dict_get_empty
+
+    # Search entries
+    mov     (%rdi), %rcx               # entry count
+    lea     8(%rdi), %r8               # first entry
+.dict_get_search:
+    test    %rcx, %rcx
+    jz      .dict_get_empty
+
+    # Compare key: entry key at (%r8), len at 8(%r8)
+    mov     8(%r8), %rax               # entry key len
+    cmp     %rax, %rdx                  # same length?
+    jne     .dict_get_next
+
+    # Same length — compare bytes
+    push    %rcx
+    push    %rsi
+    push    %rdx
+    push    %r8
+    mov     (%r8), %rdi                # entry key ptr
+    mov     %rdx, %rcx                 # byte count
+    repe    cmpsb
+    pop     %r8
+    pop     %rdx
+    pop     %rsi
+    pop     %rcx
+    je      .dict_get_found
+
+.dict_get_next:
+    add     $32, %r8                    # next entry
+    dec     %rcx
+    jmp     .dict_get_search
+
+.dict_get_found:
+    # Value is at 16(%r8) ptr, 24(%r8) len
+    mov     16(%r8), %rax
+    mov     24(%r8), %rdx
+    sub     $16, %r14
+    mov     %rax, (%r14)
+    mov     %rdx, 8(%r14)
+    jmp     vm_loop
+
+.dict_get_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.call_dict_set:
+    # Stack: [dict, key, value] → set dict[key] = value, push dict
+    add     %rcx, %r13
+    # Pop value
+    mov     (%r14), %r9                # val ptr
+    mov     8(%r14), %r10              # val len
+    # Pop key
+    mov     16(%r14), %rsi             # key ptr
+    mov     24(%r14), %rdx             # key len
+    # Pop dict
+    mov     32(%r14), %rdi             # dict base
+    add     $48, %r14                  # pop 3
+
+    test    %rdi, %rdi
+    jz      .dict_set_push
+
+    # Search for existing key
+    mov     (%rdi), %rcx
+    lea     8(%rdi), %r8
+.dict_set_search:
+    test    %rcx, %rcx
+    jz      .dict_set_append
+
+    mov     8(%r8), %rax
+    cmp     %rax, %rdx
+    jne     .dict_set_next
+
+    push    %rcx
+    push    %rsi
+    push    %rdx
+    push    %r8
+    mov     (%r8), %rdi
+    mov     %rdx, %rcx
+    repe    cmpsb
+    pop     %r8
+    pop     %rdx
+    pop     %rsi
+    pop     %rcx
+    je      .dict_set_update
+
+.dict_set_next:
+    add     $32, %r8
+    dec     %rcx
+    jmp     .dict_set_search
+
+.dict_set_update:
+    # Found — update value
+    mov     %r9, 16(%r8)
+    mov     %r10, 24(%r8)
+    # Reload dict base (rdi may have been clobbered by cmpsb)
+    mov     32(%r14), %rdi             # Actually we already popped...
+    # rdi was saved before loop, let's restore from dict base
+    jmp     .dict_set_push
+
+.dict_set_append:
+    # Append new entry at end of dict
+    mov     (%rdi), %rcx               # current count
+    # New entry position: 8 + count*32
+    mov     %rcx, %rax
+    shl     $5, %rax
+    add     $8, %rax
+    mov     %rsi, (%rdi, %rax)         # key ptr
+    mov     %rdx, 8(%rdi, %rax)        # key len
+    mov     %r9, 16(%rdi, %rax)        # val ptr
+    mov     %r10, 24(%rdi, %rax)       # val len
+    incq    (%rdi)                      # count++
+
+.dict_set_push:
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $DICT_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_dict_keys:
+    # Stack: [dict] → push array of keys
+    add     %rcx, %r13
+    mov     (%r14), %rdi               # dict base
+    add     $16, %r14                   # pop dict
+
+    test    %rdi, %rdi
+    jz      .dict_keys_empty
+
+    # Create array of keys
+    mov     (%rdi), %rcx               # dict entry count
+    mov     %r15, %rsi                  # array base
+    mov     %rcx, (%r15)               # array count
+    add     $8, %r15                    # past count
+    lea     8(%rdi), %r8               # first entry
+
+    test    %rcx, %rcx
+    jz      .dict_keys_done
+.dict_keys_loop:
+    # Copy key ptr/len to array
+    mov     (%r8), %rax
+    mov     8(%r8), %rdx
+    mov     %rax, (%r15)
+    mov     %rdx, 8(%r15)
+    add     $16, %r15
+    add     $32, %r8
+    dec     %rcx
+    jnz     .dict_keys_loop
+
+.dict_keys_done:
+    sub     $16, %r14
+    mov     %rsi, (%r14)               # array base
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.dict_keys_empty:
+    # Empty array
+    mov     %r15, %rdi
+    movq    $0, (%r15)
+    add     $8, %r15
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Bitwise builtins
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_bit_or:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    cvttsd2si %xmm0, %rax
+    cvttsd2si %xmm1, %rdx
+    or      %rdx, %rax
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bit_and:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    cvttsd2si %xmm0, %rax
+    cvttsd2si %xmm1, %rdx
+    and     %rdx, %rax
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bit_xor:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    cvttsd2si %xmm0, %rax
+    cvttsd2si %xmm1, %rdx
+    xor     %rdx, %rax
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Eval bytecode (nested execution)
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_eval_bytecode:
+    add     %rcx, %r13
+    # Pop bytecode array from stack
+    mov     (%r14), %rdi               # array base (or raw ptr)
+    mov     8(%r14), %rax              # marker
+    add     $16, %r14
+
+    cmp     $ARRAY_MARKER, %rax
+    jne     .eval_bc_raw
+
+    # Array of bytes: convert to contiguous bytecode buffer
+    # Array: [count:8][elem_0_ptr:8][elem_0_len:8]...
+    # Each element is a f64 representing a byte value
+    mov     (%rdi), %rcx               # byte count
+    lea     8(%rdi), %rsi              # first element
+    mov     %r15, %r8                   # bytecode buffer start
+    xor     %edx, %edx
+.eval_bc_copy:
+    cmp     %rcx, %rdx
+    jae     .eval_bc_run
+    movsd   (%rsi), %xmm0
+    cvttsd2si %xmm0, %rax
+    movb    %al, (%r15, %rdx)
+    add     $16, %rsi                   # next array element
+    inc     %rdx
+    jmp     .eval_bc_copy
+
+.eval_bc_raw:
+    # Raw bytes (ptr, len)
+    mov     %rdi, %r8                   # buffer ptr
+    mov     %rax, %rcx                  # length
+    test    %rcx, %rcx
+    jz      .eval_bc_empty
+
+.eval_bc_run:
+    # Save current execution context on CPU stack
+    push    %r12                        # save bytecode base
+    push    %r13                        # save PC
+    push    %rbx                        # save bytecode size
+    pushq   $1                          # nested flag marker
+
+    # Set up nested execution
+    mov     %r8, %r12                   # new bytecode base
+    xor     %r13d, %r13d               # PC = 0
+    mov     %rcx, %rbx                  # bytecode size
+    add     %rcx, %r15                  # bump heap past bytecode buffer
+
+    jmp     vm_loop                     # execute!
+    # When this hits op_halt, it will check the nested flag and return here
+
+.eval_bc_empty:
+    # Push empty result
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+
 op_ret:
     # Return from closure call — pop return address from CPU stack.
     # CPU stack top has the saved PC from cg_call_closure.
@@ -1109,12 +1954,24 @@ op_emit:
     cmp     $F64_MARKER, %rdx
     je      .emit_f64
 
+    # Array/dict: print type indicator
+    cmp     $ARRAY_MARKER, %rdx
+    je      .emit_array
+    cmp     $DICT_MARKER, %rdx
+    je      .emit_dict
+
     # If len == 0, skip
     test    %rdx, %rdx
     jz      vm_loop
 
     # Write chain bytes to stdout
     mov     $1, %edi                   # fd = stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Print newline after emit
+    lea     str_newline(%rip), %rsi
+    mov     $1, %edx
+    mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
     jmp     vm_loop
@@ -1131,6 +1988,82 @@ op_emit:
     syscall
     pop     %rax
     add     %rax, %r15                  # bump heap past formatted string
+    # Print newline
+    lea     str_newline(%rip), %rsi
+    mov     $1, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     vm_loop
+
+.emit_array:
+    # Print "[array N]" with element count
+    # rsi = array base ptr
+    test    %rsi, %rsi
+    jz      .emit_array_empty
+    mov     (%rsi), %rax               # count
+    lea     str_array_open(%rip), %rsi
+    mov     $7, %edx                    # "[array "
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Print count as number
+    cvtsi2sd %rax, %xmm0
+    call    f64_to_ascii
+    mov     %r15, %rsi
+    mov     %eax, %edx
+    mov     $1, %edi
+    push    %rax
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rax
+    add     %rax, %r15
+    lea     str_bracket_nl(%rip), %rsi
+    mov     $2, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     vm_loop
+.emit_array_empty:
+    lea     str_empty_array(%rip), %rsi
+    mov     $4, %edx                    # "[]\n"
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     vm_loop
+
+.emit_dict:
+    # Print "{dict N}"
+    test    %rsi, %rsi
+    jz      .emit_dict_empty
+    mov     (%rsi), %rax
+    lea     str_dict_open(%rip), %rsi
+    mov     $6, %edx                    # "{dict "
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    cvtsi2sd %rax, %xmm0
+    call    f64_to_ascii
+    mov     %r15, %rsi
+    mov     %eax, %edx
+    mov     $1, %edi
+    push    %rax
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rax
+    add     %rax, %r15
+    lea     str_brace_nl(%rip), %rsi
+    mov     $2, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     vm_loop
+.emit_dict_empty:
+    lea     str_empty_dict(%rip), %rsi
+    mov     $4, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
     jmp     vm_loop
 
 # ── Syscall wrappers ─────────────────────────────────────────────────────
@@ -1566,7 +2499,7 @@ f64_to_ascii:
 #
 # For standalone VM, we keep it simple: max 256 variables, linear scan.
 
-.equ VAR_TABLE_MAX, 256
+.equ VAR_TABLE_MAX, 1024
 
 # Initialize variable table — called once from _start
 # Uses r15 (heap bump), stores table base in var_table_base
@@ -1575,8 +2508,8 @@ var_table_init:
     lea     var_table_base(%rip), %rcx
     mov     %rax, (%rcx)               # save table base address
     movq    $0, (%r15)                  # count = 0
-    # Reserve 256 entries × 24 bytes + 8 header = 6152 bytes
-    add     $6152, %r15                 # bump past reserved var table space
+    # Reserve 1024 entries × 24 bytes + 8 header = 24584 bytes
+    add     $24584, %r15                # bump past reserved var table space
     ret
 
 # ── Hash-based variable table ──
@@ -1733,14 +2666,23 @@ err_read_bc:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_halt:
-    # Print greeting + enter REPL if bytecode completed normally
+    # Check if this is a nested halt (from __eval_bytecode)
+    # CPU stack: [nested_flag=1][saved_rbx][saved_r13][saved_r12]
+    pop     %rax                        # potential nested flag
+    cmp     $1, %rax
+    je      .halt_nested
+
+    # Not nested — this is the boot completion.
+    push    %rax                        # restore CPU stack
+
+    # Print greeting
     lea     msg_greeting(%rip), %rsi
-    mov     $28, %edx                   # length of greeting
+    movzbl  msg_greeting_len(%rip), %edx
     mov     $1, %edi                    # stdout
     mov     $SYS_WRITE, %eax
     syscall
 
-    # ── REPL loop: read line → echo → repeat ──────────────────────
+    # ── REPL loop: read line → compile → execute ─────────────────
 .repl_loop:
     # Print prompt: "○ > "
     lea     msg_prompt(%rip), %rsi
@@ -1749,9 +2691,9 @@ op_halt:
     mov     $SYS_WRITE, %eax
     syscall
 
-    # Read line from stdin into heap
+    # Read line from stdin into heap buffer
     mov     %r15, %rsi                  # buf = heap ptr
-    mov     $256, %edx                  # max 256 bytes
+    mov     $4096, %edx                 # max 4KB input
     xor     %edi, %edi                  # fd = stdin
     mov     $SYS_READ, %eax
     syscall
@@ -1760,30 +2702,130 @@ op_halt:
     test    %rax, %rax
     jle     .repl_exit                  # EOF → exit
 
+    # Save input length and buffer pointer
+    mov     %rax, %rcx                  # input length
+    mov     %r15, %rdi                  # input buffer
+
     # Check for "exit\n" or "quit\n"
-    mov     %rax, %rcx                  # save length
     cmp     $5, %rcx
-    jne     .repl_echo
-    cmpl    $0x74697865, (%r15)         # "exit" little-endian
+    jne     .repl_try_eval
+    cmpl    $0x74697865, (%rdi)         # "exit" little-endian
     jne     .repl_check_quit
-    cmpb    $0x0A, 4(%r15)              # '\n'
+    cmpb    $0x0A, 4(%rdi)
     je      .repl_exit
 .repl_check_quit:
-    cmpl    $0x74697571, (%r15)         # "quit" little-endian
-    jne     .repl_echo
-    cmpb    $0x0A, 4(%r15)
+    cmpl    $0x74697571, (%rdi)         # "quit" little-endian
+    jne     .repl_try_eval
+    cmpb    $0x0A, 4(%rdi)
     je      .repl_exit
 
-.repl_echo:
-    # Echo input back (placeholder for compile+execute)
-    mov     %r15, %rsi                  # buf
-    mov     %rcx, %rdx                  # len
+.repl_try_eval:
+    # Construct trampoline bytecode on heap that:
+    #   1. Pushes input string
+    #   2. Calls repl_eval(input)
+    #   3. Emits result
+    #   4. Halts (nested)
+    #
+    # Format (codegen bytecode):
+    #   [0x01][len:2 LE][input bytes]   — Push string
+    #   [0x24][0x09]["repl_eval"][0x01] — CallClosure "repl_eval" arity=1
+    #   [0x06]                          — Emit
+    #   [0x0F]                          — Halt
+
+    mov     %r15, %r8                   # trampoline base
+    # Check repl_eval exists first
+    push    %rcx                        # save input len
+    push    %rdi                        # save input ptr
+    lea     bname_repl_eval(%rip), %rdi
+    mov     $9, %edx
+    call    hash_name
+    call    var_load_hash
+    mov     %rdx, %rsi
+    and     $0xFFFF, %esi
+    pop     %rdi                        # restore input ptr
+    pop     %rcx                        # restore input len
+    cmp     $CLOSURE_MARKER, %si
+    jne     .repl_fallback_echo
+
+    # Build trampoline bytecode
+    movb    $0x01, (%r15)               # Push opcode
+    movw    %cx, 1(%r15)                # string length (u16 LE)
+    add     $3, %r15
+
+    # Copy input bytes into trampoline
+    push    %rcx
+    push    %rdi
+    mov     %r15, %rax
+    mov     %rdi, %rsi                  # src = input buffer
+    mov     %r15, %rdi                  # dest = trampoline
+    mov     %ecx, %ecx
+    rep     movsb
+    mov     %rdi, %r15
+    pop     %rdi
+    pop     %rcx
+
+    # CallClosure "repl_eval" arity=1
+    movb    $0x24, (%r15)               # CallClosure opcode
+    movb    $9, 1(%r15)                 # name len
+    # Copy "repl_eval"
+    push    %rcx
+    lea     bname_repl_eval(%rip), %rsi
+    lea     2(%r15), %rdi
+    mov     $9, %ecx
+    rep     movsb
+    pop     %rcx
+    movb    $1, 11(%r15)                # arity = 1
+    add     $12, %r15
+
+    # Emit
+    movb    $0x06, (%r15)
+    inc     %r15
+
+    # Halt (nested)
+    movb    $0x0F, (%r15)
+    inc     %r15
+
+    # Calculate trampoline length
+    mov     %r15, %rcx
+    sub     %r8, %rcx                   # trampoline bytecode length
+
+    # Execute as nested bytecode: save context + run
+    push    %r12                        # save boot bytecode base
+    push    %r13                        # save boot PC
+    push    %rbx                        # save boot bytecode size
+    pushq   $1                          # nested flag marker
+
+    mov     %r8, %r12                   # bytecode base = trampoline
+    xor     %r13d, %r13d               # PC = 0
+    mov     %rcx, %rbx                  # bytecode size
+    jmp     vm_loop                     # execute trampoline!
+    # Flow: Push input → CallClosure repl_eval → (run compiler) → Emit → Halt
+    # Halt (nested) → .halt_nested → restore → vm_loop → op_halt → REPL loop
+
+.repl_fallback_echo:
+    # repl_eval not found — echo input back
+    mov     %rdi, %rsi                  # input ptr
+    mov     %rcx, %rdx                  # input len
     mov     $1, %edi                    # stdout
     mov     $SYS_WRITE, %eax
     syscall
     jmp     .repl_loop
 
+.halt_nested:
+    # Returning from nested __eval_bytecode execution
+    # CPU stack now has: [saved_rbx][saved_r13][saved_r12]
+    pop     %rbx                        # restore bytecode size
+    pop     %r13                        # restore PC
+    pop     %r12                        # restore bytecode base
+    jmp     vm_loop                     # continue outer execution
+
 .repl_exit:
+    # Print goodbye
+    lea     msg_bye(%rip), %rsi
+    mov     $4, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
     mov     $SYS_EXIT, %eax
     xor     %edi, %edi                  # exit(0)
     syscall
@@ -1825,26 +2867,45 @@ msg_divzero:
     .ascii "Division by zero!\n"
 
 msg_greeting:
-    .ascii "origin.olang v0.1 ready\n\n"
-    .byte 0, 0, 0
+    .ascii "\xe2\x97\x8b HomeOS v0.05\n"
+    .ascii "\xe2\x97\x8b Type code or text \xc2\xb7 exit to quit\n"
+    .byte 0
+msg_greeting_len:
+    .byte 59                            # total length of greeting
 
 msg_prompt:
-    .ascii "\xe2\x97\x8b > "             # "○ > " (○ = 3 bytes UTF-8)
+    .ascii "\xe2\x97\x8b > "             # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
 
-# ── Builtin function names ───────────────────────────────────────────────
-bname_hyp_add:  .ascii "__hyp_add"
-bname_hyp_sub:  .ascii "__hyp_sub"
-bname_hyp_mul:  .ascii "__hyp_mul"
-bname_hyp_div:  .ascii "__hyp_div"
-bname_eq:       .ascii "__eq"
-bname_cmp_lt:   .ascii "__cmp_lt"
-bname_cmp_gt:   .ascii "__cmp_gt"
-bname_cmp_le:   .ascii "__cmp_le"
-bname_cmp_ge:   .ascii "__cmp_ge"
-bname_len:      .ascii "__len"
-bname_concat:   .ascii "__concat"
-bname_char_at:  .ascii "__char_at"
-bname_substr:   .ascii "__substr"
+msg_bye:
+    .ascii "bye\n"
+
+str_newline:
+    .ascii "\n"
+
+# ── Type name strings ───────────────────────────────────────────────────
+str_number:     .ascii "number"
+str_string:     .ascii "string"
+str_array:      .ascii "array"
+str_dict:       .ascii "dict"
+str_fn:         .ascii "function"
+str_nil:        .ascii "nil"
+
+# ── Float constants ─────────────────────────────────────────────────────
+.align 8
+const_ten:      .double 10.0
+const_one:      .double 1.0
+const_neg_one:  .double -1.0
+
+# ── Emit format strings ─────────────────────────────────────────────────
+str_array_open:  .ascii "[array "
+str_bracket_nl:  .ascii "]\n"
+str_empty_array: .ascii "[]\n\0"
+str_dict_open:   .ascii "{dict "
+str_brace_nl:    .ascii "}\n"
+str_empty_dict:  .ascii "{}\n\0"
+
+# ── REPL function name ──────────────────────────────────────────────────
+bname_repl_eval: .ascii "repl_eval"
 
 # ── BSS (writable, zero-initialized) ────────────────────────────────────
 .section .bss

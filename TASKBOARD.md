@@ -178,7 +178,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
 | 8 | Parser Upgrade: hex literals, ==, keywords | `PLAN_8_PARSER_UPGRADE` | Phase 0 | DONE | `claude/project-audit-review-2pN6F` | Lyra | ALL 54/54 files parse. Added: hex literals, indexed assignment, dict keyword keys, commands as idents, bitwise OR. KNOWN_PARSE_FAILURES = 0. |
-| 9 | Native REPL: ./origin interactive | `PLAN_9_NATIVE_REPL` | 8 | FREE | — | — | VM reads stdin → compile via bootstrap → execute → output. Missing builtins, bytecode layering, emotion pipeline. ~500-700 LOC ASM/Olang. |
+| 9 | Native REPL: ./origin interactive | `PLAN_9_NATIVE_REPL` | 8 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | repl.ol + VM array/dict builtins + hash dispatch + nested execution + REPL wire. ~1100 LOC ASM + 110 LOC Olang. |
 | 10 | Browser E2E: origin.html works | `PLAN_10_BROWSER_E2E` | 8 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | 10.1 boot/eval/alloc/get_output WAT exports. 10.2 JS wiring (evalInput→WASM→output). 10.3 chat-style UI, dark theme, mobile responsive. 10.4 drag&drop .ol/.wasm/.bin. Còn: 10.5 WASI parity (optional). |
 | 11 | E2E Verification & Demo | `PLAN_11_E2E_VERIFY` | 8,9,10 | BLOCKED | `claude/review-and-fix-project-dSfvz` | dSfvz | Done: 11.1 demo, 11.2 E2E tests, 11.3 server --eval, 11.5 Makefile, 11.6 README, 11.7 CI. BLOCKED: 11.4 native --eval (chờ P9). |
 | 12 | Response Intelligence | `PLAN_12_RESPONSE_INTELLIGENCE` | Phase 0 | CLAIMED | `claude/update-audit-context-2MKRJ` | 2MKRJ | Wire 5 mắt xích bị đứt: walk_emotion, STM recall, intent v2, response composer, lang fix. ~560 LOC Rust. Song song với Phase 8-11. |
@@ -524,4 +524,17 @@ INTG (song song với tất cả):
             Command/Spawn as identifiers, BitOr), semantic.rs (IndexAssign + BitOr lowering),
             isl_discovery.ol (source fix: 4F4C → 0x4F4C).
             All 2683+ workspace tests pass.
+2026-03-19  Phase 9 CLAIMED (session 2pN6F, Lyra):
+            Native REPL: repl.ol (110 LOC) + major VM upgrade (~1060 LOC ASM added).
+            New: hash-based op_call dispatch (FNV-1a, ~40 builtin hashes).
+            New: array/dict data model (ARRAY_MARKER=-3, DICT_MARKER=-4, heap layout).
+            New: 30+ builtins (__array_new/get/set/push/pop, __dict_new/get/set/keys,
+                 __type_of, __to_number, __cmp_ne, __str_bytes, __str_trim,
+                 __bit_or/and/xor, __eval_bytecode).
+            New: nested bytecode execution (save/restore r12/r13/rbx context).
+            New: REPL trampoline (construct+execute bytecode at runtime).
+            New: op_call fallback to var_table (user-defined function calls from ir.rs format).
+            New: var_table 256→1024 entries, emit newlines, array/dict len.
+            Greeting: "○ HomeOS v0.05". Fallback: echo if repl_eval not registered.
+            55 .ol files (was 54). All workspace tests + audit pass.
 ```
