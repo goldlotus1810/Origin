@@ -143,7 +143,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: asm_emit_arm64.ol 470 LOC, elf_emit.ol + builder.ol extended, VM op_call 15 builtins + ELF detection. 7KB ARM64 binary. |
+| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: asm_emit_arm64.ol 470 LOC, elf_emit.ol + builder.ol extended, VM op_call 15 builtins + ELF detection. 7KB ARM64 binary. **AUDIT (2MKRJ): 2 lỗi CRITICAL** — ① builder.ol tham chiếu `vm/arm64/vm_arm64.bin` nhưng file CHƯA TỒN TẠI (chỉ có .S source) ② Rust builder (`main.rs`) KHÔNG có `--arch`/`--arm64` flag — hardcode x86_64, chỉ Olang builder mới cross-compile được. |
 | 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
 | 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: wasm_emit.ol 250 LOC, vm_wasi.wat 400 LOC, origin.html browser host, 6 new builtins (__concat/__char_at/__substr/__push/__pop/__cmp_ne), bytecode embedding, --arch wasm/wasi in builder. |
 
@@ -232,7 +232,7 @@ tools/intg/
 | INTG-8 | `t08_evolution.rs` — Molecule Evolution | 8 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi — `evolve()`, `dimension_delta()`, `evolve_and_apply()` khớp spec |
 | INTG-9 | `t09_persistence.rs` — Origin file integrity | 6 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | RuntimeMetrics không có `registry_count` — dùng `stm_observations`, `silk_edges`, `turns` |
 | INTG-10 | `t10_invariants.rs` — Quy Tắc Bất Biến | 11 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `silk::hebbian::fib()` bắt đầu từ (1,1) không phải (0,1): fib(0)=1, fib(5)=8, fib(7)=21. `olang::lca::lca()` nhận 2 args không phải slice |
-| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | — | FREE | | | Blocked: B7 (VM entry point dispatch) |
+| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | — | FREE | | | UNBLOCKED — B7 done (dSfvz) |
 | INTG-12 | `t12_build_roundtrip.rs` — Builder → Binary | — | FREE | | | |
 | INTG-CI | Makefile target `make intg` | — | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi |
 
@@ -422,6 +422,29 @@ INTG (song song với tất cả):
                 (arithmetic, mul, string, hash, array, fibonacci, sieve, matrix, alloc).
             All 29/29 stdlib files compile OK. Bytecode: 852 KB (was 811 KB).
             All workspace tests pass, 0 new clippy warnings.
+2026-03-19  INTG cross-audit (session 2MKRJ):
+            ▸ 4.1 ARM64 cross-compile (Lyra): PASS — 82 intg tests pass sau merge.
+              asm_emit_arm64.ol: 60+ emitters OK, bit slicing đúng, label fixups đúng.
+              elf_emit.ol: EM_AARCH64=0xB7(183) đúng, arch byte 0x02 đúng.
+              builder.ol: arm64_config() OK, make_elf_arch() đúng tham số.
+              pack.rs: ARM64 packing logic OK, ELF generation đúng.
+              Ghi chú nhỏ: asm_emit_arm64.ol:328 emit_stp_pre() có duplicate
+              if-block cho negative offset (harmless, defensive code).
+            ▸ B4-B7 fix (dSfvz): PASS — 82 intg tests pass sau merge.
+              B4 unary minus: OK — Expr::Arith(0, Sub, inner).
+              B5 typeof: OK — Expr::Call → Op::TypeOf.
+              B6 reserved words: OK — From/Enum/Struct/Fn/In as Ident.
+              B7 Halt stripping: OK — strip per-file Halt, single final Halt.
+            ▸ 4.1 ARM64 AUDIT CHI TIẾT (agent):
+              ✗ CRITICAL: builder.ol tham chiếu vm/arm64/vm_arm64.bin — file KHÔNG tồn tại
+              ✗ CRITICAL: Rust builder main.rs hardcode x86_64, thiếu --arch flag
+              ✓ asm_emit_arm64.ol: 60+ emitters OK, bit slicing toán học đúng
+              ✓ elf_emit.ol: EM_AARCH64=0xB7 đúng, origin header layout đúng
+              ✓ pack.rs: Arch enum + serialize đúng cả 2 arch
+              ✓ vm_arm64.S: syscall numbers đúng, ELF detection đúng, 24 opcodes
+              ℹ asm_emit_arm64.ol:328 duplicate if-block (harmless)
+            ▸ Phase 5 (dSfvz): CHƯA AUDIT — cần test chéo 7 stdlib files mới.
+            ▸ 4.3 WASM (Lyra): CHƯA AUDIT — cần test chéo wasm_emit.ol + vm_wasi.wat.
 2026-03-19  Phase 6 ALL DONE (session dSfvz). 5 Olang files, ~675 LOC:
             6.1 install.ol (200 LOC): o install/update/learn, atomic self-modify
                 (copy → append → rename), origin header parsing.
