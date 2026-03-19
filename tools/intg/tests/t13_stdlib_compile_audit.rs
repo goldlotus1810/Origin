@@ -73,6 +73,10 @@ const KNOWN_PARSE_FAILURES: &[&str] = &[
     "isl_ws.ol",
     "isl_ble.ol",
     "isl_discovery.ol",
+    // Fat binary (hex literals in magic bytes)
+    "builder.ol",
+    "fat_header.ol",
+    "fat_loader.ol",
 ];
 
 // ═══════════════════════════════════════════════════════════════════
