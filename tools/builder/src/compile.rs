@@ -57,6 +57,12 @@ pub fn compile_all(stdlib_path: &str) -> Result<Vec<u8>, CompileError> {
     // Compile stdlib root .ol files
     compile_dir(Path::new(stdlib_path), &mut all_bytecode)?;
 
+    // Compile homeos/ subdirectory (HomeOS subsystem modules)
+    let homeos_dir = Path::new(stdlib_path).join("homeos");
+    if homeos_dir.is_dir() {
+        compile_dir(&homeos_dir, &mut all_bytecode)?;
+    }
+
     // B7: Append a single Halt (0x0F) at the end of all bytecode.
     // Individual files' Halts are stripped during compilation so
     // execution flows through all stdlib files before stopping.

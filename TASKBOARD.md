@@ -160,9 +160,9 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 6.1 | Self-update | `PLAN_6_1` | Phase 4 | FREE | | | o install/update/learn, module versioning |
-| 6.2 | Self-optimize | `PLAN_6_2` | 5.1, 6.1 | FREE | | | LeoAI profiler → auto-optimize → AAM approve |
-| 6.3 | Reproduce | `PLAN_6_3` | 4.1, 6.1 | FREE | | | Worker clones cho IoT devices |
+| 6.1 | Self-update | `PLAN_6_1` | Phase 4 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | install.ol (200 LOC): install/update/learn, atomic self-modify. module_index.ol (120 LOC): versioned module index. |
+| 6.2 | Self-optimize | `PLAN_6_2` | 5.1, 6.1 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | optimize.ol (160 LOC): runtime profiler, analysis, AAM approval, auto-apply. |
+| 6.3 | Reproduce | `PLAN_6_3` | 4.1, 6.1 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | reproduce.ol (195 LOC): spawn worker clones, skill packs, ISL addr alloc. |
 
 ---
 
@@ -182,8 +182,8 @@ Phase 5: ALL DONE ✅
   5.2 (cache)  ├→ 5.4 (benchmark)   ALL DONE ✅
   5.3 (memory) ┘
 
-Phase 6:
-  6.1 (self-update) → 6.2 (self-optimize)
+Phase 6: ALL DONE ✅
+  6.1 (self-update) → 6.2 (self-optimize)   ALL DONE ✅
                     → 6.3 (reproduce)
 ```
 
@@ -422,4 +422,14 @@ INTG (song song với tất cả):
                 (arithmetic, mul, string, hash, array, fibonacci, sieve, matrix, alloc).
             All 29/29 stdlib files compile OK. Bytecode: 852 KB (was 811 KB).
             All workspace tests pass, 0 new clippy warnings.
+2026-03-19  Phase 6 ALL DONE (session dSfvz). 5 Olang files, ~675 LOC:
+            6.1 install.ol (200 LOC): o install/update/learn, atomic self-modify
+                (copy → append → rename), origin header parsing.
+                module_index.ol (120 LOC): versioned module index [MIDX] format.
+            6.2 optimize.ol (160 LOC): runtime profiler (ops, vars, fns, turns),
+                analysis (JIT/cache/arena proposals), AAM approval gate.
+            6.3 reproduce.ol (195 LOC): spawn worker clones per kind
+                (camera/light/door/sensor/network), skill selection, ISL addr alloc.
+            Builder: compile homeos/ subdirectory (was only bootstrap/ + root).
+            50/50 stdlib+homeos files compile. Bytecode total now includes all modules.
 ```
