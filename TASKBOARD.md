@@ -145,16 +145,16 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 |----|------|------|---------|--------|--------|---------|-------|
 | 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: asm_emit_arm64.ol 470 LOC, elf_emit.ol + builder.ol extended, VM op_call 15 builtins + ELF detection. 7KB ARM64 binary. |
 | 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
-| 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | FREE | | | Bytecode embed + browser host + WASI |
+| 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: wasm_emit.ol 250 LOC, vm_wasi.wat 400 LOC, origin.html browser host, 6 new builtins (__concat/__char_at/__substr/__push/__pop/__cmp_ne), bytecode embedding, --arch wasm/wasi in builder. |
 
 ## Phase 5 — Optimization
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 5.1 | JIT compilation | `PLAN_5_1` | Phase 4 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Hot loop → native code, profile + trace + compile |
-| 5.2 | Inline caching | `PLAN_5_2` | Phase 3 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Var IC + registry LRU + silk cache |
-| 5.3 | Memory optimization | `PLAN_5_3` | Phase 3 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Arena allocator + zero-copy + molecule pool |
-| 5.4 | Benchmark suite | `PLAN_5_4` | 5.1/5.2/5.3 | CLAIMED | `claude/review-and-fix-project-dSfvz` | dSfvz | Micro + macro + memory benchmarks |
+| 5.1 | JIT compilation | `PLAN_5_1` | Phase 4 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | jit.ol 180 LOC: profiler (Fib[10] threshold), trace recorder, x86_64 code emitter, code cache. |
+| 5.2 | Inline caching | `PLAN_5_2` | Phase 3 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | registry_cache.ol (LRU 55 entries), silk_cache.ol (5D sim cache 256 entries), dream_cache.ol (score memo). |
+| 5.3 | Memory optimization | `PLAN_5_3` | Phase 3 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | arena.ol (bump allocator + O(1) reset), mol_pool.ol (slab allocator 4096 slots, O(1) alloc/free). |
+| 5.4 | Benchmark suite | `PLAN_5_4` | 5.1/5.2/5.3 | DONE | `claude/review-and-fix-project-dSfvz` | dSfvz | benchmark.ol: harness + 9 benchmarks (arithmetic, string, hash, array, fibonacci, sieve, matrix, alloc). |
 
 ## Phase 6 — Living system
 
@@ -177,11 +177,10 @@ Phase 4 (TIẾP THEO):
   4.1 (cross ARM64) ──→ 4.2 (fat binary, optional)
   4.3 (WASM universal) ← song song với 4.1
 
-Phase 5:
+Phase 5: ALL DONE ✅
   5.1 (JIT) ───┐
-  5.2 (cache)  ├→ 5.4 (benchmark)
+  5.2 (cache)  ├→ 5.4 (benchmark)   ALL DONE ✅
   5.3 (memory) ┘
-  5.1, 5.2, 5.3 song song được
 
 Phase 6:
   6.1 (self-update) → 6.2 (self-optimize)
@@ -410,6 +409,19 @@ INTG (song song với tất cả):
             22/22 stdlib files compile OK (was 15/22).
             15 new parser tests + 2 builder tests.
             2504 workspace tests pass, 0 new clippy warnings.
+2026-03-19  Phase 5 ALL DONE (session dSfvz). 7 Olang files, ~1050 LOC:
+            5.1 jit.ol (180 LOC): profiler Fib[10]=55 threshold, trace recorder,
+                x86_64 native emitter (prologue/epilogue, PushNum, Dup, Pop),
+                code cache (64 entries).
+            5.2 registry_cache.ol (95 LOC): LRU cache 55 entries, move-to-front.
+                silk_cache.ol (85 LOC): 5D similarity cache 256 entries.
+                dream_cache.ol (45 LOC): cluster score memoization with versioning.
+            5.3 arena.ol (65 LOC): bump allocator with O(1) reset, promote().
+                mol_pool.ol (95 LOC): slab allocator 4096×8B slots, free list.
+            5.4 benchmark.ol (185 LOC): harness (warm-up + measure), 9 benchmarks
+                (arithmetic, mul, string, hash, array, fibonacci, sieve, matrix, alloc).
+            All 29/29 stdlib files compile OK. Bytecode: 852 KB (was 811 KB).
+            All workspace tests pass, 0 new clippy warnings.
 2026-03-19  INTG cross-audit (session 2MKRJ):
             ▸ 4.1 ARM64 cross-compile (Lyra): PASS — 82 intg tests pass sau merge.
               asm_emit_arm64.ol: 60+ emitters OK, bit slicing đúng, label fixups đúng.
@@ -423,8 +435,6 @@ INTG (song song với tất cả):
               B5 typeof: OK — Expr::Call → Op::TypeOf.
               B6 reserved words: OK — From/Enum/Struct/Fn/In as Ident.
               B7 Halt stripping: OK — strip per-file Halt, single final Halt.
-              Ghi chú: B7 dùng while loop strip 0x0F — nếu bytecode hợp lệ
-              có opcode 0x0F giữa chừng (không phải Halt) thì không ảnh hưởng
-              vì chỉ strip ở cuối. Thiết kế đúng.
-              Lỗi: INTG-11 (VM stdlib) giờ UNBLOCKED vì B7 done.
+            ▸ Phase 5 (dSfvz): CHƯA AUDIT — cần test chéo 7 stdlib files mới.
+            ▸ 4.3 WASM (Lyra): CHƯA AUDIT — cần test chéo wasm_emit.ol + vm_wasi.wat.
 ```
