@@ -83,22 +83,53 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 |----|------|------|---------|--------|--------|---------|-------|
 | AUTH | First-run setup | `PLAN_AUTH` | Không | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | Core done (910 LOC, 21 tests). Wire vào HomeRuntime = pending. |
 
+## Phase 2 — Stdlib + HomeOS logic bằng Olang
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| 2.1a | Stdlib: result.ol + iter.ol + sort.ol | `PLAN_2_1` | Phase 1 | FREE | — | — | Group A — data patterns |
+| 2.1b | Stdlib: format.ol + json.ol | `PLAN_2_1` | Phase 1 | FREE | — | — | Group B — string/format |
+| 2.1c | Stdlib: hash.ol + mol.ol + chain.ol | `PLAN_2_1` | 2.1a | FREE | — | — | Group C — core helpers |
+| 2.2 | Emotion pipeline (emotion.ol, curve.ol, intent.ol) | `PLAN_2_2` | 2.1c | FREE | — | — | ~380 LOC |
+| 2.3 | Knowledge layer (silk_ops.ol, dream.ol, instinct.ol, learning.ol) | `PLAN_2_3` | 2.1a,2.1c | FREE | — | — | ~650 LOC |
+| 2.4 | Agent behavior (gate.ol, response.ol, leo.ol, chief.ol, worker.ol) | `PLAN_2_4` | 2.2,2.3 | FREE | — | — | ~500 LOC |
+
+## Phase 3 — Self-sufficient builder (CẮT RUST HOÀN TOÀN)
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| 3.1 | asm_emit.ol — emit x86_64 machine code | `PLAN_3_1` | Phase 2 | FREE | — | — | ~500 LOC |
+| 3.2 | elf_emit.ol — tạo ELF binary | `PLAN_3_2` | 3.1 | FREE | — | — | ~200 LOC |
+| 3.3 | builder.ol — thay Rust builder | `PLAN_3_3` | 3.1,3.2 | FREE | — | — | ~300 LOC |
+| 3.4 | Self-build test: v2 == v3 | `PLAN_3_3` | 3.3 | FREE | — | — | Fixed-point verification |
+
 ---
 
 ## Dependency Graph (visual)
 
 ```
-B1+B2+B3 (blockers)
+B1+B2+B3 (blockers) — DONE
     ↓
-  0.1 → 0.2 → 0.3 → 0.4 → 0.5 → 0.6
+  0.1 → 0.2 → 0.3 → 0.4 → 0.5 → 0.6 — ALL DONE
                                 ↓
-                              1.1 → 1.4
-                               ↓
-                              1.2
-                               ↓
-                              1.3
+  0.1 → 0.2 → 0.3 → 0.4 → 0.5 → 0.6 — ALL DONE
+                                ↓
+                    1.1 → 1.4  — DONE (Lyra)
+                     ↓
+                    1.2        — DONE (erPDB)
+                     ↓
+                    1.3        — DONE (Lyra)
 
-  AUTH (song song, không phụ thuộc)
+  AUTH — DONE
+
+  Phase 2 (song song):
+    2.1a (result+iter+sort) ──┐
+    2.1b (format+json)        ├→ 2.1c (hash+mol+chain) → 2.2 (emotion) ──┐
+                              │                         → 2.3 (knowledge) ├→ 2.4 (agents)
+                              └─────────────────────────────────────────────┘
+
+  Phase 3 (sau Phase 2):
+    3.1 (asm_emit) → 3.2 (elf_emit) → 3.3 (builder.ol) → 3.4 (self-build test)
 ```
 
 ---
@@ -106,13 +137,13 @@ B1+B2+B3 (blockers)
 ## Gợi ý phân việc cho 2-3 sessions
 
 ```
-Session A: B1 + B2 + B3 → 0.1 → 0.2 → 0.3  (unblock + bootstrap tests)
-Session B: AUTH                                (auth system — song song)
-Session C: 1.1 (bắt đầu ASM VM — cần biết bytecode format từ PLAN_0_5)
+Phase 2 (HIỆN TẠI):
+  Session A (Lyra):  2.1a (result+iter+sort) → 2.1c (hash+mol+chain) → 2.3 (knowledge)
+  Session B (erPDB): 2.1b (format+json) → 2.2 (emotion) → 2.4 (agents)
 
-Khi Session A xong 0.3:
-  Session A: → 0.4 (semantic.ol)
-  Session C: xem PLAN_0_5 để biết bytecode format → tiếp 1.1
+Phase 3 (sau Phase 2):
+  Session A: 3.1 (asm_emit) → 3.2 (elf_emit)
+  Session B: 3.3 (builder.ol) → 3.4 (self-build test)
 ```
 
 ---
