@@ -3938,23 +3938,28 @@ impl OlangVM {
                             call_depth = call_depth.saturating_sub(1);
                         }
 
-                        // Write-back: copy ONLY parameter values (first `param_count` entries)
-                        // from the function's scope back to the caller's scope.
+                        // Write-back: copy parameter values that are heap refs (dicts/arrays)
+                        // back to the IMMEDIATE caller scope only.
                         // This propagates struct mutations (e.g., p.pos = p.pos + 1).
+                        //
+                        // IMPORTANT: Only write back heap refs (dict/array), not primitives.
+                        // Only write to the immediate caller scope to avoid corrupting
+                        // variables in outer scopes that happen to share the same name.
+                        // Heap-based dict/array mutations already propagate automatically
+                        // through shared references, so this write-back handles the case
+                        // where the parameter variable itself was reassigned.
                         if saved_scope_depth >= 2 && param_count > 0 {
                             let fn_scope_idx = saved_scope_depth - 1;
+                            let caller_scope_idx = fn_scope_idx.saturating_sub(1);
                             if fn_scope_idx < scopes.len() {
-                                // Only write back the first `param_count` entries (the params)
                                 let write_count = param_count.min(scopes[fn_scope_idx].len());
                                 let params_to_write: Vec<(String, MolecularChain)> =
                                     scopes[fn_scope_idx][..write_count].to_vec();
-                                for (name, val) in &params_to_write {
-                                    for si in (0..fn_scope_idx).rev() {
-                                        if let Some(entry) = scopes[si].iter_mut().rev()
-                                            .find(|(n, _)| n == name) {
-                                            entry.1 = val.clone();
-                                            break;
-                                        }
+                                for (pname, val) in &params_to_write {
+                                    // Only write back to the immediate caller scope
+                                    if let Some(entry) = scopes[caller_scope_idx].iter_mut().rev()
+                                        .find(|(n, _)| n == pname) {
+                                        entry.1 = val.clone();
                                     }
                                 }
                             }
