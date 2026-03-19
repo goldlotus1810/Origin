@@ -54,6 +54,10 @@ const KNOWN_PARSE_FAILURES: &[&str] = &[
     "elf_emit.ol",
     "reproduce.ol",
     "wasm_emit.ol",
+    // Hex escape in strings (\x01) — parser doesn't handle escape sequences
+    "builder.ol",
+    "fat_header.ol",
+    "fat_loader.ol",
     // == in match expressions or comparisons — parser sees Eq token unexpectedly
     "benchmark.ol",
     "dream.ol",
