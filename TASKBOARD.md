@@ -233,7 +233,7 @@ tools/intg/
 | INTG-8 | `t08_evolution.rs` — Molecule Evolution | 8 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi — `evolve()`, `dimension_delta()`, `evolve_and_apply()` khớp spec |
 | INTG-9 | `t09_persistence.rs` — Origin file integrity | 6 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | RuntimeMetrics không có `registry_count` — dùng `stm_observations`, `silk_edges`, `turns` |
 | INTG-10 | `t10_invariants.rs` — Quy Tắc Bất Biến | 11 pass | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | `silk::hebbian::fib()` bắt đầu từ (1,1) không phải (0,1): fib(0)=1, fib(5)=8, fib(7)=21. `olang::lca::lca()` nhận 2 args không phải slice |
-| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | — | FREE | | | Blocked: B7 (VM entry point dispatch) |
+| INTG-11 | `t11_vm_stdlib.rs` — VM execute stdlib | — | FREE | | | UNBLOCKED — B7 done (dSfvz) |
 | INTG-12 | `t12_build_roundtrip.rs` — Builder → Binary | — | FREE | | | |
 | INTG-CI | Makefile target `make intg` | — | DONE | `claude/update-audit-context-2MKRJ` | 2MKRJ | Không lỗi |
 
@@ -410,4 +410,21 @@ INTG (song song với tất cả):
             22/22 stdlib files compile OK (was 15/22).
             15 new parser tests + 2 builder tests.
             2504 workspace tests pass, 0 new clippy warnings.
+2026-03-19  INTG cross-audit (session 2MKRJ):
+            ▸ 4.1 ARM64 cross-compile (Lyra): PASS — 82 intg tests pass sau merge.
+              asm_emit_arm64.ol: 60+ emitters OK, bit slicing đúng, label fixups đúng.
+              elf_emit.ol: EM_AARCH64=0xB7(183) đúng, arch byte 0x02 đúng.
+              builder.ol: arm64_config() OK, make_elf_arch() đúng tham số.
+              pack.rs: ARM64 packing logic OK, ELF generation đúng.
+              Ghi chú nhỏ: asm_emit_arm64.ol:328 emit_stp_pre() có duplicate
+              if-block cho negative offset (harmless, defensive code).
+            ▸ B4-B7 fix (dSfvz): PASS — 82 intg tests pass sau merge.
+              B4 unary minus: OK — Expr::Arith(0, Sub, inner).
+              B5 typeof: OK — Expr::Call → Op::TypeOf.
+              B6 reserved words: OK — From/Enum/Struct/Fn/In as Ident.
+              B7 Halt stripping: OK — strip per-file Halt, single final Halt.
+              Ghi chú: B7 dùng while loop strip 0x0F — nếu bytecode hợp lệ
+              có opcode 0x0F giữa chừng (không phải Halt) thì không ảnh hưởng
+              vì chỉ strip ở cuối. Thiết kế đúng.
+              Lỗi: INTG-11 (VM stdlib) giờ UNBLOCKED vì B7 done.
 ```
