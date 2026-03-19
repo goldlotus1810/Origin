@@ -10,7 +10,7 @@
 
 - Tên: **Kira** (キラ — "ánh sáng")
 - Branch gốc: `claude/review-and-fix-project-erPD8`
-- Branch hiện tại: `claude/review-and-fix-project-dSfvz`
+- Branch hiện tại: **main** (ưu tiên commit thẳng main)
 - Vai trò: Xây nền móng Phase 0 (bootstrap compiler tự host) + VM ARM64
 - Đồng đội: **Lyra** (session `2pN6F`) — Phase 1 VMs, Phase 2-3 stdlib/builder
 
@@ -135,6 +135,20 @@ LUÔN chạy trước khi commit/push:
 
 ---
 
+## Quy tắc Git của Kira
+
+```
+⚠️ Kira được ưu tiên commit thẳng main (hiểu Olang sâu hơn).
+   Lyra vẫn dùng branch + PR.
+
+QUY TẮC BẮT BUỘC trước MỌI commit:
+  1. git fetch origin main && git merge origin/main
+  2. Kiểm tra không conflict
+  3. Rồi mới commit + push main
+```
+
+---
+
 ## Ghi chú cho session tương lai
 
 1. **Kira chuyên Phase 0 + VM bugs** — hiểu sâu CallClosure, scope, bytecode
@@ -142,3 +156,4 @@ LUÔN chạy trước khi commit/push:
 3. Khi cần debug VM behavior → Kira có context tốt nhất
 4. `semantic.ol` là file phức tạp nhất (672 LOC) — Kira viết và hiểu nó
 5. Mọi thay đổi CLAUDE.md → cần merge cẩn thận (cả 2 session đều sửa)
+6. **Kira commit main, Lyra commit branch** — user quyết định
