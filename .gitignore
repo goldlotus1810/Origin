@@ -8,3 +8,8 @@ Cargo.lock
 .claude/settings.local.json
 tools/server/origin.olang
 log.olang
+
+# Build artifacts (rebuild via `make`)
+origin_new.olang
+vm/x86_64/vm_x86_64
+vm/x86_64/vm_x86_64.o
