@@ -108,23 +108,40 @@ tools/
 
 ---
 
-## Chạy
+## Quick Start (60 giây)
 
 ```bash
-# Build
+# 1. Build
 cargo build --workspace
 
-# Test (2,348 tests)
-cargo test --workspace
-
-# Clippy (phải 0 warnings)
-cargo clippy --workspace
-
-# REPL
+# 2. Chạy REPL
 cargo run -p server
+#   → Gõ "tôi vui" → thấy emotion-aware response
+#   → Gõ "○{stats}" → thấy system info
+#   → Gõ "exit" để thoát
 
-# Seed L0 nodes
-cargo run -p seeder
+# 3. Chạy demo (10 scenarios, tất cả phải PASS)
+make demo
+
+# 4. Chạy eval mode (scripting)
+echo 'hello' | cargo run -p server -- --eval
+
+# 5. Verify toàn bộ (unit + integration + E2E)
+make check-all
+```
+
+### Tất cả lệnh build/test
+
+```bash
+cargo build --workspace          # Build toàn bộ
+cargo test --workspace           # Test (~2700 tests)
+cargo clippy --workspace         # Clippy (phải 0 warnings)
+cargo run -p server              # REPL interactive
+cargo run -p server -- --eval    # Eval mode (stdin → stdout)
+cargo run -p seeder              # Seed L0 nodes
+make demo                        # 10 E2E scenarios
+make verify                      # Automated E2E tests
+make check-all                   # Unit + intg + E2E
 ```
 
 ### REPL
