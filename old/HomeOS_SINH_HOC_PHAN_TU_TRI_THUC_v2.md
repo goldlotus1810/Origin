@@ -1,5 +1,5 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 2.0 — 2026-03-20  
+**Phiên bản:** 2.1 — 2026-03-19
 **Nguyên tắc:** Mỗi ký tự là 1 công thức SDF. Chuỗi sinh chuỗi. Lưu cách làm, không lưu kết quả.
 
 ---
@@ -457,6 +457,134 @@ Bất ổn:     σ² > threshold AND V' đổi chiều → cờ cảnh báo
 
 ---
 
+## V-B. 7 BẢN NĂNG — Phản xạ bẩm sinh
+
+```
+Sinh học:  Sơ sinh có phản xạ bẩm sinh TRƯỚC KHI học:
+           bú, nắm, Moro (giật mình), Babinski (bàn chân), ...
+           Không cần dạy. Hardwired trong thân não (brainstem).
+
+HomeOS:    LeoAI có 7 instincts bẩm sinh TRƯỚC KHI học:
+           Không cần training. Hardcoded trong engine.
+           Thứ tự ưu tiên: ① → ② → ③ → ④ → ⑤ → ⑥ → ⑦
+```
+
+### 7 Instincts (map sinh học)
+
+```
+#  Instinct       Sinh học tương ứng          Công thức
+──────────────────────────────────────────────────────────────────
+①  Honesty        Phản xạ rụt tay khỏi lửa   confidence < 0.40 → im lặng
+                   (không cần suy nghĩ,         0.40-0.70 → Hypothesis
+                    phản ứng ngay)               0.70-0.90 → Opinion
+                                                 ≥ 0.90 → Fact
+
+②  Contradiction  Phản xạ đau                  d_V(A, B) > 0.8 AND
+                   (2 tín hiệu xung đột         d_R(A, B) < 0.2
+                    → cảnh báo ngay)             → flag mâu thuẫn
+
+③  Causality      Phản xạ nhân quả             temporal_order(A, B) AND
+                   (sờ lửa → nóng →              co_activation(A, B) > φ⁻¹ AND
+                    KHÔNG SỜ NỮA)                Relation = Causes
+                                                 → nhân quả
+
+④  Abstraction    Phân loại bẩm sinh           LCA(cluster) → variance:
+                   (trẻ 6 tháng đã phân          variance thấp → concrete
+                    biệt mặt người vs vật)       variance vừa → categorical
+                                                  variance cao → abstract
+
+⑤  Analogy        Pattern matching              A:B :: C:? → tìm D sao cho
+                   (trẻ bắt chước biểu cảm       delta_5D(A,B) ≈ delta_5D(C,D)
+                    → map khuôn mặt mình
+                    sang khuôn mặt người khác)
+
+⑥  Curiosity      Phản xạ hướng đầu            novelty = 1 − max_similarity(P, known)
+                   (trẻ quay đầu về phía         novelty > 0.5 → curiosity cao
+                    âm thanh mới)                 → ưu tiên explore
+
+⑦  Reflection     Nhận thức cơ thể              qr_ratio = QR_count / total_nodes
+                   (proprioception —              connectivity = avg_silk_weight
+                    biết tay chân ở đâu           → tự đánh giá chất lượng tri thức
+                    mà không cần nhìn)
+
+Thứ tự: Honesty LUÔN chạy đầu tiên.
+  → Không đủ evidence? Im lặng. Không cần chạy 6 instinct còn lại.
+  = Giống phản xạ rụt tay: chạy TRƯỚC suy nghĩ.
+```
+
+---
+
+## V-C. CỔNG AN NINH — Hệ miễn dịch bẩm sinh (Innate Immunity)
+
+```
+Sinh học:  Hệ miễn dịch bẩm sinh (innate immunity):
+           — Da, niêm mạc = hàng rào vật lý
+           — Bạch cầu trung tính = phản ứng NGAY, không cần học
+           — Chạy TRƯỚC hệ miễn dịch thích ứng (adaptive immunity)
+           — Nếu phát hiện mối đe dọa → CHẶN NGAY, không cho vào sâu hơn
+
+HomeOS:    SecurityGate:
+           — Gate.check_text() chạy TRƯỚC MỌI THỨ trong pipeline
+           — Phát hiện Crisis → DỪNG NGAY, return response khẩn
+           — Không chờ Emotion Pipeline, không chờ Instincts
+           — Chạy trong O(1) — pattern matching, không suy luận
+
+SecurityGate pipeline:
+  input → Gate.check_text()
+    ├── Crisis detected → DỪNG. Return emergency response.
+    │   (= bạch cầu tiêu diệt pathogen ngay)
+    │
+    └── Safe → tiếp tục vào Emotion Pipeline bình thường
+        (= không có mối đe dọa → cho vào sâu hơn)
+
+AlertLevel:
+  Normal  (○)  → pass qua
+  Important (⚠) → log + cảnh báo AAM
+  RedAlert (🔴) → CHẶN + thông báo AAM ngay
+
+= Giống triage trong cấp cứu: đỏ → xử lý ngay, vàng → theo dõi, xanh → chờ.
+```
+
+---
+
+## V-D. TÍCH HỢP ĐA GIÁC QUAN — Multisensory Integration
+
+```
+Sinh học:  Não tích hợp 5 giác quan:
+           Thị giác + thính giác + xúc giác + vị giác + khứu giác
+           Khi xung đột (nhìn vui nhưng giọng run):
+             → Thính giác thắng vì khó giả hơn
+             → Confidence giảm (không chắc chắn)
+
+HomeOS:    Fusion tích hợp 4 modality:
+           Bio (nhịp tim, da) > Audio (giọng) > Text (chữ) > Image (hình)
+
+Modality weights (cố định, innate — không học):
+  Bio    = 0.50   (tín hiệu sinh học — khó giả nhất)
+  Audio  = 0.40   (giọng nói — khó giả)
+  Text   = 0.30   (chữ viết — dễ giả)
+  Image  = 0.25   (hình ảnh — context-dependent)
+
+fusion(modalities):
+  Nếu tất cả đồng thuận:
+    V_fused = Σ (weight_i × V_i) / Σ weight_i     weighted average
+    confidence = 1.0
+
+  Nếu xung đột (text vui + audio run):
+    V_fused = modality có weight cao nhất thắng Valence
+    confidence = 1.0 − max_disagreement
+    → Nếu confidence < 0.40 → Honesty instinct → im lặng
+
+  = Hiệu ứng McGurk: khi audio nói "ba" nhưng video nói "ga"
+    → não nghe "da" (tích hợp, không phải trung bình)
+
+Trong pipeline:
+  SecurityGate → Fusion → Emotion Pipeline → Instincts → Response
+  (Fusion xảy ra SAU gate, TRƯỚC emotion — cung cấp input đa giác quan)
+```
+
+---
+
 ## VI. RESPONSE — Protein synthesis
 
 ```
@@ -826,16 +954,26 @@ HomeOS:    Hệ thống duy trì Free Energy F < φ⁻¹ ≈ 0.618.
            Cơ chế: Entropy đo → λ sigmoid điều chỉnh.
 
 Entropy trên 1 node (= nhiệt kế):
-  H(P) = − Σ_{d=1}^{5} p_d × log₂(p_d)
+  Bước 1 — confidence thô per chiều:
+    c_d = eval_confidence(Pᵈ):
+      0.0   nếu chiều d chưa evaluate (chưa đo)
+      w_d   nếu đang evaluate (đang đo, có Hebbian weight)
+      1.0   nếu đã Mature (đo xong, ổn định)
 
-  p_d = eval_confidence(Pᵈ):
-    0.0   nếu chiều d chưa evaluate (chưa đo)
-    w_d   nếu đang evaluate (đang đo, có Hebbian weight)
-    1.0   nếu đã Mature (đo xong, ổn định)
+  Bước 2 — chuẩn hóa thành xác suất (Shannon yêu cầu Σp=1):
+    p_d = c_d / Σ_{i=1}^{5} c_i          nếu Σc > 0
+    p_d = 1/5                              nếu Σc = 0 (uniform = bất định tối đa)
 
-  H ∈ [0, 2.32]
-    H = 0     → node chắc chắn (= 37°C — bình thường)
-    H = 2.32  → node bất định (= sốt cao — bất thường)
+  Bước 3 — Shannon entropy:
+    H(P) = − Σ_{d=1}^{5} p_d × log₂(p_d)     (quy ước: 0×log₂(0) = 0)
+
+  H ∈ [0, log₂5 ≈ 2.32]
+    H = 0     → node chắc chắn, 1 chiều thống trị (= 37°C — bình thường)
+    H = 2.32  → node bất định, 5 chiều đều như nhau (= sốt cao — bất thường)
+
+  Ý nghĩa sinh học:
+    H thấp = nhiệt độ ổn định = tế bào khỏe
+    H cao  = nhiệt độ dao động = tế bào bệnh → cần can thiệp
 
 Free Energy (= mức lệch khỏi homeostasis):
   F(t) = d(P_predicted, P_actual)
@@ -904,6 +1042,23 @@ Mâu thuẫn detection (= hệ miễn dịch phát hiện kháng nguyên lạ):
     → Kích hoạt Contradiction instinct
     → Tăng Curiosity score
 
+Dynamic insert (L5+ — tri thức mới, không có trong Unicode):
+  KnowTree L1-L4 = tĩnh (9,584 UDC = genome gốc, không đổi)
+  L5+ = động (tri thức học được = epigenome, thay đổi suốt đời)
+
+  insert(P_new):
+    1. search(P_new, k=1) → tìm UDC gần nhất = "parent block"
+    2. Gắn P_new vào sub-tree của parent block
+    3. Nếu sub-tree quá đông (> Fib(n)):
+       → LCA gom nhóm → tạo tầng trung gian mới
+       → Giống neurogenesis: neuron mới gắn vào vùng não sẵn có
+
+  = Giống adult neurogenesis:
+    Hippocampus tạo neuron mới suốt đời → gắn vào mạng hiện có
+    Không tạo vùng não mới — gắn vào cấu trúc đã có
+
+  Chi phí insert: O(log n) — cùng complexity với search
+
 Chi phí: 0 bytes thêm — dùng KnowTree đã có.
 ```
 
@@ -966,7 +1121,7 @@ Hội tụ (monotonic improvement):
 Chi phí: max 3 × N × O(depth). Worst case = 9 lần evaluate.
 ```
 
-### Tổng hợp: 11 cơ chế DNA → HomeOS
+### Tổng hợp: 14 cơ chế DNA → HomeOS
 
 ```
 #    DNA mechanism           HomeOS mechanism              Section
@@ -978,10 +1133,13 @@ Chi phí: max 3 × N × O(depth). Worst case = 9 lần evaluate.
 ⑤    Recombine               compose(A, B) → C             III
 ⑥    Select                  Hebbian + decay φ⁻¹           III
 ⑦    Express                 Maturity pipeline             III
-⑧    Immune Selection        infer(N nhánh) → argmin H     IX-B
-⑨    Homeostasis             F = d(predicted, actual)      IX-B
-⑩    Neural Pathways         HNSW trên KnowTree            IX-B
-⑪    DNA Repair              self_correct → quality ≥ φ⁻¹  IX-B
+⑧    Innate Reflexes         7 instincts (hardcoded)       V-B
+⑨    Innate Immunity         SecurityGate (chạy trước)     V-C
+⑩    Multisensory            Fusion 4 modalities           V-D
+⑪    Immune Selection        infer(N nhánh) → argmin H     IX-B
+⑫    Homeostasis             F = d(predicted, actual)      IX-B
+⑬    Neural Pathways         HNSW trên KnowTree            IX-B
+⑭    DNA Repair              self_correct → quality ≥ φ⁻¹  IX-B
 ```
 
 ### φ⁻¹ ≈ 0.618 — Hằng số sinh học duy nhất
@@ -1016,6 +1174,32 @@ f(p) = signed distance from point p to surface
 Một hàm. Một điểm. Cho mọi thứ: hình dạng, thể tích, gradient, ánh sáng, màu, dao động, âm thanh, vị trí.
 
 9,584 UDC = 9,584 biến thể của f(p), mỗi biến thể có sub-components bên trong.
+
+### Cầu nối f(p) ↔ d(A,B)
+
+```
+f(p) = 1 SDF đơn lẻ → mô tả 1 khái niệm
+d(A,B) = khoảng cách giữa 2 SDF → mô tả QUAN HỆ giữa 2 khái niệm
+
+Cụ thể:
+  Mỗi UDC = 1 SDF = 1 điểm P trong ℝ⁵ = (S, R, V, A, T)
+  d(A, B) = √( Σ_{d=1}^{5} w_d × (Aᵈ − Bᵈ)² )
+
+  f(p) = hạt giống (nucleotide)
+  d(A,B) = khoảng cách trên chuỗi (base-pairing distance)
+
+  Sinh học: nucleotide = đơn vị, khoảng cách trên chuỗi = thông tin
+  HomeOS:   SDF = đơn vị, d(A,B) = thông tin
+
+  Mọi thuật toán trong 5D đều dùng d(A,B):
+    Silk = f(d)       Hebbian = g(d)     Dream = cluster(d < ε)
+    Maturity = d → 0  Evolve = Δd trên 1 chiều
+    Entropy = d(predicted, actual)
+    Self-correct = refine cho đến d < φ⁻¹
+
+  f(p) sinh ra các điểm. d(A,B) đo khoảng cách giữa chúng.
+  Cả hai cùng gốc: signed distance function.
+```
 
 ### Phép toán 1 — CHAIN
 
@@ -1059,11 +1243,14 @@ KnowTree (gấp)                ●                  O(log N)
 Emotion (hormone)       ●      ●                  O(window)
 Response (output)       ●      ●         ●        O(depth)
 Render (hình ảnh)       ●                         O(1)/node
-── 4 CƠ CHẾ MỚI ──────────────────────────────────────────
-Immune Select (⑧)      ●      ●                  N×O(depth)
-Homeostasis (⑨)        ●      ●                  O(5)
-Neural Pathways (⑩)           ●                  O(log n)
-DNA Repair (⑪)         ●      ●         ●        3N×O(depth)
+── 7 CƠ CHẾ MỚI ──────────────────────────────────────────
+Instincts (⑧)          ●      ●                  O(7)
+SecurityGate (⑨)              ●                  O(1)
+Fusion (⑩)             ●      ●                  O(4)
+Immune Select (⑪)      ●      ●                  N×O(depth)
+Homeostasis (⑫)        ●      ●                  O(5)
+Neural Pathways (⑬)           ●                  O(log n)
+DNA Repair (⑭)         ●      ●         ●        3N×O(depth)
 ──────────────────────────────────────────────────────────
 ```
 
@@ -1097,11 +1284,13 @@ DNA Repair (⑪)         ●      ●         ●        3N×O(depth)
 ║   Mọi thuật toán = tổ hợp 3 phép toán + 1 hằng số:           ║
 ║     SDF + CHAIN + SPLICE + φ⁻¹                               ║
 ║                                                               ║
-║   11 cơ chế DNA → 11 thuật toán HomeOS:                       ║
+║   14 cơ chế DNA → 14 thuật toán HomeOS:                       ║
 ║     7 gốc:  copy, đọc, dịch, đột biến, tái tổ hợp,          ║
 ║             chọn lọc, biểu hiện                               ║
-║     4 mới:  chọn miễn dịch, cân bằng nội môi,                ║
-║             đường thần kinh, sửa chữa DNA                     ║
+║     3 bảo vệ: phản xạ bẩm sinh, miễn dịch bẩm sinh,         ║
+║               tích hợp đa giác quan                           ║
+║     4 thông minh: chọn miễn dịch, cân bằng nội môi,          ║
+║                   đường thần kinh, sửa chữa DNA               ║
 ║                                                               ║
 ║   DNA:     nucleotide + polymerize + splice = sự sống         ║
 ║   HomeOS:  SDF + chain + splice + φ⁻¹ = tri thức             ║
@@ -1116,16 +1305,19 @@ DNA Repair (⑪)         ●      ●         ●        3N×O(depth)
 ╚═══════════════════════════════════════════════════════════════╝
 ```
 
-### Pipeline hoàn chỉnh (11 cơ chế)
+### Pipeline hoàn chỉnh (14 cơ chế)
 
 ```
 Text input                                    thế giới bên ngoài
+  ↓ ⑨SecurityGate (Innate Immunity)          Crisis? → CHẶN ngay
+  ↓ ⑩Fusion (Multisensory Integration)       tích hợp text+audio+bio+image
   ↓ entities() ③Translate                     text → UDC refs
-  ↓ search() ⑩Neural Pathways                O(log n) tìm neighbors
-  ↓ ⑨Homeostasis: F = d(predicted, actual)   đo surprise → λ
+  ↓ search() ⑬Neural Pathways                O(log n) tìm neighbors
+  ↓ ⑫Homeostasis: F = d(predicted, actual)   đo surprise → λ
   ↓ compose() ⑤Recombine                     tổ hợp → điểm mới 5D
-  ↓ ⑧Immune Selection: infer(N=3)            N nhánh → chọn entropy thấp
-  ↓ ⑪DNA Repair: critique → refine           sửa đến quality ≥ φ⁻¹
+  ↓ ⑧Instincts (Innate Reflexes)             7 bản năng: Honesty đầu tiên
+  ↓ ⑪Immune Selection: infer(N=3)            N nhánh → chọn entropy thấp
+  ↓ ⑭DNA Repair: critique → refine           sửa đến quality ≥ φ⁻¹
   ↓ ⑥Select: Hebbian co_activate             fire together → wire together
   ↓ neo DN ①Replicate                         lưu disk (2 bytes)
   ↓ Dream ⑦Express → advance() → QR          neo vĩnh viễn nếu chín
