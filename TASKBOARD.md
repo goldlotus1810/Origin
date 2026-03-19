@@ -92,13 +92,13 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 2.1c | Stdlib: hash.ol + mol.ol + chain.ol | `PLAN_2_1` | 2.1a | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 294 LOC. hash(fnv1a/distance_5d/similarity), mol(evolve/lca/consistency), chain(lca/concat/split/compare). |
 | 2.2 | Emotion pipeline (emotion.ol, curve.ol, intent.ol) | `PLAN_2_2` | 2.1c | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 175 LOC. emotion(blend/amplify), curve(tone/variance), intent(crisis/learn/command/chat). |
 | 2.3 | Knowledge layer (silk_ops.ol, dream.ol, instinct.ol, learning.ol) | `PLAN_2_3` | 2.1a,2.1c | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 701 LOC. Silk(hebbian/walk/amplify), Dream(cluster/score/promote), Instinct(7 bản năng), Learning(pipeline). |
-| 2.4 | Agent behavior (gate.ol, response.ol, leo.ol, chief.ol, worker.ol) | `PLAN_2_4` | 2.2,2.3 | FREE | — | — | ~500 LOC |
+| 2.4 | Agent behavior (gate.ol, response.ol, leo.ol, chief.ol, worker.ol) | `PLAN_2_4` | 2.2,2.3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 198 LOC. gate(crisis/harmful), response(tone render), leo(process/dream), chief+worker(ISL protocol). |
 
 ## Phase 3 — Self-sufficient builder (CẮT RUST HOÀN TOÀN)
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 3.1 | asm_emit.ol — emit x86_64 machine code | `PLAN_3_1` | Phase 2 | FREE | — | — | ~500 LOC |
+| 3.1 | asm_emit.ol — emit x86_64 machine code | `PLAN_3_1` | Phase 2 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
 | 3.2 | elf_emit.ol — tạo ELF binary | `PLAN_3_2` | 3.1 | FREE | — | — | ~200 LOC |
 | 3.3 | builder.ol — thay Rust builder | `PLAN_3_3` | 3.1,3.2 | FREE | — | — | ~300 LOC |
 | 3.4 | Self-build test: v2 == v3 | `PLAN_3_3` | 3.3 | FREE | — | — | Fixed-point verification |
