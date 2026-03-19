@@ -735,6 +735,9 @@ impl OlangVM {
         // Array: Vec<element_chain>
         let mut dict_heap: Vec<Vec<(MolecularChain, MolecularChain)>> = Vec::new();
         let mut array_heap: Vec<Vec<MolecularChain>> = Vec::new();
+        // Compiler pipeline caches (for __parse → __lower → __encode_bytecode)
+        let mut parse_cache: Option<Vec<crate::lang::syntax::Stmt>> = None;
+        let mut lower_cache: Option<crate::exec::ir::OlangProgram> = None;
 
         while pc < prog.ops.len() {
             if steps >= self.max_steps {
@@ -2350,6 +2353,54 @@ impl OlangVM {
                             };
                             events.push(VmEvent::FileAppendRequest { path, data });
                             let _ = stack.push(MolecularChain::from_number(1.0));
+                        }
+                        // ── Compiler builtins (for builder.ol / self-compile) ──
+                        "__parse" => {
+                            // Pop source string → parse → push array of Op descriptions
+                            let src_chain = vm_pop!(stack, events);
+                            if let Some(src) = chain_to_string(&src_chain) {
+                                match crate::lang::syntax::parse(&src) {
+                                    Ok(stmts) => {
+                                        // Push count of statements as success indicator
+                                        let _ = stack.push(MolecularChain::from_number(stmts.len() as f64));
+                                        // Store stmts in parse_cache for __lower
+                                        parse_cache = Some(stmts);
+                                    }
+                                    Err(_) => {
+                                        let _ = stack.push(MolecularChain::empty());
+                                    }
+                                }
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__lower" => {
+                            // Use cached parse result → lower → push op count
+                            if let Some(ref stmts) = parse_cache {
+                                let program = crate::lang::semantic::lower(stmts);
+                                let _ = stack.push(MolecularChain::from_number(program.ops.len() as f64));
+                                lower_cache = Some(program);
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__encode_bytecode" => {
+                            // Use cached lower result → encode → push bytecode length
+                            if let Some(ref program) = lower_cache {
+                                let bc = crate::exec::bytecode::encode_bytecode(&program.ops);
+                                let _ = stack.push(MolecularChain::from_number(bc.len() as f64));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        "__list_files" => {
+                            // Pop dir path, pop extension filter → push count
+                            let ext_chain = vm_pop!(stack, events);
+                            let dir_chain = vm_pop!(stack, events);
+                            let _dir = chain_to_string(&dir_chain).unwrap_or_default();
+                            let _ext = chain_to_string(&ext_chain).unwrap_or_default();
+                            // Stub: push 0 (runtime handles file listing)
+                            let _ = stack.push(MolecularChain::from_number(0.0));
                         }
                         // ── Time builtins ────────────────────────────────
                         "__time" => {
@@ -5997,5 +6048,36 @@ pub mod tests {
         let v = result.outputs()[0].to_number().unwrap();
         // Number chain has 4 molecules
         assert!(v > 0.0, "chain_len should be > 0, got {}", v);
+    }
+
+    // ── Task 3.4: Self-compile test ─────────────────────────────────────
+
+    #[test]
+    fn self_compile_parse_lower_encode() {
+        // Test __parse → __lower → __encode_bytecode pipeline
+        let mut prog = OlangProgram::new("test");
+        // Push source: "let x = 42;"
+        prog.push_op(Op::Push(key_chain("let x = 42;")))
+            .push_op(Op::Call("__parse".into()))
+            // Stack: [stmt_count] — should be > 0
+            .push_op(Op::Emit)
+            .push_op(Op::Call("__lower".into()))
+            // Stack: [op_count]
+            .push_op(Op::Emit)
+            .push_op(Op::Call("__encode_bytecode".into()))
+            // Stack: [bytecode_len]
+            .push_op(Op::Emit)
+            .push_op(Op::Halt);
+        let result = vm().execute(&prog);
+        assert!(result.outputs().len() >= 3, "should have 3 outputs");
+
+        let parse_count = result.outputs()[0].to_number().unwrap_or(0.0);
+        assert!(parse_count > 0.0, "parse should return > 0 stmts, got {}", parse_count);
+
+        let op_count = result.outputs()[1].to_number().unwrap_or(0.0);
+        assert!(op_count > 0.0, "lower should return > 0 ops, got {}", op_count);
+
+        let bc_len = result.outputs()[2].to_number().unwrap_or(0.0);
+        assert!(bc_len > 0.0, "encode should return > 0 bytes, got {}", bc_len);
     }
 }
