@@ -11,6 +11,35 @@
 
 ---
 
+## Quy tắc giao tiếp & làm việc (BẮT BUỘC mọi session)
+
+```
+① TIẾNG VIỆT — Mọi giao tiếp với user PHẢI bằng tiếng Việt.
+  User là người Việt, tiếng Anh kém.
+  Code + commit message: tiếng Anh OK (convention).
+  Giải thích, hỏi, báo cáo, todo list: TIẾNG VIỆT.
+
+② OBSERVABLE — User phải THẤY ĐƯỢC bạn đang làm gì.
+  Dùng TodoWrite để liệt kê việc cần làm TRƯỚC KHI bắt đầu.
+  Mỗi bước: cập nhật todo status (in_progress → completed).
+  Mô tả todo bằng tiếng Việt ngắn gọn.
+  User nhìn todo list → biết bạn đang ở đâu → nhắc nếu sai.
+  KHÔNG làm im lặng 5 phút rồi dump kết quả.
+
+③ LOGIC HANDBOOK — Đọc trước khi sửa pipeline/emotion/inference.
+  File: docs/CHECK_TO_PASS_LOGIC_HANDBOOK.md
+  Chứa: 6 bug patterns đã fix + 5 checkpoints bắt buộc.
+  KHÔNG cần user nhắc — file này là luật, đọc 1 lần là nhớ.
+
+④ GIT DISCIPLINE — Mỗi session:
+  a. git fetch origin main && git merge origin/main  ← TRƯỚC KHI code
+  b. Làm xong → commit + push NGAY                  ← KHÔNG để lại
+  c. Cập nhật TASKBOARD.md nếu có thay đổi task      ← Dashboard
+  d. KHÔNG push code mà chưa test (cargo test + clippy + make smoke-binary)
+```
+
+---
+
 ## Tuyên ngôn
 
 ```
