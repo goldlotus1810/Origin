@@ -72,9 +72,9 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | FREE | — | — | Cần bytecode format cố định |
-| 1.2 | vm_arm64.S | — | 1.1 | FREE | — | — | Chưa có plan chi tiết |
-| 1.3 | vm_wasm.wat | — | 1.1 | FREE | — | — | Chưa có plan chi tiết |
+| 1.1 | vm_x86_64.S | `PLAN_1_1` | 0.5 (bytecode format) | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | Bắt đầu 2026-03-19 |
+| 1.2 | vm_arm64.S | `PLAN_1_2` | 1.1 | FREE | — | — | Plan file có sẵn |
+| 1.3 | vm_wasm.wat | `PLAN_1_3` | 1.1 | FREE | — | — | Plan file có sẵn |
 | 1.4 | Builder tool (Rust) | `PLAN_1_4` | 1.1 | FREE | — | — | — |
 
 ## Song song — Auth (KHÔNG phụ thuộc Phase 0)
@@ -169,4 +169,6 @@ Khi Session A xong 0.3:
             field-access issue in CallClosure mode (dict .name empty when
             struct passed across closure boundaries). Encoder works correctly
             with manually-created ops. 2474 workspace tests pass, 0 clippy errors.
+2026-03-19  1.1 → CLAIMED by Lyra (session 2pN6F). vm_x86_64.S bắt đầu.
+            1.2, 1.3 có plan file từ erPDB (PLAN_1_2, PLAN_1_3).
 ```
