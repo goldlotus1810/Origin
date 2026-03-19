@@ -190,3 +190,114 @@ pub fn wasi_config() {
     arch: "wasi"
   };
 }
+
+// ── Fat binary config ──
+
+pub fn fat_config() {
+  return {
+    archs: [
+      { name: "x86_64", vm_path: "vm/x86_64/vm_x86_64.bin", arch_id: 0x01, entry_off: 0 },
+      { name: "arm64",  vm_path: "vm/arm64/vm_arm64.bin",    arch_id: 0x02, entry_off: 0 }
+    ],
+    stdlib_path: "stdlib",
+    kn_path: "origin.olang",
+    output: "origin.fat",
+    stub_x86: "o_x86",
+    stub_arm: "o_arm"
+  };
+}
+
+// ── Fat binary builder ──
+// Packs multiple arch VMs + shared bytecode + knowledge into 1 file
+
+pub fn build_fat(config) {
+  emit("Builder — fat binary packer (multi-arch)\n");
+
+  // 1. Compile bytecode (shared, arch-independent)
+  let bytecode = [];
+  if config.stdlib_path != "" {
+    emit("  Compiling stdlib: " + config.stdlib_path + "\n");
+    bytecode = compile_all(config.stdlib_path);
+  }
+  emit("  Bytecode: " + to_string(len(bytecode)) + " bytes (shared)\n");
+
+  // 2. Read VM binaries for each arch
+  let vm_codes = [];
+  let i = 0;
+  while i < len(config.archs) {
+    let arch = config.archs[i];
+    emit("  Reading VM [" + arch.name + "]: " + arch.vm_path + "\n");
+    let vm = file_read_bytes(arch.vm_path);
+    push(vm_codes, vm);
+    emit("    VM size: " + to_string(len(vm)) + " bytes\n");
+    i = i + 1;
+  }
+
+  // 3. Read knowledge
+  let knowledge = [];
+  if config.kn_path != "" {
+    knowledge = file_read_bytes(config.kn_path);
+  }
+  emit("  Knowledge: " + to_string(len(knowledge)) + " bytes (shared)\n");
+
+  // 4. Calculate offsets
+  // Layout: [Fat Header 64B][VM 0][VM 1]...[Bytecode][Knowledge]
+  let fat_hdr_size = 64;
+  let arch_entries = [];
+
+  let offset = fat_hdr_size;
+  i = 0;
+  while i < len(config.archs) {
+    let arch = config.archs[i];
+    push(arch_entries, {
+      arch_id: arch.arch_id,
+      vm_off: offset,
+      vm_size: len(vm_codes[i]),
+      entry_off: arch.entry_off
+    });
+    offset = offset + len(vm_codes[i]);
+    i = i + 1;
+  }
+
+  let bc_off = offset;
+  let kn_off = bc_off + len(bytecode);
+
+  // 5. Build fat header
+  let hdr = make_fat_header(arch_entries, bc_off, len(bytecode), kn_off, len(knowledge));
+
+  // 6. Assemble fat binary
+  let fat = [];
+  concat_bytes(fat, hdr);
+  i = 0;
+  while i < len(vm_codes) {
+    concat_bytes(fat, vm_codes[i]);
+    i = i + 1;
+  }
+  concat_bytes(fat, bytecode);
+  concat_bytes(fat, knowledge);
+
+  // 7. Write fat binary
+  file_write_bytes(config.output, fat);
+  emit("  Fat binary: " + config.output + " (" + to_string(len(fat)) + " bytes)\n");
+
+  // 8. Generate ELF loader stubs
+  let fat_path = to_bytes(config.output);
+  if config.stub_x86 != "" {
+    let x86_stub_code = make_x86_64_stub(fat_path);
+    let x86_elf = make_elf_arch(x86_stub_code, 0, "x86_64");
+    file_write_bytes(config.stub_x86, x86_elf);
+    emit("  Stub [x86_64]: " + config.stub_x86 + " (" + to_string(len(x86_elf)) + " bytes)\n");
+  }
+  if config.stub_arm != "" {
+    let arm_stub_code = make_arm64_stub(fat_path);
+    let arm_elf = make_elf_arch(arm_stub_code, 0, "arm64");
+    file_write_bytes(config.stub_arm, arm_elf);
+    emit("  Stub [arm64]: " + config.stub_arm + " (" + to_string(len(arm_elf)) + " bytes)\n");
+  }
+
+  emit("Done! Fat binary with " + to_string(len(config.archs)) + " architectures.\n");
+}
+
+fn to_bytes(str) {
+  return __str_bytes(str);
+}
