@@ -312,7 +312,15 @@ impl Maturity {
     ///
     /// Formula → Evaluating: khi fire_count > 0 (có ít nhất 1 co-activation)
     /// Evaluating → Mature: khi weight ≥ threshold VÀ fire_count ≥ Fib[depth]
+    ///                       VÀ evaluated_dims ≥ 3 (ít nhất 3/5 chiều có giá trị thật)
     pub fn advance(self, fire_count: u32, weight: f32, fib_threshold: u32) -> Self {
+        self.advance_with_eval(fire_count, weight, fib_threshold, 5)
+    }
+
+    /// advance có thêm evaluated_dims — biết bao nhiêu chiều đã evaluate.
+    ///
+    /// Mature yêu cầu ≥ 3 dims evaluated (đủ evidence trên ≥ 3/5 chiều).
+    pub fn advance_with_eval(self, fire_count: u32, weight: f32, fib_threshold: u32, evaluated_dims: u8) -> Self {
         match self {
             Self::Formula => {
                 if fire_count > 0 {
@@ -323,7 +331,8 @@ impl Maturity {
             }
             Self::Evaluating => {
                 // φ⁻¹ + φ⁻³ ≈ 0.854 (PROMOTE_WEIGHT from hebbian.rs)
-                if weight >= 0.854 && fire_count >= fib_threshold {
+                // Mature CHỈ khi ≥ 3 dims evaluated — đủ evidence
+                if weight >= 0.854 && fire_count >= fib_threshold && evaluated_dims >= 3 {
                     Self::Mature
                 } else {
                     Self::Evaluating
@@ -483,6 +492,23 @@ pub struct Molecule {
     pub fa: u8,
     /// Formula rule ID for Time dimension (0xFF = unset, runtime metadata only)
     pub ft: u8,
+    /// Bitmask: dim nào đã được evaluate (có input thật).
+    ///
+    /// ```text
+    /// Bit 0: Shape     (0x01)
+    /// Bit 1: Relation  (0x02)
+    /// Bit 2: Valence   (0x04)
+    /// Bit 3: Arousal   (0x08)
+    /// Bit 4: Time      (0x10)
+    /// ```
+    ///
+    /// 0x00 = TIỀM NĂNG (chưa có input, 5 chiều đều là công thức)
+    /// 0x1F = ĐÃ ĐÁNH GIÁ (5 chiều đều có giá trị thật)
+    ///
+    /// L0 (encode_codepoint) → 0x1F (innate, biết từ Unicode)
+    /// LCA result → 0x00 (công thức mới, chờ evidence)
+    /// evolve(dim) → bit của dim mutated = 1
+    pub evaluated: u8,
 }
 
 /// PartialEq compares only the 5 core dimensions (shape, relation, valence, arousal, time).
@@ -512,6 +538,7 @@ pub const FORMULA_UNSET: u8 = 0xFF;
 
 impl Molecule {
     /// Create a Molecule with all formula fields set to FORMULA_UNSET.
+    /// evaluated = 0x1F (all dims evaluated) for backward compatibility.
     /// Use this instead of struct literals.
     pub fn raw(shape: u8, relation: u8, valence: u8, arousal: u8, time: u8) -> Self {
         Self {
@@ -524,7 +551,91 @@ impl Molecule {
             fv: FORMULA_UNSET,
             fa: FORMULA_UNSET,
             ft: FORMULA_UNSET,
+            evaluated: 0x1F, // all 5 dims evaluated (backward compat)
         }
+    }
+
+    /// Tạo Molecule công thức — TIỀM NĂNG, chưa có input.
+    ///
+    /// Values là defaults (tọa độ trong 5D), nhưng chưa được xác nhận.
+    /// Khi có evidence → `evaluate_dim()` từng chiều.
+    pub fn formula(shape: u8, relation: u8, valence: u8, arousal: u8, time: u8) -> Self {
+        Self {
+            shape,
+            relation,
+            emotion: EmotionDim { valence, arousal },
+            time,
+            fs: FORMULA_UNSET,
+            fr: FORMULA_UNSET,
+            fv: FORMULA_UNSET,
+            fa: FORMULA_UNSET,
+            ft: FORMULA_UNSET,
+            evaluated: 0x00, // TIỀM NĂNG — chưa dim nào được evaluate
+        }
+    }
+
+    // ── Evaluated bitmask ─────────────────────────────────────────────────
+
+    /// Bit: Shape đã evaluated.
+    pub const EVAL_SHAPE: u8 = 0x01;
+    /// Bit: Relation đã evaluated.
+    pub const EVAL_RELATION: u8 = 0x02;
+    /// Bit: Valence đã evaluated.
+    pub const EVAL_VALENCE: u8 = 0x04;
+    /// Bit: Arousal đã evaluated.
+    pub const EVAL_AROUSAL: u8 = 0x08;
+    /// Bit: Time đã evaluated.
+    pub const EVAL_TIME: u8 = 0x10;
+    /// Tất cả 5 dims đã evaluated.
+    pub const EVAL_ALL: u8 = 0x1F;
+    /// Chưa dim nào evaluated (tiềm năng).
+    pub const EVAL_NONE: u8 = 0x00;
+
+    /// Dim index → eval bit.
+    fn eval_bit(dim: u8) -> u8 {
+        match dim {
+            0 => Self::EVAL_SHAPE,
+            1 => Self::EVAL_RELATION,
+            2 => Self::EVAL_VALENCE,
+            3 => Self::EVAL_AROUSAL,
+            4 => Self::EVAL_TIME,
+            _ => 0,
+        }
+    }
+
+    /// Chiều `dim` đã được evaluate (có input thật)?
+    pub fn is_dim_evaluated(&self, dim: u8) -> bool {
+        self.evaluated & Self::eval_bit(dim) != 0
+    }
+
+    /// Tất cả 5 chiều đã được evaluate?
+    pub fn is_fully_evaluated(&self) -> bool {
+        self.evaluated == Self::EVAL_ALL
+    }
+
+    /// Chưa chiều nào được evaluate — node là TIỀM NĂNG (công thức thuần).
+    pub fn is_pure_formula(&self) -> bool {
+        self.evaluated == Self::EVAL_NONE
+    }
+
+    /// Đếm số chiều đã evaluate.
+    pub fn evaluated_count(&self) -> u8 {
+        self.evaluated.count_ones() as u8
+    }
+
+    /// Evaluate chiều `dim` với giá trị mới — chuyển từ công thức → giá trị.
+    ///
+    /// Giống mutation nhưng KHÔNG tạo loài mới — chỉ confirm giá trị.
+    pub fn evaluate_dim(&mut self, dim: u8, value: u8) {
+        match dim {
+            0 => self.shape = value,
+            1 => self.relation = value,
+            2 => self.emotion.valence = value,
+            3 => self.emotion.arousal = value,
+            4 => self.time = value,
+            _ => return,
+        }
+        self.evaluated |= Self::eval_bit(dim);
     }
 
     /// Extract base ShapeBase category từ hierarchical shape byte.
@@ -798,6 +909,10 @@ impl Molecule {
                 old
             }
         };
+
+        // evolve = thay 1 biến trong công thức → dim mutated được evaluate
+        // Các dim khác thừa kế trạng thái evaluated từ source
+        evolved.evaluated |= Self::eval_bit(dim as u8);
 
         let consistency = evolved.internal_consistency();
         EvolveResult {
@@ -2399,6 +2514,85 @@ mod tests {
         }
         assert!(table.ram_usage() > 0);
         assert_eq!(table.len(), 50);
+    }
+
+    // ── Molecule = Công thức tests ──────────────────────────────────────
+
+    #[test]
+    fn molecule_raw_is_fully_evaluated() {
+        let m = Molecule::raw(1, 2, 0x80, 0x80, 3);
+        assert!(m.is_fully_evaluated());
+        assert_eq!(m.evaluated_count(), 5);
+        assert!(!m.is_pure_formula());
+    }
+
+    #[test]
+    fn molecule_formula_is_potential() {
+        let m = Molecule::formula(1, 2, 0x80, 0x80, 3);
+        assert!(m.is_pure_formula());
+        assert!(!m.is_fully_evaluated());
+        assert_eq!(m.evaluated_count(), 0);
+    }
+
+    #[test]
+    fn evaluate_dim_transitions() {
+        let mut m = Molecule::formula(1, 2, 0x80, 0x80, 3);
+
+        // Evaluate shape
+        m.evaluate_dim(0, 5);
+        assert!(m.is_dim_evaluated(0)); // shape evaluated
+        assert!(!m.is_dim_evaluated(1)); // relation still formula
+        assert_eq!(m.evaluated_count(), 1);
+        assert_eq!(m.shape, 5);
+
+        // Evaluate valence
+        m.evaluate_dim(2, 0xC0);
+        assert_eq!(m.evaluated_count(), 2);
+        assert_eq!(m.emotion.valence, 0xC0);
+
+        // Evaluate all remaining
+        m.evaluate_dim(1, 6);
+        m.evaluate_dim(3, 0xA0);
+        m.evaluate_dim(4, 4);
+        assert!(m.is_fully_evaluated());
+        assert_eq!(m.evaluated_count(), 5);
+    }
+
+    #[test]
+    fn evolve_marks_dim_evaluated() {
+        let m = Molecule::formula(1, 2, 0x80, 0x80, 3);
+        let result = m.evolve(Dimension::Valence, 0xC0);
+        // Dim mutated (valence=2) should be evaluated
+        assert!(result.molecule.is_dim_evaluated(2));
+        // Other dims should still be unevaluated (inherited from formula)
+        assert!(!result.molecule.is_dim_evaluated(0)); // shape
+        assert_eq!(result.molecule.evaluated_count(), 1);
+    }
+
+    #[test]
+    fn maturity_requires_evaluated_dims() {
+        // advance_with_eval: chỉ Mature khi ≥ 3 dims evaluated
+        let m = Maturity::Evaluating;
+
+        // 2 dims evaluated — không đủ
+        let result = m.advance_with_eval(10, 0.90, 5, 2);
+        assert_eq!(result, Maturity::Evaluating);
+
+        // 3 dims evaluated — đủ
+        let result = m.advance_with_eval(10, 0.90, 5, 3);
+        assert_eq!(result, Maturity::Mature);
+
+        // 5 dims — chắc chắn đủ
+        let result = m.advance_with_eval(10, 0.90, 5, 5);
+        assert_eq!(result, Maturity::Mature);
+    }
+
+    #[test]
+    fn eq_ignores_evaluated_field() {
+        let a = Molecule::raw(1, 2, 0x80, 0x80, 3);
+        let b = Molecule::formula(1, 2, 0x80, 0x80, 3);
+        // PartialEq chỉ so sánh 5 core dims, không so evaluated
+        assert_eq!(a, b);
     }
 }
 

@@ -81,7 +81,19 @@ Molecule.evolve(dim, new_value) → EvolveResult
 ### Mỗi node = 1 điểm 5D → 3 công thức
 
 ```
-Molecule [S][R][V][A][T]
+Molecule [S][R][V][A][T] + evaluated bitmask (5 bits)
+    │
+    ├── evaluated = 0x00 → TIỀM NĂNG (5 công thức, chưa có input)
+    ├── evaluated = 0x0F → 4/5 chiều đã có giá trị thật
+    └── evaluated = 0x1F → ĐÃ ĐÁNH GIÁ (5 chiều có giá trị thật)
+
+    L0 (encode_codepoint)  → evaluated = 0x1F (innate, biết từ Unicode)
+    LCA result             → evaluated = 0x00 (công thức mới, Molecule::formula())
+    evolve(dim)            → bit dim mutated = 1 (thừa kế + dim mới)
+
+    Maturity.advance_with_eval(fire, weight, fib, eval_dims):
+      Formula → Evaluating: fire_count > 0
+      Evaluating → Mature: weight ≥ 0.854 && fire ≥ fib && eval_dims ≥ 3
 
 ```
 

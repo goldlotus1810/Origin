@@ -86,9 +86,10 @@ impl ShortTermMemory {
             // fib(2) = 2 — threshold cho STM (depth=2)
             let fib_threshold = silk::hebbian::fib(2);
             // Gap #8 fix: dùng fire_count-based heuristic thay vì 0.0
-            // Approximation: weight tăng theo fire_count (sẽ được chính xác hóa khi Dream truyền Hebbian weight thật)
             let approx_weight = (obs.fire_count as f32 / (fib_threshold as f32 + 5.0)).min(1.0);
-            obs.maturity = obs.maturity.advance(obs.fire_count, approx_weight, fib_threshold);
+            // Molecule = Công thức: advance dùng evaluated_count từ chain
+            let eval_dims = obs.chain.first().map_or(5, |m| m.evaluated_count());
+            obs.maturity = obs.maturity.advance_with_eval(obs.fire_count, approx_weight, fib_threshold, eval_dims);
             // Blend emotion
             obs.emotion = obs.emotion.blend(emotion, 0.3);
             obs.timestamp = ts;

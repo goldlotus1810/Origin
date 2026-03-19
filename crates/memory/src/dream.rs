@@ -171,7 +171,8 @@ impl DreamCycle {
                         max_w.max(graph.assoc_weight(ha, nb)).max(graph.assoc_weight(nb, ha))
                     })
                 );
-                obs.maturity.advance(obs.fire_count, weight, fib_threshold).is_mature()
+                let eval_dims = obs.chain.first().map_or(5, |m| m.evaluated_count());
+                obs.maturity.advance_with_eval(obs.fire_count, weight, fib_threshold, eval_dims).is_mature()
             })
             .map(|obs| obs.chain.chain_hash())
             .collect();
@@ -241,7 +242,8 @@ impl DreamCycle {
                             m.max(graph.assoc_weight(ha, nb)).max(graph.assoc_weight(nb, ha))
                         })
                     );
-                    let adv = obs.maturity.advance(obs.fire_count, w, fib(self.config.tree_depth));
+                    let eval_dims = obs.chain.first().map_or(5, |m| m.evaluated_count());
+                    let adv = obs.maturity.advance_with_eval(obs.fire_count, w, fib(self.config.tree_depth), eval_dims);
                     adv.is_mature() || obs.fire_count >= fib(self.config.tree_depth)
                 };
                 if eligible && obs.fire_count >= fib(self.config.tree_depth) {
