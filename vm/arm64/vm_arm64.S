@@ -288,61 +288,100 @@ op_swap:
 
 op_store:
     // [0x13, name_len:1, name:N]
-    ldrb    w1, [x19], #1           // name_len
-    // Hash name
+    ldrb    w1, [x19], #1           // name_len, x19 now at name bytes
+
+    // Save name_len and value before hash call
+    sub     x20, x20, #16           // pop value
+    ldr     x9, [x20]               // val_ptr
+    ldr     x10, [x20, #8]          // val_len
+
+    // Hash the name
+    stp     x9, x10, [sp, #-16]!   // save val ptr/len
+    str     x1, [sp, #-8]!         // save name_len
     mov     x0, x19                 // name ptr
     mov     w2, w1                  // name len
     bl      fnv1a_hash              // → x0 = hash
+    ldr     x1, [sp], #8           // restore name_len
+    ldp     x9, x10, [sp], #16     // restore val ptr/len
 
-    mov     x9, x0                  // save hash
-    add     x19, x19, x1            // pc += name_len (w1 still valid? use saved)
-    // Actually x1 might be clobbered by fnv1a. Let me re-read.
-    // Save name_len before hash call
-    // Fix: re-read from pc position
-    // Simpler: save before call
-    // Actually we already advanced x19 past name_len byte.
-    // Let me restructure:
+    add     x19, x19, x1           // pc += name_len
 
-    // Re-read: x19 was at name start, w1 = name_len
-    // After bl fnv1a_hash, x0 = hash, but w1 may be clobbered
-    // Need to save w1. Use stack:
-    // Let me redo this properly:
-    b       op_store_impl
+    // Store: search var table by hash, update or insert
+    // x0=hash, x9=val_ptr, x10=val_len
+    // Var table at x26, count at x27
+    // Entry: [hash:8][ptr:8][len:8] = 24 bytes
+    mov     x2, x26                 // table base
+    mov     w3, w27                 // count
+    cbz     w3, .vs_new
 
-op_store_impl:
-    // Re-entered. x19 points to name bytes.
-    // Back up: re-read name_len
-    ldrb    w1, [x19, #-1]         // name_len (byte before current x19)
-    // Wait, we already did x19 += 1 for name_len byte in op_store above
-    // So x19 is at name bytes start, w1 = name_len from ldrb above
-    // But we branched here... this is messy.
+    mov     w4, #0                  // index
+.vs_search:
+    ldr     x5, [x2]               // entry hash
+    cmp     x5, x0
+    b.ne    .vs_skip
+    // Found — update
+    str     x9, [x2, #8]
+    str     x10, [x2, #16]
+    b       vm_loop
+.vs_skip:
+    add     x2, x2, #24
+    add     w4, w4, #1
+    cmp     w4, w3
+    b.lt    .vs_search
 
-    // SIMPLER APPROACH: redo from scratch
-    // x19 is currently at: past the name_len byte, at name bytes start
-    // We need: name_ptr = x19, name_len = w1 (from the ldrb above)
-    // But w1 may have been clobbered. Let me use a callee-saved register.
-
-    // Actually, the ldrb w1, [x19], #1 in op_store set w1 and advanced x19.
-    // Then we branched to op_store_impl. w1 is still valid (no call yet).
-
-    stp     x19, x1, [sp, #-16]!   // save name_ptr, name_len
-    mov     x0, x19                 // name ptr
-    mov     w2, w1                  // name len
-    bl      fnv1a_hash              // → x0 = hash
-    ldp     x19, x1, [sp], #16     // restore (but x19 is name_ptr, not PC!)
-
-    // Oops: x19 is PC register. Can't use it as temp.
-    // Let me use different approach entirely.
-    b       vm_loop                 // STUB for now — will fix
+.vs_new:
+    // Append new entry
+    mov     x2, x26
+    mov     w3, w27
+    mov     w4, #24
+    mul     w3, w3, w4
+    add     x2, x2, x3             // ptr to new slot
+    str     x0, [x2]               // hash
+    str     x9, [x2, #8]           // val_ptr
+    str     x10, [x2, #16]         // val_len
+    add     w27, w27, #1            // count++
+    b       vm_loop
 
 op_load:
     // [0x02, name_len:1, name:N]
-    ldrb    w1, [x19], #1
-    // For now: push empty
+    ldrb    w1, [x19], #1           // name_len
+
+    // Hash the name
+    str     x1, [sp, #-8]!
+    mov     x0, x19                 // name ptr
+    mov     w2, w1
+    bl      fnv1a_hash              // → x0 = hash
+    ldr     x1, [sp], #8
+
+    add     x19, x19, x1           // pc += name_len
+
+    // Search var table by hash
+    mov     x2, x26                 // table base
+    mov     w3, w27                 // count
+    cbz     w3, .vl_not_found
+
+    mov     w4, #0
+.vl_search:
+    ldr     x5, [x2]
+    cmp     x5, x0
+    b.ne    .vl_skip
+    // Found
+    ldr     x6, [x2, #8]           // val_ptr
+    ldr     x7, [x2, #16]          // val_len
+    str     x6, [x20]
+    str     x7, [x20, #8]
+    add     x20, x20, #16
+    b       vm_loop
+.vl_skip:
+    add     x2, x2, #24
+    add     w4, w4, #1
+    cmp     w4, w3
+    b.lt    .vl_search
+
+.vl_not_found:
     str     xzr, [x20]
     str     xzr, [x20, #8]
     add     x20, x20, #16
-    add     x19, x19, x1
     b       vm_loop
 
 // ═══════════════════════════════════════════════════════════════════════════
