@@ -1,0 +1,671 @@
+// ── Olang Bootstrap Semantic Analyzer ─────────────────────────────
+// Self-hosting preparation: semantic analyzer written in Olang.
+// Reads AST → validates → emits IR opcodes (OlangProgram).
+//
+// Phase 4 / A9 — compiler self-hosting foundation.
+// Depends on: stdlib/bootstrap/lexer.ol, parser.ol
+//
+// Reference: crates/olang/src/lang/semantic.rs (Rust implementation)
+// This only needs to compile lexer.ol + parser.ol, not 100% of Rust version.
+
+use olang.bootstrap.lexer;
+use olang.bootstrap.parser;
+
+// ── IR Opcode representation ────────────────────────────────────
+// We represent opcodes as structs with an "op" tag string + args.
+// The Rust VM will interpret these when we bridge.
+
+type Op {
+    tag: Str,       // opcode name: "Push", "PushNum", "Store", etc.
+    name: Str,      // variable/function name (for Store, Load, Call, etc.)
+    value: Num,     // numeric value (for PushNum, Jmp target, etc.)
+    value2: Num,    // second numeric (for PushMol: r)
+    value3: Num,    // third numeric (for PushMol: v)
+    value4: Num,    // fourth numeric (for PushMol: a)
+    value5: Num,    // fifth numeric (for PushMol: t)
+}
+
+fn make_op(tag, name, value) {
+    return Op { tag: tag, name: name, value: value,
+                value2: 0, value3: 0, value4: 0, value5: 0 };
+}
+
+fn make_op_num(tag, value) {
+    return make_op(tag, "", value);
+}
+
+fn make_op_name(tag, name) {
+    return make_op(tag, name, 0);
+}
+
+fn make_op_simple(tag) {
+    return make_op(tag, "", 0);
+}
+
+// ── Scope tracking ──────────────────────────────────────────────
+
+type VarEntry {
+    name: Str,
+    slot: Num,
+}
+
+type FnEntry {
+    name: Str,
+    param_count: Num,
+    body_pc: Num,
+    params: Vec[Str],
+}
+
+type SemanticState {
+    ops: Vec[Op],
+    locals: Vec[Str],
+    fns: Vec[FnEntry],
+    fn_bodies: Vec[FnEntry],
+    errors: Vec[Str],
+    call_id: Num,
+    use_call_closure: Num,
+    compiled_fns: Vec[FnEntry],
+    types: Vec[Str],
+    unions: Vec[Str],
+}
+
+fn new_state() {
+    return SemanticState {
+        ops: [],
+        locals: [],
+        fns: [],
+        fn_bodies: [],
+        errors: [],
+        call_id: 0,
+        use_call_closure: 0,
+        compiled_fns: [],
+        types: [],
+        unions: [],
+    };
+}
+
+fn emit_op(state, op) {
+    push(state.ops, op);
+}
+
+fn current_pos(state) {
+    return len(state.ops);
+}
+
+fn patch_jump(state, pos, target) {
+    // Patch a Jmp/Jz at position pos to jump to target
+    let old_op = state.ops[pos];
+    let new_op = Op { tag: old_op.tag, name: old_op.name, value: target,
+                      value2: old_op.value2, value3: old_op.value3,
+                      value4: old_op.value4, value5: old_op.value5 };
+    set_at(state.ops, pos, new_op);
+}
+
+fn is_local(state, name) {
+    let i = len(state.locals) - 1;
+    while i >= 0 {
+        if state.locals[i] == name {
+            return true;
+        };
+        let i = i - 1;
+    };
+    return false;
+}
+
+fn push_local(state, name) {
+    push(state.locals, name);
+}
+
+fn save_locals(state) {
+    return len(state.locals);
+}
+
+fn restore_locals(state, saved) {
+    while len(state.locals) > saved {
+        pop(state.locals);
+    };
+}
+
+fn declare_fn(state, name, param_count, params) {
+    push(state.fns, FnEntry {
+        name: name, param_count: param_count,
+        body_pc: 0, params: params,
+    });
+}
+
+fn lookup_fn(state, name) {
+    let i = len(state.fns) - 1;
+    while i >= 0 {
+        if state.fns[i].name == name {
+            return state.fns[i];
+        };
+        let i = i - 1;
+    };
+    // Also check compiled_fns
+    let i = len(state.compiled_fns) - 1;
+    while i >= 0 {
+        if state.compiled_fns[i].name == name {
+            return state.compiled_fns[i];
+        };
+        let i = i - 1;
+    };
+    return false;
+}
+
+fn add_error(state, msg) {
+    push(state.errors, msg);
+}
+
+fn next_call_id(state) {
+    let id = state.call_id;
+    state.call_id = state.call_id + 1;
+    return id;
+}
+
+// ── Pass 1: Collect function definitions ────────────────────────
+
+fn collect_fns(state, stmts) {
+    let i = 0;
+    while i < len(stmts) {
+        let stmt = stmts[i];
+        match stmt {
+            Stmt::FnDef { name, params, body } => {
+                declare_fn(state, name, len(params), params);
+                push(state.fn_bodies, FnEntry {
+                    name: name, param_count: len(params),
+                    body_pc: 0, params: params,
+                });
+            },
+            Stmt::TypeDef { name, fields } => {
+                push(state.types, name);
+            },
+            Stmt::UnionDef { name, variants } => {
+                push(state.unions, name);
+            },
+            _ => {},
+        };
+        let i = i + 1;
+    };
+}
+
+// ── Pass 1.5: Pre-compile function bodies (CallClosure mode) ───
+
+fn precompile_fns(state, stmts) {
+    let i = 0;
+    while i < len(stmts) {
+        let stmt = stmts[i];
+        match stmt {
+            Stmt::FnDef { name, params, body } => {
+                let body_start = current_pos(state);
+                // Store params (they arrive on stack from CallClosure)
+                let pi = len(params) - 1;
+                while pi >= 0 {
+                    emit_op(state, make_op_name("Store", params[pi]));
+                    push_local(state, params[pi]);
+                    let pi = pi - 1;
+                };
+                // Compile function body
+                let saved = save_locals(state);
+                let bi = 0;
+                while bi < len(body) {
+                    compile_stmt(state, body[bi]);
+                    let bi = bi + 1;
+                };
+                // Default return (empty)
+                emit_op(state, make_op_name("Push", ""));
+                emit_op(state, make_op_simple("Ret"));
+                restore_locals(state, saved);
+                // Register compiled function
+                push(state.compiled_fns, FnEntry {
+                    name: name, param_count: len(params),
+                    body_pc: body_start, params: params,
+                });
+            },
+            _ => {},
+        };
+        let i = i + 1;
+    };
+}
+
+// ── Expression compilation ──────────────────────────────────────
+
+fn compile_expr(state, expr) {
+    match expr {
+        Expr::NumLit { value } => {
+            emit_op(state, make_op_num("PushNum", value));
+        },
+        Expr::StrLit { value } => {
+            emit_op(state, make_op_name("Push", value));
+        },
+        Expr::BoolLit { value } => {
+            if value == 1 {
+                emit_op(state, make_op_num("PushNum", 1));
+            } else {
+                emit_op(state, make_op_name("Push", ""));
+            };
+        },
+        Expr::Ident { name } => {
+            if name == "true" {
+                emit_op(state, make_op_num("PushNum", 1));
+            } else {
+                if name == "false" {
+                    emit_op(state, make_op_name("Push", ""));
+                } else {
+                    if is_local(state, name) {
+                        emit_op(state, make_op_name("LoadLocal", name));
+                    } else {
+                        emit_op(state, make_op_name("Load", name));
+                    };
+                };
+            };
+        },
+        Expr::BinOp { op, lhs, rhs } => {
+            // Short-circuit for && and ||
+            if op == "&&" {
+                compile_expr(state, lhs);
+                let jz_pos = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_simple("Pop"));
+                compile_expr(state, rhs);
+                patch_jump(state, jz_pos, current_pos(state));
+            } else {
+                if op == "||" {
+                    compile_expr(state, lhs);
+                    let jz_pos = current_pos(state);
+                    emit_op(state, make_op_num("Jz", 0));
+                    let jmp_pos = current_pos(state);
+                    emit_op(state, make_op_num("Jmp", 0));
+                    patch_jump(state, jz_pos, current_pos(state));
+                    emit_op(state, make_op_simple("Pop"));
+                    compile_expr(state, rhs);
+                    patch_jump(state, jmp_pos, current_pos(state));
+                } else {
+                    compile_expr(state, lhs);
+                    compile_expr(state, rhs);
+                    if op == "+" { emit_op(state, make_op_name("Call", "__hyp_add")); };
+                    if op == "-" { emit_op(state, make_op_name("Call", "__hyp_sub")); };
+                    if op == "*" { emit_op(state, make_op_name("Call", "__hyp_mul")); };
+                    if op == "/" { emit_op(state, make_op_name("Call", "__hyp_div")); };
+                    if op == "%" { emit_op(state, make_op_name("Call", "__hyp_mod")); };
+                    if op == "==" { emit_op(state, make_op_name("Call", "__eq")); };
+                    if op == "!=" { emit_op(state, make_op_name("Call", "__cmp_ne")); };
+                    if op == "<" { emit_op(state, make_op_name("Call", "__cmp_lt")); };
+                    if op == ">" { emit_op(state, make_op_name("Call", "__cmp_gt")); };
+                    if op == "<=" { emit_op(state, make_op_name("Call", "__cmp_le")); };
+                    if op == ">=" { emit_op(state, make_op_name("Call", "__cmp_ge")); };
+                };
+            };
+        },
+        Expr::UnaryNot { expr } => {
+            compile_expr(state, expr);
+            emit_op(state, make_op_name("Call", "__logic_not"));
+        },
+        Expr::Call { callee, args } => {
+            // Check if it's a known builtin
+            let fname = "";
+            match callee {
+                Expr::Ident { name } => { let fname = name; },
+                _ => {},
+            };
+            // Compile args
+            let ai = 0;
+            while ai < len(args) {
+                compile_expr(state, args[ai]);
+                let ai = ai + 1;
+            };
+            // Dispatch: builtin, user-defined, or unknown
+            if fname == "len" {
+                emit_op(state, make_op_name("Call", "__array_len"));
+            } else {
+                if fname == "push" {
+                    emit_op(state, make_op_name("Call", "__array_push"));
+                } else {
+                    if fname == "pop" {
+                        emit_op(state, make_op_name("Call", "__array_pop"));
+                    } else {
+                        if fname == "char_at" {
+                            emit_op(state, make_op_name("Call", "__str_char_at"));
+                        } else {
+                            if fname == "substr" {
+                                emit_op(state, make_op_name("Call", "__str_substr"));
+                            } else {
+                                if fname == "to_num" {
+                                    emit_op(state, make_op_name("Call", "__to_number"));
+                                } else {
+                                    if fname == "set_at" {
+                                        emit_op(state, make_op_name("Call", "__array_set"));
+                                    } else {
+                                        // Check user-defined function
+                                        let fn_entry = lookup_fn(state, fname);
+                                        if fn_entry != false {
+                                            if state.use_call_closure == 1 {
+                                                emit_op(state, make_op("CallClosure", fname, len(args)));
+                                            } else {
+                                                emit_op(state, make_op_name("Call", fname));
+                                            };
+                                        } else {
+                                            // Unknown — emit Call for runtime
+                                            emit_op(state, make_op_name("Call", fname));
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        },
+        Expr::FieldAccess { object, field } => {
+            compile_expr(state, object);
+            emit_op(state, make_op_name("Push", field));
+            emit_op(state, make_op_name("Call", "__dict_get"));
+        },
+        Expr::Index { object, index } => {
+            compile_expr(state, object);
+            compile_expr(state, index);
+            emit_op(state, make_op_name("Call", "__array_get"));
+        },
+        Expr::ArrayLit { items } => {
+            let ai = 0;
+            while ai < len(items) {
+                compile_expr(state, items[ai]);
+                let ai = ai + 1;
+            };
+            emit_op(state, make_op_num("PushNum", len(items)));
+            emit_op(state, make_op_name("Call", "__array_new"));
+        },
+        Expr::PathExpr { base, member } => {
+            // Enum variant without fields (unit variant): Base::Member
+            let tag = base + "::" + member;
+            emit_op(state, make_op_name("Push", tag));
+            emit_op(state, make_op_name("Call", "__enum_unit"));
+        },
+        Expr::StructLit { path, fields } => {
+            // Struct or enum variant with fields
+            let fi = 0;
+            while fi < len(fields) {
+                let f = fields[fi];
+                emit_op(state, make_op_name("Push", f.name));
+                compile_expr(state, f.value);
+                let fi = fi + 1;
+            };
+            emit_op(state, make_op_num("PushNum", len(fields)));
+            emit_op(state, make_op_name("Call", "__dict_new"));
+            emit_op(state, make_op_name("Push", path));
+            emit_op(state, make_op_name("Call", "__struct_tag"));
+        },
+        Expr::IfExpr { cond, then_expr, else_expr } => {
+            compile_expr(state, cond);
+            let jz_pos = current_pos(state);
+            emit_op(state, make_op_num("Jz", 0));
+            emit_op(state, make_op_simple("Pop"));
+            compile_expr(state, then_expr);
+            let jmp_pos = current_pos(state);
+            emit_op(state, make_op_num("Jmp", 0));
+            patch_jump(state, jz_pos, current_pos(state));
+            emit_op(state, make_op_simple("Pop"));
+            compile_expr(state, else_expr);
+            patch_jump(state, jmp_pos, current_pos(state));
+        },
+        Expr::MolLiteral { s, r, v, a, t } => {
+            let op = Op { tag: "PushMol", name: "", value: s,
+                          value2: r, value3: v, value4: a, value5: t };
+            emit_op(state, op);
+        },
+        Expr::MatchExpr { subject, arms } => {
+            // Simplified match: store subject, test each arm
+            compile_expr(state, subject);
+            let subj_name = "__match_subj";
+            emit_op(state, make_op_name("Store", subj_name));
+            push_local(state, subj_name);
+            let end_jumps = [];
+            let ai = 0;
+            while ai < len(arms) {
+                let arm = arms[ai];
+                if arm.pattern != "_" {
+                    // Load subject, check type/tag
+                    emit_op(state, make_op_name("LoadLocal", subj_name));
+                    emit_op(state, make_op_name("Call", "__type_of"));
+                    emit_op(state, make_op_name("Push", arm.pattern));
+                    emit_op(state, make_op_name("Call", "__eq"));
+                    let jz_pos = current_pos(state);
+                    emit_op(state, make_op_num("Jz", 0));
+                    emit_op(state, make_op_simple("Pop"));
+                    // Extract bindings
+                    let bi = 0;
+                    while bi < len(arm.bindings) {
+                        emit_op(state, make_op_name("LoadLocal", subj_name));
+                        emit_op(state, make_op_name("Push", arm.bindings[bi]));
+                        emit_op(state, make_op_name("Call", "__dict_get"));
+                        emit_op(state, make_op_name("Store", arm.bindings[bi]));
+                        push_local(state, arm.bindings[bi]);
+                        let bi = bi + 1;
+                    };
+                    // Compile arm body
+                    let si = 0;
+                    while si < len(arm.body) {
+                        compile_stmt(state, arm.body[si]);
+                        let si = si + 1;
+                    };
+                    push(end_jumps, current_pos(state));
+                    emit_op(state, make_op_num("Jmp", 0));
+                    patch_jump(state, jz_pos, current_pos(state));
+                    emit_op(state, make_op_simple("Pop"));
+                } else {
+                    // Wildcard: always matches
+                    let si = 0;
+                    while si < len(arm.body) {
+                        compile_stmt(state, arm.body[si]);
+                        let si = si + 1;
+                    };
+                    push(end_jumps, current_pos(state));
+                    emit_op(state, make_op_num("Jmp", 0));
+                };
+                let ai = ai + 1;
+            };
+            // Patch all end jumps
+            let ei = 0;
+            while ei < len(end_jumps) {
+                patch_jump(state, end_jumps[ei], current_pos(state));
+                let ei = ei + 1;
+            };
+        },
+        _ => {
+            add_error(state, "Unknown expression type");
+        },
+    };
+}
+
+// ── Statement compilation ───────────────────────────────────────
+
+fn compile_stmt(state, stmt) {
+    match stmt {
+        Stmt::LetStmt { name, value } => {
+            compile_expr(state, value);
+            if is_local(state, name) {
+                emit_op(state, make_op_name("StoreUpdate", name));
+            } else {
+                emit_op(state, make_op_name("Store", name));
+                push_local(state, name);
+            };
+        },
+        Stmt::FnDef { name, params, body } => {
+            // In CallClosure mode, functions are pre-compiled
+            // Skip function body in main pass
+            if state.use_call_closure == 1 {
+                // Already pre-compiled, nothing to emit
+            } else {
+                // Inline mode: skip body with Jmp, emit body
+                let jmp_pos = current_pos(state);
+                emit_op(state, make_op_num("Jmp", 0));
+                let body_start = current_pos(state);
+                // Store params
+                let saved = save_locals(state);
+                let pi = len(params) - 1;
+                while pi >= 0 {
+                    emit_op(state, make_op_name("Store", params[pi]));
+                    push_local(state, params[pi]);
+                    let pi = pi - 1;
+                };
+                // Compile body
+                let bi = 0;
+                while bi < len(body) {
+                    compile_stmt(state, body[bi]);
+                    let bi = bi + 1;
+                };
+                emit_op(state, make_op_name("Push", ""));
+                emit_op(state, make_op_simple("Ret"));
+                restore_locals(state, saved);
+                patch_jump(state, jmp_pos, current_pos(state));
+                // Update fn entry with body_pc
+                let fi = 0;
+                while fi < len(state.fns) {
+                    if state.fns[fi].name == name {
+                        let entry = state.fns[fi];
+                        set_at(state.fns, fi, FnEntry {
+                            name: name, param_count: entry.param_count,
+                            body_pc: body_start, params: entry.params,
+                        });
+                    };
+                    let fi = fi + 1;
+                };
+            };
+        },
+        Stmt::ReturnStmt { value } => {
+            compile_expr(state, value);
+            emit_op(state, make_op_simple("Ret"));
+        },
+        Stmt::EmitStmt { expr } => {
+            compile_expr(state, expr);
+            emit_op(state, make_op_simple("Emit"));
+        },
+        Stmt::IfStmt { cond, then_block, else_block } => {
+            compile_expr(state, cond);
+            let jz_pos = current_pos(state);
+            emit_op(state, make_op_num("Jz", 0));
+            emit_op(state, make_op_simple("Pop"));
+            // Then block
+            let ti = 0;
+            while ti < len(then_block) {
+                compile_stmt(state, then_block[ti]);
+                let ti = ti + 1;
+            };
+            if len(else_block) > 0 {
+                let jmp_pos = current_pos(state);
+                emit_op(state, make_op_num("Jmp", 0));
+                patch_jump(state, jz_pos, current_pos(state));
+                emit_op(state, make_op_simple("Pop"));
+                let ei = 0;
+                while ei < len(else_block) {
+                    compile_stmt(state, else_block[ei]);
+                    let ei = ei + 1;
+                };
+                patch_jump(state, jmp_pos, current_pos(state));
+            } else {
+                patch_jump(state, jz_pos, current_pos(state));
+                emit_op(state, make_op_simple("Pop"));
+            };
+        },
+        Stmt::WhileStmt { cond, body } => {
+            emit_op(state, make_op_simple("ScopeBegin"));
+            let loop_start = current_pos(state);
+            compile_expr(state, cond);
+            let jz_pos = current_pos(state);
+            emit_op(state, make_op_num("Jz", 0));
+            emit_op(state, make_op_simple("Pop"));
+            let bi = 0;
+            while bi < len(body) {
+                compile_stmt(state, body[bi]);
+                let bi = bi + 1;
+            };
+            emit_op(state, make_op_simple("ScopeEnd"));
+            emit_op(state, make_op_num("Jmp", loop_start));
+            patch_jump(state, jz_pos, current_pos(state));
+            emit_op(state, make_op_simple("Pop"));
+        },
+        Stmt::BreakStmt => {
+            // Simplified: emit Jmp(0) — would need break_jumps tracking
+            // For bootstrap, break inside while is uncommon
+            emit_op(state, make_op_num("Jmp", 0));
+        },
+        Stmt::ContinueStmt => {
+            // Simplified: emit Jmp(0)
+            emit_op(state, make_op_num("Jmp", 0));
+        },
+        Stmt::TypeDef { name, fields } => {
+            // Type metadata — no opcodes needed for bootstrap
+        },
+        Stmt::UnionDef { name, variants } => {
+            // Union metadata — no opcodes needed for bootstrap
+        },
+        Stmt::UseStmt { path } => {
+            // Module import — no opcodes needed for bootstrap
+        },
+        Stmt::FieldAssign { object, field, value } => {
+            // obj.field = value → load obj, set field, store back
+            if is_local(state, object) {
+                emit_op(state, make_op_name("LoadLocal", object));
+            } else {
+                emit_op(state, make_op_name("Load", object));
+            };
+            emit_op(state, make_op_name("Push", field));
+            compile_expr(state, value);
+            emit_op(state, make_op_name("Call", "__dict_set"));
+            emit_op(state, make_op_name("StoreUpdate", object));
+        },
+        Stmt::MatchStmt { subject, arms } => {
+            // Match as statement: compile subject match expression, discard result
+            compile_expr(state, subject);
+            emit_op(state, make_op_simple("Pop"));
+        },
+        Stmt::ExprStmt { expr } => {
+            compile_expr(state, expr);
+            emit_op(state, make_op_simple("Pop"));
+        },
+        _ => {
+            add_error(state, "Unknown statement type");
+        },
+    };
+}
+
+// ── Validation ──────────────────────────────────────────────────
+
+fn validate(state) {
+    // Basic validation — more can be added later
+    // For bootstrap, we mainly need the compilation to succeed
+}
+
+// ── Entry point ─────────────────────────────────────────────────
+
+pub fn analyze(ast) {
+    let state = new_state();
+
+    // Pass 1: Collect function definitions
+    collect_fns(state, ast);
+
+    // Decide compilation strategy
+    if len(state.fns) > 10 {
+        state.use_call_closure = 1;
+        // Pass 1.5: Pre-compile function bodies
+        // Emit Jmp to skip all function bodies
+        let skip_pos = current_pos(state);
+        emit_op(state, make_op_num("Jmp", 0));
+        precompile_fns(state, ast);
+        patch_jump(state, skip_pos, current_pos(state));
+    };
+
+    // Pass 2: Compile all statements
+    let i = 0;
+    while i < len(ast) {
+        compile_stmt(state, ast[i]);
+        let i = i + 1;
+    };
+
+    // End program
+    emit_op(state, make_op_simple("Halt"));
+
+    // Validate
+    validate(state);
+
+    return state;
+}

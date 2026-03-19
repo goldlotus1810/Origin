@@ -64,7 +64,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 0.1 | Test lexer.ol trên Rust VM | `PLAN_0_1` | B1,B2,B3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | tokenize("let x = 42;")→6 tokens, tokenize("fn f(x){...}")→13 tokens. 2442 tests pass. |
 | 0.2 | Test parser.ol + module import | `PLAN_0_2` | 0.1 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | parse(tokenize("let x=42;"))→1 LetStmt, parse(tokenize("fn f(x){return x+1;}"))→1 FnDef, parse(tokenize("if x>0{emit x;}"))→1 IfStmt. Key fix: CallClosure LoadLocal for non-local vars. 2451 tests pass. |
 | 0.3 | Round-trip self-parse | `PLAN_0_3` | 0.2 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: 3 roundtrip tests pass |
-| 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | CLAIMED | `claude/review-and-fix-project-erPD8` | erPD8 | Bắt đầu 2026-03-19 |
+| 0.4 | Viết semantic.ol (~800 LOC) | `PLAN_0_4` | 0.3 | DONE | `claude/review-and-fix-project-erPD8` | erPD8 | Done 2026-03-19: semantic.ol 672 LOC, 4 DoD tests pass. analyze(parse(tokenize("let x=42;")))→PushNum+Store+Halt. analyze(parse(tokenize(lexer_src)))→323 ops, 0 errors. |
 | 0.5 | Viết codegen.ol (~400 LOC) | `PLAN_0_5` | 0.4 | FREE | — | — | — |
 | 0.6 | Self-compile test | `PLAN_0_6` | 0.5 | FREE | — | — | — |
 
@@ -148,4 +148,14 @@ Khi Session A xong 0.3:
             CallClosure arg order fix, max_call_depth 512 for deep nesting.
             3 DoD tests pass: LetStmt, FnDef, IfStmt.
             2451 workspace tests pass, 0 clippy errors.
+2026-03-19  0.4 DONE (session erPD8): semantic.ol 672 LOC chạy trên Rust VM.
+            Viết semantic analyzer: Op type, SemanticState, scope tracking,
+            Pass 1 (collect_fns), Pass 1.5 (precompile_fns/CallClosure),
+            Pass 2 (compile_expr/compile_stmt), analyze() entry point.
+            Handles: all Expr/Stmt variants, builtins (len/push/pop/char_at/
+            substr/to_num/set_at), binary/comparison/logic ops, short-circuit
+            &&/||, match expr/stmt, struct/enum literals, field access/assign.
+            4 DoD tests: let_stmt, fn_def, undeclared_var, compile_lexer.
+            analyze(parse(tokenize(lexer_src))) → 323 ops, 0 errors.
+            All workspace tests pass, 0 clippy errors.
 ```
