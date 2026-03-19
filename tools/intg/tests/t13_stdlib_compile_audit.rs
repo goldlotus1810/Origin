@@ -52,10 +52,11 @@ const KNOWN_PARSE_FAILURES: &[&str] = &[
     "asm_emit.ol",
     "asm_emit_arm64.ol",
     "elf_emit.ol",
+    "fat_header.ol",
+    "fat_loader.ol",
     "reproduce.ol",
     "wasm_emit.ol",
     // Hex escape in strings (\x01) — parser doesn't handle escape sequences
-    "builder.ol",
     "fat_header.ol",
     "fat_loader.ol",
     // == in match expressions or comparisons — parser sees Eq token unexpectedly
@@ -77,10 +78,6 @@ const KNOWN_PARSE_FAILURES: &[&str] = &[
     "isl_ws.ol",
     "isl_ble.ol",
     "isl_discovery.ol",
-    // Fat binary (hex literals in magic bytes)
-    "builder.ol",
-    "fat_header.ol",
-    "fat_loader.ol",
 ];
 
 // ═══════════════════════════════════════════════════════════════════

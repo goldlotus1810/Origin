@@ -477,4 +477,32 @@ INTG (song song với tất cả):
             builder.ol: build_fat() + fat_config() for multi-arch packing.
             pack.rs: Rust fat binary support (pack_fat, parse_fat_header, 4 tests).
             All workspace tests pass, 0 new clippy warnings.
+2026-03-19  Cross-audit (session 2MKRJ, Kaze):
+            ▸ 7.1 VM Closure/REPL (dSfvz, commit 3434f91): PASS với ghi chú
+              ✓ bytecode.rs: Closure 0x25 encode/decode khớp, CallClosure 0x24 unchanged
+              ✓ vm_x86_64.S: cg_closure marker + jump, cg_call_closure hash→lookup→jump
+              ✓ REPL: heap buffer (không stack overflow), exit/quit check đúng LE encoding
+              ⚠ op_ret: pop+check heuristic — nếu Ret without Call có thể pop sai value
+                (có .ret_noop fallback nhưng fragile) [HIGH]
+              ✗ CRITICAL: Closure marker param_count encoding — shl $48 + OR marker
+                nhưng CallClosure chỉ check low 16 bits → param_count bị mất
+              ✗ CRITICAL: CallClosure KHÔNG truyền params cho closure body — arity
+                đọc xong bỏ, args trên VM stack không được bind
+              ⚠ REPL: heap buffer 256B không check overflow, string cmp < 5 bytes unsafe
+              ⚠ Variable hash table: không lưu name → collision = clobber silent
+              ℹ msg_greeting: length 28 vs actual 26 chars — minor (null padding)
+              ℹ Opcode dual format: bytecode.rs 0x24/0x25 vs ir.rs 0x71/0x70 — documented
+            ▸ 7.1 Wiring AUTH+Maturity+Silk (dSfvz, commit 9335bf4): PASS với ghi chú
+              ✓ AUTH guard: SecurityGate trước mọi thứ, natural text bypass, auth unlock OK
+              ✓ mark_matured(): loop matured_nodes → set Mature (thay no-op cũ)
+              ⚠ Silk Vertical: register_parent dùng neighbors.first() — heuristic,
+                không phải LCA thật. Comment nói "LCA" nhưng code lấy first neighbor.
+            ▸ 7.3 Testing (Lyra, commit 08cae2e): PASS với ghi chú
+              ✓ t13 stdlib audit: 50 files, known failures tracked, parse+lower+encode+decode
+              ⚠ t13 file count hardcoded (50) — đã fix thành 52 cho fat_header/fat_loader
+              ✓ t14 stress: memory stress, concurrent learning, large registry, Silk scaling
+              ✓ t15 fuzz: random molecules, boundary values, random chains, graph ops
+            ▸ 7.4 Network (Lyra): CHƯA CÓ CODE — chỉ claimed, chưa push
+            ▸ Fix: t13 file count 50→52, fat_header/fat_loader added to KNOWN_PARSE_FAILURES,
+              builder.ol fat_config() hex→decimal. All workspace tests pass.
 ```

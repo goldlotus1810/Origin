@@ -196,8 +196,8 @@ pub fn wasi_config() {
 pub fn fat_config() {
   return {
     archs: [
-      { name: "x86_64", vm_path: "vm/x86_64/vm_x86_64.bin", arch_id: 0x01, entry_off: 0 },
-      { name: "arm64",  vm_path: "vm/arm64/vm_arm64.bin",    arch_id: 0x02, entry_off: 0 }
+      { name: "x86_64", vm_path: "vm/x86_64/vm_x86_64.bin", arch_id: 1, entry_off: 0 },
+      { name: "arm64",  vm_path: "vm/arm64/vm_arm64.bin",    arch_id: 2, entry_off: 0 }
     ],
     stdlib_path: "stdlib",
     kn_path: "origin.olang",
