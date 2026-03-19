@@ -103,33 +103,53 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 3.3 | builder.ol — thay Rust builder | `PLAN_3_3` | 3.1,3.2 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: 134 LOC. compile_all + pack + ELF wrap. |
 | 3.4 | Self-build test: v2 == v3 | `PLAN_3_3` | 3.3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: VM builtins __parse/__lower/__encode_bytecode added + integration test passes. Full v2==v3 fixed-point needs runtime wiring. |
 
+## Phase 4 — Multi-architecture
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | FREE | | | asm_emit_arm64.ol + fix ARM64 op_call + ELF ARM64 |
+| 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
+| 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | FREE | | | Bytecode embed + browser host + WASI |
+
+## Phase 5 — Optimization
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| 5.1 | JIT compilation | `PLAN_5_1` | Phase 4 | FREE | | | Hot loop → native code, profile + trace + compile |
+| 5.2 | Inline caching | `PLAN_5_2` | Phase 3 | FREE | | | Var IC + registry LRU + silk cache |
+| 5.3 | Memory optimization | `PLAN_5_3` | Phase 3 | FREE | | | Arena allocator + zero-copy + molecule pool |
+| 5.4 | Benchmark suite | `PLAN_5_4` | 5.1/5.2/5.3 | FREE | | | Micro + macro + memory benchmarks |
+
+## Phase 6 — Living system
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| 6.1 | Self-update | `PLAN_6_1` | Phase 4 | FREE | | | o install/update/learn, module versioning |
+| 6.2 | Self-optimize | `PLAN_6_2` | 5.1, 6.1 | FREE | | | LeoAI profiler → auto-optimize → AAM approve |
+| 6.3 | Reproduce | `PLAN_6_3` | 4.1, 6.1 | FREE | | | Worker clones cho IoT devices |
+
 ---
 
 ## Dependency Graph (visual)
 
 ```
-B1+B2+B3 (blockers) — DONE
-    ↓
-  0.1 → 0.2 → 0.3 → 0.4 → 0.5 → 0.6 — ALL DONE
-                                ↓
-  0.1 → 0.2 → 0.3 → 0.4 → 0.5 → 0.6 — ALL DONE
-                                ↓
-                    1.1 → 1.4  — DONE (Lyra)
-                     ↓
-                    1.2        — DONE (erPDB)
-                     ↓
-                    1.3        — DONE (Lyra)
+Phase 0-3: ALL DONE ✅
+  0.1 → ... → 0.6 → 1.1 → 1.4 → 3.1 → 3.2 → 3.3 → 3.4 ✅
+  AUTH ✅  |  1.2 ✅  |  1.3 ✅  |  2.1-2.4 ✅
 
-  AUTH — DONE
+Phase 4 (TIẾP THEO):
+  4.1 (cross ARM64) ──→ 4.2 (fat binary, optional)
+  4.3 (WASM universal) ← song song với 4.1
 
-  Phase 2 (song song):
-    2.1a (result+iter+sort) ──┐
-    2.1b (format+json)        ├→ 2.1c (hash+mol+chain) → 2.2 (emotion) ──┐
-                              │                         → 2.3 (knowledge) ├→ 2.4 (agents)
-                              └─────────────────────────────────────────────┘
+Phase 5:
+  5.1 (JIT) ───┐
+  5.2 (cache)  ├→ 5.4 (benchmark)
+  5.3 (memory) ┘
+  5.1, 5.2, 5.3 song song được
 
-  Phase 3 (sau Phase 2):
-    3.1 (asm_emit) → 3.2 (elf_emit) → 3.3 (builder.ol) → 3.4 (self-build test)
+Phase 6:
+  6.1 (self-update) → 6.2 (self-optimize)
+                    → 6.3 (reproduce)
 ```
 
 ---
@@ -137,13 +157,18 @@ B1+B2+B3 (blockers) — DONE
 ## Gợi ý phân việc cho 2-3 sessions
 
 ```
-Phase 2 (HIỆN TẠI):
-  Session A (Lyra):  2.1a (result+iter+sort) → 2.1c (hash+mol+chain) → 2.3 (knowledge)
-  Session B (erPDB): 2.1b (format+json) → 2.2 (emotion) → 2.4 (agents)
+Phase 4:
+  Session A: 4.1 (cross-compile ARM64)
+  Session B: 4.3 (WASM universal)
+  Sau đó: 4.2 (fat binary, optional)
 
-Phase 3 (sau Phase 2):
-  Session A: 3.1 (asm_emit) → 3.2 (elf_emit)
-  Session B: 3.3 (builder.ol) → 3.4 (self-build test)
+Phase 5:
+  Session A: 5.1 (JIT) → 5.4 (benchmark)
+  Session B: 5.2 (inline cache) + 5.3 (memory)
+
+Phase 6:
+  Session A: 6.1 (self-update) → 6.2 (self-optimize)
+  Session B: 6.3 (reproduce)
 ```
 
 ---
@@ -219,4 +244,13 @@ Phase 3 (sau Phase 2):
             Còn lại: DoD 5 var_store bug ở codegen mode.
 2026-03-19  1.2 → CLAIMED by erPD8. vm_arm64.S bắt đầu.
             1.4 → CLAIMED by Lyra (Builder tool).
+2026-03-19  Phase 0-3 ALL DONE. VM var store/load bugs fixed (x86+ARM64).
+            Created LYRA.md (project memory for all sessions).
+            Created detailed plans for Phase 4-6:
+              PLAN_4_1 (cross-compile ARM64), PLAN_4_2 (fat binary),
+              PLAN_4_3 (WASM universal), PLAN_5_1 (JIT), PLAN_5_2 (inline cache),
+              PLAN_5_3 (memory), PLAN_5_4 (benchmark), PLAN_6_1 (self-update),
+              PLAN_6_2 (self-optimize), PLAN_6_3 (reproduce).
+            Updated TASKBOARD + plans/README with Phase 4-6 tasks.
+            2491 workspace tests pass, 0 clippy errors.
 ```
