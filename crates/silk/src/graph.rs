@@ -118,6 +118,9 @@ pub struct SilkNeighbor {
 pub struct SilkGraph {
     /// Structural + legacy associative edges (backward compat)
     edges: Vec<SilkEdge>,
+    /// Edge lookup index: (from, to, kind_byte) → index in edges Vec.
+    /// Turns O(n) find_edge_idx into O(log n).
+    edge_index: alloc::collections::BTreeMap<(u64, u64, u8), usize>,
     /// Implicit 5D index — 37 buckets, 0-cost connections
     index: SilkIndex,
     /// Slim Hebbian links — learned co-activations (sorted by key)
@@ -132,6 +135,7 @@ impl SilkGraph {
     pub fn new() -> Self {
         Self {
             edges: Vec::new(),
+            edge_index: alloc::collections::BTreeMap::new(),
             index: SilkIndex::new(),
             learned: Vec::new(),
             parent_map: alloc::collections::BTreeMap::new(),
@@ -676,6 +680,7 @@ impl SilkGraph {
                             true // giữ
                         }
                     });
+                    self.rebuild_edge_index();
                 }
             }
         }
@@ -851,15 +856,24 @@ impl SilkGraph {
 
     // ── Internal ─────────────────────────────────────────────────────────────
 
+    /// Rebuild edge_index from edges Vec (after retain/remove operations).
+    fn rebuild_edge_index(&mut self) {
+        self.edge_index.clear();
+        for (i, e) in self.edges.iter().enumerate() {
+            self.edge_index.insert(e.key(), i);
+        }
+    }
+
     fn find_edge_idx(&self, from: u64, to: u64, kind: EdgeKind) -> Option<usize> {
         let key = (from, to, kind.as_byte());
-        self.edges.iter().position(|e| e.key() == key)
+        self.edge_index.get(&key).copied()
     }
 
     fn insert_sorted(&mut self, edge: SilkEdge) {
         let key = edge.key();
-        let pos = self.edges.partition_point(|e| e.key() < key);
-        self.edges.insert(pos, edge);
+        let idx = self.edges.len();
+        self.edges.push(edge);
+        self.edge_index.insert(key, idx);
     }
 }
 
