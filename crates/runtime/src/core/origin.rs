@@ -514,6 +514,24 @@ impl HomeRuntime {
     ///
     /// Parse ○{} trước, nếu natural text → delegate to process_input (universal pipeline).
     pub fn process_text(&mut self, text: &str, ts: i64) -> Response {
+        // ── AUTH guard: ○{} commands require unlocked state ──────────────────
+        // Natural text is always allowed (emotion pipeline, learning).
+        // Olang commands (○{...}) require auth if system has been set up.
+        if !self.auth_header.is_virgin() && !self.is_unlocked() {
+            // Allow auth commands even when locked
+            let trimmed = text.trim();
+            if trimmed.starts_with("○{auth ") || trimmed.starts_with("o{auth ") {
+                // fall through to parser
+            } else if trimmed.contains("○{") || trimmed.contains("o{") {
+                return Response {
+                    text: String::from("Auth ○ Hệ thống đang khóa. Dùng ○{auth unlock <user> <pass>} để mở."),
+                    tone: ResponseTone::Engaged,
+                    fx: 0.0,
+                    kind: ResponseKind::Blocked,
+                };
+            }
+        }
+
         // ── Parse: natural hoặc ○{} ──────────────────────────────────────────
         match self.parser.parse(text) {
             ParseResult::Natural(s) => {
@@ -5415,9 +5433,10 @@ impl HomeRuntime {
             .dream
             .run(self.learning.stm(), self.learning.graph(), ts);
 
-        // Acknowledge matured nodes — không bỏ qua silently
-        if !result.matured_nodes.is_empty() {
-            let _ = &result.matured_nodes;
+        // Wire matured nodes: update STM observations to Mature state
+        // and register parent pointers in SilkGraph for promoted nodes.
+        for &matured_hash in &result.matured_nodes {
+            self.learning.stm_mut().mark_matured(matured_hash);
         }
 
         let mut approved_this_cycle: u64 = 0;
@@ -5504,6 +5523,12 @@ impl HomeRuntime {
                                 self.knowtree
                                     .promote_from_stm(&obs_chain, None, obs_fc, ts);
                                 self.slim_knowtree.promote_from_stm(&obs_chain, ts);
+                                // Silk Vertical: register parent pointer for promoted node.
+                                // Parent = LCA of source chains (if any co-activated neighbors exist).
+                                let neighbors = self.learning.graph().neighbors(*chain_hash);
+                                if let Some(&parent_hash) = neighbors.first() {
+                                    self.learning.graph_mut().register_parent(*chain_hash, parent_hash);
+                                }
                                 // Track for STM cleanup
                                 promoted_hashes.push(*chain_hash);
                             }
