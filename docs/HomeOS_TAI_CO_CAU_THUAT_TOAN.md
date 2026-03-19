@@ -893,7 +893,7 @@ THUẬT TOÁN (trong 5D):
 ---
 ## 17. ISDF RENDERER — Isometric SDF Universe
 
-### Thiết kế (từ homeos_sdf_universe.html)
+### Thiết kế 
 
 ```
 ISDF = Isometric projection + SDF evaluation + Silk signal overlay
