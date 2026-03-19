@@ -19,6 +19,29 @@ pub struct PackConfig<'a> {
     pub knowledge: &'a [u8],
     pub codegen_format: bool,
     pub is_linked_elf: bool,
+    pub arch: Arch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arch {
+    X86_64,
+    Arm64,
+}
+
+impl Arch {
+    pub fn byte(self) -> u8 {
+        match self {
+            Arch::X86_64 => 0x01,
+            Arch::Arm64 => 0x02,
+        }
+    }
+
+    pub fn e_machine(self) -> u16 {
+        match self {
+            Arch::X86_64 => 0x3E,
+            Arch::Arm64 => 0xB7,
+        }
+    }
 }
 
 pub fn pack(config: &PackConfig) -> Vec<u8> {
@@ -46,11 +69,12 @@ fn pack_wrap(config: &PackConfig) -> Vec<u8> {
     let kn_size = config.knowledge.len() as u32;
     let flags: u16 = if config.codegen_format { 1 } else { 0 };
 
-    let origin_header = build_origin_header(
+    let origin_header = build_origin_header_arch(
         0, 0, // vm fields unused in wrap mode
         bc_offset, bc_size,
         kn_offset, kn_size,
         flags,
+        config.arch.byte(),
     );
     output.extend_from_slice(&origin_header);
     output.extend_from_slice(config.bytecode);
@@ -87,11 +111,12 @@ fn pack_elf(config: &PackConfig) -> Vec<u8> {
 
     // Origin header at offset 120
     let flags: u16 = if config.codegen_format { 1 } else { 0 };
-    let origin_header = build_origin_header(
+    let origin_header = build_origin_header_arch(
         vm_offset, vm_size,
         bc_offset, bc_size,
         kn_offset, kn_size,
         flags,
+        config.arch.byte(),
     );
     output[TOTAL_HEADER_SIZE..combined_header].copy_from_slice(&origin_header);
 
@@ -99,22 +124,24 @@ fn pack_elf(config: &PackConfig) -> Vec<u8> {
     let elf_header = elf::generate_elf64(&elf::ElfConfig {
         entry_vaddr: LOAD_ADDR + vm_offset as u64,
         file_size: output.len() as u64,
+        e_machine: config.arch.e_machine(),
     });
     output[..TOTAL_HEADER_SIZE].copy_from_slice(&elf_header);
 
     output
 }
 
-fn build_origin_header(
+fn build_origin_header_arch(
     vm_offset: u32, vm_size: u32,
     bc_offset: u32, bc_size: u32,
     kn_offset: u32, kn_size: u32,
     flags: u16,
+    arch_byte: u8,
 ) -> [u8; ORIGIN_HEADER_SIZE] {
     let mut h = [0u8; ORIGIN_HEADER_SIZE];
     h[0..4].copy_from_slice(&ORIGIN_MAGIC);
     h[4] = 0x10; // version: self-exec
-    h[5] = 0x01; // arch: x86_64
+    h[5] = arch_byte; // arch: 0x01=x86_64, 0x02=arm64
     h[6..10].copy_from_slice(&vm_offset.to_le_bytes());
     h[10..14].copy_from_slice(&vm_size.to_le_bytes());
     h[14..18].copy_from_slice(&bc_offset.to_le_bytes());
@@ -137,6 +164,7 @@ mod tests {
         let binary = pack(&PackConfig {
             vm_code, bytecode, knowledge: b"",
             codegen_format: false, is_linked_elf: false,
+            arch: Arch::X86_64,
         });
 
         // ELF magic
@@ -153,6 +181,7 @@ mod tests {
         let binary = pack(&PackConfig {
             vm_code: fake_elf, bytecode, knowledge: b"",
             codegen_format: false, is_linked_elf: true,
+            arch: Arch::X86_64,
         });
 
         // Starts with the original ELF
@@ -167,6 +196,7 @@ mod tests {
         let binary = pack(&PackConfig {
             vm_code: b"vm", bytecode: b"bc", knowledge: b"",
             codegen_format: true, is_linked_elf: false,
+            arch: Arch::X86_64,
         });
         // flags at origin header offset 120+30 = 150
         let flags = u16::from_le_bytes(binary[150..152].try_into().unwrap());

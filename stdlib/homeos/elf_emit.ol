@@ -1,11 +1,24 @@
 // homeos/elf_emit.ol — Generate ELF64 executable binary
 // Minimal: ELF header (64B) + program header (56B) = 120B
+// Supports: x86_64 (e_machine=0x3E) and ARM64 (e_machine=0xB7)
 
 let LOAD_ADDR = 0x400000;
 
+// Architecture constants
+let ARCH_X86_64 = "x86_64";
+let ARCH_ARM64  = "arm64";
+
 pub fn make_elf(code_bytes, entry_offset) {
+  return make_elf_arch(code_bytes, entry_offset, ARCH_X86_64);
+}
+
+pub fn make_elf_arch(code_bytes, entry_offset, arch) {
   let buf = [];
   let total_size = 120 + len(code_bytes);
+
+  // e_machine value
+  let e_machine = 0x3E;  // x86_64
+  if arch == ARCH_ARM64 { e_machine = 0xB7; }  // EM_AARCH64
 
   // ── ELF Header (64 bytes) ──
   // e_ident: magic
@@ -14,8 +27,8 @@ pub fn make_elf(code_bytes, entry_offset) {
   push_bytes(buf, [2, 1, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0]);
   // e_type = ET_EXEC
   push_u16(buf, 2);
-  // e_machine = x86_64
-  push_u16(buf, 0x3E);
+  // e_machine
+  push_u16(buf, e_machine);
   // e_version
   push_u32(buf, 1);
   // e_entry
@@ -68,13 +81,19 @@ pub fn make_elf(code_bytes, entry_offset) {
 // ── Origin header (32 bytes) ──
 
 pub fn make_origin_header(vm_off, vm_sz, bc_off, bc_sz, kn_off, kn_sz, flags) {
+  return make_origin_header_arch(vm_off, vm_sz, bc_off, bc_sz, kn_off, kn_sz, flags, ARCH_X86_64);
+}
+
+pub fn make_origin_header_arch(vm_off, vm_sz, bc_off, bc_sz, kn_off, kn_sz, flags, arch) {
   let buf = [];
   // Magic: ○LNG
   push_bytes(buf, [0xE2, 0x97, 0x8B, 0x4C]);
   // Version
   push(buf, 0x10);
-  // Arch: x86_64
-  push(buf, 0x01);
+  // Arch: 0x01=x86_64, 0x02=arm64
+  let arch_byte = 0x01;
+  if arch == ARCH_ARM64 { arch_byte = 0x02; }
+  push(buf, arch_byte);
   push_u32(buf, vm_off);
   push_u32(buf, vm_sz);
   push_u32(buf, bc_off);

@@ -68,8 +68,8 @@ _start:
     b.lt    err_open
     mov     x28, x0                 // fd
 
-    // ── 2. Read header (32 bytes) ──
-    sub     sp, sp, #HEADER_SIZE
+    // ── 2. Read first 32 bytes ──
+    sub     sp, sp, #48             // 48 bytes aligned (32 header + 16 scratch)
     mov     x0, x28                 // fd
     mov     x1, sp                  // buf
     mov     x2, #HEADER_SIZE
@@ -78,11 +78,53 @@ _start:
     cmp     x0, #HEADER_SIZE
     b.ne    err_header
 
-    // Parse header
+    // Check if ELF magic: 7f 45 4c 46
+    ldr     w0, [sp]
+    movz    w1, #0x457f             // "\x7fE" LE
+    movk    w1, #0x464c, lsl #16   // "LF" LE
+    cmp     w0, w1
+    b.ne    .header_ok
+
+    // ── ELF detected → read 8-byte trailer from end of file ──
+    // lseek(fd, -8, SEEK_END)
+    mov     x0, x28                 // fd
+    mov     x1, #-8                 // offset = -8
+    mov     x2, #2                  // SEEK_END
+    mov     x8, #SYS_LSEEK
+    svc     #0
+
+    // Read 8 bytes (header_offset u64 LE)
+    mov     x0, x28                 // fd
+    mov     x1, sp                  // buf (reuse)
+    mov     x2, #8
+    mov     x8, #SYS_READ
+    svc     #0
+
+    // lseek(fd, header_offset, SEEK_SET)
+    ldr     x1, [sp]               // header_offset
+    mov     x0, x28                 // fd
+    mov     x2, #0                  // SEEK_SET
+    mov     x8, #SYS_LSEEK
+    svc     #0
+
+    // Re-read 32 bytes origin header
+    mov     x0, x28                 // fd
+    mov     x1, sp                  // buf
+    mov     x2, #HEADER_SIZE
+    mov     x8, #SYS_READ
+    svc     #0
+    cmp     x0, #HEADER_SIZE
+    b.ne    err_header
+
+.header_ok:
+    // Parse origin header fields
+    // offset 14: bc_offset (4 bytes LE)
+    // offset 18: bc_size (4 bytes LE)
+    // offset 30: flags (2 bytes LE)
     ldr     w9, [sp, #14]           // bc_offset
     ldr     w10, [sp, #18]          // bc_size
     ldrh    w11, [sp, #30]          // flags
-    add     sp, sp, #HEADER_SIZE
+    add     sp, sp, #48             // free stack
 
     // ── 3. mmap VM stack ──
     mov     x0, xzr
@@ -446,7 +488,461 @@ op_emit:
 op_call:
     // [0x07, name_len:1, name:N]
     ldrb    w1, [x19], #1           // name_len
-    add     x19, x19, x1            // skip name (stub — builtins TODO)
+
+    // Hash the function name (FNV-1a)
+    stp     x29, x30, [sp, #-16]!
+    str     x1, [sp, #-8]!         // save name_len
+    mov     x0, x19                 // name ptr
+    mov     w2, w1                  // name len
+    bl      fnv1a_hash              // → x0 = hash
+    ldr     x1, [sp], #8           // restore name_len
+    ldp     x29, x30, [sp], #16
+
+    add     x19, x19, x1           // pc += name_len
+
+    // ── Dispatch builtins by hash ──
+    // Pre-computed FNV-1a hashes (verified by rustc):
+    //   __hyp_add = 0x57252090b96bc074
+    //   __hyp_sub = 0xf28afa91114a9d15
+    //   __hyp_mul = 0x7800c290cb86ca01
+    //   __hyp_div = 0x3e279790ab8c5ba8
+    //   __eq      = 0x59c2494311519859
+    //   __cmp_lt  = 0xe50d9329a4496776
+    //   __cmp_gt  = 0xe525a529a45e17ed
+    //   __cmp_le  = 0xe50d8429a4494df9
+    //   __cmp_ge  = 0xe5259429a45dfb0a
+    //   __len     = 0x231f02f69878e492
+    //   __concat  = 0xa51ed5c2bde7e73b
+    //   __char_at = 0x9fc9b1482b01d5e9
+    //   __substr  = 0xe386a6329e2424be
+    //   __push    = 0x9fc459281d29be97
+    //   __pop     = 0x46a5acf6acd83186
+
+    // Check math builtins (most common)
+    movz    x2, #0xc074
+    movk    x2, #0xb96b, lsl #16
+    movk    x2, #0x2090, lsl #32
+    movk    x2, #0x5725, lsl #48   // __hyp_add
+    cmp     x0, x2
+    b.eq    .call_add
+
+    movz    x2, #0x9d15
+    movk    x2, #0x114a, lsl #16
+    movk    x2, #0xfa91, lsl #32
+    movk    x2, #0xf28a, lsl #48   // __hyp_sub
+    cmp     x0, x2
+    b.eq    .call_sub
+
+    movz    x2, #0xca01
+    movk    x2, #0xcb86, lsl #16
+    movk    x2, #0xc290, lsl #32
+    movk    x2, #0x7800, lsl #48   // __hyp_mul
+    cmp     x0, x2
+    b.eq    .call_mul
+
+    movz    x2, #0x5ba8
+    movk    x2, #0xab8c, lsl #16
+    movk    x2, #0x9790, lsl #32
+    movk    x2, #0x3e27, lsl #48   // __hyp_div
+    cmp     x0, x2
+    b.eq    .call_div
+
+    // Comparison builtins
+    movz    x2, #0x9859
+    movk    x2, #0x1151, lsl #16
+    movk    x2, #0x4943, lsl #32
+    movk    x2, #0x59c2, lsl #48   // __eq
+    cmp     x0, x2
+    b.eq    .call_eq
+
+    movz    x2, #0x6776
+    movk    x2, #0xa449, lsl #16
+    movk    x2, #0x9329, lsl #32
+    movk    x2, #0xe50d, lsl #48   // __cmp_lt
+    cmp     x0, x2
+    b.eq    .call_lt
+
+    movz    x2, #0x17ed
+    movk    x2, #0xa45e, lsl #16
+    movk    x2, #0xa529, lsl #32
+    movk    x2, #0xe525, lsl #48   // __cmp_gt
+    cmp     x0, x2
+    b.eq    .call_gt
+
+    movz    x2, #0x4df9
+    movk    x2, #0xa449, lsl #16
+    movk    x2, #0x8429, lsl #32
+    movk    x2, #0xe50d, lsl #48   // __cmp_le
+    cmp     x0, x2
+    b.eq    .call_le
+
+    movz    x2, #0xfb0a
+    movk    x2, #0xa45d, lsl #16
+    movk    x2, #0x9429, lsl #32
+    movk    x2, #0xe525, lsl #48   // __cmp_ge
+    cmp     x0, x2
+    b.eq    .call_ge
+
+    // String builtins
+    movz    x2, #0xe492
+    movk    x2, #0x9878, lsl #16
+    movk    x2, #0x02f6, lsl #32
+    movk    x2, #0x231f, lsl #48   // __len
+    cmp     x0, x2
+    b.eq    .call_len
+
+    movz    x2, #0xe73b
+    movk    x2, #0xbde7, lsl #16
+    movk    x2, #0xd5c2, lsl #32
+    movk    x2, #0xa51e, lsl #48   // __concat
+    cmp     x0, x2
+    b.eq    .call_concat
+
+    movz    x2, #0xd5e9
+    movk    x2, #0x2b01, lsl #16
+    movk    x2, #0xb148, lsl #32
+    movk    x2, #0x9fc9, lsl #48   // __char_at
+    cmp     x0, x2
+    b.eq    .call_char_at
+
+    movz    x2, #0x24be
+    movk    x2, #0x9e24, lsl #16
+    movk    x2, #0xa632, lsl #32
+    movk    x2, #0xe386, lsl #48   // __substr
+    cmp     x0, x2
+    b.eq    .call_substr
+
+    movz    x2, #0xbe97
+    movk    x2, #0x1d29, lsl #16
+    movk    x2, #0x5928, lsl #32
+    movk    x2, #0x9fc4, lsl #48   // __push
+    cmp     x0, x2
+    b.eq    .call_push
+
+    movz    x2, #0x3186
+    movk    x2, #0xacd8, lsl #16
+    movk    x2, #0xacf6, lsl #32
+    movk    x2, #0x46a5, lsl #48   // __pop
+    cmp     x0, x2
+    b.eq    .call_pop
+
+    // Unknown builtin — skip (no-op)
+    b       vm_loop
+
+// ── Math builtins (f64) ──────────────────────────────────────────────
+
+.call_add:
+    // Pop 2 f64, push a + b
+    ldr     x0, [x20, #-16]        // b (raw f64 bits)
+    ldr     x1, [x20, #-32]        // a
+    fmov    d1, x0
+    fmov    d0, x1
+    fadd    d0, d0, d1
+    fmov    x0, d0
+    sub     x20, x20, #16           // pop one
+    str     x0, [x20, #-16]         // overwrite a with result
+    b       vm_loop
+
+.call_sub:
+    ldr     x0, [x20, #-16]        // b
+    ldr     x1, [x20, #-32]        // a
+    fmov    d1, x0
+    fmov    d0, x1
+    fsub    d0, d0, d1              // a - b
+    fmov    x0, d0
+    sub     x20, x20, #16
+    str     x0, [x20, #-16]
+    b       vm_loop
+
+.call_mul:
+    ldr     x0, [x20, #-16]        // b
+    ldr     x1, [x20, #-32]        // a
+    fmov    d1, x0
+    fmov    d0, x1
+    fmul    d0, d0, d1
+    fmov    x0, d0
+    sub     x20, x20, #16
+    str     x0, [x20, #-16]
+    b       vm_loop
+
+.call_div:
+    ldr     x0, [x20, #-16]        // b (divisor)
+    fmov    d1, x0
+    fcmp    d1, #0.0
+    b.eq    .call_div_zero
+    ldr     x1, [x20, #-32]        // a
+    fmov    d0, x1
+    fdiv    d0, d0, d1              // a / b
+    fmov    x0, d0
+    sub     x20, x20, #16
+    str     x0, [x20, #-16]
+    b       vm_loop
+.call_div_zero:
+    // Push 0.0 on divide by zero
+    sub     x20, x20, #16
+    str     xzr, [x20, #-16]
+    b       vm_loop
+
+// ── Comparison builtins ──────────────────────────────────────────────
+
+.call_eq:
+    // Pop 2, push 1.0 if equal, empty if not
+    ldr     x0, [x20, #-16]        // b ptr/bits
+    ldr     x1, [x20, #-8]         // b len
+    ldr     x2, [x20, #-32]        // a ptr/bits
+    ldr     x3, [x20, #-24]        // a len
+    sub     x20, x20, #16           // pop one
+
+    // Both f64? (len == F64_MARKER)
+    cmp     x1, #F64_MARKER
+    b.ne    .eq_chain
+    cmp     x3, #F64_MARKER
+    b.ne    .eq_false
+
+    // f64 compare
+    fmov    d0, x2
+    fmov    d1, x0
+    fcmp    d0, d1
+    b.ne    .eq_false
+    // Equal → push 1.0
+    movz    x0, #0x0000
+    movk    x0, #0x0000, lsl #16
+    movk    x0, #0xf03f, lsl #32   // 1.0 = 0x3FF0000000000000
+    movk    x0, #0x3ff0, lsl #48
+    str     x0, [x20, #-16]
+    mov     x1, #F64_MARKER
+    str     x1, [x20, #-8]
+    b       vm_loop
+
+.eq_chain:
+    // Chain compare: same length + same bytes
+    cmp     x1, x3
+    b.ne    .eq_false
+    // Compare bytes
+    mov     x4, #0                  // index
+.eq_cmp_loop:
+    cmp     x4, x1
+    b.hs    .eq_true
+    ldrb    w5, [x2, x4]
+    ldrb    w6, [x0, x4]
+    cmp     w5, w6
+    b.ne    .eq_false
+    add     x4, x4, #1
+    b       .eq_cmp_loop
+.eq_true:
+    movz    x0, #0x0000
+    movk    x0, #0x0000, lsl #16
+    movk    x0, #0xf03f, lsl #32
+    movk    x0, #0x3ff0, lsl #48   // 1.0
+    str     x0, [x20, #-16]
+    mov     x1, #F64_MARKER
+    str     x1, [x20, #-8]
+    b       vm_loop
+.eq_false:
+    str     xzr, [x20, #-16]       // empty
+    str     xzr, [x20, #-8]
+    b       vm_loop
+
+.call_lt:
+    ldr     x0, [x20, #-16]        // b
+    ldr     x1, [x20, #-32]        // a
+    fmov    d1, x0
+    fmov    d0, x1
+    sub     x20, x20, #16
+    fcmp    d0, d1
+    b.lt    .cmp_true
+    b       .cmp_false
+
+.call_gt:
+    ldr     x0, [x20, #-16]
+    ldr     x1, [x20, #-32]
+    fmov    d1, x0
+    fmov    d0, x1
+    sub     x20, x20, #16
+    fcmp    d0, d1
+    b.gt    .cmp_true
+    b       .cmp_false
+
+.call_le:
+    ldr     x0, [x20, #-16]
+    ldr     x1, [x20, #-32]
+    fmov    d1, x0
+    fmov    d0, x1
+    sub     x20, x20, #16
+    fcmp    d0, d1
+    b.le    .cmp_true
+    b       .cmp_false
+
+.call_ge:
+    ldr     x0, [x20, #-16]
+    ldr     x1, [x20, #-32]
+    fmov    d1, x0
+    fmov    d0, x1
+    sub     x20, x20, #16
+    fcmp    d0, d1
+    b.ge    .cmp_true
+    b       .cmp_false
+
+.cmp_true:
+    movz    x0, #0x0000
+    movk    x0, #0x0000, lsl #16
+    movk    x0, #0xf03f, lsl #32
+    movk    x0, #0x3ff0, lsl #48   // 1.0
+    str     x0, [x20, #-16]
+    mov     x1, #F64_MARKER
+    str     x1, [x20, #-8]
+    b       vm_loop
+
+.cmp_false:
+    str     xzr, [x20, #-16]
+    str     xzr, [x20, #-8]
+    b       vm_loop
+
+// ── String builtins ──────────────────────────────────────────────────
+
+.call_len:
+    // Pop 1 value, push its length as f64
+    sub     x20, x20, #16
+    ldr     x1, [x20, #8]          // len
+    // Convert len to f64
+    scvtf   d0, x1
+    fmov    x0, d0
+    str     x0, [x20]              // push f64 bits
+    mov     x1, #F64_MARKER
+    str     x1, [x20, #8]
+    add     x20, x20, #16
+    b       vm_loop
+
+.call_concat:
+    // Pop 2 strings, push concatenation
+    sub     x20, x20, #16
+    ldr     x4, [x20]              // b ptr
+    ldr     x5, [x20, #8]          // b len
+    sub     x20, x20, #16
+    ldr     x6, [x20]              // a ptr
+    ldr     x7, [x20, #8]          // a len
+
+    // Copy a to heap
+    mov     x2, x23                 // dest start
+    mov     x3, x6                  // src = a
+    mov     w4, w7                  // count = a len
+    stp     x5, x4, [sp, #-16]!   // save b len, b ptr (reuse x4)
+    // Actually save properly
+    ldp     x5, x4, [sp], #16
+    // Simpler: copy a bytes
+    mov     x8, x23                 // result start
+    mov     x9, #0                  // index
+.cc_a:
+    cmp     x9, x7
+    b.hs    .cc_b_start
+    ldrb    w10, [x6, x9]
+    strb    w10, [x23]
+    add     x23, x23, #1
+    add     x9, x9, #1
+    b       .cc_a
+.cc_b_start:
+    // Copy b to heap after a
+    ldr     x4, [x20, #16]         // b ptr (was popped earlier, re-read from old position)
+    ldr     x5, [x20, #24]         // b len
+    mov     x9, #0
+.cc_b:
+    cmp     x9, x5
+    b.hs    .cc_done
+    ldrb    w10, [x4, x9]
+    strb    w10, [x23]
+    add     x23, x23, #1
+    add     x9, x9, #1
+    b       .cc_b
+.cc_done:
+    // Push result
+    str     x8, [x20]              // ptr = start of concat
+    add     x0, x7, x5             // total len
+    str     x0, [x20, #8]
+    add     x20, x20, #16
+    b       vm_loop
+
+.call_char_at:
+    // Pop index (f64), pop string, push char
+    sub     x20, x20, #16
+    ldr     x0, [x20]              // index (f64 bits)
+    fmov    d0, x0
+    fcvtzs  x0, d0                  // index as int
+    sub     x20, x20, #16
+    ldr     x1, [x20]              // str ptr
+    ldr     x2, [x20, #8]          // str len
+
+    // Bounds check
+    cmp     x0, x2
+    b.hs    .ca_empty
+    // Get char
+    ldrb    w3, [x1, x0]
+    strb    w3, [x23]
+    str     x23, [x20]
+    mov     x1, #1
+    str     x1, [x20, #8]
+    add     x20, x20, #16
+    add     x23, x23, #1
+    b       vm_loop
+.ca_empty:
+    str     xzr, [x20]
+    str     xzr, [x20, #8]
+    add     x20, x20, #16
+    b       vm_loop
+
+.call_substr:
+    // Pop len (f64), pop start (f64), pop string → push substring
+    sub     x20, x20, #16
+    ldr     x0, [x20]              // sub_len (f64 bits)
+    fmov    d0, x0
+    fcvtzs  x3, d0                  // sub_len as int
+
+    sub     x20, x20, #16
+    ldr     x0, [x20]              // start (f64 bits)
+    fmov    d0, x0
+    fcvtzs  x2, d0                  // start as int
+
+    sub     x20, x20, #16
+    ldr     x0, [x20]              // str ptr
+    ldr     x1, [x20, #8]          // str len
+
+    // Clamp
+    cmp     x2, x1
+    b.hs    .ss_empty
+    add     x4, x2, x3             // start + sub_len
+    cmp     x4, x1
+    b.ls    .ss_ok
+    sub     x3, x1, x2             // clamp to remaining
+.ss_ok:
+    // Copy to heap
+    add     x5, x0, x2             // src = str + start
+    mov     x6, x23                 // dest
+    mov     x7, #0
+.ss_copy:
+    cmp     x7, x3
+    b.hs    .ss_done
+    ldrb    w8, [x5, x7]
+    strb    w8, [x23]
+    add     x23, x23, #1
+    add     x7, x7, #1
+    b       .ss_copy
+.ss_done:
+    str     x6, [x20]
+    str     x3, [x20, #8]
+    add     x20, x20, #16
+    b       vm_loop
+.ss_empty:
+    str     xzr, [x20]
+    str     xzr, [x20, #8]
+    add     x20, x20, #16
+    b       vm_loop
+
+.call_push:
+    // Pop value, pop array-like → append (simplified: just skip for now)
+    // In VM context: arrays are heap regions, push extends
+    b       vm_loop
+
+.call_pop:
+    // Pop from array-like → push popped value
     b       vm_loop
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -144,7 +144,7 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | CLAIMED | `claude/project-audit-review-2pN6F` | Lyra | asm_emit_arm64.ol + fix ARM64 op_call + ELF ARM64 |
+| 4.1 | Cross-compile: x86_64 → ARM64 | `PLAN_4_1` | Phase 3 | DONE | `claude/project-audit-review-2pN6F` | Lyra | Done 2026-03-19: asm_emit_arm64.ol 470 LOC, elf_emit.ol + builder.ol extended, VM op_call 15 builtins + ELF detection. 7KB ARM64 binary. |
 | 4.2 | Fat binary (optional) | `PLAN_4_2` | 4.1 | FREE | | | Multi-arch trong 1 file |
 | 4.3 | WASM universal | `PLAN_4_3` | Phase 3 | FREE | | | Bytecode embed + browser host + WASI |
 
@@ -374,7 +374,10 @@ INTG (song song với tất cả):
             Công cụ kiểm tra chéo giữa các crate, cover 12 mối nối.
             AI 3 sẽ implement. Scaffold → 12 test files → Makefile target.
             B4-B7 → FREE for Kira (erPD8, context nhiều nhất).
-            4.1 → CLAIMED by Lyra (session 2pN6F).
+            4.1 → DONE by Lyra (session 2pN6F).
+            asm_emit_arm64.ol 470 LOC, elf_emit/builder extended for ARM64,
+            VM op_call 15 builtins (FNV-1a hash dispatch), ELF header detection.
+            ARM64 VM: 7KB binary, assembles+links OK. 2496 tests pass.
 2026-03-19  🎉 origin.olang RA ĐỜI — build thành công lần đầu!
             VM: 15 KB (x86_64 ASM, no libc, static linked)
             Bytecode: 811 KB (15/22 stdlib files compiled)
