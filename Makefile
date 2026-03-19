@@ -16,7 +16,7 @@ STDLIB   = stdlib
 KNOWLEDGE = origin.olang
 OUTPUT   = origin_new.olang
 
-.PHONY: all vm build test intg clean clippy
+.PHONY: all vm build test intg clean clippy eval smoke verify demo check-all
 
 all: build
 
@@ -52,6 +52,26 @@ intg:
 # Clippy
 clippy:
 	$(CARGO) clippy --workspace
+
+# Eval mode — pipe input to server
+eval:
+	@$(CARGO) run -p server -- --eval
+
+# Quick smoke test
+smoke:
+	@echo 'hello' | $(CARGO) run -p server -- --eval
+
+# E2E demo — 10 scenarios (requires tools/demo/scenarios.sh)
+demo:
+	@bash tools/demo/scenarios.sh
+
+# E2E automated verification (Rust tests)
+verify:
+	@$(CARGO) test -p intg --test t16_e2e_demo -- --show-output
+
+# Full check: unit + integration + E2E
+check-all: test intg verify
+	@echo "ALL CHECKS PASSED"
 
 # Clean
 clean:

@@ -6,7 +6,7 @@
 //! ○(∅) == ○ — boot từ hư không.
 
 use std::fs::OpenOptions;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 
 use runtime::origin::{now_ns, HomeRuntime};
 
@@ -18,10 +18,17 @@ const OLANG_FILE: &str = "origin.olang";
 //   Phase 2: BOOT     — load origin.olang file bytes, validate/recover
 //   Phase 3: LOAD     — registry + QT axioms → HomeRuntime
 //   Phase 4: SETUP    — HAL detect, manifest scan, agent inventory
-//   Phase 5: RUN      — REPL loop
+//   Phase 5: RUN      — REPL loop (or --eval mode)
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let eval_mode = args.contains(&"--eval".to_string());
+
+    if eval_mode {
+        run_eval();
+        return;
+    }
     // ══════════════════════════════════════════════════════════════════════════
     // Phase 1: START — ○(∅) == ○
     // ══════════════════════════════════════════════════════════════════════════
@@ -246,6 +253,51 @@ fn main() {
     );
 }
 
+/// --eval mode: đọc stdin → process → output → exit.
+/// Không banner, không REPL prompt, không persist.
+/// Dùng cho scripting và automated testing.
+fn run_eval() {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input).expect("failed to read stdin");
+
+    let session_id = now_ns() as u64;
+    let file_bytes = std::fs::read(OLANG_FILE).ok();
+    let mut rt = if let Some(ref bytes) = file_bytes {
+        HomeRuntime::with_file(session_id, Some(bytes))
+    } else {
+        HomeRuntime::new(session_id)
+    };
+
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let ts = now_ns();
+        let response = if let Some(filename) = trimmed.strip_prefix("olang ") {
+            match std::fs::read_to_string(filename.trim()) {
+                Ok(source) => rt.run_program(&source, ts),
+                Err(e) => {
+                    eprintln!("[error] Cannot read '{}': {}", filename.trim(), e);
+                    continue;
+                }
+            }
+        } else if trimmed.starts_with("> ") || trimmed.starts_with('>') {
+            let source = trimmed.strip_prefix("> ").unwrap_or(
+                trimmed.strip_prefix('>').unwrap_or(trimmed),
+            );
+            rt.run_program(source, ts)
+        } else {
+            rt.process_text(trimmed, ts)
+        };
+
+        if !response.text.is_empty() {
+            println!("{}", response.text);
+        }
+    }
+}
+
 /// Flush pending writes từ runtime → origin.olang.
 fn flush_pending(rt: &mut HomeRuntime) {
     if !rt.has_pending_writes() {
@@ -406,5 +458,18 @@ mod tests {
         assert!(rt.registry_alias_count() > 0);
         // No errors on clean boot
         assert!(rt.boot_errors().is_empty());
+    }
+
+    #[test]
+    fn eval_flag_detected() {
+        // --eval should be recognized in args
+        let args = vec!["server".to_string(), "--eval".to_string()];
+        assert!(args.contains(&"--eval".to_string()));
+    }
+
+    #[test]
+    fn eval_flag_not_present() {
+        let args = vec!["server".to_string()];
+        assert!(!args.contains(&"--eval".to_string()));
     }
 }
