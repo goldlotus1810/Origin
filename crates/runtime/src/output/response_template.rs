@@ -152,8 +152,6 @@ pub fn crisis_text_with_region(lang: &str) -> String {
     }
 }
 
-fn soft_refusal_text() -> String { soft_refusal_text_lang(Lang::Vi) }
-
 fn soft_refusal_text_lang(lang: Lang) -> String {
     match lang {
         Lang::Vi => "Cái này mình không làm được — không phải vì quy tắc, \
@@ -164,8 +162,6 @@ fn soft_refusal_text_lang(lang: Lang) -> String {
              Would you like to talk about what's driving this question?".to_string(),
     }
 }
-
-fn ask_context_text(angry: bool, cur_v: f32) -> String { ask_context_text_lang(angry, cur_v, Lang::Vi) }
 
 fn ask_context_text_lang(angry: bool, cur_v: f32, lang: Lang) -> String {
     match lang {
@@ -190,8 +186,6 @@ fn ask_context_text_lang(angry: bool, cur_v: f32, lang: Lang) -> String {
     }
 }
 
-fn empathize_text(tone: ResponseTone, cur_v: f32, original: Option<&str>) -> String { empathize_text_lang(tone, cur_v, original, Lang::Vi) }
-
 fn empathize_text_lang(_tone: ResponseTone, cur_v: f32, original: Option<&str>, lang: Lang) -> String {
     let ack = match lang {
         Lang::Vi => {
@@ -213,8 +207,6 @@ fn empathize_text_lang(_tone: ResponseTone, cur_v: f32, original: Option<&str>, 
         },
     }
 }
-
-fn clarify_text(kind: ClarifyKind, cur_v: f32) -> String { clarify_text_lang(kind, cur_v, Lang::Vi) }
 
 fn clarify_text_lang(kind: ClarifyKind, cur_v: f32, lang: Lang) -> String {
     match lang {
@@ -326,6 +318,12 @@ fn deny_text_lang(lang: Lang) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Test-only convenience wrappers (Vietnamese default)
+    fn soft_refusal_text() -> String { soft_refusal_text_lang(Lang::Vi) }
+    fn ask_context_text(angry: bool, cur_v: f32) -> String { ask_context_text_lang(angry, cur_v, Lang::Vi) }
+    fn empathize_text(tone: ResponseTone, cur_v: f32, original: Option<&str>) -> String { empathize_text_lang(tone, cur_v, original, Lang::Vi) }
+    fn clarify_text(kind: ClarifyKind, cur_v: f32) -> String { clarify_text_lang(kind, cur_v, Lang::Vi) }
 
     fn make_params(action: IntentAction, tone: ResponseTone, v: f32) -> ResponseParams {
         ResponseParams {
