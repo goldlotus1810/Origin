@@ -17,7 +17,7 @@ use agents::learning::{LearningLoop, ProcessResult};
 use context::emotion::sentence_affect;
 use context::emotion::IntentKind;
 use context::infer::infer_context;
-use context::intent::{decide_action, estimate_intent, IntentAction};
+use context::intent::{decide_action, decide_action_v2, estimate_intent, ActionContext, IntentAction};
 use memory::dream::{DreamConfig, DreamCycle};
 use silk::walk::ResponseTone;
 
@@ -3274,7 +3274,6 @@ impl HomeRuntime {
         }
 
         // ── T7: Decide action → render response ────────────────────────────
-        let mut action = decide_action(&est, cur_v);
         let fx = self.learning.context().fx();
         let tone = self.learning.context().tone();
         let lang = match &input {
@@ -3283,6 +3282,7 @@ impl HomeRuntime {
         };
 
         // ── T7a: Build ResponseContext từ STM + Silk + Instincts ────────
+        // (phải build TRƯỚC decide_action_v2 — context quyết định action)
         let resp_ctx = {
             let input_text = match &input {
                 ContentInput::Text { content, .. } => content.as_str(),
@@ -3339,6 +3339,17 @@ impl HomeRuntime {
 
             ctx
         };
+
+        // ── T7a2: decide_action_v2 — dùng context thay vì keywords only ──
+        let action_ctx = ActionContext {
+            repetition_count: resp_ctx.repetition_count,
+            has_causality: resp_ctx.causality.is_some(),
+            has_contradiction: resp_ctx.contradiction,
+            novelty: resp_ctx.novelty,
+            has_topics: !resp_ctx.topics.is_empty(),
+            walk_valence: resp_ctx.walk_valence,
+        };
+        let mut action = decide_action_v2(&est, cur_v, &action_ctx);
 
         // ── T7b: Reference resolution — "bà ấy", "anh ta"... ─────────────
         // Nếu Observe vì unresolved_ref → thử resolve từ recent_texts
@@ -3515,35 +3526,47 @@ impl HomeRuntime {
                     };
                 }
 
-                // ── Normal flow: contradiction / recall / proceed ────────────
-                // Build response with context awareness — use user's actual words
-                let original = if let Some(ref contra) = contradiction {
-                    // Contradiction detected → inform user
-                    Some(contra.clone())
-                } else {
-                    match &action {
-                        IntentAction::Proceed => {
-                            if let Some(ref ctx) = recall {
-                                // Silk/KnowTree recalled related knowledge
-                                Some(contextual_reply(tone, final_v, input_text, ctx))
-                            } else {
-                                // No recall — still use user's actual words
-                                Some(natural_reply(tone, final_v, input_text))
-                            }
+                // ── Normal flow: compose_response cho Proceed/EmpathizeFirst ──
+                // compose_response dùng ResponseContext (topics, causality, novelty)
+                // thay vì template cứng → response chứa words thật của user.
+                let mut text = match action {
+                    IntentAction::Proceed | IntentAction::EmpathizeFirst => {
+                        if let Some(ref contra) = contradiction {
+                            // Contradiction detected → inform user
+                            contra.clone()
+                        } else {
+                            compose_response(
+                                &ResponseParams {
+                                    tone,
+                                    action: action.clone(),
+                                    valence: final_v,
+                                    fx,
+                                    context: recall.clone(),
+                                    original: None,
+                                    language: lang,
+                                },
+                                &resp_ctx,
+                            )
                         }
-                        _ => None,
+                    }
+                    _ => {
+                        // Các action khác (AddClarify, AskContext, etc.) vẫn dùng render
+                        let original = if let Some(ref contra) = contradiction {
+                            Some(contra.clone())
+                        } else {
+                            None
+                        };
+                        render(&ResponseParams {
+                            tone,
+                            action,
+                            valence: final_v,
+                            fx,
+                            context: recall,
+                            original,
+                            language: lang,
+                        })
                     }
                 };
-
-                let mut text = render(&ResponseParams {
-                    tone,
-                    action,
-                    valence: final_v,
-                    fx,
-                    context: recall,
-                    original,
-                    language: lang,
-                });
 
                 // ── T7e: Instinct enrichment — bản năng làm giàu response ──
                 if let Some(ref insight) = instinct_ctx {

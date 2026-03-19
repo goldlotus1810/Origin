@@ -58,6 +58,8 @@ const SCORE_CMD_KW: f32 = 0.55;
 const SCORE_LEARN_CMD_KW: f32 = 0.70;
 /// Score confirm knowledge.
 const SCORE_CONFIRM_KNOWLEDGE_KW: f32 = 0.65;
+/// Score chat/greeting keyword.
+const SCORE_CHAT_KW: f32 = 0.50;
 
 /// Ngưỡng valence "rất buồn" → crisis amplifier.
 const V_CRISIS_LOW: f32 = -0.70;
@@ -133,6 +135,10 @@ static KW_HEAL: &[&str] = &[
     // VI
     "tôi buồn",
     "tôi đau",
+    "tôi sợ",
+    "sợ quá",
+    "tôi giận",
+    "giận lắm",
     "không biết phải làm sao",
     "cô đơn",
     "mất mát",
@@ -142,6 +148,8 @@ static KW_HEAL: &[&str] = &[
     "mệt mỏi quá",
     // EN
     "i'm sad",
+    "i'm scared",
+    "i'm angry",
     "i feel lost",
     "heartbroken",
     "lonely",
@@ -310,6 +318,15 @@ static KW_CONFIRM: &[&str] = &[
     "do it",
     "ok",
     "okay",
+];
+
+/// Chat/greeting keywords — "xin chào", "hello", small talk.
+static KW_CHAT: &[&str] = &[
+    // VI
+    "xin chào", "chào", "chào bạn", "hi", "xin", "tạm biệt",
+    // EN
+    "hello", "hey", "good morning", "good evening", "goodbye", "bye",
+    "how are you", "what's up",
 ];
 
 static KW_DENY: &[&str] = &[
@@ -518,6 +535,13 @@ pub fn estimate_intent(text: &str, cur_v: f32, cur_a: f32) -> IntentEstimate {
         }
     }
 
+    // Chat/greeting keywords
+    for kw in KW_CHAT {
+        if lo.contains(kw) {
+            add!(IntentKind::Chat, SCORE_CHAT_KW, &format!("kw:{}", kw));
+        }
+    }
+
     // ── Listening signals ─────────────────────────────────────────────────────
 
     // Exclamation detection: rất ngắn + có dấu ! hoặc thán từ
@@ -712,6 +736,124 @@ pub fn decide_action(est: &IntentEstimate, cur_v: f32) -> IntentAction {
     }
 
     // ── Normal flow ──────────────────────────────────────────────────────────
+    if est.need_clarify {
+        IntentAction::AddClarify {
+            kind: est.clarify_kind.unwrap_or(ClarifyKind::WhatContext),
+        }
+    } else {
+        IntentAction::Proceed
+    }
+}
+
+/// Context từ STM + Silk + Instincts — dùng bởi `decide_action_v2`.
+///
+/// Struct nhẹ (copy semantics) để context module không phụ thuộc runtime.
+#[derive(Debug, Clone, Default)]
+pub struct ActionContext {
+    /// Số lần user nhắc topic tương tự (từ STM fire_count).
+    pub repetition_count: u32,
+    /// Causality detected (e.g. "mất việc" causes "buồn").
+    pub has_causality: bool,
+    /// User nói trái ngược turn trước?
+    pub has_contradiction: bool,
+    /// 0.0 = topic quen, 1.0 = hoàn toàn mới.
+    pub novelty: f32,
+    /// Có topics thật (content words) không?
+    pub has_topics: bool,
+    /// Walk emotion amplified valence.
+    pub walk_valence: Option<f32>,
+}
+
+/// Quyết định hành động dùng context từ STM + Silk + Instincts.
+///
+/// Khác `decide_action`:
+/// - repetition > 2 → Heal (cần empathize sâu, không AddClarify)
+/// - has_causality → skip WhatPurpose clarify (đã biết nguyên nhân)
+/// - novelty > 0.8 → Observe nếu neutral, Proceed nếu emotional
+/// - has_topics + V < -0.3 → EmpathizeFirst (không AddClarify)
+pub fn decide_action_v2(est: &IntentEstimate, cur_v: f32, ctx: &ActionContext) -> IntentAction {
+    // Sensitive intents — giữ nguyên logic
+    match est.primary {
+        IntentKind::Crisis => return IntentAction::CrisisOverride,
+        IntentKind::Risk => {
+            return IntentAction::AskContext {
+                angry: cur_v < V_RISK_ANGRY,
+            }
+        }
+        IntentKind::Manipulate => return IntentAction::SoftRefusal,
+        _ => {}
+    }
+
+    // User commands — giữ nguyên
+    match est.primary {
+        IntentKind::Command => return IntentAction::HomeControl,
+        IntentKind::Confirm => return IntentAction::UserConfirm,
+        IntentKind::Deny => return IntentAction::UserDeny,
+        IntentKind::LearnCommand => return IntentAction::ForceLearnQR,
+        IntentKind::ConfirmKnowledge => return IntentAction::ConfirmLearnQR,
+        _ => {}
+    }
+
+    // ── Listening signals — giữ nguyên ──────────────────────────────────────
+    if est.is_exclamation {
+        return IntentAction::SilentAck;
+    }
+    if est.has_unresolved_ref {
+        return IntentAction::Observe;
+    }
+
+    // ── Context-aware decisions (MỚI) ───────────────────────────────────────
+
+    // Chat/greeting → Proceed ngay (không cần clarify)
+    if est.primary == IntentKind::Chat {
+        return IntentAction::Proceed;
+    }
+
+    // Heal: vague emotion → Observe nếu chưa biết context
+    if est.primary == IntentKind::Heal {
+        // Lặp > 2 → user xoay quanh topic → empathize sâu
+        if ctx.repetition_count > 2 {
+            return IntentAction::EmpathizeFirst;
+        }
+        if est.is_vague_emotion && !ctx.has_causality {
+            return IntentAction::Observe;
+        }
+        return IntentAction::EmpathizeFirst;
+    }
+
+    // Topics + negative emotion → empathize trước, KHÔNG hỏi clarify
+    if ctx.has_topics && cur_v < -0.30 {
+        return IntentAction::EmpathizeFirst;
+    }
+
+    // Contradiction → hỏi cụ thể về mâu thuẫn
+    if ctx.has_contradiction {
+        return IntentAction::AskContext { angry: false };
+    }
+
+    // Vague emotion without context → observe
+    if est.is_vague_emotion && !ctx.has_causality {
+        return IntentAction::Observe;
+    }
+
+    // Topics + causality + need_clarify → SKIP clarify (đã biết nguyên nhân)
+    if ctx.has_causality && est.need_clarify {
+        return IntentAction::Proceed;
+    }
+
+    // Câu ngắn + emotional (V xa 0) → KHÔNG clarify — xử lý emotion trước
+    // "tôi sợ quá", "tôi vui quá" → EmpathizeFirst/Proceed, không "tìm hiểu gì"
+    if est.need_clarify && ctx.has_topics {
+        // Emotional input → skip clarify
+        if cur_v < -0.20 {
+            return IntentAction::EmpathizeFirst;
+        }
+        if cur_v > 0.20 {
+            return IntentAction::Proceed;
+        }
+    }
+
+    // Normal flow
     if est.need_clarify {
         IntentAction::AddClarify {
             kind: est.clarify_kind.unwrap_or(ClarifyKind::WhatContext),
@@ -1002,5 +1144,66 @@ mod tests {
     fn confirm_knowledge_action() {
         let e = estimate_intent("điều này đúng rồi", 0.3, 0.5);
         assert_eq!(decide_action(&e, 0.3), IntentAction::ConfirmLearnQR);
+    }
+
+    // ── decide_action_v2 tests ──────────────────────────────────────────
+
+    fn ctx_empty() -> ActionContext { ActionContext::default() }
+
+    #[test]
+    fn v2_sad_with_topic_empathizes() {
+        // "tôi buồn vì mất việc" → has_topics + V < -0.3 → EmpathizeFirst
+        let e = estimate_intent("tôi buồn vì mất việc", -0.5, 0.4);
+        let ctx = ActionContext { has_topics: true, ..ctx_empty() };
+        assert_eq!(decide_action_v2(&e, -0.50, &ctx), IntentAction::EmpathizeFirst);
+    }
+
+    #[test]
+    fn v2_causality_skips_clarify() {
+        // Có causality → không hỏi "tìm hiểu gì"
+        let e = estimate_intent("tại sao trời mưa", 0.0, 0.3);
+        let ctx = ActionContext {
+            has_causality: true,
+            has_topics: true,
+            ..ctx_empty()
+        };
+        let action = decide_action_v2(&e, 0.0, &ctx);
+        assert_ne!(action, IntentAction::AddClarify { kind: ClarifyKind::WhatPurpose });
+    }
+
+    #[test]
+    fn v2_repetition_heals() {
+        // Lặp > 2 lần + Heal → EmpathizeFirst (không AddClarify)
+        let e = estimate_intent("buồn quá", -0.5, 0.3);
+        let ctx = ActionContext { repetition_count: 4, has_topics: true, ..ctx_empty() };
+        assert_eq!(decide_action_v2(&e, -0.50, &ctx), IntentAction::EmpathizeFirst);
+    }
+
+    #[test]
+    fn v2_greeting_proceeds() {
+        // "xin chào" → Chat → Proceed (không AddClarify)
+        let e = estimate_intent("xin chào", 0.2, 0.3);
+        let ctx = ActionContext { has_topics: true, novelty: 0.85, ..ctx_empty() };
+        let action = decide_action_v2(&e, 0.2, &ctx);
+        assert_eq!(action, IntentAction::Proceed);
+    }
+
+    #[test]
+    fn v2_crisis_still_overrides() {
+        // Crisis vẫn override mọi thứ
+        let e = estimate_intent("không muốn sống nữa", -0.8, 0.5);
+        let ctx = ActionContext { has_topics: true, ..ctx_empty() };
+        assert_eq!(decide_action_v2(&e, -0.8, &ctx), IntentAction::CrisisOverride);
+    }
+
+    #[test]
+    fn v2_contradiction_asks_context() {
+        // Contradiction → AskContext
+        let e = estimate_intent("hôm nay vui", 0.3, 0.3);
+        let ctx = ActionContext { has_contradiction: true, has_topics: true, ..ctx_empty() };
+        assert_eq!(
+            decide_action_v2(&e, 0.3, &ctx),
+            IntentAction::AskContext { angry: false }
+        );
     }
 }
