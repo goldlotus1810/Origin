@@ -50,13 +50,13 @@ json/ucd.json    = structured, diff-able, AI + human có thể edit
                  = build.rs đọc JSON lúc compile → TÍNH P → sinh bảng tĩnh
 
 Flow đúng:
-  Unicode .txt ──(parse 1 lần)──► json/ucd.json (base: name, block, category, aliases)
+  SINH_HOC_v2 + Unicode .txt ──(bootstrap 1 lần)──► json/udc.json
+    blocks: dominant_axis, integral_kernel
+    characters: physics_logic.P_weight (SEALED từ bootstrap), localizations
+    alias_mapping: ngôn ngữ → codepoint (SEALED_INHERIT)
                                        │
-                              (human/AI thêm aliases vào)
-                                       │
-                              tool tính P từ block + category (∫ₛ)
-                                       │
-                              build.rs đọc → bảng tĩnh
+                              build.rs đọc json → NẠP P_weight → bảng tĩnh
+                              KHÔNG tính lại P lúc compile hay runtime.
 ```
 
 ### 0.4 Những cái cần chú ý
@@ -81,13 +81,16 @@ Flow đúng:
 
 ⑤ build.rs hiện tại (v5):
    - Đang derive P tự động từ name patterns + block ranges (code logic)
-   - Sau UDC rebuild: build.rs đọc json/ucd.json → TÍNH P từ block + category theo ∫ₛ
-   - JSON KHÔNG chứa P values — P là output của tính toán, không phải input
+   - Sau UDC rebuild: build.rs đọc json/udc.json → NẠP P_weight trực tiếp từ JSON
+   - JSON CÓ CHỨA P_weight (physics_logic.P_weight) cho anchor chars — đây là kết quả
+     bootstrap 1 lần từ tài liệu SINH_HOC_v2 → SEALED vĩnh viễn.
+   - Chars không có P_weight riêng → kế thừa từ block (dominant_axis).
 
-⑥ Phân chia 3 loại entry trong JSON:
-   - "blocks": block nodes (dimension dominant — input để tính P)
-   - "codepoints": từng char với block + category + aliases (input để tính P)
-   - "script_aliases": ngôn ngữ tự nhiên → codepoint mapping
+⑥ Phân chia 4 loại entry trong JSON (UTC32-SDF-INTEGRATOR format):
+   - "blocks": block nodes (dominant_axis, integral_kernel, sub_groups)
+   - "characters": từng anchor char với physics_logic.P_weight + localizations
+   - "alias_mapping": ngôn ngữ tự nhiên → codepoint mapping (SEALED_INHERIT)
+   - "utf32_aliases": UTF-32 symbol → canonical codepoint (inheritance)
 ```
 
 ---

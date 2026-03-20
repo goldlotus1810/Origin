@@ -84,8 +84,9 @@ Từ tọa độ này, MỌI THỨ về một khái niệm đều TÍNH ĐƯỢC
 Dream = đánh giá công thức nào đã "chín" (đủ evidence) → promote QR
 LeoAI program() = tổ hợp công thức A ∘ B → công thức C mới, chờ dữ liệu
 evolve() = thay 1 biến trong công thức → loài mới
-16GB budget: 100M concept × 7 bytes công thức = 700 MB (thay vì TB nếu lưu giá trị)
-→ Áp dụng cho Gap #3: Dream phải evaluate công thức (MolSummary 5D), không so sánh bytes.
+14.84 GB: 7.42 tỷ chain links × 2 bytes = toàn bộ tri thức nhân loại (thay vì hàng trăm TB)
+KnowTree 9,584 L0 nodes: 65,536 × 5B = 328 KB — vừa L1 cache, O(1) lookup.
+→ Áp dụng cho Gap #3: Dream phải evaluate P_weight (MolSummary 5D), không so sánh bytes.
 
 Từ 5 bytes:
   Shape=Sphere      → SDF tính ra hình cầu
@@ -135,18 +136,31 @@ Tri thức nhân loại (text thô):
   UniProt:    ~250 triệu seq   │ → KHÔNG VỪA điện thoại
   GenBank:    ~billions seq     ┘
 
-HomeOS (công thức):
-  1 concept = ~33 bytes (5 mol + 8 hash + 20 metadata)
-  500 triệu concepts = 16.5 GB → VỪA 1 CHIẾC ĐIỆN THOẠI
+HomeOS — 3 lớp bộ nhớ tách biệt:
+  ┌──────────────────────────────────────────────────────────┐
+  │ KnowTree (working memory):  65,536 × 5B = 328 KB         │
+  │   KnowTree[u16] → P_weight  — O(1), không cần hash       │
+  │   9,584 đầu = L0 UDC SEALED. Phần còn lại = learned.     │
+  │   → Vừa L1 cache của bất kỳ CPU nào.                     │
+  ├──────────────────────────────────────────────────────────┤
+  │ Chain links (knowledge content):  7.42 tỷ × 2B = 14.84 GB│
+  │   Mỗi link = u16 = index vào KnowTree branch             │
+  │   Toàn bộ tri thức nhân loại vừa trong 1 chiếc điện thoại│
+  ├──────────────────────────────────────────────────────────┤
+  │ origin.olang (persistent):  ~25B/record (signed)          │
+  │   append-only, QR signing, rebuild được từ đây.           │
+  └──────────────────────────────────────────────────────────┘
 
-  Cách lưu              1 concept    500M concepts
-  ──────────────────────────────────────────────────
-  Text (Wikipedia)       ~5 KB        ~2.5 TB
-  Embedding (768D)       3 KB         1.5 TB
-  Knowledge Graph        ~200 B       100 GB
-  HomeOS Molecule        ~33 B        16.5 GB
+  So sánh lưu trữ:
+  Cách lưu                  1 concept    Ghi chú
+  ──────────────────────────────────────────────────────────
+  Text (Wikipedia)           ~5 KB       hàng trăm TB
+  Embedding (768D float)     3 KB        1.5 TB cho 500M
+  Knowledge Graph node       ~200 B      100 GB cho 500M
+  HomeOS KnowTree node       5 B         328 KB (65,536 nodes)
+  HomeOS chain link          2 B         14.84 GB (7.42 tỷ links)
 
-CÔNG THỨC tạo ra VÔ HẠN ngữ nghĩa từ HỮU HẠN bytes.
+TRỌNG SỐ ĐÃ TÍCH PHÂN tạo ra VÔ HẠN ngữ nghĩa từ HỮU HẠN bytes.
 Đó là lý do HomeOS không cần GPU. Không cần cloud. Chạy local.
 ```
 
@@ -171,31 +185,33 @@ Người dùng gõ → runtime::HomeRuntime.process_text()
 
 ---
 
-## 5 Nhóm Unicode = 5 Chiều = DNA
+## 4 Nhóm Unicode = 5 Chiều = DNA
 
-**Unicode đã có tên, có định nghĩa, có ~5400 mẫu đối chiếu sẵn. Đây là kiến thức nền tảng, là thước đo, là chìa khóa — KHÔNG mượn từ nguồn ngoài.**
+**Unicode đã có tên, có định nghĩa, có 9,584 L0 anchor points (58 blocks, 4 nhóm). Đây là kiến thức nền tảng, là thước đo, là chìa khóa — KHÔNG mượn từ nguồn ngoài.**
 
 ```
-Mỗi ký tự Unicode → 1 Molecule = 5 bytes:
+Mỗi ký tự Unicode → 1 P_weight (Molecule) = 5 bytes:
 
   [Shape] [Relation] [Valence] [Arousal] [Time]
    1 byte   1 byte    1 byte    1 byte   1 byte
 
-Hierarchical encoding: base (1-8) + sub_index*8 → ~5400 patterns phân biệt
+Mỗi chiều = trọng số đã tích phân (∫ₛ) — KHÔNG phải công thức compute lại.
+P tính 1 lần từ json/ucd.json lúc bootstrap → SEALED vĩnh viễn (L0 anchor).
+u16 slot layout: [gen:2b][address:14b] — 65,536 slots, 9,584 đầu = L0 UDC.
 Tagged wire format: [mask:1B][present_fields:0-5B] → 1-6 bytes (sparse)
 Evolution: Molecule.evolve(dim, val) → mutate 1/5 chiều → loài mới
 
-Nhóm        Ký tự    Chiều         Ý nghĩa
-──────────────────────────────────────────────────
-SDF         ~1344    Shape         "Trông như thế nào" (8 primitives: ● ▬ ■ ▲ ○ ∪ ∩ ∖)
-MATH        ~1904    Relation      "Liên kết thế nào" (8 relations: ∈ ⊂ ≡ ⊥ ∘ → ≈ ←)
-EMOTICON    ~1760    Valence+A     "Cảm thế nào" (0x00..0xFF × 2)
-MUSICAL     ~416     Time          "Thay đổi thế nào" (Static/Slow/Medium/Fast/Instant)
-──────────────────────────────────────────────────
-Tổng        ~5424    5 chiều       = bộ gene ban đầu của HomeOS
+Nhóm       Blocks   Ký tự    Chiều         Ý nghĩa
+──────────────────────────────────────────────────────────────
+SDF           13    1,904    Shape         "Trông như thế nào" (18 SDF primitives)
+MATH          21    3,088    Relation      "Liên kết thế nào" (75 relation channels)
+EMOTICON      17    3,568    Valence+A     "Cảm thế nào" (V+A chia sẻ 17 blocks)
+MUSICAL        7    1,024    Time          "Thay đổi thế nào" (Static/Slow/Medium/Fast/Instant)
+──────────────────────────────────────────────────────────────
+Tổng          58    9,584    5 chiều       = 9,584 L0 anchor points
 
-Tại sao ~5400 mà không phải 150K (toàn bộ Unicode)?
-→ 5400 ký tự này có SEMANTIC IDENTITY rõ ràng
+Tại sao 9,584 mà không phải 150K (toàn bộ Unicode)?
+→ 9,584 ký tự này có SEMANTIC IDENTITY rõ ràng (ký tự đồ họa, toán học, cảm xúc, âm nhạc)
 → Mỗi nhóm tạo 1 chiều ĐỘC LẬP (orthogonal)
 → Đủ để định vị BẤT KỲ khái niệm nào trong không gian 5D
 → Phần còn lại của Unicode = text thường, dùng qua alias → node
@@ -512,15 +528,16 @@ Wire points (chưa implement):
 
 ### Silk Vertical — Parent Pointer (SPEC — chưa implement):
 ```
-Silk ngang (implicit, 0 bytes): 37 kênh SilkIndex ← ĐÃ CÓ ✅
+Silk ngang (implicit, 0 bytes): 75 kênh SilkIndex ← ĐÃ CÓ ✅
+  (13S + 21R + 17V + 17A + 7T = 75 kênh, từ 58 blocks)
 Silk dọc (parent pointer, 43KB): child → parent chain ← CHƯA CÓ ❌
 
   SilkGraph.parent_map: BTreeMap<u64, u64>  (child_hash → parent_hash)
   register_parent(), parent_of(), children_of(), layer_of()
-  5460 pointers × 8B = 43 KB toàn bộ mạng dọc
+  9,584 pointers × 8B = ~76 KB toàn bộ mạng dọc
 
 31 compound patterns (C(5,1)+...+C(5,5) = 31):
-  37 kênh × 31 mẫu = 1147 kiểu quan hệ ← CompoundKind enum chưa có
+  75 kênh × 31 mẫu = 2,325 kiểu quan hệ ← CompoundKind enum chưa có
 
 Dream cần wire:
   cluster_score() → dùng MolSummary + implicit_silk() thay vì chain bytes
