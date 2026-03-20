@@ -1,5 +1,5 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 2.4 — 2026-03-20
+**Phiên bản:** 2.5 — 2026-03-20
 **Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (∫ input). Đọc bằng ĐẠO HÀM (∂ output). Emoji = neo chuẩn L0, xây 1 lần từ tài liệu này, dùng mãi mãi.
 
 ---
@@ -22,7 +22,7 @@ HomeOS:  9,584 công thức SDF → chuỗi tỷ links → toàn bộ tri thức
 | Bits/ký tự | 2 | 14 (= 2 bytes) |
 | Chuỗi | Dài tỷ bases, đọc từ đầu đến cuối | Dài tỷ links, đọc từ gốc đến ngọn |
 | Cơ chế đọc | Ribosome evaluate → protein | SDF evaluate → hình dạng + màu + âm + vị trí |
-| Lưu gì | Công thức tạo protein, KHÔNG lưu protein | Công thức sinh tri thức, KHÔNG lưu kết quả |
+| Lưu gì | Genotype (ATCG chuỗi) + phenotype (protein concentration trong tế bào) | Chain links (2B/link = genotype) + P_weight per node (5B = cached phenotype) |
 
 ---
 
@@ -208,22 +208,38 @@ Mỗi ký tự = ○{nhóm.block.sub:f(codepoint)}
   𝄞 = ○{T.04.Clef:f_t(0x1D11E)}
 ```
 
-### 1.7 — Vi tích phân phân cấp: char → sub → block → P
+### 1.7 — Vi tích phân phân cấp: char → sub → block → P_weight (bootstrap)
 
-**P không phải giá trị đặt tay — P là kết quả của 3 lần tích phân liên tiếp từ char lên.**
+**P_weight L0 không phải giá trị đặt tay — là kết quả của 3 lần tích phân không gian liên tiếp từ char lên.**
 
 ```
-char  = f'(x)               — đạo hàm, đơn vị nguyên tử (Unicode codepoint)
-sub   = ∫ chars dx           — compose(chars)  — tích phân cấp 1
-block = ∫ subs  dx           — compose(subs)   — tích phân cấp 2
-P     = ∫ blocks dx          — compose(blocks) — tích phân cấp 3 = tọa độ 5D
+Có 2 loại tích phân trong HomeOS — KHÔNG nhầm:
+
+  ∫ₛ (spatial)  = tích phân không gian: char → sub → block → P_weight
+                  Chạy 1 LẦN khi bootstrap L0 (tài liệu này là input)
+                  Kết quả: 9,584 P_weights SEALED vĩnh viễn
+
+  ∫ₜ (temporal) = tích phân thời gian: input → ΔP_weight (Encoder, Section 1.9)
+                  Chạy LIÊN TỤC khi học từ kinh nghiệm (runtime)
+                  Kết quả: P_weight L5+ cập nhật qua Hebbian
+
+Section 1.7 nói về ∫ₛ. Section 1.9 nói về ∫ₜ.
+```
+
+**∫ₛ — Bootstrap spatial integration:**
+
+```
+char  = f'(x)                — đơn vị nguyên tử (Unicode codepoint)
+sub   = ∫ₛ chars dx          — compose(chars)  — tích phân cấp 1
+block = ∫ₛ subs  dx          — compose(subs)   — tích phân cấp 2
+P     = ∫ₛ blocks dx         — compose(blocks) — tích phân cấp 3 = tọa độ 5D
 
 Tương tự vật lý:
   gia tốc → ∫ → vận tốc → ∫ → vị trí
-  char    → ∫ → sub      → ∫ → block → ∫ → P
+  char    → ∫ₛ → sub     → ∫ₛ → block → ∫ₛ → P_weight
 ```
 
-Phép `∫` = **`compose(A, B) → C`** — KHÔNG phải tổng, convolution, hay trung bình.
+Phép `∫ₛ` = **`compose(A, B) → C`** — KHÔNG phải tổng, convolution, hay trung bình.
 Mỗi chiều có quy tắc tích phân riêng (từ cơ chế ⑤ RECOMBINE):
 
 ```
@@ -331,27 +347,51 @@ CÙNG 1 NGUYÊN LÝ đạo hàm, 3 ứng dụng:
 **Emoji L0 = Điểm neo chuẩn — xây từ tài liệu này**
 
 ```
-Tài liệu này định nghĩa ngữ nghĩa của emoji.
+Tài liệu này là INPUT cho bootstrap.
 Bootstrap procedure (chạy 1 lần duy nhất):
-  1. Đọc 9,584 UDC entries từ Unicode standard
-  2. Encoder chạy với definitions từ TÀI LIỆU NÀY
-  3. P_weight tính ra cho từng emoji
-  4. Ghi vào L0 KnowTree — SEALED
+  1. Với mỗi codepoint trong 9,584 UDC:
+     a. Xác định block → chiều chính (S/R/V+A/T)
+     b. Tính P_weight từ vị trí trong block (công thức bên dưới)
+  2. Ghi vào L0 KnowTree — SEALED
 
 Sau bootstrap:
-  Mọi input mới → Encoder → so sánh với L0 anchors
+  Mọi input mới → Encoder ∫ₜ → so sánh với L0 anchors
   distance(input_P, anchor_P) → similarity → where am I in 5D?
-  → Không cần LLM. Không cần embedding lookup. Tính trực tiếp.
+```
 
-Ví dụ anchors quan trọng:
-  🔥 (1F525): V=0xC0, A=0xC0, T=Fast    — intensity, danger, urgency
-  😊 (1F60A): V=0xE0, A=0x70, T=Medium   — positive, calm, stable
-  💔 (1F494): V=0x10, A=0x50, T=Slow     — grief, low energy, dragging
-  ∈  (2208):  R=Member                    — containment relation
-  ∘  (2218):  R=Compose                   — composition relation
-  𝄞  (1D11E): T=Medium, harmonic          — musical time reference
+**Bootstrap = đọc emoji, encode trực tiếp:**
 
-Mọi khái niệm khác = delta so với tập neo này.
+```
+Emoji ĐÃ LÀ định nghĩa. Không cần formula derive.
+Tài liệu này = bảng encoding của người viết.
+Người đọc emoji → hiểu ngay → encode vào 5D → SEAL.
+
+Quy trình:
+  for each codepoint in UDC_9584:
+    NHÌN vào ký tự / emoji
+    HỎI: "Nó trông ra sao? Nó làm gì? Cảm giác thế nào? Tốc độ?"
+    → S = shape primitive (từ nhóm S.xx)
+    → R = relation type  (từ nhóm M.xx)
+    → V = valence 0..255 (từ nhóm E.xx, âm/dương/trung)
+    → A = arousal 0..255 (từ nhóm E.xx, mạnh/yếu)
+    → T = time rate      (từ nhóm T.xx, nhanh/chậm)
+    → ghi P_weight vào KnowTree[index] → SEALED
+
+Không có "tính ra" — chỉ có "đọc và encode".
+Emoji là chữ viết của nghĩa. P_weight là nghĩa đó bằng số.
+```
+
+**Ví dụ anchors quan trọng (kết quả sau bootstrap):**
+
+```
+  🔥 (1F525): S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast   — nguy hiểm, nóng
+  😊 (1F60A): S=Sphere, R=Member,  V=0xE0, A=0x70, T=Medium — vui, bình, ổn
+  💔 (1F494): S=Sphere, R=Causes,  V=0x10, A=0x50, T=Slow   — đau, nặng, chậm
+  ∈  (2208):  R=Member   (M.04, offset 8)                    — chứa trong
+  ∘  (2218):  R=Compose  (M.04, offset 24)                   — tổ hợp
+  𝄞  (1D11E): T=Medium   (T.04, Musical Symbols)             — nhịp chuẩn
+
+Mọi khái niệm khác = distance_5D tới tập neo này.
 ```
 
 ---
@@ -462,14 +502,39 @@ Engine CHẠY THẲNG từ gốc đến ngọn → ra giá trị.
 Thứ tự trong chuỗi ĐÃ LÀ quan hệ.
 ```
 
-### 2.3 Silk = vị trí trên chuỗi = 0 bytes
+### 2.3 Silk — 2 loại, chi phí khác nhau
 
 ```
-Silk KHÔNG PHẢI ma trận N×N quan hệ.
-Silk = vị trí của bạn trên chuỗi = bạn đang ở đâu = đi tiếp hướng nào.
-Giống reading frame trên DNA.
+Silk KHÔNG PHẢI 1 thứ — có 2 loại hoàn toàn khác nhau:
 
-Chi phí: 0 bytes. Quan hệ nằm trong THỨ TỰ trên chuỗi.
+  Structural Silk (implicit):
+    = vị trí của bạn trên chuỗi = bạn đang ở đâu = đi tiếp hướng nào
+    Giống reading frame trên DNA.
+    Chi phí: 0 bytes. Quan hệ nằm trong THỨ TỰ trên chuỗi.
+
+  Hebbian Silk (explicit, learned):
+    = co-activation strength giữa 2 node
+    = KHÔNG hardcode — tính từ P_weight của 2 node tại thời điểm co-activate
+
+    co_activate(A, B):
+      emotion_factor = (|A.V| + |B.V|) / 2  × max(A.A, B.A) / 255
+        (cảm xúc càng mạnh → kết nối càng sâu)
+      Δw = emotion_factor × (1 − w_AB) × 0.1
+      w_AB ← w_AB + Δw
+
+    Ví dụ: "buồn"(V=−0.7) ↔ "mất_việc"(V=−0.6), A=0.5
+      emotion_factor = 0.65 × 0.5 = 0.325
+      Δw = 0.325 × (1 − 0) × 0.1 = 0.0325  (lần đầu)
+      Lặp lại nhiều lần → w tăng dần → kết nối mạnh
+
+    Mang EmotionTag = (V, A) tại khoảnh khắc co-activate.
+    Chi phí: stored trong SilkGraph (~43KB cho mạng đầy đủ).
+
+Structural Silk = genotype bond (thứ tự trên chuỗi)
+Hebbian Silk   = synaptic strength (học từ kinh nghiệm)
+
+Khi document nói "Silk = 0 bytes" → chỉ đúng với Structural Silk.
+Hebbian Silk = weight per edge = stored, updated, decayed.
 ```
 
 Khi CẦN so sánh 2 chuỗi (không phải lúc nào cũng cần):
@@ -598,7 +663,8 @@ Quên (chọn lọc tự nhiên):
     → Không dùng = quên. Dùng nhiều = nhớ.
 
 Promote (ngưỡng Fibonacci):
-  w ≥ φ⁻¹ AND fire_count ≥ Fib(n)
+  w ≥ φ⁻¹ (= 0.618) AND fire_count ≥ Fib(n)
+  φ⁻¹ = (√5−1)/2 ≈ 0.618 = ngưỡng tự nhiên, nhất quán với decay φ⁻¹
 
   Tầng bẩm sinh:    Fib(3) = 2
   Tầng kinh nghiệm: Fib(5) = 5
@@ -641,7 +707,11 @@ Dream(STM):
   ① Scan tất cả node Evaluating trong bộ nhớ ngắn hạn (STM)
 
   ② Cluster — gom node gần nhau trong 5D:
-     dist(A, B) = √( Σ_{d=1}^{5} (Aᵈ − Bᵈ)² )
+     dist(A, B) = √( Σ_{d=1}^{5} (Aᵈₙ − Bᵈₙ)² )
+     Normalize trước: mỗi chiều d → [0.0, 1.0]
+       S, R, T: enum index / max_enum  (S: 0..17 → /17, R: 0..7 → /7, T: 0..4 → /4)
+       V, A:    byte / 255             (0x00..0xFF → /255)
+     → 5 chiều cùng scale → distance có nghĩa
      ε = median(dist) × 0.5           (threshold thích ứng)
      min_size = max(2, ⌊|STM| / 5⌋)  (tối thiểu 2 node)
 
@@ -653,9 +723,10 @@ Dream(STM):
      cluster_center = LCA(cluster_members)
      advance() → Mature → append QR
 
-  ④ Prune — chuỗi yếu bị xóa:
-     weight < 0.1 AND fire_count = 0 sau N cycles → xóa
-     = apoptosis (chết tế bào theo chương trình)
+  ④ Prune — chuỗi yếu bị supersede:
+     weight < 0.1 AND fire_count = 0 sau N cycles → SupersedeQR record
+     KHÔNG xóa vật lý — ghi thêm record "đã thay thế" (append-only)
+     = apoptosis (chết tế bào theo chương trình, nhưng DNA vẫn còn đó)
 ```
 
 ### 4.2 Fibonacci KnowTree — Chuỗi gấp lại thành cây
