@@ -430,7 +430,7 @@ Có 3 loại KHÔNG được nhầm:
 u16 slot layout:
 
 ```
-[gen: 2 bits][address: 14 bits]
+[address: 14 bits] -> không can index trong cấu trúc mới
   gen=00: UDC base L0 (0..9583)   — 9,584 slots được dùng
   gen=01: learned L5  (early)     — 16,384 slots
   gen=10: learned L6+ (mature)    — 16,384 slots
