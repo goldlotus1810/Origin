@@ -1,9 +1,10 @@
 # PLAN_UDC_REBUILD — Xây dựng lại UDC.md đúng chuẩn
 
 > **Ngày tạo:** 2026-03-20
+> **Cập nhật:** 2026-03-20 (v3 — Unicode 18.0, emoji-data.txt canonical)
 > **Tác giả:** Lara (AI session)
 > **Branch:** `claude/lara-SBLZg`
-> **Trạng thái:** 🟡 DRAFT — cần review trước khi thực thi
+> **Trạng thái:** 🟢 ACTIVE — data files sẵn sàng, có thể thực thi
 
 ---
 
@@ -88,46 +89,67 @@ A: 0x00 (tĩnh lặng) → 0x80 (trung bình) → 0xFF (kích động mạnh)
 
 ---
 
-## 4. PHÂN NHÓM EMOJI (1,447 chars)
+## 4. PHÂN NHÓM EMOJI — Unicode 18.0 (3,966 fully-qualified)
 
-Từ `json/emoji/emoji-data.txt` — phân theo range codepoint:
+> **Nguồn:** `ucd_source/emoji-data.txt` (Unicode 18.0, ngày 2026-01-30)
+> **Số liệu thật:**
+> - `Emoji_Presentation` base codepoints: **1,228** (single cp + ranges)
+> - Fully-qualified sequences (từ emoji-test.txt): **3,966**
+> - Tất cả qualified (incl. minimally, unqualified): **5,244**
+
+Từ `ucd_source/emoji-data.txt` v18 — phân theo range codepoint:
 
 ```
-Nhóm 0: ASCII/Latin emoji (U+0023..U+00AE)       — 5 ranges  ~14 chars
+Nhóm 0: ASCII/Latin emoji (U+0023..U+00AE)           — 5 ranges  ~14 cp
   # * 0-9 © ® — ký hiệu text thông thường có emoji variant
 
-Nhóm 1: Geometric/Technical (U+2000..U+25FF)     — 21 ranges ~90 chars
+Nhóm 1: Geometric/Technical (U+2000..U+25FF)         — 21 ranges ~90 cp
   ⌚ ⌨ ⏏ ⏩ ⏰ ⚓ ⚡ — kỹ thuật + hình học
 
-Nhóm 2: Misc Symbols (U+2600..U+26FF)            — 55 ranges ~180 chars
+Nhóm 2: Misc Symbols (U+2600..U+26FF)                — 55 ranges ~180 cp
   ☀ ☁ ☔ ♈ ♥ ⚽ ⛄ — thời tiết, biểu tượng, thể thao
 
-Nhóm 3: Dingbats/Arrows (U+2700..U+28FF)         — 24 ranges ~80 chars
+Nhóm 3: Dingbats/Arrows (U+2700..U+28FF)             — 24 ranges ~80 cp
   ✅ ✊ ✨ ❌ ➕ ➰ — dấu check, mũi tên, ký hiệu
 
-Nhóm 4: Other BMP (U+3000..U+3FFF)               — 9 ranges  ~30 chars
+Nhóm 4: Other BMP (U+3000..U+3FFF)                   — 9 ranges  ~30 cp
   Ⓜ ㊗ ㊙ — ký hiệu CJK enclosed
 
-Nhóm 5: Mahjong/Cards (U+1F000..U+1F1FF)         — 7 ranges  ~50 chars
+Nhóm 5: Mahjong/Cards (U+1F000..U+1F1FF)             — 7 ranges  ~50 cp
   🀄 🃏 🅰 🅱 🆎 — bài, mạt chược
 
-Nhóm 6: Enclosed/Regional (U+1F200..U+1F2FF)     — 5 ranges  ~25 chars
+Nhóm 6: Enclosed/Regional (U+1F200..U+1F2FF)         — 5 ranges  ~25 cp
   🈁 🈶 🉐 — ký hiệu Nhật Bản
 
-Nhóm 7: Pictographs/Nature/Objects (U+1F300..U+1F5FF) — 120 ranges ~500 chars
+Nhóm 7: Pictographs/Nature/Objects (U+1F300..U+1F5FF)— 120 ranges ~500 cp
   🌀 🌊 🌱 🍎 🎀 🎭 🏠 🐶 — lớn nhất, đa dạng nhất
 
-Nhóm 8: Emoticons/Faces (U+1F600..U+1F64F)       — 31 ranges ~80 chars
+Nhóm 8: Emoticons/Faces (U+1F600..U+1F64F)           — 31 ranges ~80 cp
   😀 😂 😍 😭 🙏 — biểu cảm khuôn mặt
 
-Nhóm 9: Transport/Signs (U+1F680..U+1F8FF)       — 58 ranges ~200 chars
+Nhóm 9: Transport/Signs (U+1F680..U+1F8FF)           — 58 ranges ~200 cp
   🚀 🚗 🛒 🛸 — phương tiện, biển báo
 
-Nhóm B: Supplemental (U+1F900..U+1F9FF)          — 45 ranges ~150 chars
+Nhóm B: Supplemental (U+1F900..U+1F9FF)              — 45 ranges ~150 cp
   🤖 🤸 🤺 🥇 🦁 — người, động vật, biểu tượng mới
 
-Nhóm C: Extended (U+1FA00..U+1FAFF+)             — 44 ranges ~140 chars
-  🪄 🪅 🦾 🧬 — emoji mới nhất (v11+)
+Nhóm C: Extended-A (U+1FA00..U+1FAFF)                — 44 ranges ~140 cp
+  ♟ 🪄 🪅 🦾 🧬 — Chess (1FA00-1FA6F) + Pictographs (1FA70-1FAFF)
+  ⚠️ MỚI: 1FA00..1FA6F (Chess Symbols) chưa có trong build.rs cũ
+
+Nhóm D: Legacy Computing (U+1FB00..U+1FBFF) ← MỚI v18  — ~50 cp
+  Block/terminal symbols, SDF-like geometric shapes
+  ⚠️ Chưa có trong build.rs cũ
+```
+
+### Blocks mới trong v18 cần thêm vào build.rs GROUPS:
+```
+SDF group:
+  1FA00..1FA6F   Chess Symbols (hình học: ♟ quân cờ, geometric)
+  1FB00..1FBFF   Symbols for Legacy Computing (terminal blocks)
+
+MUSICAL group:
+  1D250..1D28F   Musical Symbols Supplement
 ```
 
 ---
@@ -342,15 +364,40 @@ json/
 
 ## 11. CÁC FILE THAM KHẢO
 
-| File | Dùng để |
-|------|---------|
-| `json/emoji/emoji-data.txt` | Nguồn chính — tên và codepoint emoji |
-| `json/emoji/emoji-variation-sequences.txt` | Emoji có text/graphic variant |
-| `json/Blocks.txt` | Range Unicode blocks cho UTF-32 alias |
-| `json/Index.txt` | Tên Unicode chính xác của UTF-32 chars |
-| `tmp_P_tree.md` | Cấu trúc cây tham khảo |
-| `old/HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2.md` | Triết lý P đúng |
+| File | Dùng để | Status |
+|------|---------|--------|
+| `ucd_source/UnicodeData.txt` | Tên + category mọi codepoint Unicode 18.0 | ✅ v18 sẵn sàng |
+| `ucd_source/emoji-data.txt` | **Nguồn canonical** — Emoji_Presentation property | ✅ v18 mới tải |
+| `ucd_source/emoji-test.txt` | 3,966 fully-qualified emoji list | ✅ v18 mới tải |
+| `ucd_source/Blocks.txt` | Range blocks Unicode 18.0 | ✅ v18 sẵn sàng |
+| `crates/ucd/build.rs` | Sinh bảng tĩnh lúc compile | 🔧 Cần thêm emoji-data.txt + v18 blocks |
+| `tmp_P_tree.md` | Cấu trúc cây tham khảo | 📖 tham khảo |
+| `old/HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2.md` | Triết lý P đúng | 📖 tham khảo |
+
+### Kiến trúc 2 thế giới (từ session 2026-03-20):
+```
+Emoji  🔥         = SDF node thật   = thế giới HÌNH ẢNH (human)
+Olang/UDC         = ngôn ngữ về emoji = thế giới TÍNH TOÁN (machine)
+Môi trường chung  = Unicode 18.0   = không gian định nghĩa chung
+
+Unicode codepoint U+1F525:
+  → Người: 🔥 (nhìn thấy ngay)
+  → Olang: "FIRE" == { S=Sphere R=Causes V=0xC0 A=0xC0 T=Fast }
+  → SDF:   f(p) = sphere SDF, màu cam/đỏ, ánh sáng động
+  → Cùng 1 codepoint, 3 cách nhìn, 1 Molecule
+```
+
+### Số liệu chuẩn Unicode 18.0:
+```
+Emoji_Presentation base codepoints: 1,228
+Fully-qualified sequences:          3,966
+Tất cả qualified:                   5,244
+Unicode assigned codepoints tổng:  41,382 (từ UnicodeData.txt)
+KnowTree key type cần dùng:        u32 (không phải u16)
+Dung lượng toàn bộ ~41K entries:   ~1.4 MB static array (tối ưu)
+```
 
 ---
 
-*Plan v2 — Cập nhật 2026-03-20 sau khi hiểu: Emoji = canonical nodes, UTF-32 = alias.*
+*Plan v3 — Cập nhật 2026-03-20: Unicode 18.0 data files đã có trong ucd_source/,
+emoji-data.txt là nguồn canonical cho EMOTICON group, 3 blocks mới cần thêm vào build.rs.*
