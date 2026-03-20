@@ -56,7 +56,8 @@ HomeOS:  ○{○{○{○{○{...}}}}}              (mỗi char = 1 node có tọ
 ### Nguyên lý — từ SINH_HOC_v2:
 ```
 UDC 9,584 chars (58 blocks)  = L0 KnowTree  → mỗi char có P_weight đầy đủ, SEALED
-Text (ngôn ngữ tự nhiên)     = ALIAS        → trỏ vào UDC node qua LCA
+P[UDC] -> P[node[ecomji]] qua LCA
+P[Text (ngôn ngữ tự nhiên)]     = ALIAS        → trỏ vào P[node[ecomji]] qua LCA
 
 Phân cấp trong 9,584:
   Emoji (visual, E.xx blocks) = neo cảm xúc mạnh nhất (V/A rõ ràng nhất)
@@ -127,12 +128,13 @@ KHÔNG derive tự động từ emoji-data.txt hay UnicodeData.txt.
 Chúng ta XÂY thủ công JSON → đó là nguồn dữ liệu canonical.
 
 Flow:
-  Người → nhìn emoji → encode P tay → ghi vào UDC.md (draft)
-  UDC.md → review + validate → ghi vào json/ucd.json (canonical source)
-  json/ucd.json → ucd crate đọc khi compile → build.rs nạp vào bảng tĩnh
+  Người → nhìn emoji → ghi vào UDC.md (draft)
+  UDC.md → review + validate → ghi vào json/ucd.json 
+  xây dựng công cụ mới chuyển mọi thứ thành P -> nạp giá trị từ json, tạo ra P thực tế.
+  P → ucd crate đọc khi compile → build.rs nạp vào bảng tĩnh
 
-Không có bước "parse emoji-data.txt để sinh P" — P là tri thức con người,
-không phải metadata Unicode. emoji-data.txt chỉ dùng để: tên emoji, codepoint range.
+Không có bước "parse emoji-data.txt để sinh P" — json/ucd.json là tri thức con người,
+P-> tên emoji, codepoint range.
 ```
 
 ---
