@@ -1,10 +1,94 @@
 # PLAN_UDC_REBUILD — Xây dựng lại UDC.md đúng chuẩn
 
 > **Ngày tạo:** 2026-03-20
-> **Cập nhật:** 2026-03-20 (v4 — hierarchy #emoji→P→alias, KnowTree=tree not flat, json/ucd.json là canonical source)
+> **Cập nhật:** 2026-03-20 (v5 — Unicode IS the taxonomy, JSON = editable layer, language data vào script blocks)
 > **Tác giả:** Lara (AI session)
 > **Branch:** `claude/lara-SBLZg`
 > **Trạng thái:** 🟢 ACTIVE — schema chuẩn, có thể bắt đầu encode
+
+---
+
+## 0. TỔNG HỢP — Những điều đã clarify (session 2026-03-20)
+
+### 0.1 Unicode IS the taxonomy
+
+```
+KHÔNG tự phân loại lại Unicode.
+Unicode đã có sẵn: index (UTF-32), block, category, properties — dùng nguyên.
+
+Hierarchy:
+  Codepoint (U+1F525)
+      └── Block ("Misc Symbols and Pictographs" 1F300..1F5FF)
+           └── Category ("So" = Other Symbol)
+                └── Property group ("Emoji_Presentation")
+
+Điểm chung (cùng block / cùng category) → 1 node đại diện → Silk đến từng codepoint.
+Không cần thêm tầng trung gian nào.
+```
+
+### 0.2 Ngôn ngữ quốc gia = vào block Unicode của ngôn ngữ đó
+
+```
+Vietnamese → Latin Extended (U+00C0..U+024F) — block này đã CÓ sẵn trong Unicode
+Chinese    → CJK Unified Ideographs (U+4E00..U+9FFF)
+Arabic     → Arabic block (U+0600..U+06FF)
+Japanese   → Hiragana (U+3040..U+309F) + Katakana (U+30A0..U+30FF)
+
+→ Dữ liệu ngôn ngữ tiếng Việt đi vào block node "Latin Extended"
+  (không tạo node riêng "Vietnamese")
+→ Alias tiếng Việt cho emoji/symbol → ghi tại codepoint đó trong JSON
+```
+
+### 0.3 Tại sao cần JSON (không dùng .txt trực tiếp)
+
+```
+UnicodeData.txt  = read-only, 1 entry/line, format cứng, không thể thêm field
+Blocks.txt       = chỉ có range + tên block, không có P values, không có aliases
+
+json/ucd.json    = structured, diff-able, AI + human có thể edit
+                 = thêm được: P values (S/R/V/A/T), aliases (vi/en/ja/zh), notes
+                 = build.rs đọc JSON lúc compile → sinh bảng tĩnh
+
+Flow đúng:
+  Unicode .txt ──(parse 1 lần)──► json/ucd.json (base: name, block, category)
+                                       │
+                              (human/AI thêm vào)
+                                       │
+                              P values + language aliases
+                                       │
+                              build.rs đọc → bảng tĩnh
+```
+
+### 0.4 Những cái cần chú ý
+
+```
+① Tên codepoint = từ UnicodeData.txt — KHÔNG đặt tên khác
+   "FIRE" đúng, "lửa" là ALIAS, không phải tên chính
+
+② Block node = đơn vị tổ chức cao nhất trong JSON
+   Mỗi block có P_default (giá trị mặc định cho cả block)
+   Codepoint individual override P_default nếu cần
+
+③ Alias = nhiều chiều:
+   - Alias ngôn ngữ (vi/en/ja/zh): "lửa" → U+1F525
+   - Alias UTF-32 (char khác → emoji): U+2605 ★ → canonical U+2B50 ⭐
+   - Alias text: "fire" → U+1F525
+
+④ Script blocks (ngôn ngữ quốc gia):
+   - KHÔNG cần encode P cho từng codepoint Latin/CJK/Arabic (quá nhiều)
+   - Chỉ cần: alias map (từ tiếng Việt → codepoint Unicode hoặc emoji tương ứng)
+   - VD: "buồn" → U+1F622 😢 (không phải encode từng ký tự "b","u","ồ","n")
+
+⑤ build.rs hiện tại (v5):
+   - Đang derive P tự động từ name patterns + block ranges (code logic)
+   - Sau UDC rebuild: build.rs đọc json/ucd.json → dùng P values từ JSON
+   - Giữ fallback: nếu codepoint không có trong JSON → dùng formula tự động
+
+⑥ Phân chia 3 loại entry trong JSON:
+   - "blocks": block nodes (P_default, dimension dominant)
+   - "codepoints": từng char với P explicit + aliases
+   - "script_aliases": ngôn ngữ tự nhiên → codepoint mapping
+```
 
 ---
 
@@ -329,104 +413,489 @@ Instant(4)  → tức thì, kích nổ, bùng phát: 💥⚡☇💢
 
 ---
 
-## 7. KẾ HOẠCH THỰC HIỆN
+## 7. KẾ HOẠCH THỰC HIỆN — PHÂN VIỆC CHI TIẾT
 
-### Phase 0: Skeleton (1 session)
-- [ ] Tạo `docs/UDC.md` với header + schema + bảng 5 chiều
-- [ ] Commit: `docs: create UDC.md skeleton`
-
-### Phase 1: E.09 — Emoticons/Faces (1 session, ~80 chars)
-**Lý do bắt đầu ở đây:** Faces = VA dominant → dễ nhất để NHÌN và encode tay
-**Quy trình bootstrap (từ SINH_HOC_v2):**
-  - NHÌN vào từng emoji
-  - HỎI: trông ra sao? làm gì? cảm giác thế nào? tốc độ?
-  - Ghi S, R, V, A, T → SEAL (không derive từ code)
-- [ ] U+1F600..U+1F64F: 80 emoji khuôn mặt → ghi vào UDC.md
-- [ ] Commit: `docs: UDC.md - E.09 Emoticons group (1F600-1F64F)`
-
-### Phase 2: Nhóm 2 — Misc Symbols (1 session, ~180 chars)
-- [ ] U+2600..U+26FF: thời tiết, biểu tượng, thể thao
-- [ ] Commit: `docs: UDC.md - Misc Symbols group (2600-26FF)`
-
-### Phase 3: Nhóm 3 — Dingbats/Arrows (1 session, ~80 chars)
-- [ ] U+2700..U+28FF
-- [ ] Commit: `docs: UDC.md - Dingbats/Arrows group (2700-28FF)`
-
-### Phase 4: Nhóm 1 — Geometric/Technical (1 session, ~90 chars)
-- [ ] U+2000..U+25FF
-- [ ] **+ alias map**: UTF-32 geometric → emoji
-
-### Phase 5: Nhóm 7 — Pictographs/Nature/Objects (nhiều sessions, ~500 chars)
-**Lớn nhất** — chia thành sub-sessions:
-- [ ] 7a: Weather & Nature (🌀🌊🌱) — ~80 chars
-- [ ] 7b: Food & Drink (🍎🍕🍺) — ~100 chars
-- [ ] 7c: Animals (🐶🐱🦁) — ~100 chars
-- [ ] 7d: Objects & Tools (🎀🏠🔧) — ~100 chars
-- [ ] 7e: Activities (🎭🏃⚽) — ~120 chars
-
-### Phase 6: Nhóm 9 — Transport/Signs (~200 chars)
-- [ ] 9a: Vehicles (🚀🚗🚂) — ~80 chars
-- [ ] 9b: Signs & Symbols (🛒🚦🚫) — ~120 chars
-
-### Phase 7: Nhóm B+C — Supplemental + Extended (~290 chars)
-- [ ] B: 1F900..1F9FF (🤖🦁🥇)
-- [ ] C: 1FA00..1FAFF (🪄🧬🦾)
-
-### Phase 8: Nhóm 0+4+5+6 — Misc small groups (~120 chars)
-- [ ] ASCII emoji (#️ *️ 0️-9️ ©️ ®️)
-- [ ] BMP misc (Ⓜ ㊗)
-- [ ] Mahjong/Cards
-- [ ] CJK enclosed
-
-### Phase 9: Alias Map (1 session)
-- [ ] Tạo `docs/UDC_ALIAS.md`: mọi UTF-32 symbol → emoji alias
-- [ ] Geometric shapes → emoji hình dạng tương ứng
-- [ ] Math operators → emoji quan hệ tương ứng
-- [ ] Musical symbols → emoji thời gian tương ứng
-
-### Phase 10: Sinh JSON (1 session)
-- [ ] Script parse UDC.md + UDC_ALIAS.md
-- [ ] Sinh `json/ucd_utf32.json`
-- [ ] Verify: coverage, format, no duplicates
+> **Nguyên tắc phân việc:**
+> - Mỗi task = 1 Unicode block group → 1 commit
+> - Ưu tiên blocks có VA rõ ràng nhất (Emoticons) → dễ validate
+> - Script aliases (ngôn ngữ) = task riêng, song song được
+> - build.rs update = task cuối (sau khi JSON đủ dữ liệu)
 
 ---
 
-## 8. OUTPUT CUỐI CÙNG
+### Task 0: Scaffold JSON + update build.rs để đọc JSON (1 session)
+
+**Mục tiêu:** Tạo skeleton, wire build.rs đọc JSON trước khi điền data.
+
+```
+Files tạo/sửa:
+  json/ucd.json          ← tạo mới, skeleton (meta + blocks rỗng)
+  crates/ucd/build.rs    ← thêm: đọc json/ucd.json nếu tồn tại
+                            Priority: json values > formula auto-derive
+```
+
+Checklist:
+- [ ] Tạo `json/ucd.json` với `_meta` + `blocks: {}` + `codepoints: {}` + `script_aliases: {}` + `utf32_aliases: {}`
+- [ ] `build.rs`: thêm `fn load_json_overrides()` → đọc `json/ucd.json`
+- [ ] `build.rs`: nếu codepoint có trong JSON → dùng P từ JSON; nếu không → formula tự động
+- [ ] Test: `cargo test -p ucd` vẫn pass
+- [ ] Commit: `feat(ucd): scaffold json/ucd.json + build.rs JSON override`
+
+---
+
+### Task 1: Blocks metadata (1 session)
+
+**Mục tiêu:** Điền `"blocks"` section — P_default cho 58 blocks.
+
+```
+Ưu tiên điền trước (theo dimension dominant):
+  VA blocks (EMOTICON): 1F600-1F64F, 1F300-1F5FF, 2600-26FF, 1F900-1F9FF, 1FA70-1FAFF
+  R blocks (MATH):      2200-22FF, 2A00-2AFF, 2980-29FF, 27C0-27EF
+  S blocks (SDF):       25A0-25FF, 2500-257F, 2580-259F, 2190-21FF, 2B00-2BFF
+  T blocks (MUSICAL):   1D100-1D1FF, 4DC0-4DFF, 1D300-1D35F
+```
+
+Checklist:
+- [ ] Điền P_default cho 17 EMOTICON blocks (VA dominant)
+- [ ] Điền P_default cho 21 MATH blocks (R dominant)
+- [ ] Điền P_default cho 13 SDF blocks (S dominant)
+- [ ] Điền P_default cho 7 MUSICAL blocks (T dominant)
+- [ ] Commit: `docs(ucd): blocks metadata - P_default for 58 Unicode blocks`
+
+---
+
+### Task 2: Emoticons/Faces — U+1F600..U+1F64F (1 session, ~80 chars)
+
+**Lý do bắt đầu ở đây:** VA rõ ràng nhất → dễ encode tay + dễ validate.
+
+```
+Quy trình:
+  NHÌN từng emoji → HỎI: cảm giác gì? mạnh/yếu? nhanh/chậm?
+  Ghi S, R, V, A, T → thêm aliases vi/en → SEAL
+```
+
+Sub-tasks:
+- [ ] **2a** U+1F600..U+1F60F: 16 happy/laugh faces (V: 0xC0..0xFF)
+      🎯 Anchor: 1F600 😀 V=0xE0 A=0xC0 T=Fast
+- [ ] **2b** U+1F610..U+1F61F: 16 neutral/worried faces (V: 0x60..0x90)
+      🎯 Anchor: 1F610 😐 V=0x80 A=0x20 T=Static
+- [ ] **2c** U+1F620..U+1F62F: 16 angry/sad faces (V: 0x10..0x50)
+      🎯 Anchor: 1F622 😢 V=0x30 A=0x60 T=Slow
+- [ ] **2d** U+1F630..U+1F64F: 32 misc faces (fear/sick/gesture)
+      🎯 Anchor: 1F631 😱 V=0x10 A=0xFF T=Instant
+- [ ] Thêm `aliases.vi` + `aliases.en` cho mỗi emoji
+- [ ] Commit: `docs(ucd): codepoints - E.09 Emoticons/Faces (1F600-1F64F)`
+
+---
+
+### Task 3: Misc Symbols — U+2600..U+26FF (1 session, ~100 chars quan trọng)
+
+```
+Nhóm con:
+  2600..260F: thời tiết (☀☁☂☃☄)     → S dominant nhẹ, VA medium
+  2610..261F: boxes/ballots (☐☑☒)    → S=Square
+  2620..262F: hazard/skull (☠☢☣)     → V thấp
+  2630..263F: yin-yang/stars (☯★)    → VA balanced
+  2640..265F: chess/signs (♟♠♣)      → R dominant
+  2660..266F: music notes (♩♪♫♬)    → T dominant!
+  2680..26FF: dice/sports (⚀⚽⚾)    → A medium
+```
+
+Checklist:
+- [ ] 2600..260F: weather (7 chars chính)
+- [ ] 2620..262F: hazard/danger (V thấp)
+- [ ] 2630..263F: yin-yang, stars
+- [ ] 2660..266F: music notes → T dimension
+- [ ] 2680..26FF: sports/dice
+- [ ] Aliases vi + en
+- [ ] Commit: `docs(ucd): codepoints - Misc Symbols (2600-26FF)`
+
+---
+
+### Task 4: Geometric Shapes — U+25A0..U+25FF (1 session, ~60 chars chính)
+
+**8 SDF primitives nằm ở đây** — quan trọng nhất.
+
+```
+SDF Primitives (PHẢI encode chính xác):
+  25CF ● BLACK CIRCLE   → S=Sphere   R=Member  V=0x40 A=0x40 T=Static
+  25AC ▬ BLACK RECT     → S=Capsule  R=Member  V=0x40 A=0x40 T=Static
+  25A0 ■ BLACK SQUARE   → S=Box      R=Subset  V=0x40 A=0x40 T=Static
+  25B2 ▲ BLACK TRIANGLE → S=Cone     R=Causes  V=0x60 A=0x80 T=Fast
+  25CB ○ WHITE CIRCLE   → S=Torus    R=Member  V=0x80 A=0x20 T=Static
+  222A ∪ UNION          → S=Union    R=Member  V=0x80 A=0x40 T=Static
+  2229 ∩ INTERSECTION   → S=Intersect R=Intersect V=0x80 A=0x40 T=Static
+  2216 ∖ SET MINUS      → S=SetMinus R=SetMinus V=0x40 A=0x60 T=Fast
+```
+
+Checklist:
+- [ ] Encode 8 SDF primitives chính xác
+- [ ] Encode colored variants: 🔴🟠🟡🟢🔵🟣⚫⚪ (1F534..1F7E3 region)
+- [ ] Encode squares/diamonds/triangles quan trọng
+- [ ] Aliases vi + en
+- [ ] Commit: `docs(ucd): codepoints - Geometric Shapes (25A0-25FF) + SDF primitives`
+
+---
+
+### Task 5: Math Operators — U+2200..U+22FF (1 session, ~50 chars quan trọng)
+
+**8 Relation primitives nằm ở đây** — quan trọng nhất.
+
+```
+Relation Primitives (PHẢI encode chính xác):
+  2208 ∈ ELEMENT OF    → R=Member      V=0x80 A=0x20 T=Static
+  2282 ⊂ SUBSET OF     → R=Subset      V=0x80 A=0x20 T=Static
+  2261 ≡ IDENTICAL TO  → R=Equiv       V=0x80 A=0x10 T=Static
+  22A5 ⊥ UP TACK       → R=Orthogonal  V=0x80 A=0x20 T=Static
+  2218 ∘ RING OP       → R=Compose     V=0x80 A=0x40 T=Medium
+  2192 → RIGHTWARDS    → R=Causes      V=0x90 A=0x60 T=Fast
+  2248 ≈ ALMOST EQUAL  → R=Approx     V=0x80 A=0x20 T=Slow
+  2190 ← LEFTWARDS     → R=Inverse    V=0x70 A=0x40 T=Fast
+```
+
+Checklist:
+- [ ] Encode 8 Relation primitives chính xác
+- [ ] Encode các operators logic thường dùng: ∧∨¬∀∃
+- [ ] Encode operators số học: ±×÷∞
+- [ ] Aliases vi + en (tên toán học)
+- [ ] Commit: `docs(ucd): codepoints - Mathematical Operators (2200-22FF) + Relation primitives`
+
+---
+
+### Task 6: Pictographs/Objects lớn — U+1F300..U+1F5FF (2-3 sessions, ~200 chars)
+
+**Block lớn nhất** — chia sub-tasks:
+
+- [ ] **6a** Nature/Weather (1F300..1F32F): 🌀🌊🌱🌺🌸 — ~50 chars
+      Commit: `docs(ucd): codepoints - Nature/Weather (1F300-1F32F)`
+
+- [ ] **6b** Sky/Space (1F330..1F37F): 🌍🌙⭐🌟 — ~30 chars
+      Commit: `docs(ucd): codepoints - Sky/Space (1F330-1F37F)`
+
+- [ ] **6c** Food/Drink (1F380..1F3FF): 🍎🍕🍺🎂 — ~60 chars
+      Commit: `docs(ucd): codepoints - Food/Objects (1F380-1F3FF)`
+
+- [ ] **6d** People/Body (1F440..1F4FF): 👁👂👃💪🦶 — ~40 chars
+      Commit: `docs(ucd): codepoints - People/Body (1F440-1F4FF)`
+
+- [ ] **6e** Office/Tools (1F500..1F5FF): 📱💡🔧🔑📦 — ~40 chars
+      Commit: `docs(ucd): codepoints - Tools/Office (1F500-1F5FF)`
+
+---
+
+### Task 7: Transport + Activities — U+1F680..U+1F6FF (1 session)
+
+```
+1F680..1F6BF: vehicles (🚀🚂🚗🚢✈️)
+1F6C0..1F6FF: signs/facilities (🚦🚫🛒)
+```
+
+- [ ] Encode ~40 chars chính
+- [ ] Aliases vi + en
+- [ ] Commit: `docs(ucd): codepoints - Transport/Signs (1F680-1F6FF)`
+
+---
+
+### Task 8: Supplemental Symbols — U+1F900..U+1FAFF (1 session)
+
+```
+1F900..1F9FF: 🤖🦁🥇🧠 (mới trong Unicode 9-13)
+1FA70..1FAFF: 🪄🧬🦾 (mới nhất Unicode 12-14)
+```
+
+- [ ] Encode ~60 chars chính
+- [ ] Aliases vi + en
+- [ ] Commit: `docs(ucd): codepoints - Supplemental Symbols (1F900-1FAFF)`
+
+---
+
+### Task 9: Musical Symbols — U+1D100..U+1D1FF (1 session)
+
+**T dimension canonical** — note duration = Time value.
+
+```
+T mapping từ note duration:
+  Whole note    → T=Static(0)   (longest, held)
+  Half note     → T=Slow(1)
+  Quarter note  → T=Medium(2)   (beat = standard)
+  Eighth note   → T=Fast(3)
+  Sixteenth     → T=Instant(4)  (shortest)
+
+Musical dynamics → A dimension:
+  pp (pianissimo) → A=0x10
+  p  (piano)      → A=0x40
+  mf (mezzo)      → A=0x80
+  f  (forte)      → A=0xC0
+  ff (fortissimo) → A=0xFF
+```
+
+- [ ] Encode ~40 chars chính (notes + rests + dynamics)
+- [ ] Aliases vi + en (tên nhạc lý)
+- [ ] Commit: `docs(ucd): codepoints - Musical Symbols (1D100-1D1FF)`
+
+---
+
+### Task 10: Script Aliases — Ngôn ngữ tự nhiên (song song với Task 2-9)
+
+**Không cần đợi Task 2-9 xong** — chỉ cần Task 0 (scaffold) xong.
+
+- [ ] **10a** Vietnamese (`script_aliases.vi`):
+      ~200 từ cảm xúc + hành động + vật thể thường dùng
+      Commit: `docs(ucd): script_aliases - Vietnamese (vi)`
+
+- [ ] **10b** English (`script_aliases.en`):
+      ~200 từ tương ứng
+      Commit: `docs(ucd): script_aliases - English (en)`
+
+- [ ] **10c** UTF-32 aliases (`utf32_aliases`):
+      Geometric shapes → emoji canonical
+      Math operators → emoji tương ứng
+      Commit: `docs(ucd): utf32_aliases - geometric + math mappings`
+
+---
+
+### Task 11: build.rs — đọc JSON thực sự (1 session)
+
+**Sau khi Task 1-9 có đủ data** — wire hoàn chỉnh.
+
+```
+build.rs update:
+  1. Parse json/ucd.json (serde_json hoặc tự parse đơn giản)
+  2. Merge với UnicodeData.txt:
+     - Nếu codepoint có P trong JSON → dùng JSON values (SEALED)
+     - Nếu không có → formula tự động (fallback hiện tại)
+  3. Thêm bảng mới vào ucd_generated.rs:
+     ALIAS_TABLE    — text alias → chain_hash (binary search)
+     BLOCK_TABLE    — block_range → P_default (lookup by cp)
+```
+
+Checklist:
+- [ ] Viết `parse_ucd_json()` trong build.rs (~50 LOC)
+- [ ] Merge P values: JSON priority > formula
+- [ ] Sinh `ALIAS_TABLE: &[(&str, u64)]` (alias → hash)
+- [ ] Test: verify 8 SDF primitives + 8 Relation primitives có P đúng
+- [ ] `cargo test -p ucd` pass
+- [ ] `make smoke-binary` pass
+- [ ] Commit: `feat(ucd): build.rs reads json/ucd.json for P values`
+
+---
+
+### Task 12: lib.rs — API mới cho JSON layer (1 session)
+
+```
+Thêm vào crates/ucd/src/lib.rs:
+  lookup_alias(text: &str) → Option<u64>   // "lửa" → chain_hash
+  lookup_block(cp: u32) → Option<BlockEntry> // cp → block P_default
+  alias_candidates(partial: &str) → Vec<&str> // autocomplete
+```
+
+Checklist:
+- [ ] Implement `lookup_alias()`
+- [ ] Implement `lookup_block()`
+- [ ] 5 tests mới
+- [ ] Commit: `feat(ucd): alias lookup + block lookup API`
+
+---
+
+### Thứ tự ưu tiên thực hiện:
+
+```
+Đợt 1 (BẮT BUỘC làm trước):
+  Task 0 → scaffold JSON + build.rs wire
+  Task 1 → blocks metadata (P_default cho 58 blocks)
+
+Đợt 2 (Core anchors — cần sớm):
+  Task 2 → Emoticons/Faces (VA anchors)
+  Task 4 → Geometric Shapes (SDF primitives)
+  Task 5 → Math Operators (Relation primitives)
+
+Đợt 3 (Mở rộng — song song được):
+  Task 3 → Misc Symbols
+  Task 9 → Musical Symbols (T anchors)
+  Task 10a → Vietnamese aliases
+
+Đợt 4 (Large blocks — nhiều session):
+  Task 6 (6a..6e) → Pictographs (chia nhỏ)
+  Task 7 → Transport
+  Task 8 → Supplemental
+
+Đợt 5 (Wire hoàn chỉnh):
+  Task 11 → build.rs đọc JSON
+  Task 12 → API mới
+
+Total estimate: ~15-20 sessions (mỗi task = 1 session)
+```
+
+---
+
+## 8. OUTPUT CUỐI CÙNG + CẤU TRÚC JSON
 
 ```
 docs/
   UDC.md          — P definition cho ~9,584 chars (draft, human-readable)
 
 json/
-  ucd.json        — INPUT VALUES: canonical nodes + alias chain (tool đọc → sinh P)
+  ucd.json        — canonical source: blocks + codepoints + language aliases
 ```
 
-### JSON format (3 sections = 3 loại node):
+### JSON format đầy đủ (v5):
+
 ```json
 {
-  "udc": {
-    "2605": { "name": "BLACK_STAR",   "S": 3, "R": 5, "V": 176, "A": 160, "T": 3 },
-    "25A0": { "name": "BLACK_SQUARE", "S": 2, "R": 1, "V": 128, "A": 64,  "T": 0 },
-    "2208": { "name": "ELEMENT_OF",   "S": 0, "R": 0, "V": 128, "A": 64,  "T": 2 }
+  "_meta": {
+    "version": "0.05",
+    "unicode_version": "18.0",
+    "source": "UnicodeData.txt + Blocks.txt + emoji-data.txt",
+    "note": "P values = human-encoded, SEALED. Aliases = extensible."
   },
-  "emoji": {
-    "1F525": { "name": "FIRE",        "S": 0, "R": 5, "V": 192, "A": 192, "T": 3 },
-    "1F622": { "name": "CRYING_FACE", "S": 0, "R": 0, "V": 48,  "A": 96,  "T": 1 },
-    "1F7E5": { "name": "RED_SQUARE",  "S": 2, "R": 1, "V": 192, "A": 128, "T": 0 }
+
+  "blocks": {
+    "1F300-1F5FF": {
+      "name": "Miscellaneous Symbols and Pictographs",
+      "dimension": "VA",
+      "P_default": { "S": 0, "R": 0, "V": 128, "A": 128, "T": 2 },
+      "note": "Largest EMOTICON block, ~768 chars"
+    },
+    "1F600-1F64F": {
+      "name": "Emoticons",
+      "dimension": "VA",
+      "P_default": { "S": 0, "R": 0, "V": 128, "A": 128, "T": 2 }
+    },
+    "2200-22FF": {
+      "name": "Mathematical Operators",
+      "dimension": "R",
+      "P_default": { "S": 5, "R": 0, "V": 128, "A": 32, "T": 0 },
+      "note": "R dominant — 8 relation primitives nằm ở đây"
+    },
+    "25A0-25FF": {
+      "name": "Geometric Shapes",
+      "dimension": "S",
+      "P_default": { "S": 0, "R": 0, "V": 128, "A": 64, "T": 0 },
+      "note": "S dominant — 8 SDF primitives nằm ở đây"
+    },
+    "1D100-1D1FF": {
+      "name": "Musical Symbols",
+      "dimension": "T",
+      "P_default": { "S": 5, "R": 7, "V": 160, "A": 128, "T": 2 },
+      "note": "T dominant — note duration = Time dimension"
+    }
   },
-  "aliases": {
-    "1F625": { "canonical": "1F622", "A": 112 },
-    "vi": { "lửa": "1F525", "buồn": "1F622", "ngôi sao": "2605" },
-    "en": { "fire": "1F525", "sad":  "1F622", "star": "2605" }
+
+  "codepoints": {
+    "1F525": {
+      "name": "FIRE",
+      "block": "1F300-1F5FF",
+      "category": "So",
+      "S": 0, "R": 5, "V": 192, "A": 192, "T": 3,
+      "aliases": {
+        "vi": ["lửa", "ngọn lửa", "đám cháy"],
+        "en": ["fire", "flame", "blaze"],
+        "ja": ["火", "炎"],
+        "zh": ["火", "火焰"]
+      }
+    },
+    "1F622": {
+      "name": "CRYING FACE",
+      "block": "1F600-1F64F",
+      "category": "So",
+      "S": 0, "R": 0, "V": 48, "A": 96, "T": 1,
+      "aliases": {
+        "vi": ["khóc", "buồn", "nước mắt"],
+        "en": ["crying", "sad", "tears"]
+      }
+    },
+    "2208": {
+      "name": "ELEMENT OF",
+      "block": "2200-22FF",
+      "category": "Sm",
+      "S": 5, "R": 0, "V": 128, "A": 32, "T": 0,
+      "aliases": {
+        "en": ["element of", "belongs to", "in"],
+        "vi": ["thuộc", "là thành viên của"]
+      }
+    },
+    "25CF": {
+      "name": "BLACK CIRCLE",
+      "block": "25A0-25FF",
+      "category": "So",
+      "S": 0, "R": 0, "V": 64, "A": 64, "T": 0,
+      "aliases": {
+        "en": ["black circle", "filled circle", "bullet"],
+        "vi": ["vòng tròn đen", "chấm tròn"]
+      }
+    }
+  },
+
+  "script_aliases": {
+    "vi": {
+      "_block": "00C0-024F",
+      "_note": "Latin Extended — chứa toàn bộ ký tự có dấu tiếng Việt",
+      "vui": "1F601",
+      "buồn": "1F622",
+      "tức": "1F621",
+      "sợ": "1F628",
+      "yêu": "2764",
+      "lửa": "1F525",
+      "nước": "1F4A7",
+      "cây": "1F333",
+      "nhà": "1F3E0",
+      "tim": "2764",
+      "nguy hiểm": "26A0",
+      "chết": "1F480",
+      "ánh sáng": "1F4A1",
+      "âm nhạc": "1F3B5"
+    },
+    "en": {
+      "_block": "0000-007F",
+      "_note": "Basic Latin — ASCII range",
+      "fire": "1F525",
+      "sad": "1F622",
+      "angry": "1F621",
+      "scared": "1F628",
+      "love": "2764",
+      "water": "1F4A7",
+      "tree": "1F333",
+      "house": "1F3E0",
+      "heart": "2764",
+      "danger": "26A0",
+      "death": "1F480",
+      "light": "1F4A1",
+      "music": "1F3B5"
+    }
+  },
+
+  "utf32_aliases": {
+    "2605": { "canonical": "2B50", "note": "BLACK STAR → WHITE MEDIUM STAR (brighter)" },
+    "25A0": { "canonical": "1F7E5", "V_override": 128, "note": "BLACK SQUARE → neutral (no color)" },
+    "2192": { "canonical": "27A1",  "note": "RIGHTWARDS ARROW → simpler arrow" }
   }
 }
 ```
 
-P[gốc] (công thức) đọc json → tính P cho cả 3 loại → SEAL:
+### Giải thích 4 sections:
+
 ```
-P[UDC]   P[0x2605]  = { S=Triangle, R=Causes, V=0xB0, A=0xA0, T=Fast }   ← SEALED
-P[emoji] P[0x1F525] = { S=Sphere,   R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED
-P[alias] P["lửa"]   = { S=Sphere,   R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED
+"blocks"         → Block nodes: P_default + dimension dominant
+                   Silk tự động từ block node → mọi codepoint trong block
+
+"codepoints"     → Từng char: P explicit (override P_default) + language aliases
+                   Chỉ cần encode những char QUAN TRỌNG (~500 anchor chars)
+                   Phần còn lại dùng P_default của block
+
+"script_aliases" → Natural language → codepoint mapping
+                   "lửa" → "1F525" (không encode từng ký tự l,ử,a)
+                   Mỗi ngôn ngữ có _block trỏ tới Unicode block của nó
+
+"utf32_aliases"  → UTF-32 symbol → canonical emoji
+                   ★ (2605) → ⭐ (2B50) với V override nếu cần
+```
+
+P[gốc] đọc json → tính P → SEAL:
+```
+blocks["1F300-1F5FF"].P_default       → P block node   SEALED
+codepoints["1F525"].{S,R,V,A,T}       → P codepoint    SEALED
+script_aliases["vi"]["lửa"] = "1F525" → P["lửa"] = copy từ P["1F525"]  SEALED
+utf32_aliases["2605"].canonical        → P["2605"] = P["2B50"] + V_override SEALED
 ```
 
 build.rs đọc bảng P đã tính → nạp vào bảng tĩnh lúc compile.
