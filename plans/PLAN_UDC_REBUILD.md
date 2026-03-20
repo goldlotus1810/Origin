@@ -1,10 +1,10 @@
 # PLAN_UDC_REBUILD — Xây dựng lại UDC.md đúng chuẩn
 
 > **Ngày tạo:** 2026-03-20
-> **Cập nhật:** 2026-03-20 (v3 — Unicode 18.0, emoji-data.txt canonical)
+> **Cập nhật:** 2026-03-20 (v4 — hierarchy #emoji→P→alias, KnowTree=tree not flat, json/ucd.json là canonical source)
 > **Tác giả:** Lara (AI session)
 > **Branch:** `claude/lara-SBLZg`
-> **Trạng thái:** 🟢 ACTIVE — data files sẵn sàng, có thể thực thi
+> **Trạng thái:** 🟢 ACTIVE — schema chuẩn, có thể bắt đầu encode
 
 ---
 
@@ -71,33 +71,68 @@ Ví dụ:
   "red square"         → alias → 🟥
 ```
 
-### KnowTree structure (từ SINH_HOC_v2):
+### KnowTree là CÂY, không phải 1 flat array:
 ```
-KnowTree = array 65,536 phần tử (u16 index):
-  [gen: 2 bits][address: 14 bits]
-    gen=00: UDC base L0 (0..9583)    — 9,584 slots
-    gen=01: learned L5  (early)      — 16,384 slots
-    gen=10: learned L6+ (mature)     — 16,384 slots
-    gen=11: system/reserved          — 16,384 slots
+KnowTree = cây Fibonacci nhiều tầng:
 
-  Mỗi phần tử = P_weight: Mol (5 bytes)
-  KnowTree toàn bộ: 65,536 × 5B = 328 KB  ← vừa L1 cache!
+  Root branch (L0 working memory):
+    Array 65,536 × 5B = 328KB  ← ĐÂY CHỈ LÀ 1 NHÁNH (root branch)
+    KnowTree[u16] → P_weight   — O(1), không cần hash
+    9,584 slots đầu = UDC L0   — phần còn lại = learned/system
 
-  KnowTree[codepoint] → P_weight  — O(1), không cần hash
-  Chain link = u16 (2 bytes) = đủ trỏ vào toàn bộ KnowTree
+  Cây đầy đủ (nhiều tầng):
+    L0: 9,584 UDC nodes (root)
+    L1: LCA clusters của kinh nghiệm học
+    L2: LCA clusters cấp cao hơn
+    ...
+    → Cây tăng trưởng theo Fibonacci khi học thêm
+    → Mỗi tầng có root branch riêng (u16 indexed)
+    → 65,536 = kích thước MỖI nhánh, không phải toàn bộ cây
+
+  Ví dụ (v2 Section 4.2): 1 cuốn sách 100 trang:
+    L0: 1,700 nodes (câu/ý)
+    L1:    50 nodes (đoạn văn, gom Fib[8]=34)
+    L2:     3 nodes (mục/phần)
+    L3:     1 node  (cuốn sách)
+    → Mỗi L có root branch riêng, mỗi branch ≤ 65,536 slots
+
+Chain link = u16 (2 bytes) = index vào branch của tầng hiện tại
+⚠️ u16 là ĐÚNG — không phải u32. v2 đã xác nhận rõ.
+
+### Hierarchy: #emoji → P → alias → alias → ...
+```
+Mỗi emoji = canonical root node (#emoji):
+  → có P_weight đầy đủ (S, R, V, A, T) — SEAL
+  → mọi thứ khác ALIAS về nó
+
+Ví dụ:
+  #🔥 (U+1F525)  P = { S=Sphere R=Causes V=0xC0 A=0xC0 T=Fast }
+    ↳ alias: U+2605 ★ (ngôi sao → lửa sáng, V override=0xB0)
+    ↳ alias: "lửa" (tiếng Việt)
+    ↳ alias: "fire" (tiếng Anh)
+    ↳ alias: "feu" (tiếng Pháp)
+
+  #😢 (U+1F622)  P = { S=Sphere R=Member V=0x30 A=0x60 T=Slow }
+    ↳ alias: U+1F625 😥 (sad but relieved — gần nhau về VA)
+    ↳ alias: "buồn" (tiếng Việt)
+    ↳ alias: "sad" (tiếng Anh)
+
+Chain: #emoji có P → alias chỉ lưu {canonical_cp, V_override?, A_override?}
+Alias KHÔNG copy P — chỉ trỏ vào canonical, optional override V/A
 ```
 
-⚠️ **u16 là ĐÚNG** — không phải u32. v2 đã xác nhận rõ.
-
-### Flow sinh UDC.md:
+### Flow xây dữ liệu (không phải parse từ txt):
 ```
-58 Unicode blocks (9,584 chars)
-  → UDC.md: với mỗi char, người encode:
-      NHÌN vào ký tự / emoji
-      HỎI: "Nó trông ra sao? Nó làm gì? Cảm giác thế nào? Tốc độ?"
-      → ghi P_weight = (S, R, V, A, T) → SEAL
-  → alias_map: text/language → UDC node
-  → ucd_utf32.json: { codepoint: P_weight }
+KHÔNG derive tự động từ emoji-data.txt hay UnicodeData.txt.
+Chúng ta XÂY thủ công JSON → đó là nguồn dữ liệu canonical.
+
+Flow:
+  Người → nhìn emoji → encode P tay → ghi vào UDC.md (draft)
+  UDC.md → review + validate → ghi vào json/ucd.json (canonical source)
+  json/ucd.json → ucd crate đọc khi compile → build.rs nạp vào bảng tĩnh
+
+Không có bước "parse emoji-data.txt để sinh P" — P là tri thức con người,
+không phải metadata Unicode. emoji-data.txt chỉ dùng để: tên emoji, codepoint range.
 ```
 
 ---
@@ -350,49 +385,72 @@ Instant(4)  → tức thì, kích nổ, bùng phát: 💥⚡☇💢
 
 ```
 docs/
-  UDC.md          — P definition cho 1,447 emoji
-  UDC_ALIAS.md    — UTF-32 → emoji alias map
+  UDC.md          — P definition cho ~9,584 chars (draft, human-readable)
 
 json/
-  ucd_utf32.json  — { "1F525": {S:0, R:5, V:192, A:192, T:3}, ... }
+  ucd.json        — CANONICAL SOURCE: canonical nodes + alias chain
 ```
 
-### JSON format:
+### JSON format (canonical nodes + alias chain):
 ```json
 {
-  "1F525": { "name": "FIRE",        "S": 0, "R": 5, "V": 192, "A": 192, "T": 3 },
-  "1F600": { "name": "GRINNING_FACE","S": 0, "R": 0, "V": 230, "A": 180, "T": 2 },
-  "25A0":  { "name": "BLACK_SQUARE", "alias": "1F7E5", "V_override": 64 }
+  "nodes": {
+    "1F525": { "name": "FIRE",         "S": 0, "R": 5, "V": 192, "A": 192, "T": 3 },
+    "1F622": { "name": "CRYING_FACE",  "S": 0, "R": 0, "V": 48,  "A": 96,  "T": 1 },
+    "1F7E5": { "name": "RED_SQUARE",   "S": 2, "R": 1, "V": 192, "A": 128, "T": 0 }
+  },
+  "aliases": {
+    "2605":   { "canonical": "1F525", "V_override": 176 },
+    "25A0":   { "canonical": "1F7E5" },
+    "1F625":  { "canonical": "1F622", "A_override": 112 }
+  },
+  "text_aliases": {
+    "vi": {
+      "lửa":  "1F525",
+      "buồn": "1F622"
+    },
+    "en": {
+      "fire": "1F525",
+      "sad":  "1F622"
+    }
+  }
 }
 ```
+
+⚠️ **ucd.json là CANONICAL SOURCE** — không phải output được generate.
+build.rs đọc file này khi compile → sinh bảng tĩnh.
 
 ---
 
 ## 9. NGUYÊN TẮC BẤT BIẾN
 
 ```
-① Mọi P value phải có LÝ DO từ emoji-data.txt hoặc Unicode name
-② Emoji name = tên chính xác từ emoji-data.txt (UPPERCASE, underscore)
-③ Mỗi emoji có DUY NHẤT 1 dòng Olang
-④ Alias không thay đổi S, R, T — chỉ có thể override V và/hoặc A
-⑤ Olang dùng tên enum (S=Square), JSON dùng số (S=2)
-⑥ Nhóm 7 (Pictographs) là phức tạp nhất — luôn làm sub-session nhỏ
+① #emoji là CANONICAL NODE — có P đầy đủ, không derive từ code
+② P value là tri thức con người (nhìn → encode) — không phải metadata Unicode
+③ Alias KHÔNG copy P — chỉ trỏ canonical + optional V/A override
+④ Alias chỉ override V và/hoặc A — KHÔNG override S, R, T
+⑤ ucd.json là NGUỒN, không phải output — build.rs đọc nó
+⑥ KnowTree 65,536 = kích thước 1 branch — toàn cây lớn hơn nhiều
+⑦ Emoji name = tên chính xác từ Unicode (UPPERCASE, underscore)
+⑧ Mỗi canonical node có DUY NHẤT 1 entry trong "nodes"
 ```
 
 ---
 
 ## 10. BẮT ĐẦU: Session đầu tiên làm gì?
 
-1. Tạo `docs/UDC.md` — Phase 0 skeleton
-2. Điền **Nhóm 8: Emoticons/Faces** (U+1F600..U+1F64F) — ~80 emoji
-   - Dùng `json/emoji/emoji-data.txt` để lấy tên chính xác
-   - Assign V/A từ visual cue (😀=vui → V=0xE0, 😢=buồn → V=0x30)
-3. Commit + push
+1. Tạo `docs/UDC.md` — Phase 0 skeleton + schema
+2. Tạo `json/ucd.json` — skeleton (nodes={}, aliases={}, text_aliases={})
+3. Điền **E.09: Emoticons/Faces** (U+1F600..U+1F64F) — ~80 canonical nodes
+   - NHÌN từng emoji → encode P tay
+   - Ghi vào cả UDC.md (human-readable) VÀ json/ucd.json (canonical)
+   - Tên lấy từ `ucd_source/emoji-data.txt` cho chính xác
+4. Commit + push
 
 **Lý do bắt đầu với Faces:**
-- V và A rõ ràng nhất trong nhóm này (mặt người = cảm xúc trực quan)
-- 80 chars = đủ để validate schema nhưng không quá tải
-- Xong → có template cho mọi nhóm VA khác
+- VA rõ ràng nhất (mặt người = cảm xúc trực quan) → dễ encode tay
+- 80 chars = vừa để validate schema + flow json
+- Xong → có template cho mọi nhóm khác
 
 ---
 
@@ -423,13 +481,15 @@ Unicode codepoint U+1F525:
 
 ### Số liệu chuẩn (từ SINH_HOC_v2):
 ```
-UDC chars (58 blocks):         9,584  ← L0 KnowTree slots
-KnowTree tổng slots:          65,536  (u16, 2^16)
-KnowTree kích thước:           328 KB (65,536 × 5B)
-Chain link size:                 2B   (u16)
-Bootstrap: người encode tay → SEAL   (không compute từ emoji-data.txt)
-Emoji trong UDC:             ~3,568  (EMOTICON group, E.01-E.17)
-Data files có sẵn:           json/UnicodeData.txt, json/emoji/emoji-data.txt
+UDC chars (58 blocks):         9,584  ← L0 canonical nodes
+KnowTree root branch:         65,536 slots (u16, 2^16) = 1 nhánh
+KnowTree root branch size:     328 KB (65,536 × 5B)
+KnowTree toàn cây:             nhiều tầng, tăng theo Fibonacci khi học
+Chain link size:                 2B   (u16) = index vào branch hiện tại
+Bootstrap: người encode tay → SEAL → json/ucd.json
+Canonical emoji nodes:       ~3,568  (EMOTICON group E.01-E.17) + S/M/T groups
+Reference files (tên/range): ucd_source/emoji-data.txt, ucd_source/UnicodeData.txt
+JSON canonical source:       json/ucd.json (chúng ta xây thủ công)
 ```
 
 ---
