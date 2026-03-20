@@ -738,162 +738,265 @@ json/
   ucd.json        — canonical source: blocks + codepoints + language aliases
 ```
 
-### JSON format chính thức — HomeOS Molecule Registry (Unicode 18.0):
+### JSON format chính thức — UTF32-SDF-INTEGRATOR (Unicode 18.0):
 
 ```json
 {
-  "_meta": {
-    "protocol": "HOMEOS-MOLECULE-REGISTRY",
-    "version": "0.05-tagged-sparse",
-    "unicode_version": "18.0",
-    "source": "UnicodeData.txt + Blocks.txt + emoji-data.txt",
-    "note": "Molecule = encode_codepoint() output, SEALED. Aliases = extensible."
+  "protocol": "UTF32-SDF-INTEGRATOR",
+  "version": "18.0",
+  "global_config": {
+    "integral_levels": ["L1_Char", "L2_SubGroup", "L3_Block"],
+    "seal_mechanism": "Inheritance_By_Reference",
+    "dimensions": ["S (Shape)", "R (Relation)", "V (Valence)", "A (Arousal)", "T (Time)"],
+    "total_blocks": 58,
+    "total_L0_anchors": 9584
   },
-
-  "blocks": {
-    "1F300-1F5FF": {
-      "name": "Miscellaneous Symbols and Pictographs",
-      "dominant_dim": "Valence",
-      "note": "Largest EMOTICON block, ~768 chars → V+A dominant"
-    },
-    "1F600-1F64F": {
-      "name": "Emoticons",
-      "dominant_dim": "Valence"
-    },
-    "2200-22FF": {
-      "name": "Mathematical Operators",
-      "dominant_dim": "Relation",
-      "note": "R dominant — 8 relation primitives (∈ ⊂ ≡ ⊥ ∘ → ≈ ←)"
-    },
-    "25A0-25FF": {
+  "blocks": [
+    {
+      "id": "S.04",
+      "range": ["25A0", "25FF"],
       "name": "Geometric Shapes",
-      "dominant_dim": "Shape",
-      "note": "S dominant — 8 SDF primitives (● ▬ ■ ▲ ○ ∪ ∩ ∖)"
+      "count": 96,
+      "group": "SDF",
+      "dominant_axis": "S",
+      "integral_kernel": "P_block = ∭_{S.04} f(p) dV",
+      "note": "S dominant — 8 SDF primitives (● ▬ ■ ▲ ○ ∪ ∩ ∖)",
+      "sub_groups": [
+        {
+          "id": "SG_CIRCLE",
+          "range": ["25CB", "25CF"],
+          "integral_kernel": "P_subgroup = ∬_{SG} f(p) dS"
+        }
+      ]
     },
-    "1D100-1D1FF": {
+    {
+      "id": "M.04",
+      "range": ["2200", "22FF"],
+      "name": "Mathematical Operators",
+      "count": 256,
+      "group": "MATH",
+      "dominant_axis": "R",
+      "integral_kernel": "P_block = ∭_{M.04} f(p) dV",
+      "note": "R dominant — chứa ~35 Silk edges (∈ ⊂ ≡ ⊥ ∘ → ≈ ←)",
+      "sub_groups": [
+        {
+          "id": "SG_MEMBERSHIP",
+          "range": ["2208", "220F"],
+          "integral_kernel": "P_subgroup = ∬_{SG} f(p) dS"
+        },
+        {
+          "id": "SG_COMPOSITION",
+          "range": ["2218", "221F"],
+          "integral_kernel": "P_subgroup = ∬_{SG} f(p) dS"
+        }
+      ]
+    },
+    {
+      "id": "E.08",
+      "range": ["1F300", "1F5FF"],
+      "name": "Miscellaneous Symbols and Pictographs",
+      "count": 768,
+      "group": "EMOTICON",
+      "dominant_axis": "VA",
+      "integral_kernel": "P_block = ∭_{E.08} f(p) dV",
+      "note": "Largest EMOTICON block — V+A chia sẻ cùng 17 EMOTICON blocks",
+      "sub_groups": [
+        {
+          "id": "SG_FIRE",
+          "range": ["1F525", "1F528"],
+          "integral_kernel": "P_subgroup = ∬_{SG} f(p) dS"
+        }
+      ]
+    },
+    {
+      "id": "E.09",
+      "range": ["1F600", "1F64F"],
+      "name": "Emoticons",
+      "count": 80,
+      "group": "EMOTICON",
+      "dominant_axis": "VA",
+      "integral_kernel": "P_block = ∭_{E.09} f(p) dV"
+    },
+    {
+      "id": "T.04",
+      "range": ["1D100", "1D1FF"],
       "name": "Musical Symbols",
-      "dominant_dim": "Time",
-      "note": "T dominant — note duration = Time dimension (Static/Slow/Medium/Fast/Instant)"
+      "count": 256,
+      "group": "MUSICAL",
+      "dominant_axis": "T",
+      "integral_kernel": "P_block = ∭_{T.04} f(p) dV",
+      "note": "T dominant — note duration = Time (Static/Slow/Medium/Fast/Instant)"
     }
-  },
-
-  "codepoints": {
-    "1F525": {
-      "block": "1F300-1F5FF",
-      "layer": 0,
-      "maturity": "Sealed",
+  ],
+  "characters": [
+    {
+      "hex": "1F525",
+      "char": "🔥",
+      "anchor": "L0_SEALED",
       "category": "So",
-      "molecule": {
-        "formula": "encode_codepoint(0x1F525)",
-        "dominant_dim": "Valence",
-        "dims": ["Shape", "Relation", "Valence", "Arousal", "Time"]
+      "block_ref": "E.08",
+      "sub_group_ref": "SG_FIRE",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "VA",
+        "P_weight": { "S": "Sphere", "R": "Causes", "V": "0xC0", "A": "0xC0", "T": "Fast" }
       },
-      "aliases": {
-        "vi": ["lửa", "ngọn lửa", "đám cháy"],
+      "localizations": {
         "en": ["fire", "flame", "blaze"],
+        "vi": ["lửa", "ngọn lửa", "đám cháy"],
         "ja": ["火", "炎"],
         "zh": ["火", "火焰"]
-      }
+      },
+      "canonical_ref": null
     },
-    "1F622": {
-      "block": "1F600-1F64F",
-      "layer": 0,
-      "maturity": "Sealed",
+    {
+      "hex": "1F60A",
+      "char": "😊",
+      "anchor": "L0_SEALED",
       "category": "So",
-      "molecule": {
-        "formula": "encode_codepoint(0x1F622)",
-        "dominant_dim": "Valence"
+      "block_ref": "E.09",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "VA",
+        "P_weight": { "S": "Sphere", "R": "Member", "V": "0xE0", "A": "0x70", "T": "Medium" }
       },
-      "aliases": {
-        "vi": ["khóc", "buồn", "nước mắt"],
-        "en": ["crying", "sad", "tears"]
-      }
-    },
-    "2208": {
-      "block": "2200-22FF",
-      "layer": 0,
-      "maturity": "Sealed",
-      "category": "Sm",
-      "molecule": {
-        "formula": "encode_codepoint(0x2208)",
-        "dominant_dim": "Relation"
+      "localizations": {
+        "vi": ["vui", "hạnh phúc", "mỉm cười"],
+        "en": ["happy", "smiling", "joyful"]
       },
-      "aliases": {
-        "en": ["element of", "belongs to", "in"],
-        "vi": ["thuộc", "là thành viên của"]
-      }
+      "canonical_ref": null
     },
-    "25CF": {
-      "block": "25A0-25FF",
-      "layer": 0,
-      "maturity": "Sealed",
+    {
+      "hex": "1F494",
+      "char": "💔",
+      "anchor": "L0_SEALED",
       "category": "So",
-      "molecule": {
-        "formula": "encode_codepoint(0x25CF)",
-        "dominant_dim": "Shape"
+      "block_ref": "E.08",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "VA",
+        "P_weight": { "S": "Sphere", "R": "Causes", "V": "0x10", "A": "0x50", "T": "Slow" }
       },
-      "aliases": {
+      "localizations": {
+        "vi": ["đau", "tan vỡ", "thất tình"],
+        "en": ["broken heart", "heartbreak", "pain"]
+      },
+      "canonical_ref": null
+    },
+    {
+      "hex": "25CF",
+      "char": "●",
+      "anchor": "L0_SEALED",
+      "category": "So",
+      "block_ref": "S.04",
+      "sub_group_ref": "SG_CIRCLE",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "S",
+        "P_weight": { "S": "Sphere", "R": "Member", "V": "0x80", "A": "0x40", "T": "Static" }
+      },
+      "localizations": {
         "en": ["black circle", "filled circle", "bullet"],
         "vi": ["vòng tròn đen", "chấm tròn"]
+      },
+      "canonical_ref": null
+    },
+    {
+      "hex": "2208",
+      "char": "∈",
+      "anchor": "L0_SEALED",
+      "category": "Sm",
+      "block_ref": "M.04",
+      "sub_group_ref": "SG_MEMBERSHIP",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "R",
+        "P_weight": { "R": "Member" }
+      },
+      "localizations": {
+        "en": ["element of", "belongs to", "in"],
+        "vi": ["thuộc", "là thành viên của"]
+      },
+      "canonical_ref": null
+    },
+    {
+      "hex": "2218",
+      "char": "∘",
+      "anchor": "L0_SEALED",
+      "category": "Sm",
+      "block_ref": "M.04",
+      "sub_group_ref": "SG_COMPOSITION",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "R",
+        "P_weight": { "R": "Compose" }
+      },
+      "localizations": {
+        "en": ["ring operator", "composition"],
+        "vi": ["tổ hợp", "phép hợp"]
+      },
+      "canonical_ref": null
+    },
+    {
+      "hex": "1D11E",
+      "char": "𝄞",
+      "anchor": "L0_SEALED",
+      "category": "So",
+      "block_ref": "T.04",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "T",
+        "P_weight": { "T": "Medium" }
+      },
+      "localizations": {
+        "en": ["treble clef", "G clef"],
+        "vi": ["khóa Sol"]
+      },
+      "canonical_ref": null
+    },
+    {
+      "hex": "2605",
+      "char": "★",
+      "canonical_ref": "2B50",
+      "inheritance": "P[2605] = P[2B50] << SEAL",
+      "metadata": { "name": "BLACK STAR" }
+    }
+  ],
+  "alias_mapping": {
+    "registry": {
+      "vi": {
+        "_block": "00C0-024F",
+        "_note": "Latin Extended — chứa toàn bộ ký tự có dấu tiếng Việt",
+        "lửa": { "target": "1F525", "status": "SEALED_INHERIT" },
+        "vui": { "target": "1F601", "status": "SEALED_INHERIT" },
+        "buồn": { "target": "1F622", "status": "SEALED_INHERIT" },
+        "tức": { "target": "1F621", "status": "SEALED_INHERIT" },
+        "sợ": { "target": "1F628", "status": "SEALED_INHERIT" },
+        "yêu": { "target": "2764", "status": "SEALED_INHERIT" },
+        "đau": { "target": "1F494", "status": "SEALED_INHERIT" },
+        "nước": { "target": "1F4A7", "status": "SEALED_INHERIT" },
+        "nhà": { "target": "1F3E0", "status": "SEALED_INHERIT" },
+        "âm nhạc": { "target": "1F3B5", "status": "SEALED_INHERIT" },
+        "thuộc": { "target": "2208", "status": "SEALED_INHERIT" }
+      },
+      "en": {
+        "_block": "0000-007F",
+        "_note": "Basic Latin — ASCII range",
+        "fire": { "target": "1F525", "status": "SEALED_INHERIT" },
+        "happy": { "target": "1F60A", "status": "SEALED_INHERIT" },
+        "sad": { "target": "1F622", "status": "SEALED_INHERIT" },
+        "pain": { "target": "1F494", "status": "SEALED_INHERIT" },
+        "love": { "target": "2764", "status": "SEALED_INHERIT" },
+        "circle": { "target": "25CF", "status": "SEALED_INHERIT" },
+        "element of": { "target": "2208", "status": "SEALED_INHERIT" },
+        "music": { "target": "1F3B5", "status": "SEALED_INHERIT" }
       }
     }
   },
-
-  "script_aliases": {
-    "vi": {
-      "_block": "00C0-024F",
-      "_note": "Latin Extended — chứa toàn bộ ký tự có dấu tiếng Việt",
-      "vui": "1F601",
-      "buồn": "1F622",
-      "tức": "1F621",
-      "sợ": "1F628",
-      "yêu": "2764",
-      "lửa": "1F525",
-      "nước": "1F4A7",
-      "cây": "1F333",
-      "nhà": "1F3E0",
-      "tim": "2764",
-      "nguy hiểm": "26A0",
-      "chết": "1F480",
-      "ánh sáng": "1F4A1",
-      "âm nhạc": "1F3B5"
-    },
-    "en": {
-      "_block": "0000-007F",
-      "_note": "Basic Latin — ASCII range",
-      "fire": "1F525",
-      "sad": "1F622",
-      "angry": "1F621",
-      "scared": "1F628",
-      "love": "2764",
-      "water": "1F4A7",
-      "tree": "1F333",
-      "house": "1F3E0",
-      "heart": "2764",
-      "danger": "26A0",
-      "death": "1F480",
-      "light": "1F4A1",
-      "music": "1F3B5"
-    }
-  },
-
-  "silk_aliases": {
-    "2605": {
-      "canonical": "2B50",
-      "silk_inherit": "chain[2605] = chain[2B50] << Sealed",
-      "note": "BLACK STAR → WHITE MEDIUM STAR (brighter)"
-    },
-    "25A0": {
-      "canonical": "1F7E5",
-      "silk_inherit": "chain[25A0] = chain[1F7E5] << Sealed",
-      "V_override": 128,
-      "note": "BLACK SQUARE → neutral (no color)"
-    },
-    "2192": {
-      "canonical": "27A1",
-      "silk_inherit": "chain[2192] = chain[27A1] << Sealed",
-      "note": "RIGHTWARDS ARROW → simpler arrow"
-    }
+  "utf32_aliases": {
+    "2605": { "canonical": "2B50", "note": "BLACK STAR → WHITE MEDIUM STAR (brighter)" },
+    "25A0": { "canonical": "1F7E5", "V_override": 128, "note": "BLACK SQUARE → neutral (no color)" },
+    "2192": { "canonical": "27A1", "note": "RIGHTWARDS ARROW → simpler arrow" }
   }
 }
 ```
@@ -901,38 +1004,40 @@ json/
 ### Giải thích 5 sections:
 
 ```
-"blocks"         → Block metadata: dominant_dim cho 5 chiều [S][R][V][A][T]
-                   Silk tự động từ block → mọi codepoint trong block
-                   dominant_dim quyết định encode_codepoint() ưu tiên chiều nào
+"blocks"         → Block nodes: dominant_axis (S/R/VA/T) — input để tính P
+                   58 blocks thuộc 4 nhóm: SDF(13), MATH(21), EMOTICON(17), MUSICAL(7)
+                   integral_kernel = công thức ∫ₛ cho block/sub_group
 
-"codepoints"     → Từng char: block + category + molecule + aliases
-                   molecule.formula = encode_codepoint(hex) → Molecule [S][R][V][A][T]
-                   Chỉ encode ~500 anchor chars, phần còn lại kế thừa block
+"characters"     → Từng char: block_ref + category + physics_logic
+                   P_weight = kết quả ∫ₛ 3 cấp (char → sub → block)
+                   anchor = L0_SEALED: 9,584 chars xây 1 lần, dùng mãi mãi
 
-"script_aliases" → Natural language → codepoint mapping
-                   "lửa" → "1F525" (alias → node, QT③)
+"alias_mapping"  → Natural language → codepoint mapping
+                   "lửa" → "1F525" (alias kế thừa P[char])
                    Mỗi ngôn ngữ có _block trỏ tới Unicode block của nó
 
-"silk_aliases"   → UTF-32 symbol → canonical codepoint (kế thừa qua Silk)
-                   ★ (2605) → ⭐ (2B50): chain[2605] = chain[2B50] << Sealed
+"utf32_aliases"  → UTF-32 symbol → canonical codepoint
+                   ★ (2605) → ⭐ (2B50): P[2605] = P[2B50] << SEAL
+                   Cơ chế ① REPLICATE: 2 bytes trỏ đến chain gốc
 ```
 
-**Cấu trúc codepoint trong JSON:**
+**Cấu trúc character trong JSON:**
 ```
-"1F525"  ──────────────────────────────── Molecule = encode_codepoint(0x1F525) [SEALED]
+"1F525" 🔥 ─────────────────────────── P[char] = L0 anchor (SEALED)
    │
-   ├── block: "1F300-1F5FF"  ────────── dominant_dim = Valence
-   ├── category: "So"         ────────── xác định chiều dominant trong 5D
-   ├── layer: 0                ────────── L0 = innate (từ UCD)
-   ├── maturity: "Sealed"     ────────── node đã chín, bất biến
+   ├── block_ref: "E.08"       ────────── EMOTICON group, 768 chars
+   ├── category: "So"           ────────── xác định dominant_axis = VA
+   ├── anchor: "L0_SEALED"     ────────── xây 1 lần từ UCD, bất biến
    │
-   ├── molecule:
-   │     formula: encode_codepoint()  ── hàm tính Molecule [S][R][V][A][T]
-   │     dims: [Shape, Relation, Valence, Arousal, Time]
+   ├── physics_logic:
+   │     integral_L1: P_char = ∫_{U} f(p) dp   ← vi tích phân cấp 1
+   │     dominant_axis: VA                       ← Valence+Arousal dominant
+   │     P_weight:                               ← kết quả ∫ₛ (SEALED)
+   │       S=Sphere  R=Causes  V=0xC0  A=0xC0  T=Fast
    │
-   └── aliases:
+   └── localizations:
          en: [fire, flame, blaze]  ──────┐
-         vi: [lửa, ngọn lửa, ...]  ──────┤── alias kế thừa Molecule gốc
+         vi: [lửa, ngọn lửa, ...]  ──────┤── P[alias] = P[char] (kế thừa)
          ja: [火, 炎]               ──────┘   tự nhóm theo key ngôn ngữ
 ```
 
