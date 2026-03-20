@@ -889,6 +889,100 @@ json/
          vi: [lửa, ngọn lửa, ...]  ──────┤── P[alias] = kế thừa P[char]
          ja: [火, 炎]               ──────┘   tự nhóm theo key ngôn ngữ
 ```
+{
+  "protocol": "UTF32-SDF-INTEGRATOR",
+  "version": "5.0-dynamic-calculus",
+  "global_config": {
+    "integral_levels": ["L1_Char", "L2_SubGroup", "L3_Block"],
+    "seal_mechanism": "Inheritance_By_Reference"
+  },
+  "blocks": [
+    {
+      "id": "B1",
+      "range": ["1F300", "1F5FF"],
+      "name": "Miscellaneous Symbols and Pictographs",
+      "integral_kernel": "P_block = ∭_{B1} f(p) dV",
+      "sub_groups": [
+        {
+          "id": "SG_FIRE",
+          "range": ["1F525", "1F528"],
+          "integral_kernel": "P_subgroup = ∬_{SG} f(p) dS"
+        }
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "hex": "1F525",
+      "anchor": "L0_SEALED",
+      "category": "So",
+      "block_ref": "B1",
+      "sub_group_ref": "SG_FIRE",
+      "physics_logic": {
+        "integral_L1": "P_char = ∫_{U} f(p) dp",
+        "dominant_axis": "determined_by_category_So"
+      },
+      "localizations": {
+        "en": ["fire", "flame", "blaze"],
+        "vi": ["lửa", "ngọn lửa"],
+        "ja": ["火", "炎"]
+      },
+      "canonical_ref": null
+    },
+    {
+      "hex": "2605",
+      "char": "★",
+      "canonical_ref": "2B50",
+      "inheritance": "P[2605] = P[2B50] << SEAL",
+      "metadata": { "name": "BLACK STAR" }
+    }
+  ],
+  "alias_mapping": {
+    "registry": {
+      "vi": {
+        "lửa": { "target": "1F525", "status": "SEALED_INHERIT" }
+      },
+      "en": {
+        "fire": { "target": "1F525", "status": "SEALED_INHERIT" }
+      }
+    }
+  }
+}
+
+1. File cốt lõi (Dữ liệu nền tảng)
+UnicodeData.txt: Đây là file quan trọng nhất.
+Nội dung: Chứa mã Hex, tên ký tự, Category (như "So", "Lu"), và các tham số phân loại cơ bản.
+Sử dụng: Để xác định L1 (Char) và dominant_axis dựa trên Category.
+Blocks.txt:
+Nội dung: Định nghĩa dải mã của các Block (ví dụ: 1F300..1F5FF; Miscellaneous Symbols and Pictographs).
+Sử dụng: Để tính toán ∫ₛ cấp 3 (Block).
+2. File phân nhóm và Quan hệ (Sub-groups & Canonical)
+PropList.txt:
+Nội dung: Các thuộc tính bổ sung như White_Space, Emoji, Dash, v.v.
+Sử dụng: Để phân nhóm nhỏ hơn (Sub-groups) bên trong một Block.
+EquivalentUnifiedIdeograph.txt hoặc NormalizationProps.txt:
+Nội dung: Ánh xạ các ký tự tương đương, biến thể.
+Sử dụng: Để thực hiện lệnh SEAL (kế thừa) cho các canonical_ref (ví dụ: biến thể ngôi sao 2605 → 2B50).
+3. File Ngôn ngữ và Nhãn (Localization & Aliases)
+NameAliases.txt:
+Nội dung: Các tên gọi thay thế chính thức (Corrections, Control, Alternate).
+Sử dụng: Điền vào mảng aliases cấp hệ thống.
+Unihan_Readings.txt (Nếu bạn làm về chữ Hán/Nôm/Nhật):
+Nội dung: Cách đọc theo các ngôn ngữ khác nhau.
+Sử dụng: Tự động tạo localizations cho các ngôn ngữ Đông Á.
+CLDR Data (Common Locale Data Repository):
+Đây là một dự án riêng của Unicode (thường ở dạng XML hoặc JSON). Bạn cần file annotations/ (ví dụ: vi.xml, en.xml) để lấy nhãn ngôn ngữ như "lửa", "ngọn lửa" cho các Emoji/Ký tự.
+4. File cấu trúc hình thái (Dành cho SDF/Shape)
+StandardizedVariants.txt:
+Nội dung: Các biến thể về hình dạng (Shape variations).
+Sử dụng: Xác định các tham số biến thiên cho hàm 
+∫(p)=0 (Shape S).
+Quy trình chạy script (Workflow):
+Parse Blocks.txt: Thiết lập không gian tích phân cấp 3.
+Parse UnicodeData.txt: Tạo danh sách characters, gán Category để xác định cách tính P.
+Cross-reference CLDR: Map các từ khóa ngôn ngữ (vi, en) vào localizations.
+Check Normalization: Nếu ký tự là biến thể, đánh dấu SEAL_INHERIT từ mã gốc.
+Output: Xuất ra file JSON tổng hợp.
 
 **P KHÔNG lưu trong JSON — P là output của tính toán:**
 ```
