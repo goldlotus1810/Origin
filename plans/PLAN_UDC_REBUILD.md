@@ -738,48 +738,56 @@ json/
   ucd.json        — canonical source: blocks + codepoints + language aliases
 ```
 
-### JSON format đầy đủ (v1):
+### JSON format chính thức — HomeOS Molecule Registry (Unicode 18.0):
 
 ```json
 {
   "_meta": {
-    "version": "0.05",
+    "protocol": "HOMEOS-MOLECULE-REGISTRY",
+    "version": "0.05-tagged-sparse",
     "unicode_version": "18.0",
     "source": "UnicodeData.txt + Blocks.txt + emoji-data.txt",
-    "note": "P values = human-encoded, SEALED. Aliases = extensible."
+    "note": "Molecule = encode_codepoint() output, SEALED. Aliases = extensible."
   },
 
   "blocks": {
     "1F300-1F5FF": {
       "name": "Miscellaneous Symbols and Pictographs",
-      "dimension": "VA",
-      "note": "Largest EMOTICON block, ~768 chars"
+      "dominant_dim": "Valence",
+      "note": "Largest EMOTICON block, ~768 chars → V+A dominant"
     },
     "1F600-1F64F": {
       "name": "Emoticons",
-      "dimension": "VA"
+      "dominant_dim": "Valence"
     },
     "2200-22FF": {
       "name": "Mathematical Operators",
-      "dimension": "R",
-      "note": "R dominant — 8 relation primitives nằm ở đây"
+      "dominant_dim": "Relation",
+      "note": "R dominant — 8 relation primitives (∈ ⊂ ≡ ⊥ ∘ → ≈ ←)"
     },
     "25A0-25FF": {
       "name": "Geometric Shapes",
-      "dimension": "S",
-      "note": "S dominant — 8 SDF primitives nằm ở đây"
+      "dominant_dim": "Shape",
+      "note": "S dominant — 8 SDF primitives (● ▬ ■ ▲ ○ ∪ ∩ ∖)"
     },
     "1D100-1D1FF": {
       "name": "Musical Symbols",
-      "dimension": "T",
-      "note": "T dominant — note duration = Time dimension"
+      "dominant_dim": "Time",
+      "note": "T dominant — note duration = Time dimension (Static/Slow/Medium/Fast/Instant)"
     }
   },
 
   "codepoints": {
     "1F525": {
       "block": "1F300-1F5FF",
+      "layer": 0,
+      "maturity": "Sealed",
       "category": "So",
+      "molecule": {
+        "formula": "encode_codepoint(0x1F525)",
+        "dominant_dim": "Valence",
+        "dims": ["Shape", "Relation", "Valence", "Arousal", "Time"]
+      },
       "aliases": {
         "vi": ["lửa", "ngọn lửa", "đám cháy"],
         "en": ["fire", "flame", "blaze"],
@@ -789,7 +797,13 @@ json/
     },
     "1F622": {
       "block": "1F600-1F64F",
+      "layer": 0,
+      "maturity": "Sealed",
       "category": "So",
+      "molecule": {
+        "formula": "encode_codepoint(0x1F622)",
+        "dominant_dim": "Valence"
+      },
       "aliases": {
         "vi": ["khóc", "buồn", "nước mắt"],
         "en": ["crying", "sad", "tears"]
@@ -797,7 +811,13 @@ json/
     },
     "2208": {
       "block": "2200-22FF",
+      "layer": 0,
+      "maturity": "Sealed",
       "category": "Sm",
+      "molecule": {
+        "formula": "encode_codepoint(0x2208)",
+        "dominant_dim": "Relation"
+      },
       "aliases": {
         "en": ["element of", "belongs to", "in"],
         "vi": ["thuộc", "là thành viên của"]
@@ -805,7 +825,13 @@ json/
     },
     "25CF": {
       "block": "25A0-25FF",
+      "layer": 0,
+      "maturity": "Sealed",
       "category": "So",
+      "molecule": {
+        "formula": "encode_codepoint(0x25CF)",
+        "dominant_dim": "Shape"
+      },
       "aliases": {
         "en": ["black circle", "filled circle", "bullet"],
         "vi": ["vòng tròn đen", "chấm tròn"]
@@ -851,105 +877,64 @@ json/
     }
   },
 
-  "utf32_aliases": {
-    "2605": { "canonical": "2B50", "note": "BLACK STAR → WHITE MEDIUM STAR (brighter)" },
-    "25A0": { "canonical": "1F7E5", "V_override": 128, "note": "BLACK SQUARE → neutral (no color)" },
-    "2192": { "canonical": "27A1",  "note": "RIGHTWARDS ARROW → simpler arrow" }
+  "silk_aliases": {
+    "2605": {
+      "canonical": "2B50",
+      "silk_inherit": "chain[2605] = chain[2B50] << Sealed",
+      "note": "BLACK STAR → WHITE MEDIUM STAR (brighter)"
+    },
+    "25A0": {
+      "canonical": "1F7E5",
+      "silk_inherit": "chain[25A0] = chain[1F7E5] << Sealed",
+      "V_override": 128,
+      "note": "BLACK SQUARE → neutral (no color)"
+    },
+    "2192": {
+      "canonical": "27A1",
+      "silk_inherit": "chain[2192] = chain[27A1] << Sealed",
+      "note": "RIGHTWARDS ARROW → simpler arrow"
+    }
   }
 }
 ```
 
-### Giải thích 4 sections:
+### Giải thích 5 sections:
 
 ```
-"blocks"         → Block nodes: dimension dominant (input để tính P)
-                   Silk tự động từ block node → mọi codepoint trong block
+"blocks"         → Block metadata: dominant_dim cho 5 chiều [S][R][V][A][T]
+                   Silk tự động từ block → mọi codepoint trong block
+                   dominant_dim quyết định encode_codepoint() ưu tiên chiều nào
 
-"codepoints"     → Từng char: block + category + aliases (input để tính P)
-                   Chỉ cần encode những char QUAN TRỌNG (~500 anchor chars)
-                   Phần còn lại dùng dimension của block
+"codepoints"     → Từng char: block + category + molecule + aliases
+                   molecule.formula = encode_codepoint(hex) → Molecule [S][R][V][A][T]
+                   Chỉ encode ~500 anchor chars, phần còn lại kế thừa block
 
 "script_aliases" → Natural language → codepoint mapping
-                   "lửa" → "1F525" (không encode từng ký tự l,ử,a)
+                   "lửa" → "1F525" (alias → node, QT③)
                    Mỗi ngôn ngữ có _block trỏ tới Unicode block của nó
 
-"utf32_aliases"  → UTF-32 symbol → canonical emoji
-                   ★ (2605) → ⭐ (2B50)
+"silk_aliases"   → UTF-32 symbol → canonical codepoint (kế thừa qua Silk)
+                   ★ (2605) → ⭐ (2B50): chain[2605] = chain[2B50] << Sealed
 ```
 
 **Cấu trúc codepoint trong JSON:**
 ```
-"1F525"  ──────────────────────────────── P[char] = L0 anchor (SEALED)
+"1F525"  ──────────────────────────────── Molecule = encode_codepoint(0x1F525) [SEALED]
    │
-   ├── block: "1F300-1F5FF"  ────────── P[block] = ∫ₛ cấp 2
-   ├── category: "So"         ────────── xác định chiều dominant
+   ├── block: "1F300-1F5FF"  ────────── dominant_dim = Valence
+   ├── category: "So"         ────────── xác định chiều dominant trong 5D
+   ├── layer: 0                ────────── L0 = innate (từ UCD)
+   ├── maturity: "Sealed"     ────────── node đã chín, bất biến
+   │
+   ├── molecule:
+   │     formula: encode_codepoint()  ── hàm tính Molecule [S][R][V][A][T]
+   │     dims: [Shape, Relation, Valence, Arousal, Time]
    │
    └── aliases:
          en: [fire, flame, blaze]  ──────┐
-         vi: [lửa, ngọn lửa, ...]  ──────┤── P[alias] = kế thừa P[char]
+         vi: [lửa, ngọn lửa, ...]  ──────┤── alias kế thừa Molecule gốc
          ja: [火, 炎]               ──────┘   tự nhóm theo key ngôn ngữ
 ```
-{
-  "protocol": "HOMEOS-MOLECULE-REGISTRY",
-  "version": "0.05-tagged-sparse",
-  "global_config": {
-    "layer_levels": ["L0_Codepoint", "L1_SubGroup", "L2_Block"],
-    "seal_mechanism": "Molecule_By_Inheritance"
-  },
-  "blocks": [
-    {
-      "id": "B1",
-      "range": ["1F300", "1F5FF"],
-      "name": "Miscellaneous Symbols and Pictographs",
-      "dominant_dim": "Valence",
-      "sub_groups": [
-        {
-          "id": "SG_FIRE",
-          "range": ["1F525", "1F528"],
-          "dominant_dim": "Valence"
-        }
-      ]
-    }
-  ],
-  "codepoints": [
-    {
-      "hex": "1F525",
-      "layer": 0,
-      "maturity": "Sealed",
-      "category": "So",
-      "block_ref": "B1",
-      "sub_group_ref": "SG_FIRE",
-      "molecule": {
-        "formula": "encode_codepoint(0x1F525)",
-        "dominant_dim": "Valence",
-        "dims": ["Shape", "Relation", "Valence", "Arousal", "Time"]
-      },
-      "aliases": {
-        "en": ["fire", "flame", "blaze"],
-        "vi": ["lửa", "ngọn lửa"],
-        "ja": ["火", "炎"]
-      },
-      "canonical_ref": null
-    },
-    {
-      "hex": "2605",
-      "char": "★",
-      "canonical_ref": "2B50",
-      "silk_inherit": "chain[2605] = chain[2B50] << Sealed",
-      "metadata": { "name": "BLACK STAR" }
-    }
-  ],
-  "alias_mapping": {
-    "registry": {
-      "vi": {
-        "lửa": { "target": "1F525", "status": "Sealed_Inherit" }
-      },
-      "en": {
-        "fire": { "target": "1F525", "status": "Sealed_Inherit" }
-      }
-    }
-  }
-}
 
 1. File cốt lõi (Dữ liệu nền tảng)
 UnicodeData.txt: Đây là file quan trọng nhất.
