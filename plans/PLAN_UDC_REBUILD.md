@@ -21,6 +21,28 @@ encode_codepoint(cp) → mỗi ký tự được gán VÀO 1 chiều
 ### Vấn đề cốt lõi:
 Olang đang dùng P như **nhãn phân loại** (char thuộc nhóm nào), thay vì dùng P như **tọa độ 5D** (char ở ĐÂU trong không gian tri thức).
 
+### P đúng — theo SINH_HOC_v2:
+```
+P = (S, R, V, A, T) = TRỌNG SỐ ĐÃ TÍCH PHÂN — không phải công thức compute lại mỗi lần
+
+  S = weight_s   Shape    (kết quả ∫ₛ cấp 3 từ char → sub → block)
+  R = weight_r   Relation (kết quả ∫ₛ từ nhóm MATH)
+  V = weight_v   Valence  (kết quả ∫ₛ từ nhóm EMOTICON)
+  A = weight_a   Arousal  (kết quả ∫ₛ từ nhóm EMOTICON)
+  T = weight_t   Time     (kết quả ∫ₛ từ nhóm MUSICAL)
+
+Vòng đời:
+  Bootstrap (1 lần): người đọc emoji → encode vào P_weight → SEAL
+  Runtime:           đọc P_weight trực tiếp → O(1), không compute lại
+  Learned:           Encoder ∫ₜ → ΔP_weight → Hebbian → CHÍN → QR
+
+L0 emoji = calibration anchors (như 0°C và 100°C của nhiệt kế):
+  🔥 (1F525): S=Sphere, R=Causes,  V=0xC0, A=0xC0, T=Fast
+  😊 (1F60A): S=Sphere, R=Member,  V=0xE0, A=0x70, T=Medium
+  💔 (1F494): S=Sphere, R=Causes,  V=0x10, A=0x50, T=Slow
+  → Vĩnh viễn, không thay đổi. Mọi khái niệm khác = distance tới tập này.
+```
+
 ### P đúng — DNA analogy:
 ```
 DNA:     A — T — G — C — C — A — T...   (mỗi base = 1 nucleotide có danh tính riêng)
@@ -29,13 +51,18 @@ HomeOS:  ○{○{○{○{○{...}}}}}              (mỗi char = 1 node có tọ
 
 ---
 
-## 2. KIẾN TRÚC MỚI: Emoji = Canonical Nodes
+## 2. KIẾN TRÚC MỚI: UDC 9,584 = L0 KnowTree
 
-### Nguyên lý:
+### Nguyên lý — từ SINH_HOC_v2:
 ```
-EMOJI (1,447 chars)     = CANONICAL NODES   → mỗi emoji có P=(S,R,V,A,T) đầy đủ
-UTF-32 chars            = ALIAS NODES       → trỏ vào emoji gần nhất về ngữ nghĩa
-Text (ngôn ngữ tự nhiên) = ALIAS           → trỏ vào emoji/node
+UDC 9,584 chars (58 blocks)  = L0 KnowTree  → mỗi char có P_weight đầy đủ, SEALED
+Text (ngôn ngữ tự nhiên)     = ALIAS        → trỏ vào UDC node qua LCA
+
+Phân cấp trong 9,584:
+  Emoji (visual, E.xx blocks) = neo cảm xúc mạnh nhất (V/A rõ ràng nhất)
+  Math (M.xx blocks)          = neo quan hệ (R rõ ràng nhất)
+  SDF (S.xx blocks)           = neo hình dạng (S rõ ràng nhất)
+  Musical (T.xx blocks)       = neo thời gian (T rõ ràng nhất)
 
 Ví dụ:
   🟥 RED SQUARE        → P = { S=Square R=Contains V=0xC0 A=0x80 T=Static }  ← node thật
@@ -44,18 +71,33 @@ Ví dụ:
   "red square"         → alias → 🟥
 ```
 
-### Tại sao Emoji = root?
-- Emoji có **ngữ nghĩa phổ quát** (cross-language, cross-culture)
-- Emoji đã được Unicode gán ý nghĩa rõ ràng (tên, category, version)
-- Emoji có **visual cue** trực tiếp → dễ assign V, A, S
-- UTF-32 symbols (■ ∈ ♩) = biểu diễn trừu tượng → cần anchor vào emoji cụ thể
-
-### Flow sinh JSON cuối:
+### KnowTree structure (từ SINH_HOC_v2):
 ```
-emoji-data.txt
-  → UDC.md (P cho từng emoji, nhóm theo semantic)
-  → alias_map (UTF-32 → emoji codepoint)
-  → ucd_utf32.json (mọi char, P trực tiếp hoặc qua alias)
+KnowTree = array 65,536 phần tử (u16 index):
+  [gen: 2 bits][address: 14 bits]
+    gen=00: UDC base L0 (0..9583)    — 9,584 slots
+    gen=01: learned L5  (early)      — 16,384 slots
+    gen=10: learned L6+ (mature)     — 16,384 slots
+    gen=11: system/reserved          — 16,384 slots
+
+  Mỗi phần tử = P_weight: Mol (5 bytes)
+  KnowTree toàn bộ: 65,536 × 5B = 328 KB  ← vừa L1 cache!
+
+  KnowTree[codepoint] → P_weight  — O(1), không cần hash
+  Chain link = u16 (2 bytes) = đủ trỏ vào toàn bộ KnowTree
+```
+
+⚠️ **u16 là ĐÚNG** — không phải u32. v2 đã xác nhận rõ.
+
+### Flow sinh UDC.md:
+```
+58 Unicode blocks (9,584 chars)
+  → UDC.md: với mỗi char, người encode:
+      NHÌN vào ký tự / emoji
+      HỎI: "Nó trông ra sao? Nó làm gì? Cảm giác thế nào? Tốc độ?"
+      → ghi P_weight = (S, R, V, A, T) → SEAL
+  → alias_map: text/language → UDC node
+  → ucd_utf32.json: { codepoint: P_weight }
 ```
 
 ---
@@ -89,67 +131,55 @@ A: 0x00 (tĩnh lặng) → 0x80 (trung bình) → 0xFF (kích động mạnh)
 
 ---
 
-## 4. PHÂN NHÓM EMOJI — Unicode 18.0 (3,966 fully-qualified)
+## 4. 58 UNICODE BLOCKS = 9,584 UDC (từ SINH_HOC_v2)
 
-> **Nguồn:** `ucd_source/emoji-data.txt` (Unicode 18.0, ngày 2026-01-30)
-> **Số liệu thật:**
-> - `Emoji_Presentation` base codepoints: **1,228** (single cp + ranges)
-> - Fully-qualified sequences (từ emoji-test.txt): **3,966**
-> - Tất cả qualified (incl. minimally, unqualified): **5,244**
-
-Từ `ucd_source/emoji-data.txt` v18 — phân theo range codepoint:
+> **Nguồn:** `old/HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2.md` Section 1.4
 
 ```
-Nhóm 0: ASCII/Latin emoji (U+0023..U+00AE)           — 5 ranges  ~14 cp
-  # * 0-9 © ® — ký hiệu text thông thường có emoji variant
+SDF — 13 blocks, 1,904 chars (Shape)
+  S.01  Arrows                 2190..21FF    112
+  S.02  Box Drawing            2500..257F    128
+  S.03  Block Elements         2580..259F     32
+  S.04  Geometric Shapes       25A0..25FF     96
+  S.05  Dingbats               2700..27BF    192
+  S.06  Supp Arrows-A          27F0..27FF     16
+  S.07  Supp Arrows-B          2900..297F    128
+  S.08  Misc Symbols+Arrows    2B00..2BFF    256
+  S.09  Geometric Shapes Ext   1F780..1F7FF  128
+  S.10  Supp Arrows-C          1F800..1F8FF  256
+  S.11  Ornamental Dingbats    1F650..1F67F   48
+  S.12  Misc Technical         2300..23FF    256
+  S.13  Braille Patterns       2800..28FF    256
 
-Nhóm 1: Geometric/Technical (U+2000..U+25FF)         — 21 ranges ~90 cp
-  ⌚ ⌨ ⏏ ⏩ ⏰ ⚓ ⚡ — kỹ thuật + hình học
+MATH — 21 blocks, 3,088 chars (Relation)
+  M.01  Superscripts+Subscripts   2070..209F     48
+  M.02  Letterlike Symbols        2100..214F     80
+  M.03  Number Forms              2150..218F     64
+  M.04  Mathematical Operators    2200..22FF    256  ← ~35 Silk edges
+  M.05  Misc Math Symbols-A       27C0..27EF     48
+  M.06  Misc Math Symbols-B       2980..29FF    128
+  M.07  Supp Math Operators       2A00..2AFF    256
+  M.08  Math Alphanum Symbols     1D400..1D7FF 1024
+  M.09–M.21  (Ancient numerics, Siyaq, Arab math...)  1,184
 
-Nhóm 2: Misc Symbols (U+2600..U+26FF)                — 55 ranges ~180 cp
-  ☀ ☁ ☔ ♈ ♥ ⚽ ⛄ — thời tiết, biểu tượng, thể thao
+EMOTICON — 17 blocks, 3,568 chars (Valence + Arousal)
+  E.01  Enclosed Alphanumerics    2460..24FF    160
+  E.02  Misc Symbols              2600..26FF    256
+  E.03–E.05  (Mahjong, Domino, Playing Cards)   256
+  E.06–E.07  (Enclosed supp, Ideographic supp)  512
+  E.08  Misc Sym+Pictographs     1F300..1F5FF  768  ← lớn nhất
+  E.09  Emoticons                 1F600..1F64F   80
+  E.10–E.17  (Transport, Alchemical, Chess...)  1,536
 
-Nhóm 3: Dingbats/Arrows (U+2700..U+28FF)             — 24 ranges ~80 cp
-  ✅ ✊ ✨ ❌ ➕ ➰ — dấu check, mũi tên, ký hiệu
+MUSICAL — 7 blocks, 1,024 chars (Time)
+  T.01  Yijing Hexagram           4DC0..4DFF     64
+  T.02  Znamenny Musical          1CF00..1CFCF  208
+  T.03  Byzantine Musical         1D000..1D0FF  256
+  T.04  Musical Symbols           1D100..1D1FF  256
+  T.05–T.07  (Ancient Greek, Supp, Tai Xuan)    240
 
-Nhóm 4: Other BMP (U+3000..U+3FFF)                   — 9 ranges  ~30 cp
-  Ⓜ ㊗ ㊙ — ký hiệu CJK enclosed
-
-Nhóm 5: Mahjong/Cards (U+1F000..U+1F1FF)             — 7 ranges  ~50 cp
-  🀄 🃏 🅰 🅱 🆎 — bài, mạt chược
-
-Nhóm 6: Enclosed/Regional (U+1F200..U+1F2FF)         — 5 ranges  ~25 cp
-  🈁 🈶 🉐 — ký hiệu Nhật Bản
-
-Nhóm 7: Pictographs/Nature/Objects (U+1F300..U+1F5FF)— 120 ranges ~500 cp
-  🌀 🌊 🌱 🍎 🎀 🎭 🏠 🐶 — lớn nhất, đa dạng nhất
-
-Nhóm 8: Emoticons/Faces (U+1F600..U+1F64F)           — 31 ranges ~80 cp
-  😀 😂 😍 😭 🙏 — biểu cảm khuôn mặt
-
-Nhóm 9: Transport/Signs (U+1F680..U+1F8FF)           — 58 ranges ~200 cp
-  🚀 🚗 🛒 🛸 — phương tiện, biển báo
-
-Nhóm B: Supplemental (U+1F900..U+1F9FF)              — 45 ranges ~150 cp
-  🤖 🤸 🤺 🥇 🦁 — người, động vật, biểu tượng mới
-
-Nhóm C: Extended-A (U+1FA00..U+1FAFF)                — 44 ranges ~140 cp
-  ♟ 🪄 🪅 🦾 🧬 — Chess (1FA00-1FA6F) + Pictographs (1FA70-1FAFF)
-  ⚠️ MỚI: 1FA00..1FA6F (Chess Symbols) chưa có trong build.rs cũ
-
-Nhóm D: Legacy Computing (U+1FB00..U+1FBFF) ← MỚI v18  — ~50 cp
-  Block/terminal symbols, SDF-like geometric shapes
-  ⚠️ Chưa có trong build.rs cũ
-```
-
-### Blocks mới trong v18 cần thêm vào build.rs GROUPS:
-```
-SDF group:
-  1FA00..1FA6F   Chess Symbols (hình học: ♟ quân cờ, geometric)
-  1FB00..1FBFF   Symbols for Legacy Computing (terminal blocks)
-
-MUSICAL group:
-  1D250..1D28F   Musical Symbols Supplement
+─────────────────────────────────────
+TỔNG: 58 blocks = 9,584 UDC chars = L0 KnowTree
 ```
 
 ---
@@ -260,10 +290,14 @@ Instant(4)  → tức thì, kích nổ, bùng phát: 💥⚡☇💢
 - [ ] Tạo `docs/UDC.md` với header + schema + bảng 5 chiều
 - [ ] Commit: `docs: create UDC.md skeleton`
 
-### Phase 1: Nhóm 8 — Emoticons/Faces (1 session, ~80 chars)
-**Lý do bắt đầu ở đây:** Faces = VA dominant → dễ nhất để assign V và A
-- [ ] U+1F600..U+1F64F: 80 emoji khuôn mặt
-- [ ] Commit: `docs: UDC.md - Emoticons group (1F600-1F64F)`
+### Phase 1: E.09 — Emoticons/Faces (1 session, ~80 chars)
+**Lý do bắt đầu ở đây:** Faces = VA dominant → dễ nhất để NHÌN và encode tay
+**Quy trình bootstrap (từ SINH_HOC_v2):**
+  - NHÌN vào từng emoji
+  - HỎI: trông ra sao? làm gì? cảm giác thế nào? tốc độ?
+  - Ghi S, R, V, A, T → SEAL (không derive từ code)
+- [ ] U+1F600..U+1F64F: 80 emoji khuôn mặt → ghi vào UDC.md
+- [ ] Commit: `docs: UDC.md - E.09 Emoticons group (1F600-1F64F)`
 
 ### Phase 2: Nhóm 2 — Misc Symbols (1 session, ~180 chars)
 - [ ] U+2600..U+26FF: thời tiết, biểu tượng, thể thao
@@ -387,14 +421,15 @@ Unicode codepoint U+1F525:
   → Cùng 1 codepoint, 3 cách nhìn, 1 Molecule
 ```
 
-### Số liệu chuẩn Unicode 18.0:
+### Số liệu chuẩn (từ SINH_HOC_v2):
 ```
-Emoji_Presentation base codepoints: 1,228
-Fully-qualified sequences:          3,966
-Tất cả qualified:                   5,244
-Unicode assigned codepoints tổng:  41,382 (từ UnicodeData.txt)
-KnowTree key type cần dùng:        u32 (không phải u16)
-Dung lượng toàn bộ ~41K entries:   ~1.4 MB static array (tối ưu)
+UDC chars (58 blocks):         9,584  ← L0 KnowTree slots
+KnowTree tổng slots:          65,536  (u16, 2^16)
+KnowTree kích thước:           328 KB (65,536 × 5B)
+Chain link size:                 2B   (u16)
+Bootstrap: người encode tay → SEAL   (không compute từ emoji-data.txt)
+Emoji trong UDC:             ~3,568  (EMOTICON group, E.01-E.17)
+Data files có sẵn:           json/UnicodeData.txt, json/emoji/emoji-data.txt
 ```
 
 ---
