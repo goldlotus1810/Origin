@@ -102,24 +102,29 @@ Chain link = u16 (2 bytes) = index vào branch của tầng hiện tại
 
 ### Hierarchy: #emoji → P → alias → alias → ...
 ```
-Mỗi emoji = canonical root node (#emoji):
-  → có P_weight đầy đủ (S, R, V, A, T) — SEAL
-  → mọi thứ khác ALIAS về nó
+Mỗi node (emoji hay alias) đều có P riêng — tính 1 lần từ json → SEAL vĩnh viễn.
+Không có "lazy resolve" lúc runtime. Mọi P đã sẵn sàng từ bootstrap.
+
+Flow tính P:
+  json/ucd.json  →  công thức P  →  P[emoji]  → SEAL
+                                 →  P[alias]  → SEAL
+
+#emoji = canonical gốc:
+  → P tính trực tiếp từ json (S, R, V, A, T đầy đủ)
+
+alias = node thứ cấp:
+  → P tính từ canonical P + override từ json
+  → Kết quả = P riêng, SEAL — không trỏ runtime
 
 Ví dụ:
-  #🔥 (U+1F525)  P = { S=Sphere R=Causes V=0xC0 A=0xC0 T=Fast }
-    ↳ alias: U+2605 ★ (ngôi sao → lửa sáng, V override=0xB0)
-    ↳ alias: "lửa" (tiếng Việt)
-    ↳ alias: "fire" (tiếng Anh)
-    ↳ alias: "feu" (tiếng Pháp)
+  #🔥 (U+1F525)  json: { S=Sphere R=Causes V=0xC0 A=0xC0 T=Fast }
+                 → P[🔥] = { S=Sphere R=Causes V=0xC0 A=0xC0 T=Fast }  SEALED
 
-  #😢 (U+1F622)  P = { S=Sphere R=Member V=0x30 A=0x60 T=Slow }
-    ↳ alias: U+1F625 😥 (sad but relieved — gần nhau về VA)
-    ↳ alias: "buồn" (tiếng Việt)
-    ↳ alias: "sad" (tiếng Anh)
+  ★ (U+2605)    json: { canonical=1F525, V=0xB0 }
+                 → P[★] = { S=Sphere R=Causes V=0xB0 A=0xC0 T=Fast }   SEALED (kế thừa + override V)
 
-Chain: #emoji có P → alias chỉ lưu {canonical_cp, V_override?, A_override?}
-Alias KHÔNG copy P — chỉ trỏ vào canonical, optional override V/A
+  "lửa" (vi)    json: { canonical=1F525 }
+                 → P[lửa] = { S=Sphere R=Causes V=0xC0 A=0xC0 T=Fast }  SEALED (copy đầy đủ)
 ```
 
 ### Flow xây dữ liệu (không phải parse từ txt):
@@ -390,51 +395,51 @@ docs/
   UDC.md          — P definition cho ~9,584 chars (draft, human-readable)
 
 json/
-  ucd.json        — CANONICAL SOURCE: canonical nodes + alias chain
+  ucd.json        — INPUT VALUES: canonical nodes + alias chain (tool đọc → sinh P)
 ```
 
-### JSON format (canonical nodes + alias chain):
+### JSON format (input values để tính P):
 ```json
 {
   "nodes": {
-    "1F525": { "name": "FIRE",         "S": 0, "R": 5, "V": 192, "A": 192, "T": 3 },
-    "1F622": { "name": "CRYING_FACE",  "S": 0, "R": 0, "V": 48,  "A": 96,  "T": 1 },
-    "1F7E5": { "name": "RED_SQUARE",   "S": 2, "R": 1, "V": 192, "A": 128, "T": 0 }
+    "1F525": { "name": "FIRE",        "S": 0, "R": 5, "V": 192, "A": 192, "T": 3 },
+    "1F622": { "name": "CRYING_FACE", "S": 0, "R": 0, "V": 48,  "A": 96,  "T": 1 },
+    "1F7E5": { "name": "RED_SQUARE",  "S": 2, "R": 1, "V": 192, "A": 128, "T": 0 }
   },
   "aliases": {
-    "2605":   { "canonical": "1F525", "V_override": 176 },
-    "25A0":   { "canonical": "1F7E5" },
-    "1F625":  { "canonical": "1F622", "A_override": 112 }
+    "2605":  { "canonical": "1F525", "V": 176 },
+    "25A0":  { "canonical": "1F7E5" },
+    "1F625": { "canonical": "1F622", "A": 112 }
   },
   "text_aliases": {
-    "vi": {
-      "lửa":  "1F525",
-      "buồn": "1F622"
-    },
-    "en": {
-      "fire": "1F525",
-      "sad":  "1F622"
-    }
+    "vi": { "lửa": "1F525", "buồn": "1F622" },
+    "en": { "fire": "1F525", "sad":  "1F622" }
   }
 }
 ```
 
-⚠️ **ucd.json là CANONICAL SOURCE** — không phải output được generate.
-build.rs đọc file này khi compile → sinh bảng tĩnh.
+Tool đọc json → tính P cho TẤT CẢ nodes + aliases → output bảng P đã tính:
+```
+P[0x1F525] = Molecule { S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED
+P[0x2605]  = Molecule { S=Sphere, R=Causes, V=0xB0, A=0xC0, T=Fast }   ← SEALED (V override)
+P["lửa"]   = Molecule { S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED (copy đầy đủ)
+```
+
+build.rs đọc bảng P đã tính → nạp vào bảng tĩnh lúc compile.
 
 ---
 
 ## 9. NGUYÊN TẮC BẤT BIẾN
 
 ```
-① #emoji là CANONICAL NODE — có P đầy đủ, không derive từ code
-② P value là tri thức con người (nhìn → encode) — không phải metadata Unicode
-③ Alias KHÔNG copy P — chỉ trỏ canonical + optional V/A override
-④ Alias chỉ override V và/hoặc A — KHÔNG override S, R, T
-⑤ ucd.json là NGUỒN, không phải output — build.rs đọc nó
-⑥ KnowTree 65,536 = kích thước 1 branch — toàn cây lớn hơn nhiều
-⑦ Emoji name = tên chính xác từ Unicode (UPPERCASE, underscore)
-⑧ Mỗi canonical node có DUY NHẤT 1 entry trong "nodes"
+① Chỉ có 1 công thức P duy nhất — tất cả nodes đều dùng cùng 1 công thức
+② Mọi node (emoji + alias + text) đều có P riêng, SEALED vĩnh viễn sau bootstrap
+③ Không có "lazy resolve" — P tính 1 lần từ json, không tính lại lúc runtime
+④ #emoji = gốc canonical; alias kế thừa P từ canonical + override V/A nếu cần
+⑤ Alias chỉ override V và/hoặc A — KHÔNG override S, R, T
+⑥ ucd.json = input values của con người → tool tính P → bảng tĩnh
+⑦ KnowTree 65,536 = kích thước 1 branch — toàn cây lớn hơn nhiều
+⑧ Emoji name = tên chính xác từ Unicode (UPPERCASE, underscore)
 ```
 
 ---
