@@ -1,7 +1,7 @@
 # PLAN_UDC_REBUILD — Xây dựng lại UDC.md đúng chuẩn
 
 > **Ngày tạo:** 2026-03-20
-> **Cập nhật:** 2026-03-20 (v6 — P KHÔNG lưu trong JSON, P = output tính từ block+category+aliases qua ∫ₛ)
+> **Cập nhật:** 2026-03-20 (v2 — P KHÔNG lưu trong JSON, P = output tính từ block+category+aliases qua ∫ₛ)
 > **Tác giả:** Lara (AI session)
 > **Branch:** `claude/lara-SBLZg`
 > **Trạng thái:** 🟢 ACTIVE — schema chuẩn, có thể bắt đầu encode
@@ -35,7 +35,7 @@ Arabic     → Arabic block (U+0600..U+06FF)
 Japanese   → Hiragana (U+3040..U+309F) + Katakana (U+30A0..U+30FF)
 
 → Dữ liệu ngôn ngữ tiếng Việt đi vào block node "Latin Extended"
-  (không tạo node riêng "Vietnamese")
+
 → Alias tiếng Việt cho emoji/symbol → ghi tại codepoint đó trong JSON
 ```
 
@@ -738,7 +738,7 @@ json/
   ucd.json        — canonical source: blocks + codepoints + language aliases
 ```
 
-### JSON format đầy đủ (v5):
+### JSON format đầy đủ (v1):
 
 ```json
 {
