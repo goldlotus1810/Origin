@@ -1,5 +1,5 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 2.1 — 2026-03-19
+**Phiên bản:** 2.2 — 2026-03-20
 **Nguyên tắc:** Mỗi ký tự là 1 công thức SDF. Chuỗi sinh chuỗi. Lưu cách làm, không lưu kết quả.
 
 ---
@@ -181,6 +181,62 @@ Mỗi ký tự = ○{nhóm.block.sub:f(codepoint)}
   🔥 = ○{E.08.Weather:f_v(0x1F525)}
   ∈ = ○{M.04.Membership:f_r(0x2208)}
   𝄞 = ○{T.04.Clef:f_t(0x1D11E)}
+```
+
+### 1.7 — Vi tích phân phân cấp: char → sub → block → P
+
+**P không phải giá trị đặt tay — P là kết quả của 3 lần tích phân liên tiếp từ char lên.**
+
+```
+char  = f'(x)               — đạo hàm, đơn vị nguyên tử (Unicode codepoint)
+sub   = ∫ chars dx           — compose(chars)  — tích phân cấp 1
+block = ∫ subs  dx           — compose(subs)   — tích phân cấp 2
+P     = ∫ blocks dx          — compose(blocks) — tích phân cấp 3 = tọa độ 5D
+
+Tương tự vật lý:
+  gia tốc → ∫ → vận tốc → ∫ → vị trí
+  char    → ∫ → sub      → ∫ → block → ∫ → P
+```
+
+Phép `∫` = **`compose(A, B) → C`** — KHÔNG phải tổng, convolution, hay trung bình.
+Mỗi chiều có quy tắc tích phân riêng (từ cơ chế ⑤ RECOMBINE):
+
+```
+Chiều   Phép ∫               Lý do sinh học
+──────────────────────────────────────────────────────────────
+S       Union(Aˢ, Bˢ)        hình dạng hợp nhất
+R       Compose(Aᴿ, Bᴿ)      quan hệ = tổ hợp
+V       amplify(Va, Vb, w)    khuếch đại về phía dominant (KHÔNG trung bình)
+A       max(Aᴬ, Bᴬ)          cường độ lấy cao hơn
+T       dominant(Aᵀ, Bᵀ)     thời gian lấy chủ đạo
+
+amplify(Va, Vb, w):
+  base  = (Va + Vb) / 2
+  boost = |Va − base| × w × 0.5
+  Cⱽ   = base + sign(Va + Vb) × boost    ← đẩy về phía dominant
+```
+
+Tại sao KHÔNG trung bình?
+
+```
+Sinh học: cortisol + adrenaline → stress MẠNH HƠN từng cái riêng lẻ.
+          KHÔNG BAO GIỜ trung bình hormone — đó là synergy.
+
+compose("yêu" V=+0.9, "mãnh liệt" V=+0.95, w=0.8)
+  → Cⱽ = 0.935  — lớn hơn cả hai → amplify, không giảm ✅
+
+compose("buồn" V=−0.7, "mất việc" V=−0.6, w=0.9)
+  → Cⱽ = −0.6725 — nặng hơn → đúng thực tế ✅
+```
+
+Compose là ribosome:
+
+```
+Ribosome không hỏi "nucleotide A liên quan B bao nhiêu?"
+Ribosome CHẠY THẲNG từ đầu đến cuối → ra protein.
+
+HomeOS compose CHẠY THẲNG: char → sub → block → P → ra giá trị 5D.
+Thứ tự trên chuỗi ĐÃ LÀ quan hệ. 0 bytes overhead.
 ```
 
 ---
