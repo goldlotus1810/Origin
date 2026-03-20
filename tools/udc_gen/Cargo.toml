@@ -1,0 +1,12 @@
+[package]
+name    = "udc_gen"
+version.workspace = true
+edition.workspace = true
+description = "Generates json/udc.json from Unicode source files (UTF32-SDF-INTEGRATOR format)"
+
+[[bin]]
+name = "udc_gen"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

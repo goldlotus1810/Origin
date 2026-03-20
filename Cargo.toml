@@ -20,6 +20,7 @@ members = [
     "tools/migrate",
     "tools/builder",
     "tools/intg",
+    "tools/udc_gen",
 ]
 
 [workspace.package]

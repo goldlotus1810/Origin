@@ -57,9 +57,7 @@ Workers [tier 2] — SILENT, báo cáo chain (không raw data)
 ```
 P_weight [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5D
 Tính 1 lần lúc bootstrap từ json/udc.json → SEALED vĩnh viễn (L0 anchor)
-KnowTree: 65,536 × 5B = 328 KB (O(1) lookup)   Chain: 7.42 tỷ × 2B = 14.84 GB
-
-Nhóm       Blocks   Ký tự    Chiều
+KnowTree: 65,536 × 5B = 328 KB (O(1) lookup)   Chain: 7.42 tỷ × 2B = 14.84 GB       Blocks   Ký tự    Chiều
 ──────────────────────────────────────────────────────
 SDF           13    1,904    Shape    (18 SDF primitives)
 MATH          21    3,088    Relation (75 kênh)
