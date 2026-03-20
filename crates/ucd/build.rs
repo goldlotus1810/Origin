@@ -1,4 +1,4 @@
-//! build.rs — đọc UnicodeData.txt lúc compile → sinh bảng tĩnh
+//! build.rs — đọc UnicodeData.txt + emoji-data.txt lúc compile → sinh bảng tĩnh
 //!
 //! Output trong OUT_DIR/ucd_generated.rs:
 //!   UCD_TABLE         — forward lookup (cp → Molecule bytes + formula rules)
@@ -9,7 +9,11 @@
 //!   FORMULA_NAMES_S/R/V/A/T — formula descriptions per dimension
 //!
 //! KHÔNG hardcode bất kỳ Molecule nào.
-//! Mọi giá trị đến từ UnicodeData.txt.
+//! Mọi giá trị đến từ UnicodeData.txt + emoji-data.txt (Unicode 18.0).
+//!
+//! Nguồn dữ liệu:
+//!   UnicodeData.txt  — tên + category cho mọi codepoint
+//!   emoji-data.txt   — Emoji_Presentation property → EMOTICON group canonical
 //!
 //! Mỗi entry mang 5 công thức (f_s, f_r, f_v, f_a, f_t):
 //!   Shape    = f_s(cp, name, block) → u8
@@ -19,6 +23,8 @@
 //!   Time     = f_t(cp, name, block) → u8
 //!
 //! Formula rule_id ghi lại CÁCH suy ra mỗi chiều — molecule tự giải thích được.
+//!
+//! Update Unicode version mới: chỉ cần thay file trong ucd_source/ → cargo build tự sinh lại.
 
 use std::collections::HashMap;
 use std::env;

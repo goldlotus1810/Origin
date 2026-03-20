@@ -1,6 +1,6 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 2.1 — 2026-03-19
-**Nguyên tắc:** Mỗi ký tự là 1 công thức SDF. Chuỗi sinh chuỗi. Lưu cách làm, không lưu kết quả.
+**Phiên bản:** 2.7 — 2026-03-20
+**Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (∫ input). Đọc bằng ĐẠO HÀM (∂ output). Emoji = neo chuẩn L0, xây 1 lần từ tài liệu này, dùng mãi mãi.
 
 ---
 
@@ -22,7 +22,7 @@ HomeOS:  9,584 công thức SDF → chuỗi tỷ links → toàn bộ tri thức
 | Bits/ký tự | 2 | 14 (= 2 bytes) |
 | Chuỗi | Dài tỷ bases, đọc từ đầu đến cuối | Dài tỷ links, đọc từ gốc đến ngọn |
 | Cơ chế đọc | Ribosome evaluate → protein | SDF evaluate → hình dạng + màu + âm + vị trí |
-| Lưu gì | Công thức tạo protein, KHÔNG lưu protein | Công thức sinh tri thức, KHÔNG lưu kết quả |
+| Lưu gì | Genotype (ATCG chuỗi) + phenotype (protein concentration trong tế bào) | Chain links (2B/link = genotype) + P_weight per node (5B = cached phenotype) |
 
 ---
 
@@ -66,22 +66,47 @@ Chi phí lưu UDC: 0 bytes.
   Behavior hardcode trong engine — giống ribosome đọc codon.
 ```
 
-### 1.3 Năm chiều = 5 hàm, KHÔNG phải 5 số
+### 1.3 Năm chiều = 5 trọng số, lưu kết quả tích phân
 
 ```
-P = (S, R, V, A, T)     — mỗi chiều LÀ 1 hàm
+P = (S, R, V, A, T)     — mỗi chiều LÀ 1 trọng số ĐÃ TÍNH
 
-  S = f_s(context...)    Shape    — 13 SDF blocks,   1,904 ký tự
-  R = f_r(context...)    Relation — 21 MATH blocks,  3,088 ký tự
-  V = f_v(context...)    Valence  — 17 EMOTICON blk,  3,568 ký tự
-  A = f_a(context...)    Arousal  — 17 EMOTICON blk   (chia sẻ với V)
-  T = f_t(context...)    Time     —  7 MUSICAL blocks, 1,024 ký tự
+  S = weight_s    Shape    — 13 SDF blocks,   1,904 ký tự
+  R = weight_r    Relation — 21 MATH blocks,  3,088 ký tự
+  V = weight_v    Valence  — 17 EMOTICON blk,  3,568 ký tự
+  A = weight_a    Arousal  — 17 EMOTICON blk   (chia sẻ với V)
+  T = weight_t    Time     —  7 MUSICAL blocks, 1,024 ký tự
   ─────────────────────────────────────────────────────────
-  Tổng: 58 blocks = 9,584 hàm SDF
+  Tổng: 58 blocks = 9,584 điểm neo gốc (L0)
 
-  Chưa có context → TIỀM NĂNG (công thức chưa evaluate)
-  Có context      → evaluate → giá trị cụ thể
-  Hội tụ          → CHÍN → ghi vĩnh viễn (QR)
+Vòng đời của P:
+  Encoder (∫): input → tích phân → weight (học, ghi vào node)
+  Storage:     weight nằm trong KnowTree node — KHÔNG compute lại
+  Decoder (∂): weight → đạo hàm → output (render, trả lời)
+
+  L0 emoji (xây 1 lần từ tài liệu này):
+    🔥 → V=0xC0, A=0xC0, T=Fast   — vĩnh viễn, không thay đổi
+    😊 → V=0xE0, A=0x80, T=Medium  — vĩnh viễn, không thay đổi
+    💔 → V=0x10, A=0x60, T=Slow    — vĩnh viễn, không thay đổi
+    Dùng như CỨ CHUẨN so sánh mọi giá trị khác
+
+  L5+ learned (cập nhật qua Hebbian):
+    Encoder chạy → weight tích lũy → CHÍN → ghi vĩnh viễn (QR)
+```
+
+Tại sao lưu trọng số, KHÔNG lưu công thức?
+
+```
+❌ Lưu công thức: evaluate lại mỗi lần → không nhất quán, tốn CPU
+✅ Lưu trọng số: compute 1 lần khi học → đọc trực tiếp → O(1)
+
+Giống neuron sinh học:
+  Synapse weight = kết quả học tập (long-term potentiation)
+  Khi fire: đọc weight → output — KHÔNG chạy lại quá trình học
+
+Emoji = "calibration standard":
+  Giống điểm 0°C (nước đá) và 100°C (nước sôi) của nhiệt kế.
+  Mọi khái niệm khác được so sánh với các điểm neo này.
 ```
 
 ### 1.4 — 58 Unicode Blocks = Bảng tuần hoàn của tri thức
@@ -183,6 +208,245 @@ Mỗi ký tự = ○{nhóm.block.sub:f(codepoint)}
   𝄞 = ○{T.04.Clef:f_t(0x1D11E)}
 ```
 
+### 1.7 — Vi tích phân phân cấp: char → sub → block → P_weight (bootstrap)
+
+**P_weight L0 không phải giá trị đặt tay — là kết quả của 3 lần tích phân không gian liên tiếp từ char lên.**
+
+```
+Có 2 loại tích phân trong HomeOS — KHÔNG nhầm:
+
+  ∫ₛ (spatial)  = tích phân không gian: char → sub → block → P_weight
+                  Chạy 1 LẦN khi bootstrap L0 (tài liệu này là input)
+                  Kết quả: 9,584 P_weights SEALED vĩnh viễn
+
+  ∫ₜ (temporal) = tích phân thời gian: input → ΔP_weight (Encoder, Section 1.9)
+                  Chạy LIÊN TỤC khi học từ kinh nghiệm (runtime)
+                  Kết quả: P_weight L5+ cập nhật qua Hebbian
+
+Section 1.7 nói về ∫ₛ. Section 1.9 nói về ∫ₜ.
+```
+
+**∫ₛ — Bootstrap spatial integration:**
+
+```
+char  = f'(x)                — đơn vị nguyên tử (Unicode codepoint)
+sub   = ∫ₛ chars dx          — compose(chars)  — tích phân cấp 1
+block = ∫ₛ subs  dx          — compose(subs)   — tích phân cấp 2
+P     = ∫ₛ blocks dx         — compose(blocks) — tích phân cấp 3 = tọa độ 5D
+
+Tương tự vật lý:
+  gia tốc → ∫ → vận tốc → ∫ → vị trí
+  char    → ∫ₛ → sub     → ∫ₛ → block → ∫ₛ → P_weight
+```
+
+Phép `∫ₛ` = **`compose(A, B) → C`** — KHÔNG phải tổng, convolution, hay trung bình.
+Mỗi chiều có quy tắc tích phân riêng (từ cơ chế ⑤ RECOMBINE):
+
+```
+Chiều   Phép ∫               Lý do sinh học
+──────────────────────────────────────────────────────────────
+S       Union(Aˢ, Bˢ)        hình dạng hợp nhất
+R       Compose(Aᴿ, Bᴿ)      quan hệ = tổ hợp
+V       amplify(Va, Vb, w)    khuếch đại về phía dominant (KHÔNG trung bình)
+A       max(Aᴬ, Bᴬ)          cường độ lấy cao hơn
+T       dominant(Aᵀ, Bᵀ)     thời gian lấy chủ đạo
+
+amplify(Va, Vb, w):
+  base  = (Va + Vb) / 2
+  boost = |Va − base| × w × 0.5
+  Cⱽ   = base + sign(Va + Vb) × boost    ← đẩy về phía dominant
+```
+
+Tại sao KHÔNG trung bình?
+
+```
+Sinh học: cortisol + adrenaline → stress MẠNH HƠN từng cái riêng lẻ.
+          KHÔNG BAO GIỜ trung bình hormone — đó là synergy.
+
+compose("yêu" V=+0.9, "mãnh liệt" V=+0.95, w=0.8)
+  → Cⱽ = 0.935  — lớn hơn cả hai → amplify, không giảm ✅
+
+compose("buồn" V=−0.7, "mất việc" V=−0.6, w=0.9)
+  → Cⱽ = −0.6725 — nặng hơn → đúng thực tế ✅
+```
+
+Compose là ribosome:
+
+```
+Ribosome không hỏi "nucleotide A liên quan B bao nhiêu?"
+Ribosome CHẠY THẲNG từ đầu đến cuối → ra protein.
+
+HomeOS compose CHẠY THẲNG: char → sub → block → P → ra giá trị 5D.
+Thứ tự trên chuỗi ĐÃ LÀ quan hệ. 0 bytes overhead.
+```
+
+### 1.9 — Encoder (∫) · Storage · Decoder (∂): luồng tri thức
+
+```
+INPUT → Encoder → KnowTree node → Decoder → OUTPUT
+         (∫)       P_weight        (∂)
+         học       lưu             biểu đạt
+```
+
+**Encoder = tích phân (∫)**
+
+```
+encoder(input_signal) → ΔP_weight
+
+Nhận luồng tín hiệu (text, sensor, image...)
+Tích phân theo thời gian → trọng số P mới
+Cập nhật node trong KnowTree (Hebbian: fire together → wire together)
+
+Toán: ΔV = ∫ affect(token) dt   (qua toàn bộ câu/đoạn)
+      ΔA = ∫ intensity(token) dt
+  Không phải snapshot — là tích lũy liên tục.
+
+Ví dụ "tôi buồn vì mất việc":
+  ∫ ["tôi"(neutral) + "buồn"(V=-0.6) + "mất việc"(V=-0.7)] dt
+  → ΔV = -0.75 (amplified, không trung bình — xem Section 1.7)
+  → node "mất_mát" weight tăng, edge "buồn"↔"mất_việc" mạnh hơn
+```
+
+**Storage = trọng số trong KnowTree node**
+
+```
+KnowTree = array 65,536 phần tử:
+  Position (u16) = codepoint = INDEX IMPLICIT — không lưu trong node
+  Value          = P_weight (5B Molecule)     — LÀ node
+
+  KnowTree[0x1F525] → P(🔥) = [S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast]
+  KnowTree[0x25CF]  → P(●)  = [S=Sphere, R=Member,  V=0x80, A=0x40, T=Static]
+
+Node layout:
+  P_weight: Mol  (5 bytes)   — trọng số đã tính (S,R,V,A,T)
+  ─────────────────────────────────────────────────────
+  Total:         5 bytes/node   ← index là vị trí array, implicit
+
+L0 emoji nodes (9,584):
+  P_weight = được xây 1 lần từ TÀI LIỆU NÀY khi bootstrap
+  Sau đó: IMMUTABLE — không bao giờ thay đổi
+
+L5+ learned nodes:
+  P_weight = kết quả Encoder tích lũy qua thời gian
+  Cập nhật theo Hebbian cho đến khi CHÍN → promote QR → immutable
+
+KnowTree toàn bộ: 65,536 × 5B = 328 KB
+```
+
+**Decoder = đạo hàm (∂)**
+
+```
+decoder(P_weight) → expression
+
+Đọc trọng số P từ node
+Tính đạo hàm → tốc độ thay đổi → hành động
+
+  ∂P/∂space = ∇f(p)      → normal → ánh sáng (SDF rendering)
+  ∂V/∂time  = V'(t)       → tốc độ thay đổi cảm xúc → tone (ConversationCurve)
+  ∂P/∂experience = ΔP     → delta so với neo L0 → novelty (Curiosity instinct)
+
+CÙNG 1 NGUYÊN LÝ đạo hàm, 3 ứng dụng:
+  Không gian  → hình ảnh
+  Thời gian   → giọng điệu
+  Tri thức    → học tập
+```
+
+**Emoji L0 = Điểm neo chuẩn — xây từ tài liệu này**
+
+```
+Tài liệu này là INPUT cho bootstrap.
+Bootstrap procedure (chạy 1 lần duy nhất):
+  1. Với mỗi codepoint trong 9,584 UDC:
+     a. Xác định block → chiều chính (S/R/V+A/T)
+     b. Đọc nghĩa của ký tự/emoji → encode trực tiếp vào P_weight
+  2. Ghi vào L0 KnowTree — SEALED
+
+Sau bootstrap:
+  Mọi input mới → Encoder ∫ₜ → so sánh với L0 anchors
+  distance(input_P, anchor_P) → similarity → where am I in 5D?
+```
+
+**Bootstrap = đọc emoji, encode trực tiếp:**
+
+```
+Emoji ĐÃ LÀ định nghĩa. Không cần formula derive.
+Tài liệu này = bảng encoding của người viết.
+Người đọc emoji → hiểu ngay → encode vào 5D → SEAL.
+
+Quy trình:
+  for each codepoint in UDC_9584:
+    NHÌN vào ký tự / emoji
+    HỎI: "Nó trông ra sao? Nó làm gì? Cảm giác thế nào? Tốc độ?"
+    → S = shape primitive (từ nhóm S.xx)
+    → R = relation type  (từ nhóm M.xx)
+    → V = valence 0..255 (từ nhóm E.xx, âm/dương/trung)
+    → A = arousal 0..255 (từ nhóm E.xx, mạnh/yếu)
+    → T = time rate      (từ nhóm T.xx, nhanh/chậm)
+    → ghi P_weight vào KnowTree[index] → SEALED
+
+Không có "tính ra" — chỉ có "đọc và encode".
+Emoji là chữ viết của nghĩa. P_weight là nghĩa đó bằng số.
+```
+
+**Ví dụ anchors quan trọng (kết quả sau bootstrap):**
+
+```
+  🔥 (1F525): S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast   — nguy hiểm, nóng
+  😊 (1F60A): S=Sphere, R=Member,  V=0xE0, A=0x70, T=Medium — vui, bình, ổn
+  💔 (1F494): S=Sphere, R=Causes,  V=0x10, A=0x50, T=Slow   — đau, nặng, chậm
+  ∈  (2208):  R=Member   (M.04, offset 8)                    — chứa trong
+  ∘  (2218):  R=Compose  (M.04, offset 24)                   — tổ hợp
+  𝄞  (1D11E): T=Medium   (T.04, Musical Symbols)             — nhịp chuẩn
+
+Mọi khái niệm khác = distance_5D tới tập neo này.
+```
+
+---
+
+### 1.8 — Phân biệt 3 loại storage
+
+```
+Có 3 loại KHÔNG được nhầm:
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Loại 1 — KnowTree (in-memory, working memory)                  │
+│   Array 65,536 phần tử, index = vị trí = IMPLICIT              │
+│   Mỗi phần tử = P_weight: Mol (5 bytes)                        │
+│   → KnowTree toàn bộ: 65,536 × 5B = 328 KB                    │
+│                                                                 │
+│   KnowTree[codepoint] → P_weight — O(1), không cần hash        │
+├─────────────────────────────────────────────────────────────────┤
+│ Loại 2 — Chain link (knowledge content)                         │
+│   Mỗi link = u16 (2 bytes) = codepoint trỏ vào KnowTree        │
+│   7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)             │
+│   Chuỗi: [0x1F525][0x25CF][0x2208]... = trình tự khái niệm    │
+├─────────────────────────────────────────────────────────────────┤
+│ Loại 3 — origin.olang (persistent, signed)                      │
+│   ~25B/record: [type:1B][tagged_mol:2-6B][layer:1B][ts:8B][hash:8B]│
+│   Append-only, QR signing, rebuild được từ đây                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+u16 slot layout:
+
+```
+[gen: 2 bits][address: 14 bits]
+  gen=00: UDC base L0 (0..9583)   — 9,584 slots được dùng
+  gen=01: learned L5  (early)     — 16,384 slots
+  gen=10: learned L6+ (mature)    — 16,384 slots
+  gen=11: system/reserved         — 16,384 slots
+
+→ 65,536 nodes tổng cộng
+→ Chain link (2B) = slot number = đủ trỏ vào toàn bộ KnowTree
+→ Node trong KnowTree = 5B P_weight (vị trí array là key, không lưu lại)
+```
+
+```
+KnowTree working memory : 328 KB   (65,536 × 5B — vừa L1 cache)
+Chain data (tri thức)   : ~14 GB   (7.42 tỷ u16 links)
+origin.olang (persist)  : ~25B/rec (hash + timestamp + mol)
+```
+
 ---
 
 ## II. CHUỖI — Chuỗi sinh chuỗi, chuỗi tạo chuỗi
@@ -216,14 +480,39 @@ Engine CHẠY THẲNG từ gốc đến ngọn → ra giá trị.
 Thứ tự trong chuỗi ĐÃ LÀ quan hệ.
 ```
 
-### 2.3 Silk = vị trí trên chuỗi = 0 bytes
+### 2.3 Silk — 2 loại, chi phí khác nhau
 
 ```
-Silk KHÔNG PHẢI ma trận N×N quan hệ.
-Silk = vị trí của bạn trên chuỗi = bạn đang ở đâu = đi tiếp hướng nào.
-Giống reading frame trên DNA.
+Silk KHÔNG PHẢI 1 thứ — có 2 loại hoàn toàn khác nhau:
 
-Chi phí: 0 bytes. Quan hệ nằm trong THỨ TỰ trên chuỗi.
+  Structural Silk (implicit):
+    = vị trí của bạn trên chuỗi = bạn đang ở đâu = đi tiếp hướng nào
+    Giống reading frame trên DNA.
+    Chi phí: 0 bytes. Quan hệ nằm trong THỨ TỰ trên chuỗi.
+
+  Hebbian Silk (explicit, learned):
+    = co-activation strength giữa 2 node
+    = KHÔNG hardcode — tính từ P_weight của 2 node tại thời điểm co-activate
+
+    co_activate(A, B):
+      emotion_factor = (|A.V| + |B.V|) / 2  × max(A.A, B.A) / 255
+        (cảm xúc càng mạnh → kết nối càng sâu)
+      Δw = emotion_factor × (1 − w_AB) × 0.1
+      w_AB ← w_AB + Δw
+
+    Ví dụ: "buồn"(V=−0.7) ↔ "mất_việc"(V=−0.6), A=0.5
+      emotion_factor = 0.65 × 0.5 = 0.325
+      Δw = 0.325 × (1 − 0) × 0.1 = 0.0325  (lần đầu)
+      Lặp lại nhiều lần → w tăng dần → kết nối mạnh
+
+    Mang EmotionTag = (V, A) tại khoảnh khắc co-activate.
+    Chi phí: stored trong SilkGraph (~43KB cho mạng đầy đủ).
+
+Structural Silk = genotype bond (thứ tự trên chuỗi)
+Hebbian Silk   = synaptic strength (học từ kinh nghiệm)
+
+Khi document nói "Silk = 0 bytes" → chỉ đúng với Structural Silk.
+Hebbian Silk = weight per edge = stored, updated, decayed.
 ```
 
 Khi CẦN so sánh 2 chuỗi (không phải lúc nào cũng cần):
@@ -260,8 +549,8 @@ Không copy nội dung. Chỉ trỏ.
 DNA:     RNA polymerase đọc gene → mRNA (riêng từng tế bào)
 HomeOS:  evaluate(chain, context) → giá trị 5D
 
-f(chain, context_A) ≠ f(chain, context_B)
-→ Cùng công thức, context khác, kết quả khác.
+evaluate(chain, context_A) ≠ evaluate(chain, context_B)
+→ Cùng chain, context khác, walk khác nhau → kết quả khác.
 → Đa nghĩa tự nhiên. Không cần bảng tra.
 ```
 
@@ -341,8 +630,10 @@ DNA:     natural selection → gene tốt sống, gene yếu chết
 HomeOS:  Hebbian learning + decay
 
 Phát hiện (không tạo) quan hệ:
-  co_activate(A, B, reward):
-    w_AB ← w_AB + reward × (1 − w_AB) × 0.1
+  co_activate(A, B):
+    emotion_factor = (|A.V| + |B.V|) / 2 × max(A.A, B.A) / 255
+    w_AB ← w_AB + emotion_factor × (1 − w_AB) × 0.1
+    (cảm xúc càng mạnh → kết nối càng sâu — không hardcode reward)
 
 Quên (chọn lọc tự nhiên):
   decay(w, Δt):
@@ -352,7 +643,8 @@ Quên (chọn lọc tự nhiên):
     → Không dùng = quên. Dùng nhiều = nhớ.
 
 Promote (ngưỡng Fibonacci):
-  w ≥ φ⁻¹ AND fire_count ≥ Fib(n)
+  w ≥ φ⁻¹ (= 0.618) AND fire_count ≥ Fib(n)
+  φ⁻¹ = (√5−1)/2 ≈ 0.618 = ngưỡng tự nhiên, nhất quán với decay φ⁻¹
 
   Tầng bẩm sinh:    Fib(3) = 2
   Tầng kinh nghiệm: Fib(5) = 5
@@ -365,15 +657,15 @@ Promote (ngưỡng Fibonacci):
 
 ```
 DNA:     gene expression → cùng DNA, tế bào khác bật gene khác
-HomeOS:  Maturity pipeline: Formula → Evaluating → Mature
+HomeOS:  Maturity pipeline: Evaluating → Mature
 
-eval_mask = 5 bits (1 bit/chiều — chiều nào đã evaluate)
+eval_mask = 5 bits (1 bit/chiều — chiều nào đã có P_weight thực)
 
 advance():
-  Formula → Evaluating:    fire_count > 0
-  Evaluating → Mature:     weight ≥ 0.618
+  Evaluating → Mature:     weight ≥ φ⁻¹ (0.618)
                            AND fire_count ≥ Fib(n)
                            AND eval_dims ≥ 3
+  (Node mới sinh ra đã ở Evaluating với P_weight từ bootstrap hoặc LCA)
 
 Mature → QR: append-only, vĩnh viễn, không sửa.
 Giống DNA methylation — đánh dấu vĩnh viễn.
@@ -395,7 +687,11 @@ Dream(STM):
   ① Scan tất cả node Evaluating trong bộ nhớ ngắn hạn (STM)
 
   ② Cluster — gom node gần nhau trong 5D:
-     dist(A, B) = √( Σ_{d=1}^{5} (Aᵈ − Bᵈ)² )
+     dist(A, B) = √( Σ_{d=1}^{5} (Aᵈₙ − Bᵈₙ)² )
+     Normalize trước: mỗi chiều d → [0.0, 1.0]
+       S, R, T: enum index / max_enum  (S: 0..17 → /17, R: 0..7 → /7, T: 0..4 → /4)
+       V, A:    byte / 255             (0x00..0xFF → /255)
+     → 5 chiều cùng scale → distance có nghĩa
      ε = median(dist) × 0.5           (threshold thích ứng)
      min_size = max(2, ⌊|STM| / 5⌋)  (tối thiểu 2 node)
 
@@ -407,9 +703,10 @@ Dream(STM):
      cluster_center = LCA(cluster_members)
      advance() → Mature → append QR
 
-  ④ Prune — chuỗi yếu bị xóa:
-     weight < 0.1 AND fire_count = 0 sau N cycles → xóa
-     = apoptosis (chết tế bào theo chương trình)
+  ④ Prune — chuỗi yếu bị supersede:
+     weight < 0.1 AND fire_count = 0 sau N cycles → SupersedeQR record
+     KHÔNG xóa vật lý — ghi thêm record "đã thay thế" (append-only)
+     = apoptosis (chết tế bào theo chương trình, nhưng DNA vẫn còn đó)
 ```
 
 ### 4.2 Fibonacci KnowTree — Chuỗi gấp lại thành cây
@@ -657,8 +954,9 @@ chain → evaluate → compose → text → câu trả lời
 ### 6.2 Chọn từ theo cảm xúc
 
 ```
-distance(w, target) = 2|Vw−Vt| + |Aw−At| + |Dw−Dt|
-  (Valence weight gấp đôi — quan trọng nhất)
+distance(w, target) = 2|Vw−Vt| + |Aw−At|
+  Valence weight gấp đôi — quan trọng nhất.
+  Dominance không cần — là hệ quả của R=Causes (implicit).
 
 select_words(target_emotion, n):
   candidates = { w : distance(w, target) < δ }
@@ -708,113 +1006,19 @@ Benchmark (16,416 nodes):
 
 ---
 
-## VIII. BÀI TOÁN 16GB
-
-### 8.1 Nguyên tắc
+## VIII. STORAGE — Tóm tắt
 
 ```
-1 UDC  = 1 SDF = 1 codepoint = 2 bytes
-1 link = 1 index trên chuỗi   = 2 bytes
-Silk   = 0 bytes (vị trí trên chuỗi)
-Hebbian = 0 bytes trên disk (RAM tạm)
+KnowTree node   = 5 bytes  (chỉ P_weight — index implicit từ vị trí array)
+KnowTree tổng   = 328 KB   (65,536 × 5B)
+Chain link      = 2 bytes  u16 = codepoint trỏ vào KnowTree
+Structural Silk = 0 bytes  (thứ tự trên chuỗi, implicit)
+Hebbian Silk    = ~43 KB   (SilkGraph, stored per pair)
+Chain data      = 14 GB    (7.42 tỷ links × 2B)
+origin.olang    = ~25B/rec (append-only, QR signing)
 ```
 
-### 8.2 Chi phí
-
-```
-UDC alphabet:     0 bytes (codepoint = địa chỉ, hardcode trong engine)
-SDF primitives:   0 bytes (18 hàm trong engine)
-Block mapping:    0 bytes (range = implicit)
-Aliases:          155,000 × 4 bytes = 620 KB
-──────────────────────────────────
-Cố định: ≈ 621 KB
-
-OS:               2,000 MB
-HomeOS engine:       32 MB
-STM buffer:         128 MB
-Alias index:         64 MB
-──────────────────────────────────
-Runtime: 2,224 MB
-
-Khả dụng: 16,384 − 2,224 − 0.6 = 14,159 MB ≈ 14.16 GB
-```
-
-### 8.3 Bao nhiêu tri thức?
-
-```
-14,839,193,600 bytes ÷ 2 bytes/link = 7,419,596,800 links
-
-→ 7.42 TỶ LINKS trên 16 GB
-
-Không phải 7.42 tỷ "điểm cô lập".
-Là 7.42 tỷ MẮT XÍCH trên các chuỗi liên tục.
-Giống 3.2 tỷ cặp base tạo chuỗi DNA liên tục.
-```
-
-### 8.4 So sánh DNA vs HomeOS
-
-```
-                    DNA              HomeOS
-─────────────────────────────────────────────────────
-Alphabet:           4                9,584
-Bits/ký tự:         2                14
-Tổng links:         3.2 tỷ           7.42 tỷ
-Dung lượng:         ~800 MB          ~14.16 GB
-Entropy/link:       2 bits           13.23 bits
-
-Thông tin/link:     HomeOS gấp 6.6×
-Tổng links:         HomeOS gấp 2.3×
-─────────────────────────────────────────────────────
-Tổng entropy:       6.4 Gbits        98.2 Gbits
-                    HomeOS giàu hơn DNA 15.3 lần
-
-DNA 800 MB → toàn bộ sự sống.
-HomeOS 14 GB → ???
-```
-
-### 8.5 Sách & Tổ hợp
-
-```
-1 cuốn sách 100 trang:
-  1,700 câu × 2 UDC/câu = 3,400 links = 6,800 bytes
-  + 1,753 parent pointers × 2B = 3,506 bytes
-  = 10,306 bytes ≈ 10 KB
-
-  So với UTF-8 (146 KB): 14× nhỏ hơn
-  So với PDF (5 MB): 485× nhỏ hơn
-
-16 GB chứa: ~1,440,000 cuốn sách 100 trang
-
-Tiềm năng tổ hợp (0 bytes — evaluate khi cần):
-  Không sub:  9,584³ = 880 tỷ
-  Có sub:     1,581,360³ = 3.95 × 10¹⁸
-```
-
-### 8.6 Bảng so sánh tổng
-
-```
-Phương pháp         16 GB chứa        HomeOS gấp
-──────────────────────────────────────────────────
-Text UTF-8          ~100K sách         14×
-Embedding 768D      ~2.4M concepts     3,092×
-Knowledge Graph     ~74M triples       100×
-LLM 7B (Q4)        1 model / 3.5GB    khác loại
-HomeOS              7.42 tỷ links      —
-                    ~1.44 triệu sách
-                    3.95 × 10¹⁸ tiềm năng
-```
-
-### 8.7 Timeline
-
-```
-Năm 1:    ~20M links    =    38 MB
-Năm 5:    ~200M links   =   381 MB
-Năm 10:   ~600M links   =   1.1 GB
-Năm 20:   ~1.5B links   =   2.8 GB
-Năm 30+:  ~3B links     =   5.7 GB   (dư 8.5 GB)
-
-Cả đời KHÔNG BAO GIỜ đầy. Luôn dư.
-```
+> Tính toán chi tiết: xem `HomeOS_16GB_example.md`
 
 ---
 
