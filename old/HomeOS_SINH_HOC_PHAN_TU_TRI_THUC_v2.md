@@ -1,5 +1,5 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 2.2 — 2026-03-20
+**Phiên bản:** 2.3 — 2026-03-20
 **Nguyên tắc:** Mỗi ký tự là 1 công thức SDF. Chuỗi sinh chuỗi. Lưu cách làm, không lưu kết quả.
 
 ---
@@ -237,6 +237,80 @@ Ribosome CHẠY THẲNG từ đầu đến cuối → ra protein.
 
 HomeOS compose CHẠY THẲNG: char → sub → block → P → ra giá trị 5D.
 Thứ tự trên chuỗi ĐÃ LÀ quan hệ. 0 bytes overhead.
+```
+
+### 1.8 — 2 bytes per Node: Phân tích khả thi
+
+**Câu hỏi: Lưu mỗi Node với 2 bytes trong KnowTree có khả thi không?**
+
+**Trả lời: Có, và thực ra đây là thiết kế ĐÚNG — document đã nói nhưng chưa ghi tường minh.**
+
+```
+Có 3 loại storage khác nhau, KHÔNG được nhầm:
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Loại 1 — KnowTree index (in-memory, structure only)            │
+│   2 bytes/node = u16 index                                     │
+│   9,584 UDC + ~200 subs + 58 blocks + 5 groups = ~10 KB        │
+│   L5+ learned slots: 65,536 − 9,584 = 55,952 slot × 2B = 109KB│
+│   → KnowTree toàn bộ: ≈ 131 KB                                │
+├─────────────────────────────────────────────────────────────────┤
+│ Loại 2 — Chain link (content, on-disk knowledge)               │
+│   2 bytes/link = u16 index trỏ vào KnowTree                   │
+│   7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)            │
+│   → Loại 1 và Loại 2 CÙNG ĐƠNN VỊ: u16                       │
+├─────────────────────────────────────────────────────────────────┤
+│ Loại 3 — origin.olang record (persistent, signed)              │
+│   ~17B minimal: [type:1B][tagged_mol:2-6B][layer:1B][ts:8B]    │
+│   + hash index: [chain_hash:8B]                                │
+│   → ~25B/record (cần cho append-only + QR signing)             │
+└─────────────────────────────────────────────────────────────────┘
+
+Loại 1 (KnowTree) và Loại 2 (chain) = DÙNG ĐỦ để suy luận.
+Loại 3 (origin.olang) = cần thêm khi PERSIST vĩnh viễn + verify.
+```
+
+Tại sao 2 bytes đủ cho node identity?
+
+```
+P = (S, R, V, A, T) KHÔNG cần lưu — COMPUTE từ u16 index:
+  index 0..9583  → encode_codepoint(ucd_table[index]) → Molecule
+  index 9584+    → compose(parent_mol, local_delta)   → Molecule
+
+Giống DNA:
+  Codon "ATG" không lưu "protein methionine"
+  Ribosome TÍNH ra methionine từ codon khi cần.
+
+u16 bit layout:
+  [gen: 2 bits][address: 14 bits]
+  gen=00: UDC base (0..9583)      — 14,336 slots (dùng 9,584)
+  gen=01: learned L5  (early)     — 16,384 slots
+  gen=10: learned L6+ (mature)    — 16,384 slots
+  gen=11: system/reserved         — 16,384 slots
+
+→ Tổng addressable: 65,536 nodes trong 2 bytes
+→ 9,584 UDC + 55,952 learned = đủ cho lifetime learning
+```
+
+Xác nhận với Section 8.1:
+
+```
+"1 UDC  = 1 SDF = 1 codepoint = 2 bytes"  ← node identity = 2B ✅
+"1 link = 1 index trên chuỗi  = 2 bytes"  ← chain link    = 2B ✅
+Link = trỏ tới node → cùng 1 đơn vị: u16 ✅
+
+KnowTree   = ~131 KB   (toàn bộ cây index)
+Chain data = ~14 GB   (toàn bộ tri thức, 7.42 tỷ u16)
+origin.olang record = ~25B (persistence layer, thêm hash + ts)
+```
+
+Kết luận:
+
+```
+2 bytes/node trong KnowTree = ĐÚNG VÀ KHẢ THI.
+Điều kiện bắt buộc: P KHÔNG lưu → compute on demand.
+Điều kiện hiện tại: origin.olang vẫn lưu tagged_mol (2-6B) + hash (8B)
+  → Đây là persistence overhead cần thiết, KHÔNG mâu thuẫn với 2B identity.
 ```
 
 ---
@@ -713,13 +787,19 @@ chain → evaluate → compose → text → câu trả lời
 ### 6.2 Chọn từ theo cảm xúc
 
 ```
-distance(w, target) = 2|Vw−Vt| + |Aw−At| + |Dw−Dt|
+distance(w, target) = 2|Vw−Vt| + |Aw−At|
   (Valence weight gấp đôi — quan trọng nhất)
+  (Molecule chỉ có V + A — KHÔNG có D/Dominance)
 
 select_words(target_emotion, n):
   candidates = { w : distance(w, target) < δ }
   return top_n sorted by distance
 ```
+
+⚠️ Lưu ý: Công thức cũ dùng `|Dw−Dt|` (Dominance) — đây là tàn dư từ mô hình
+VAD (Valence-Arousal-Dominance) bên ngoài. Molecule của HomeOS chỉ có V và A.
+Dominance KHÔNG phải chiều độc lập trong 5D — nó là hệ quả của R (Relation):
+  R=Causes + V cao → implicit dominance (không cần thêm chiều).
 
 ---
 
@@ -769,10 +849,17 @@ Benchmark (16,416 nodes):
 ### 8.1 Nguyên tắc
 
 ```
-1 UDC  = 1 SDF = 1 codepoint = 2 bytes
-1 link = 1 index trên chuỗi   = 2 bytes
+1 UDC  = 1 SDF = 1 codepoint = 2 bytes   ← node identity (u16 index)
+1 link = 1 index trên chuỗi   = 2 bytes   ← chain link = CÙNG u16 identity
 Silk   = 0 bytes (vị trí trên chuỗi)
 Hebbian = 0 bytes trên disk (RAM tạm)
+P      = 0 bytes — KHÔNG lưu, COMPUTE từ u16 index khi cần
+
+Phân biệt quan trọng (xem Section 1.8):
+  KnowTree index:    2B/node  = ~131 KB  (cây in-memory)
+  Chain data:        2B/link  = 14 GB    (tri thức on-disk)
+  origin.olang rec:  ~25B/node = persistence layer (hash + ts)
+  → Không mâu thuẫn. Ba loại phục vụ ba mục đích khác nhau.
 ```
 
 ### 8.2 Chi phí
