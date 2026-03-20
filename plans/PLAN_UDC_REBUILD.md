@@ -1,7 +1,7 @@
 # PLAN_UDC_REBUILD — Xây dựng lại UDC.md đúng chuẩn
 
 > **Ngày tạo:** 2026-03-20
-> **Cập nhật:** 2026-03-20 (v5 — Unicode IS the taxonomy, JSON = editable layer, language data vào script blocks)
+> **Cập nhật:** 2026-03-20 (v6 — P KHÔNG lưu trong JSON, P = output tính từ block+category+aliases qua ∫ₛ)
 > **Tác giả:** Lara (AI session)
 > **Branch:** `claude/lara-SBLZg`
 > **Trạng thái:** 🟢 ACTIVE — schema chuẩn, có thể bắt đầu encode
@@ -46,15 +46,15 @@ UnicodeData.txt  = read-only, 1 entry/line, format cứng, không thể thêm fi
 Blocks.txt       = chỉ có range + tên block, không có P values, không có aliases
 
 json/ucd.json    = structured, diff-able, AI + human có thể edit
-                 = thêm được: P values (S/R/V/A/T), aliases (vi/en/ja/zh), notes
-                 = build.rs đọc JSON lúc compile → sinh bảng tĩnh
+                 = thêm được: aliases (vi/en/ja/zh), notes
+                 = build.rs đọc JSON lúc compile → TÍNH P → sinh bảng tĩnh
 
 Flow đúng:
-  Unicode .txt ──(parse 1 lần)──► json/ucd.json (base: name, block, category)
+  Unicode .txt ──(parse 1 lần)──► json/ucd.json (base: name, block, category, aliases)
                                        │
-                              (human/AI thêm vào)
+                              (human/AI thêm aliases vào)
                                        │
-                              P values + language aliases
+                              tool tính P từ block + category (∫ₛ)
                                        │
                               build.rs đọc → bảng tĩnh
 ```
@@ -81,12 +81,12 @@ Flow đúng:
 
 ⑤ build.rs hiện tại (v5):
    - Đang derive P tự động từ name patterns + block ranges (code logic)
-   - Sau UDC rebuild: build.rs đọc json/ucd.json → dùng P values từ JSON
-   - Giữ fallback: nếu codepoint không có trong JSON → dùng formula tự động
+   - Sau UDC rebuild: build.rs đọc json/ucd.json → TÍNH P từ block + category theo ∫ₛ
+   - JSON KHÔNG chứa P values — P là output của tính toán, không phải input
 
 ⑥ Phân chia 3 loại entry trong JSON:
-   - "blocks": block nodes (P_default, dimension dominant)
-   - "codepoints": từng char với P explicit + aliases
+   - "blocks": block nodes (dimension dominant — input để tính P)
+   - "codepoints": từng char với block + category + aliases (input để tính P)
    - "script_aliases": ngôn ngữ tự nhiên → codepoint mapping
 ```
 
@@ -753,40 +753,33 @@ json/
     "1F300-1F5FF": {
       "name": "Miscellaneous Symbols and Pictographs",
       "dimension": "VA",
-      "P_default": { "S": 0, "R": 0, "V": 128, "A": 128, "T": 2 },
       "note": "Largest EMOTICON block, ~768 chars"
     },
     "1F600-1F64F": {
       "name": "Emoticons",
-      "dimension": "VA",
-      "P_default": { "S": 0, "R": 0, "V": 128, "A": 128, "T": 2 }
+      "dimension": "VA"
     },
     "2200-22FF": {
       "name": "Mathematical Operators",
       "dimension": "R",
-      "P_default": { "S": 5, "R": 0, "V": 128, "A": 32, "T": 0 },
       "note": "R dominant — 8 relation primitives nằm ở đây"
     },
     "25A0-25FF": {
       "name": "Geometric Shapes",
       "dimension": "S",
-      "P_default": { "S": 0, "R": 0, "V": 128, "A": 64, "T": 0 },
       "note": "S dominant — 8 SDF primitives nằm ở đây"
     },
     "1D100-1D1FF": {
       "name": "Musical Symbols",
       "dimension": "T",
-      "P_default": { "S": 5, "R": 7, "V": 160, "A": 128, "T": 2 },
       "note": "T dominant — note duration = Time dimension"
     }
   },
 
   "codepoints": {
     "1F525": {
-      "name": "FIRE",
       "block": "1F300-1F5FF",
       "category": "So",
-      "S": 0, "R": 5, "V": 192, "A": 192, "T": 3,
       "aliases": {
         "vi": ["lửa", "ngọn lửa", "đám cháy"],
         "en": ["fire", "flame", "blaze"],
@@ -795,30 +788,24 @@ json/
       }
     },
     "1F622": {
-      "name": "CRYING FACE",
       "block": "1F600-1F64F",
       "category": "So",
-      "S": 0, "R": 0, "V": 48, "A": 96, "T": 1,
       "aliases": {
         "vi": ["khóc", "buồn", "nước mắt"],
         "en": ["crying", "sad", "tears"]
       }
     },
     "2208": {
-      "name": "ELEMENT OF",
       "block": "2200-22FF",
       "category": "Sm",
-      "S": 5, "R": 0, "V": 128, "A": 32, "T": 0,
       "aliases": {
         "en": ["element of", "belongs to", "in"],
         "vi": ["thuộc", "là thành viên của"]
       }
     },
     "25CF": {
-      "name": "BLACK CIRCLE",
       "block": "25A0-25FF",
       "category": "So",
-      "S": 0, "R": 0, "V": 64, "A": 64, "T": 0,
       "aliases": {
         "en": ["black circle", "filled circle", "bullet"],
         "vi": ["vòng tròn đen", "chấm tròn"]
@@ -875,44 +862,64 @@ json/
 ### Giải thích 4 sections:
 
 ```
-"blocks"         → Block nodes: P_default + dimension dominant
+"blocks"         → Block nodes: dimension dominant (input để tính P)
                    Silk tự động từ block node → mọi codepoint trong block
 
-"codepoints"     → Từng char: P explicit (override P_default) + language aliases
+"codepoints"     → Từng char: block + category + aliases (input để tính P)
                    Chỉ cần encode những char QUAN TRỌNG (~500 anchor chars)
-                   Phần còn lại dùng P_default của block
+                   Phần còn lại dùng dimension của block
 
 "script_aliases" → Natural language → codepoint mapping
                    "lửa" → "1F525" (không encode từng ký tự l,ử,a)
                    Mỗi ngôn ngữ có _block trỏ tới Unicode block của nó
 
 "utf32_aliases"  → UTF-32 symbol → canonical emoji
-                   ★ (2605) → ⭐ (2B50) với V override nếu cần
+                   ★ (2605) → ⭐ (2B50)
 ```
 
-P[gốc] đọc json → tính P → SEAL:
+**Cấu trúc codepoint trong JSON:**
 ```
-blocks["1F300-1F5FF"].P_default       → P block node   SEALED
-codepoints["1F525"].{S,R,V,A,T}       → P codepoint    SEALED
-script_aliases["vi"]["lửa"] = "1F525" → P["lửa"] = copy từ P["1F525"]  SEALED
-utf32_aliases["2605"].canonical        → P["2605"] = P["2B50"] + V_override SEALED
+"1F525"  ──────────────────────────────── P[char] = L0 anchor (SEALED)
+   │
+   ├── block: "1F300-1F5FF"  ────────── P[block] = ∫ₛ cấp 2
+   ├── category: "So"         ────────── xác định chiều dominant
+   │
+   └── aliases:
+         en: [fire, flame, blaze]  ──────┐
+         vi: [lửa, ngọn lửa, ...]  ──────┤── P[alias] = kế thừa P[char]
+         ja: [火, 炎]               ──────┘   tự nhóm theo key ngôn ngữ
 ```
 
-build.rs đọc bảng P đã tính → nạp vào bảng tĩnh lúc compile.
+**P KHÔNG lưu trong JSON — P là output của tính toán:**
+```
+char  → category "So" + block "1F300-1F5FF"
+     → ∫ₛ cấp 1 (char)
+     → ∫ₛ cấp 2 (sub-group trong block)
+     → ∫ₛ cấp 3 (block)
+     → P[gốc] = (S, R, V, A, T)  ← SEAL
+
+script_aliases["vi"]["lửa"] = "1F525"
+     → P["lửa"] = P["1F525"]  ← SEAL (kế thừa)
+
+utf32_aliases["2605"].canonical = "2B50"
+     → P["2605"] = P["2B50"]  ← SEAL (kế thừa)
+```
+
+build.rs đọc JSON (block + category + aliases) → TÍNH P theo ∫ₛ → nạp vào bảng tĩnh lúc compile.
 
 ---
 
 ## 9. NGUYÊN TẮC BẤT BIẾN
 
 ```
-① Chỉ có 1 công thức P duy nhất — tất cả nodes đều dùng cùng 1 công thức
-② Mọi node (emoji + alias + text) đều có P riêng, SEALED vĩnh viễn sau bootstrap
-③ Không có "lazy resolve" — P tính 1 lần từ json, không tính lại lúc runtime
-④ #emoji = gốc canonical; alias kế thừa P từ canonical + override V/A nếu cần
-⑤ Alias chỉ override V và/hoặc A — KHÔNG override S, R, T
-⑥ ucd.json = input values của con người → tool tính P → bảng tĩnh
-⑦ KnowTree 65,536 = kích thước 1 branch — toàn cây lớn hơn nhiều
-⑧ Emoji name = tên chính xác từ Unicode (UPPERCASE, underscore)
+① Chỉ có 1 công thức P duy nhất — tất cả nodes đều dùng cùng 1 công thức ∫ₛ
+② Mọi node (codepoint + alias) đều có P riêng, SEALED vĩnh viễn sau bootstrap
+③ Không có "lazy resolve" — P tính 1 lần từ block+category, không tính lại lúc runtime
+④ JSON KHÔNG lưu P values — JSON chỉ chứa: block, category, aliases
+⑤ P là OUTPUT của tính toán ∫ₛ từ block + category — KHÔNG phải input
+⑥ Alias kế thừa P từ canonical codepoint — KHÔNG override bất kỳ chiều nào
+⑦ ucd.json (block + category + aliases) → tool tính P → bảng tĩnh compile-time
+⑧ KnowTree 65,536 = kích thước 1 branch — toàn cây lớn hơn nhiều
 ```
 
 ---
@@ -974,5 +981,5 @@ JSON canonical source:       json/ucd.json (chúng ta xây thủ công)
 
 ---
 
-*Plan v3 — Cập nhật 2026-03-20: Unicode 18.0 data files đã có trong ucd_source/,
-emoji-data.txt là nguồn canonical cho EMOTICON group, 3 blocks mới cần thêm vào build.rs.*
+*Plan v6 — Cập nhật 2026-03-20: P KHÔNG lưu trong JSON. JSON chỉ có block + category + aliases.
+P là output tính từ ∫ₛ (block → dimension dominant → compose rules). build.rs đọc JSON → tính P → SEAL.*
