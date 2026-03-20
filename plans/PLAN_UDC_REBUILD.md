@@ -55,21 +55,24 @@ HomeOS:  ○{○{○{○{○{...}}}}}              (mỗi char = 1 node có tọ
 
 ### Nguyên lý — từ SINH_HOC_v2:
 ```
-UDC 9,584 chars (58 blocks)  = L0 KnowTree  → mỗi char có P_weight đầy đủ, SEALED
-P[UDC] -> P[node[ecomji]] qua LCA
-P[Text (ngôn ngữ tự nhiên)]     = ALIAS        → trỏ vào P[node[ecomji]] qua LCA
+P[gốc] = 1 công thức duy nhất (S, R, V, A, T)
+       → sinh ra 3 loại node, tất cả đều có P riêng, SEALED vĩnh viễn:
 
-Phân cấp trong 9,584:
-  Emoji (visual, E.xx blocks) = neo cảm xúc mạnh nhất (V/A rõ ràng nhất)
-  Math (M.xx blocks)          = neo quan hệ (R rõ ràng nhất)
-  SDF (S.xx blocks)           = neo hình dạng (S rõ ràng nhất)
-  Musical (T.xx blocks)       = neo thời gian (T rõ ràng nhất)
+  P[UDC]   = P của 9,584 chars trong 58 Unicode blocks (base layer)
+               SDF chars   → S dominant (hình dạng rõ)
+               MATH chars  → R dominant (quan hệ rõ)
+               EMOTICON    → V/A dominant (cảm xúc rõ)
+               MUSICAL     → T dominant (thời gian rõ)
 
-Ví dụ:
-  🟥 RED SQUARE        → P = { S=Square R=Contains V=0xC0 A=0x80 T=Static }  ← node thật
-  ■  BLACK SQUARE      → alias → 🟥 (cùng hình, khác màu/V)
-  "hình vuông đỏ"      → alias → 🟥
-  "red square"         → alias → 🟥
+  P[emoji] = P của emoji nodes (canonical — gốc để các alias kế thừa)
+               Là tập con của P[UDC] (emoji thuộc EMOTICON group)
+               Đây là "điểm neo" chuẩn — như 0°C và 100°C
+
+  P[alias] = P của mọi alias (text, char alias, ngôn ngữ tự nhiên)
+               Kế thừa từ P[emoji] canonical + override V/A nếu cần
+               SEALED — không phải pointer lúc runtime
+
+Tất cả sinh từ P[gốc] với input từ json/ucd.json.
 ```
 
 ### KnowTree là CÂY, không phải 1 flat array:
@@ -398,31 +401,32 @@ json/
   ucd.json        — INPUT VALUES: canonical nodes + alias chain (tool đọc → sinh P)
 ```
 
-### JSON format (input values để tính P):
+### JSON format (3 sections = 3 loại node):
 ```json
 {
-  "nodes": {
+  "udc": {
+    "2605": { "name": "BLACK_STAR",   "S": 3, "R": 5, "V": 176, "A": 160, "T": 3 },
+    "25A0": { "name": "BLACK_SQUARE", "S": 2, "R": 1, "V": 128, "A": 64,  "T": 0 },
+    "2208": { "name": "ELEMENT_OF",   "S": 0, "R": 0, "V": 128, "A": 64,  "T": 2 }
+  },
+  "emoji": {
     "1F525": { "name": "FIRE",        "S": 0, "R": 5, "V": 192, "A": 192, "T": 3 },
     "1F622": { "name": "CRYING_FACE", "S": 0, "R": 0, "V": 48,  "A": 96,  "T": 1 },
     "1F7E5": { "name": "RED_SQUARE",  "S": 2, "R": 1, "V": 192, "A": 128, "T": 0 }
   },
   "aliases": {
-    "2605":  { "canonical": "1F525", "V": 176 },
-    "25A0":  { "canonical": "1F7E5" },
-    "1F625": { "canonical": "1F622", "A": 112 }
-  },
-  "text_aliases": {
-    "vi": { "lửa": "1F525", "buồn": "1F622" },
-    "en": { "fire": "1F525", "sad":  "1F622" }
+    "1F625": { "canonical": "1F622", "A": 112 },
+    "vi": { "lửa": "1F525", "buồn": "1F622", "ngôi sao": "2605" },
+    "en": { "fire": "1F525", "sad":  "1F622", "star": "2605" }
   }
 }
 ```
 
-Tool đọc json → tính P cho TẤT CẢ nodes + aliases → output bảng P đã tính:
+P[gốc] (công thức) đọc json → tính P cho cả 3 loại → SEAL:
 ```
-P[0x1F525] = Molecule { S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED
-P[0x2605]  = Molecule { S=Sphere, R=Causes, V=0xB0, A=0xC0, T=Fast }   ← SEALED (V override)
-P["lửa"]   = Molecule { S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED (copy đầy đủ)
+P[UDC]   P[0x2605]  = { S=Triangle, R=Causes, V=0xB0, A=0xA0, T=Fast }   ← SEALED
+P[emoji] P[0x1F525] = { S=Sphere,   R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED
+P[alias] P["lửa"]   = { S=Sphere,   R=Causes, V=0xC0, A=0xC0, T=Fast }   ← SEALED
 ```
 
 build.rs đọc bảng P đã tính → nạp vào bảng tĩnh lúc compile.
