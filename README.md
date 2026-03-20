@@ -16,17 +16,21 @@ mọi f == ○[f]   instance     — mọi thứ là instance của ○
 
 ## Không Gian 5 Chiều
 
-Mỗi khái niệm = tọa độ trong không gian 5D, từ **~5,400 ký tự Unicode 18.0**:
+Mỗi khái niệm = tọa độ trong không gian 5D, từ **9,584 L0 anchors (58 blocks, Unicode 18.0)**:
 
 ```
-MolecularChain = [Shape][Relation][Valence][Arousal][Time] = 5 bytes
+P_weight = [Shape][Relation][Valence][Arousal][Time] = 5 bytes/node
+KnowTree: 65,536 × 5B = 328 KB (working memory, O(1) lookup)
+Chain:    7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)
 
-Nhóm        Ký tự    Chiều        Ý nghĩa
-────────────────────────────────────────────────────
-SDF         ~1344    Shape        "Trông như thế nào" (● ▬ ■ ▲ ○ ∪ ∩ ∖)
-MATH        ~1904    Relation     "Liên kết thế nào" (∈ ⊂ ≡ ⊥ ∘ → ≈ ←)
-EMOTICON    ~1760    Valence+A    "Cảm thế nào" (0x00..0xFF × 2)
-MUSICAL     ~416     Time         "Thay đổi thế nào" (Static → Instant)
+Nhóm       Blocks   Ký tự    Chiều        Ý nghĩa
+────────────────────────────────────────────────────────────
+SDF           13    1,904    Shape        "Trông như thế nào" (18 SDF primitives)
+MATH          21    3,088    Relation     "Liên kết thế nào" (75 kênh quan hệ)
+EMOTICON      17    3,568    Valence+A    "Cảm thế nào" (V+A chia sẻ 17 blocks)
+MUSICAL        7    1,024    Time         "Thay đổi thế nào" (Static → Instant)
+────────────────────────────────────────────────────────────
+Tổng          58    9,584    5 chiều      = 9,584 L0 anchor points
 ```
 
 ### Node = Molecule + Maturity + Origin
@@ -43,12 +47,12 @@ NodeState {
 
 ```
 3 tầng ngang (implicit, 0 bytes):
-  Base:     37 kênh (8S+8R+8V+8A+5T)     → SilkIndex
-  Compound: 31 mẫu C(5,k) k=1..5         → CompoundKind enum
-  Precise:  ~5400 kênh (= L0 nodes)       → SPEC
+  Base:     75 kênh (13S+21R+17V+17A+7T)  → SilkIndex
+  Compound: 31 mẫu C(5,k) k=1..5          → CompoundKind enum
+  Precise:  9,584 kênh (= L0 anchor nodes) → SPEC
 
-Silk dọc (parent pointer, 43KB):
-  parent_map: BTreeMap<u64, u64>           → 5460 child→parent pointers
+Silk dọc (parent pointer, ~76KB):
+  parent_map: BTreeMap<u64, u64>            → 9,584 child→parent pointers
   register_parent() · parent_of() · children_of() · layer_of()
 ```
 
@@ -69,9 +73,9 @@ Molecule [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5D
 
 | Tầng | Kênh | Ý nghĩa |
 |------|------|---------|
-| Base | 37 (8S+8R+8V+8A+5T) | Cùng "nhóm máu" trên 1 chiều |
-| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều → 1147 kiểu quan hệ |
-| Vertical | 5460 pointers = 43KB | Parent-child giữa các tầng |
+| Base | 75 (13S+21R+17V+17A+7T) | Cùng "nhóm máu" trên 1 chiều |
+| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều → 2,325 kiểu quan hệ |
+| Vertical | 9,584 pointers = ~76KB | Parent-child giữa các tầng |
 
 ```
 Node lifecycle: Formula → Evaluating → Mature → QR (append-only, signed)
@@ -84,7 +88,7 @@ evolve(dim, val): thay 1/5 chiều → loài mới (e.g. 🔥 → "lửa nhẹ")
 
 ```
 crates/
-├── ucd/         Unicode → Molecule lookup (5424 entries)         23 tests
+├── ucd/         Unicode → P_weight lookup (9,584 L0 entries)      23 tests
 ├── olang/       Core: Molecule · LCA · Registry · VM · Compact 1088 tests
 ├── silk/        Hebbian learning · Silk 3-layer · parent_map       85 tests
 ├── context/     Emotion V/A/D/I · ConversationCurve · Intent    168 tests
