@@ -890,39 +890,41 @@ json/
          ja: [火, 炎]               ──────┘   tự nhóm theo key ngôn ngữ
 ```
 {
-  "protocol": "UTF32-SDF-INTEGRATOR",
-  "version": "5.0-dynamic-calculus",
+  "protocol": "HOMEOS-MOLECULE-REGISTRY",
+  "version": "0.05-tagged-sparse",
   "global_config": {
-    "integral_levels": ["L1_Char", "L2_SubGroup", "L3_Block"],
-    "seal_mechanism": "Inheritance_By_Reference"
+    "layer_levels": ["L0_Codepoint", "L1_SubGroup", "L2_Block"],
+    "seal_mechanism": "Molecule_By_Inheritance"
   },
   "blocks": [
     {
       "id": "B1",
       "range": ["1F300", "1F5FF"],
       "name": "Miscellaneous Symbols and Pictographs",
-      "integral_kernel": "P_block = ∭_{B1} f(p) dV",
+      "dominant_dim": "Valence",
       "sub_groups": [
         {
           "id": "SG_FIRE",
           "range": ["1F525", "1F528"],
-          "integral_kernel": "P_subgroup = ∬_{SG} f(p) dS"
+          "dominant_dim": "Valence"
         }
       ]
     }
   ],
-  "characters": [
+  "codepoints": [
     {
       "hex": "1F525",
-      "anchor": "L0_SEALED",
+      "layer": 0,
+      "maturity": "Sealed",
       "category": "So",
       "block_ref": "B1",
       "sub_group_ref": "SG_FIRE",
-      "physics_logic": {
-        "integral_L1": "P_char = ∫_{U} f(p) dp",
-        "dominant_axis": "determined_by_category_So"
+      "molecule": {
+        "formula": "encode_codepoint(0x1F525)",
+        "dominant_dim": "Valence",
+        "dims": ["Shape", "Relation", "Valence", "Arousal", "Time"]
       },
-      "localizations": {
+      "aliases": {
         "en": ["fire", "flame", "blaze"],
         "vi": ["lửa", "ngọn lửa"],
         "ja": ["火", "炎"]
@@ -933,17 +935,17 @@ json/
       "hex": "2605",
       "char": "★",
       "canonical_ref": "2B50",
-      "inheritance": "P[2605] = P[2B50] << SEAL",
+      "silk_inherit": "chain[2605] = chain[2B50] << Sealed",
       "metadata": { "name": "BLACK STAR" }
     }
   ],
   "alias_mapping": {
     "registry": {
       "vi": {
-        "lửa": { "target": "1F525", "status": "SEALED_INHERIT" }
+        "lửa": { "target": "1F525", "status": "Sealed_Inherit" }
       },
       "en": {
-        "fire": { "target": "1F525", "status": "SEALED_INHERIT" }
+        "fire": { "target": "1F525", "status": "Sealed_Inherit" }
       }
     }
   }
