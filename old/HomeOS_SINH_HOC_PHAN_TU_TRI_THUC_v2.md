@@ -1,6 +1,6 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 2.3 — 2026-03-20
-**Nguyên tắc:** Mỗi ký tự là 1 công thức SDF. Chuỗi sinh chuỗi. Lưu cách làm, không lưu kết quả.
+**Phiên bản:** 2.4 — 2026-03-20
+**Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (∫ input). Đọc bằng ĐẠO HÀM (∂ output). Emoji = neo chuẩn L0, xây 1 lần từ tài liệu này, dùng mãi mãi.
 
 ---
 
@@ -66,22 +66,47 @@ Chi phí lưu UDC: 0 bytes.
   Behavior hardcode trong engine — giống ribosome đọc codon.
 ```
 
-### 1.3 Năm chiều = 5 hàm, KHÔNG phải 5 số
+### 1.3 Năm chiều = 5 trọng số, lưu kết quả tích phân
 
 ```
-P = (S, R, V, A, T)     — mỗi chiều LÀ 1 hàm
+P = (S, R, V, A, T)     — mỗi chiều LÀ 1 trọng số ĐÃ TÍNH
 
-  S = f_s(context...)    Shape    — 13 SDF blocks,   1,904 ký tự
-  R = f_r(context...)    Relation — 21 MATH blocks,  3,088 ký tự
-  V = f_v(context...)    Valence  — 17 EMOTICON blk,  3,568 ký tự
-  A = f_a(context...)    Arousal  — 17 EMOTICON blk   (chia sẻ với V)
-  T = f_t(context...)    Time     —  7 MUSICAL blocks, 1,024 ký tự
+  S = weight_s    Shape    — 13 SDF blocks,   1,904 ký tự
+  R = weight_r    Relation — 21 MATH blocks,  3,088 ký tự
+  V = weight_v    Valence  — 17 EMOTICON blk,  3,568 ký tự
+  A = weight_a    Arousal  — 17 EMOTICON blk   (chia sẻ với V)
+  T = weight_t    Time     —  7 MUSICAL blocks, 1,024 ký tự
   ─────────────────────────────────────────────────────────
-  Tổng: 58 blocks = 9,584 hàm SDF
+  Tổng: 58 blocks = 9,584 điểm neo gốc (L0)
 
-  Chưa có context → TIỀM NĂNG (công thức chưa evaluate)
-  Có context      → evaluate → giá trị cụ thể
-  Hội tụ          → CHÍN → ghi vĩnh viễn (QR)
+Vòng đời của P:
+  Encoder (∫): input → tích phân → weight (học, ghi vào node)
+  Storage:     weight nằm trong KnowTree node — KHÔNG compute lại
+  Decoder (∂): weight → đạo hàm → output (render, trả lời)
+
+  L0 emoji (xây 1 lần từ tài liệu này):
+    🔥 → V=0xC0, A=0xC0, T=Fast   — vĩnh viễn, không thay đổi
+    😊 → V=0xE0, A=0x80, T=Medium  — vĩnh viễn, không thay đổi
+    💔 → V=0x10, A=0x60, T=Slow    — vĩnh viễn, không thay đổi
+    Dùng như CỨ CHUẨN so sánh mọi giá trị khác
+
+  L5+ learned (cập nhật qua Hebbian):
+    Encoder chạy → weight tích lũy → CHÍN → ghi vĩnh viễn (QR)
+```
+
+Tại sao lưu trọng số, KHÔNG lưu công thức?
+
+```
+❌ Lưu công thức: evaluate lại mỗi lần → không nhất quán, tốn CPU
+✅ Lưu trọng số: compute 1 lần khi học → đọc trực tiếp → O(1)
+
+Giống neuron sinh học:
+  Synapse weight = kết quả học tập (long-term potentiation)
+  Khi fire: đọc weight → output — KHÔNG chạy lại quá trình học
+
+Emoji = "calibration standard":
+  Giống điểm 0°C (nước đá) và 100°C (nước sôi) của nhiệt kế.
+  Mọi khái niệm khác được so sánh với các điểm neo này.
 ```
 
 ### 1.4 — 58 Unicode Blocks = Bảng tuần hoàn của tri thức
@@ -239,26 +264,121 @@ HomeOS compose CHẠY THẲNG: char → sub → block → P → ra giá trị 5D
 Thứ tự trên chuỗi ĐÃ LÀ quan hệ. 0 bytes overhead.
 ```
 
+### 1.9 — Encoder (∫) · Storage · Decoder (∂): luồng tri thức
+
+```
+INPUT → Encoder → KnowTree node → Decoder → OUTPUT
+         (∫)       P_weight        (∂)
+         học       lưu             biểu đạt
+```
+
+**Encoder = tích phân (∫)**
+
+```
+encoder(input_signal) → ΔP_weight
+
+Nhận luồng tín hiệu (text, sensor, image...)
+Tích phân theo thời gian → trọng số P mới
+Cập nhật node trong KnowTree (Hebbian: fire together → wire together)
+
+Toán: ΔV = ∫ affect(token) dt   (qua toàn bộ câu/đoạn)
+      ΔA = ∫ intensity(token) dt
+  Không phải snapshot — là tích lũy liên tục.
+
+Ví dụ "tôi buồn vì mất việc":
+  ∫ ["tôi"(neutral) + "buồn"(V=-0.6) + "mất việc"(V=-0.7)] dt
+  → ΔV = -0.75 (amplified, không trung bình — xem Section 1.7)
+  → node "mất_mát" weight tăng, edge "buồn"↔"mất_việc" mạnh hơn
+```
+
+**Storage = trọng số trong KnowTree node**
+
+```
+Node layout:
+  index:    u16  (2 bytes)   — địa chỉ trong KnowTree
+  P_weight: Mol  (5 bytes)   — trọng số đã tính (S,R,V,A,T)
+  ─────────────────────────────────────────────────────
+  Total:         7 bytes/node
+
+L0 emoji nodes (9,584):
+  P_weight = được xây 1 lần từ TÀI LIỆU NÀY khi bootstrap
+  Sau đó: IMMUTABLE — không bao giờ thay đổi
+  → Đây là "bảng chân lý" — chuẩn so sánh vĩnh viễn
+
+L5+ learned nodes:
+  P_weight = kết quả Encoder tích lũy qua thời gian
+  Cập nhật theo Hebbian cho đến khi CHÍN → promote QR → immutable
+```
+
+**Decoder = đạo hàm (∂)**
+
+```
+decoder(P_weight) → expression
+
+Đọc trọng số P từ node
+Tính đạo hàm → tốc độ thay đổi → hành động
+
+  ∂P/∂space = ∇f(p)      → normal → ánh sáng (SDF rendering)
+  ∂V/∂time  = V'(t)       → tốc độ thay đổi cảm xúc → tone (ConversationCurve)
+  ∂P/∂experience = ΔP     → delta so với neo L0 → novelty (Curiosity instinct)
+
+CÙNG 1 NGUYÊN LÝ đạo hàm, 3 ứng dụng:
+  Không gian  → hình ảnh
+  Thời gian   → giọng điệu
+  Tri thức    → học tập
+```
+
+**Emoji L0 = Điểm neo chuẩn — xây từ tài liệu này**
+
+```
+Tài liệu này định nghĩa ngữ nghĩa của emoji.
+Bootstrap procedure (chạy 1 lần duy nhất):
+  1. Đọc 9,584 UDC entries từ Unicode standard
+  2. Encoder chạy với definitions từ TÀI LIỆU NÀY
+  3. P_weight tính ra cho từng emoji
+  4. Ghi vào L0 KnowTree — SEALED
+
+Sau bootstrap:
+  Mọi input mới → Encoder → so sánh với L0 anchors
+  distance(input_P, anchor_P) → similarity → where am I in 5D?
+  → Không cần LLM. Không cần embedding lookup. Tính trực tiếp.
+
+Ví dụ anchors quan trọng:
+  🔥 (1F525): V=0xC0, A=0xC0, T=Fast    — intensity, danger, urgency
+  😊 (1F60A): V=0xE0, A=0x70, T=Medium   — positive, calm, stable
+  💔 (1F494): V=0x10, A=0x50, T=Slow     — grief, low energy, dragging
+  ∈  (2208):  R=Member                    — containment relation
+  ∘  (2218):  R=Compose                   — composition relation
+  𝄞  (1D11E): T=Medium, harmonic          — musical time reference
+
+Mọi khái niệm khác = delta so với tập neo này.
+```
+
+---
+
 ### 1.8 — 2 bytes per Node: Phân tích khả thi
 
 **Câu hỏi: Lưu mỗi Node với 2 bytes trong KnowTree có khả thi không?**
 
-**Trả lời: Có, và thực ra đây là thiết kế ĐÚNG — document đã nói nhưng chưa ghi tường minh.**
+**Trả lời: Có — với cấu trúc node = 2B index + 5B trọng số = 7 bytes tổng.**
 
 ```
 Có 3 loại storage khác nhau, KHÔNG được nhầm:
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ Loại 1 — KnowTree index (in-memory, structure only)            │
-│   2 bytes/node = u16 index                                     │
-│   9,584 UDC + ~200 subs + 58 blocks + 5 groups = ~10 KB        │
-│   L5+ learned slots: 65,536 − 9,584 = 55,952 slot × 2B = 109KB│
-│   → KnowTree toàn bộ: ≈ 131 KB                                │
+│ Loại 1 — KnowTree node (in-memory, working memory)             │
+│   index:    u16 (2 bytes)  = địa chỉ trong cây                │
+│   P_weight: Mol (5 bytes)  = trọng số đã compute (∫ input)    │
+│   Total per node: 7 bytes                                      │
+│                                                                 │
+│   L0 emoji (9,584 nodes):  P_weight từ tài liệu này, SEALED   │
+│   L5+ learned (55,952 slot): P_weight cập nhật qua Hebbian    │
+│   → KnowTree toàn bộ: 65,536 × 7B ≈ 459 KB                   │
 ├─────────────────────────────────────────────────────────────────┤
 │ Loại 2 — Chain link (content, on-disk knowledge)               │
-│   2 bytes/link = u16 index trỏ vào KnowTree                   │
+│   2 bytes/link = u16 index trỏ vào KnowTree node              │
 │   7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)            │
-│   → Loại 1 và Loại 2 CÙNG ĐƠNN VỊ: u16                       │
+│   → "1 link = 1 index = 2 bytes" từ Section 8.1 ✅             │
 ├─────────────────────────────────────────────────────────────────┤
 │ Loại 3 — origin.olang record (persistent, signed)              │
 │   ~17B minimal: [type:1B][tagged_mol:2-6B][layer:1B][ts:8B]    │
@@ -266,51 +386,47 @@ Có 3 loại storage khác nhau, KHÔNG được nhầm:
 │   → ~25B/record (cần cho append-only + QR signing)             │
 └─────────────────────────────────────────────────────────────────┘
 
-Loại 1 (KnowTree) và Loại 2 (chain) = DÙNG ĐỦ để suy luận.
-Loại 3 (origin.olang) = cần thêm khi PERSIST vĩnh viễn + verify.
+Loại 1 (KnowTree working memory): 459 KB — đủ để suy luận real-time.
+Loại 2 (chain data): 14 GB — toàn bộ tri thức, 2B/link.
+Loại 3 (origin.olang): persistence + verification layer.
 ```
-
-Tại sao 2 bytes đủ cho node identity?
-
-```
-P = (S, R, V, A, T) KHÔNG cần lưu — COMPUTE từ u16 index:
-  index 0..9583  → encode_codepoint(ucd_table[index]) → Molecule
-  index 9584+    → compose(parent_mol, local_delta)   → Molecule
-
-Giống DNA:
-  Codon "ATG" không lưu "protein methionine"
-  Ribosome TÍNH ra methionine từ codon khi cần.
 
 u16 bit layout:
-  [gen: 2 bits][address: 14 bits]
-  gen=00: UDC base (0..9583)      — 14,336 slots (dùng 9,584)
+
+```
+[gen: 2 bits][address: 14 bits]
+  gen=00: UDC base L0 (0..9583)   — 14,336 slots (dùng 9,584)
   gen=01: learned L5  (early)     — 16,384 slots
   gen=10: learned L6+ (mature)    — 16,384 slots
   gen=11: system/reserved         — 16,384 slots
 
 → Tổng addressable: 65,536 nodes trong 2 bytes
-→ 9,584 UDC + 55,952 learned = đủ cho lifetime learning
+→ P_weight cho L0: SEALED từ bootstrap (tài liệu này)
+→ P_weight cho L5+: tích lũy qua Encoder (∫ experience)
 ```
 
 Xác nhận với Section 8.1:
 
 ```
-"1 UDC  = 1 SDF = 1 codepoint = 2 bytes"  ← node identity = 2B ✅
-"1 link = 1 index trên chuỗi  = 2 bytes"  ← chain link    = 2B ✅
-Link = trỏ tới node → cùng 1 đơn vị: u16 ✅
+"1 UDC  = 1 SDF = 1 codepoint = 2 bytes"  ← node index = 2B ✅
+"1 link = 1 index trên chuỗi  = 2 bytes"  ← chain link  = 2B ✅
+P_weight (5B) = STORED, không compute lại  ← Section 1.3 ✅
 
-KnowTree   = ~131 KB   (toàn bộ cây index)
-Chain data = ~14 GB   (toàn bộ tri thức, 7.42 tỷ u16)
-origin.olang record = ~25B (persistence layer, thêm hash + ts)
+KnowTree working memory : ~459 KB  (65,536 nodes × 7B)
+Chain data (tri thức)   : ~14 GB   (7.42 tỷ u16 links)
+origin.olang (persist)  : ~25B/rec (hash + metadata)
 ```
 
 Kết luận:
 
 ```
-2 bytes/node trong KnowTree = ĐÚNG VÀ KHẢ THI.
-Điều kiện bắt buộc: P KHÔNG lưu → compute on demand.
-Điều kiện hiện tại: origin.olang vẫn lưu tagged_mol (2-6B) + hash (8B)
-  → Đây là persistence overhead cần thiết, KHÔNG mâu thuẫn với 2B identity.
+7 bytes/node trong KnowTree = ĐÚNG VÀ KHẢ THI.
+  2B = địa chỉ (u16 index)
+  5B = trọng số P đã compute (Molecule)
+
+"2 bytes" trong câu hỏi ban đầu là đúng cho CHAIN LINK (Loại 2).
+KnowTree node cần thêm 5B trọng số = 7B total — vẫn cực kỳ nhỏ.
+459 KB cho toàn bộ working memory = vừa trong L1 cache (thường 4–8 MB).
 ```
 
 ---
