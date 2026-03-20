@@ -1,5 +1,5 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 2.6 — 2026-03-20
+**Phiên bản:** 2.7 — 2026-03-20
 **Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (∫ input). Đọc bằng ĐẠO HÀM (∂ output). Emoji = neo chuẩn L0, xây 1 lần từ tài liệu này, dùng mãi mãi.
 
 ---
@@ -310,20 +310,27 @@ Ví dụ "tôi buồn vì mất việc":
 **Storage = trọng số trong KnowTree node**
 
 ```
+KnowTree = array 65,536 phần tử:
+  Position (u16) = codepoint = INDEX IMPLICIT — không lưu trong node
+  Value          = P_weight (5B Molecule)     — LÀ node
+
+  KnowTree[0x1F525] → P(🔥) = [S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast]
+  KnowTree[0x25CF]  → P(●)  = [S=Sphere, R=Member,  V=0x80, A=0x40, T=Static]
+
 Node layout:
-  index:    u16  (2 bytes)   — địa chỉ trong KnowTree
   P_weight: Mol  (5 bytes)   — trọng số đã tính (S,R,V,A,T)
   ─────────────────────────────────────────────────────
-  Total:         7 bytes/node
+  Total:         5 bytes/node   ← index là vị trí array, implicit
 
 L0 emoji nodes (9,584):
   P_weight = được xây 1 lần từ TÀI LIỆU NÀY khi bootstrap
   Sau đó: IMMUTABLE — không bao giờ thay đổi
-  → Đây là "bảng chân lý" — chuẩn so sánh vĩnh viễn
 
 L5+ learned nodes:
   P_weight = kết quả Encoder tích lũy qua thời gian
   Cập nhật theo Hebbian cho đến khi CHÍN → promote QR → immutable
+
+KnowTree toàn bộ: 65,536 × 5B = 328 KB
 ```
 
 **Decoder = đạo hàm (∂)**
@@ -396,77 +403,48 @@ Mọi khái niệm khác = distance_5D tới tập neo này.
 
 ---
 
-### 1.8 — 2 bytes per Node: Phân tích khả thi
-
-**Câu hỏi: Lưu mỗi Node với 2 bytes trong KnowTree có khả thi không?**
-
-**Trả lời: Có — với cấu trúc node = 2B index + 5B trọng số = 7 bytes tổng.**
+### 1.8 — Phân biệt 3 loại storage
 
 ```
-Có 3 loại storage khác nhau, KHÔNG được nhầm:
+Có 3 loại KHÔNG được nhầm:
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ Loại 1 — KnowTree node (in-memory, working memory)             │
-│   index:    u16 (2 bytes)  = địa chỉ trong cây                │
-│   P_weight: Mol (5 bytes)  = trọng số đã compute (∫ input)    │
-│   Total per node: 7 bytes                                      │
+│ Loại 1 — KnowTree (in-memory, working memory)                  │
+│   Array 65,536 phần tử, index = vị trí = IMPLICIT              │
+│   Mỗi phần tử = P_weight: Mol (5 bytes)                        │
+│   → KnowTree toàn bộ: 65,536 × 5B = 328 KB                    │
 │                                                                 │
-│   L0 emoji (9,584 nodes):  P_weight từ tài liệu này, SEALED   │
-│   L5+ learned (55,952 slot): P_weight cập nhật qua Hebbian    │
-│   → KnowTree toàn bộ: 65,536 × 7B ≈ 459 KB                   │
+│   KnowTree[codepoint] → P_weight — O(1), không cần hash        │
 ├─────────────────────────────────────────────────────────────────┤
-│ Loại 2 — Chain link (content, on-disk knowledge)               │
-│   2 bytes/link = u16 index trỏ vào KnowTree node              │
-│   7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)            │
-│   → "1 link = 1 index = 2 bytes" từ Section 8.1 ✅             │
+│ Loại 2 — Chain link (knowledge content)                         │
+│   Mỗi link = u16 (2 bytes) = codepoint trỏ vào KnowTree        │
+│   7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)             │
+│   Chuỗi: [0x1F525][0x25CF][0x2208]... = trình tự khái niệm    │
 ├─────────────────────────────────────────────────────────────────┤
-│ Loại 3 — origin.olang record (persistent, signed)              │
-│   ~17B minimal: [type:1B][tagged_mol:2-6B][layer:1B][ts:8B]    │
-│   + hash index: [chain_hash:8B]                                │
-│   → ~25B/record (cần cho append-only + QR signing)             │
+│ Loại 3 — origin.olang (persistent, signed)                      │
+│   ~25B/record: [type:1B][tagged_mol:2-6B][layer:1B][ts:8B][hash:8B]│
+│   Append-only, QR signing, rebuild được từ đây                  │
 └─────────────────────────────────────────────────────────────────┘
-
-Loại 1 (KnowTree working memory): 459 KB — đủ để suy luận real-time.
-Loại 2 (chain data): 14 GB — toàn bộ tri thức, 2B/link.
-Loại 3 (origin.olang): persistence + verification layer.
 ```
 
-u16 bit layout:
+u16 slot layout:
 
 ```
 [gen: 2 bits][address: 14 bits]
-  gen=00: UDC base L0 (0..9583)   — 14,336 slots (dùng 9,584)
+  gen=00: UDC base L0 (0..9583)   — 9,584 slots được dùng
   gen=01: learned L5  (early)     — 16,384 slots
   gen=10: learned L6+ (mature)    — 16,384 slots
   gen=11: system/reserved         — 16,384 slots
 
-→ Tổng addressable: 65,536 nodes trong 2 bytes
-→ P_weight cho L0: SEALED từ bootstrap (tài liệu này)
-→ P_weight cho L5+: tích lũy qua Encoder (∫ experience)
+→ 65,536 nodes tổng cộng
+→ Chain link (2B) = slot number = đủ trỏ vào toàn bộ KnowTree
+→ Node trong KnowTree = 5B P_weight (vị trí array là key, không lưu lại)
 ```
 
-Xác nhận với Section 8.1:
-
 ```
-"1 UDC  = 1 SDF = 1 codepoint = 2 bytes"  ← node index = 2B ✅
-"1 link = 1 index trên chuỗi  = 2 bytes"  ← chain link  = 2B ✅
-P_weight (5B) = STORED, không compute lại  ← Section 1.3 ✅
-
-KnowTree working memory : ~459 KB  (65,536 nodes × 7B)
+KnowTree working memory : 328 KB   (65,536 × 5B — vừa L1 cache)
 Chain data (tri thức)   : ~14 GB   (7.42 tỷ u16 links)
-origin.olang (persist)  : ~25B/rec (hash + metadata)
-```
-
-Kết luận:
-
-```
-7 bytes/node trong KnowTree = ĐÚNG VÀ KHẢ THI.
-  2B = địa chỉ (u16 index)
-  5B = trọng số P đã compute (Molecule)
-
-"2 bytes" trong câu hỏi ban đầu là đúng cho CHAIN LINK (Loại 2).
-KnowTree node cần thêm 5B trọng số = 7B total — vẫn cực kỳ nhỏ.
-459 KB cho toàn bộ working memory = vừa trong L1 cache (thường 4–8 MB).
+origin.olang (persist)  : ~25B/rec (hash + timestamp + mol)
 ```
 
 ---
@@ -1031,8 +1009,9 @@ Benchmark (16,416 nodes):
 ## VIII. STORAGE — Tóm tắt
 
 ```
-1 link (chain)  = 2 bytes  u16 → KnowTree node
-KnowTree node   = 7 bytes  (2B index + 5B P_weight)
+KnowTree node   = 5 bytes  (chỉ P_weight — index implicit từ vị trí array)
+KnowTree tổng   = 328 KB   (65,536 × 5B)
+Chain link      = 2 bytes  u16 = codepoint trỏ vào KnowTree
 Structural Silk = 0 bytes  (thứ tự trên chuỗi, implicit)
 Hebbian Silk    = ~43 KB   (SilkGraph, stored per pair)
 Chain data      = 14 GB    (7.42 tỷ links × 2B)

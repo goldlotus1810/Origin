@@ -11,11 +11,11 @@
 UDC alphabet:     0 bytes (codepoint = địa chỉ, hardcode trong engine)
 SDF primitives:   0 bytes (18 hàm trong engine)
 Block mapping:    0 bytes (range = implicit)
-KnowTree:         65,536 × 7B = 459 KB (index + P_weight)
+KnowTree:         65,536 × 5B = 328 KB (chỉ P_weight, index implicit)
 Hebbian Silk:     ~43 KB (SilkGraph)
 Aliases:          155,000 × 4 bytes = 620 KB
 ──────────────────────────────────────────
-Cố định: ≈ 1.1 MB
+Cố định: ≈ 1 MB
 
 OS:               2,000 MB
 HomeOS engine:       32 MB
