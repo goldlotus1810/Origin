@@ -985,7 +985,7 @@ fn string_to_key_chain(s: &str) -> crate::molecular::MolecularChain {
             0x01,  // time: Static
         ));
     }
-    crate::molecular::MolecularChain(mols)
+    crate::molecular::MolecularChain(mols.iter().map(|m| m.bits).collect())
 }
 
 /// Lower (hạ) AST → OlangProgram (IR opcodes).
@@ -2383,7 +2383,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     let pc_lo = (body_pc & 0xFF) as u8;
                     let pc_hi = ((body_pc >> 8) & 0xFF) as u8;
                     ctx.emit(Op::Push(crate::molecular::MolecularChain(
-                        alloc::vec![crate::molecular::Molecule::raw(0xFF, 0, pc_lo, pc_hi, 0)]
+                        alloc::vec![crate::molecular::Molecule::raw(0xFF, 0, pc_lo, pc_hi, 0).bits]
                     )));
                     for arg in args {
                         lower_expr(arg, ctx);

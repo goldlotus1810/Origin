@@ -43,22 +43,22 @@ pub fn encode_zwj_sequence(codepoints: &[u32]) -> MolecularChain {
     }
 
     let last = codepoints.len() - 1;
-    let molecules: Vec<Molecule> = codepoints
+    let bits_vec: Vec<u16> = codepoints
         .iter()
         .enumerate()
         .map(|(i, &cp)| {
-            let mol = encode_codepoint(cp).0.remove(0);
+            let mol = encode_codepoint(cp).first().unwrap();
             let new_rel = if i < last {
                 RelationBase::Compose.as_byte() // ∘ — còn tiếp
             } else {
                 RelationBase::Member.as_byte() // ∈ — kết thúc
             };
             // Rebuild molecule with new relation, keeping other dimensions
-            Molecule::pack(mol.shape_u8(), new_rel, mol.valence_u8(), mol.arousal_u8(), mol.time_u8())
+            Molecule::pack(mol.shape_u8(), new_rel, mol.valence_u8(), mol.arousal_u8(), mol.time_u8()).bits
         })
         .collect();
 
-    MolecularChain(molecules)
+    MolecularChain(bits_vec)
 }
 
 /// Encode flag sequence (Regional Indicator pair) → 2 molecules.
@@ -83,7 +83,7 @@ mod tests {
     fn encode_fire() {
         let chain = encode_codepoint(0x1F525); // 🔥
         assert_eq!(chain.len(), 1);
-        let m = &chain.0[0];
+        let m = chain.mol_at(0).unwrap();
         assert_eq!(m.shape_base(), ShapeBase::Sphere, "FIRE shape = Sphere");
         assert_eq!(
             m.relation_base(),
@@ -99,7 +99,7 @@ mod tests {
     fn encode_droplet() {
         let chain = encode_codepoint(0x1F4A7); // 💧
         assert_eq!(chain.len(), 1);
-        let m = &chain.0[0];
+        let m = chain.mol_at(0).unwrap();
         assert!(m.valence_u8() >= 0x80, "DROPLET valence moderate");
         assert!(m.arousal_u8() <= 0x80, "DROPLET arousal thấp");
         assert_eq!(m.time_base(), TimeDim::Slow, "DROPLET time = Slow");
@@ -108,22 +108,22 @@ mod tests {
     #[test]
     fn encode_sphere_sdf() {
         let chain = encode_codepoint(0x25CF); // ●
-        assert_eq!(chain.0[0].shape_base(), ShapeBase::Sphere);
-        assert_eq!(chain.0[0].time_base(), TimeDim::Static, "SDF shapes = Static");
+        assert_eq!(chain.mol_at(0).unwrap().shape_base(), ShapeBase::Sphere);
+        assert_eq!(chain.mol_at(0).unwrap().time_base(), TimeDim::Static, "SDF shapes = Static");
     }
 
     #[test]
     fn encode_arrow_causes() {
         let chain = encode_codepoint(0x2192); // →
-        assert_eq!(chain.0[0].relation_base(), RelationBase::Causes);
-        assert_eq!(chain.0[0].time_base(), TimeDim::Instant, "Arrow = Instant");
+        assert_eq!(chain.mol_at(0).unwrap().relation_base(), RelationBase::Causes);
+        assert_eq!(chain.mol_at(0).unwrap().time_base(), TimeDim::Instant, "Arrow = Instant");
     }
 
     #[test]
     fn encode_member_relation() {
         let chain = encode_codepoint(0x2208); // ∈
-        assert_eq!(chain.0[0].relation_base(), RelationBase::Member);
-        assert_eq!(chain.0[0].time_base(), TimeDim::Static, "Math = Static");
+        assert_eq!(chain.mol_at(0).unwrap().relation_base(), RelationBase::Member);
+        assert_eq!(chain.mol_at(0).unwrap().time_base(), TimeDim::Static, "Math = Static");
     }
 
     #[test]
@@ -132,17 +132,17 @@ mod tests {
         let chain = encode_zwj_sequence(&[0x1F468, 0x1F469, 0x1F466]);
         assert_eq!(chain.len(), 3);
         assert_eq!(
-            chain.0[0].relation_base(),
+            chain.mol_at(0).unwrap().relation_base(),
             RelationBase::Compose,
             "mol[0] = Compose"
         );
         assert_eq!(
-            chain.0[1].relation_base(),
+            chain.mol_at(1).unwrap().relation_base(),
             RelationBase::Compose,
             "mol[1] = Compose"
         );
         assert_eq!(
-            chain.0[2].relation_base(),
+            chain.mol_at(2).unwrap().relation_base(),
             RelationBase::Member,
             "mol[2] = Member"
         );
@@ -153,7 +153,7 @@ mod tests {
         let chain = encode_zwj_sequence(&[0x1F525]);
         assert_eq!(chain.len(), 1);
         // Single = Member (kết thúc ngay)
-        assert_eq!(chain.0[0].relation_base(), RelationBase::Member);
+        assert_eq!(chain.mol_at(0).unwrap().relation_base(), RelationBase::Member);
     }
 
     #[test]
@@ -163,8 +163,8 @@ mod tests {
         let chain = encode_flag(0x1F1FB, 0x1F1F3);
         assert_eq!(chain.len(), 2);
         // ZWJ-like: first mol.relation = Compose, last = Member
-        assert_eq!(chain.0[0].relation_base(), RelationBase::Compose);
-        assert_eq!(chain.0[1].relation_base(), RelationBase::Member);
+        assert_eq!(chain.mol_at(0).unwrap().relation_base(), RelationBase::Compose);
+        assert_eq!(chain.mol_at(1).unwrap().relation_base(), RelationBase::Member);
     }
 
     #[test]
@@ -184,7 +184,7 @@ mod tests {
         // Values are quantized during pack(), so compare packed results
         let cp = 0x1F525u32;
         let chain = encode_codepoint(cp);
-        let m = &chain.0[0];
+        let m = chain.mol_at(0).unwrap();
         let expected = Molecule::pack(
             ucd::shape_of(cp),
             ucd::relation_of(cp),

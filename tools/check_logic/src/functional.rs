@@ -110,8 +110,8 @@ pub fn check_molecule_roundtrip() -> CheckResult {
         }
 
         // Verify bytes are valid (non-zero for important dims)
-        let mol = &chain.0[0];
-        let size = std::mem::size_of_val(mol);
+        let mol = olang::mol::molecular::Molecule::from_u16(chain.0[0]);
+        let size = std::mem::size_of_val(&mol);
         details.push(format!("✅ U+{:04X} — {} mol(s), {}B wire, hash={:016X}, struct={}B RAM",
             cp, chain.len(), bytes.len(), hash, size));
 
@@ -172,7 +172,7 @@ pub fn check_lca_rules() -> CheckResult {
         return CheckResult::fail("F3 LCA Rules", "LCA returned EMPTY chain");
     }
 
-    let r = &result.0[0];
+    let r = olang::mol::molecular::Molecule::from_u16(result.0[0]);
 
     // v2 rules:
     //   V = amplify → should be >= max(0x20, 0xE0) = 0xE0, NOT average 0x80

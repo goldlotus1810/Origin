@@ -143,16 +143,16 @@ impl Skill for DeltaSkill {
         let b = &ctx.input_chains[1];
         let common = lca(a, b);
 
-        // Delta = molecules in A not in common
-        let common_mols: Vec<_> = common.0.to_vec();
-        let delta_mols: Vec<_> =
+        // Delta = u16 bits in A not in common
+        let common_bits: Vec<u16> = common.0.to_vec();
+        let delta_bits: Vec<u16> =
             a.0.iter()
-                .filter(|m| !common_mols.contains(m))
+                .filter(|b| !common_bits.contains(b))
                 .cloned()
                 .collect();
 
-        let delta_count = delta_mols.len();
-        let delta_chain = MolecularChain(delta_mols);
+        let delta_count = delta_bits.len();
+        let delta_chain = MolecularChain(delta_bits);
 
         ctx.set(
             String::from("delta_count"),
@@ -650,7 +650,8 @@ impl Skill for GeneralizationSkill {
         let mut total_mols: u32 = 0;
 
         for chain in &ctx.input_chains {
-            for mol in &chain.0 {
+            for &bits in &chain.0 {
+                let mol = olang::molecular::Molecule::from_u16(bits);
                 let s = (mol.shape_u8() & 0x07) as usize;
                 let r = (mol.relation_u8() & 0x07) as usize;
                 shape_counts[s] += 1;

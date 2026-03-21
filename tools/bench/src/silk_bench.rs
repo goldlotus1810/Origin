@@ -808,7 +808,7 @@ fn bench_projection() {
 
         // Encode fire codepoint → Molecule → CompactQR (LOSSLESS)
         let fire_chain = olang::encoder::encode_codepoint(0x1F525);
-        let fire_mol = fire_chain.0[0];
+        let fire_mol = fire_chain.first().unwrap();
         let fire_cqr = CompactQR::from_molecule(&fire_mol, &mut table).unwrap();
         println!("    🔥 Fire: {:?} → CompactQR {}", fire_mol, fire_cqr);
 
@@ -820,7 +820,7 @@ fn bench_projection() {
 
         // Silk compare: fire vs water (LOSSLESS — full precision)
         let water_chain = olang::encoder::encode_codepoint(0x1F4A7);
-        let water_mol = water_chain.0[0];
+        let water_mol = water_chain.first().unwrap();
         let water_cqr = CompactQR::from_molecule(&water_mol, &mut table).unwrap();
         let (base_match, exact_match, sim) = fire_cqr.silk_compare(water_cqr, &table);
         println!("    🔥↔💧 silk_compare: base={}/5 exact={}/5 strength={:.2}", base_match, exact_match, sim);

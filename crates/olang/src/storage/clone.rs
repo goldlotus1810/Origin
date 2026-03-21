@@ -156,7 +156,11 @@ fn is_relevant(chain: &MolecularChain, profile: &DeviceProfile) -> bool {
     }
 
     // Lấy molecule đầu tiên để check shape/emotion
-    let mol = &chain.0[0];
+    // SAFETY: chain.is_empty() checked above
+    let mol = match chain.first() {
+        Some(m) => m,
+        None => return false,
+    };
     let v = mol.valence_u8();
     let a = mol.arousal_u8();
 

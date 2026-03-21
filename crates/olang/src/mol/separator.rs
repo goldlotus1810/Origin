@@ -321,9 +321,9 @@ mod tests {
         assert_eq!(chain.len(), 3, "3 molecules: 15 bytes");
         // Verify relation pattern: ∘ ∘ ∈
         use crate::molecular::RelationBase;
-        assert_eq!(chain.0[0].relation_base(), RelationBase::Compose);
-        assert_eq!(chain.0[1].relation_base(), RelationBase::Compose);
-        assert_eq!(chain.0[2].relation_base(), RelationBase::Member);
+        assert_eq!(chain.mol_at(0).unwrap().relation_base(), RelationBase::Compose);
+        assert_eq!(chain.mol_at(1).unwrap().relation_base(), RelationBase::Compose);
+        assert_eq!(chain.mol_at(2).unwrap().relation_base(), RelationBase::Member);
     }
 
     #[test]
@@ -335,8 +335,8 @@ mod tests {
         let chain = token_to_chain(&tokens[0]);
         assert_eq!(chain.len(), 2, "2 molecules cho couple");
         use crate::molecular::RelationBase;
-        assert_eq!(chain.0[0].relation_base(), RelationBase::Compose); // ∘
-        assert_eq!(chain.0[1].relation_base(), RelationBase::Member); // ∈
+        assert_eq!(chain.mol_at(0).unwrap().relation_base(), RelationBase::Compose); // ∘
+        assert_eq!(chain.mol_at(1).unwrap().relation_base(), RelationBase::Member); // ∈
     }
 
     // ── Space separator ───────────────────────────────────────────────────────

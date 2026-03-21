@@ -26,10 +26,10 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
         return Some(String::new());
     }
     // Check if it looks like a string chain (all shape=0x02, relation=0x01)
-    let is_string = chain.0.iter().all(|m| m.shape_u8() == 0x02 && m.relation_u8() == 0x01);
+    let is_string = chain.0.iter().all(|&bits| { let m = Molecule::from_u16(bits); m.shape_u8() == 0x02 && m.relation_u8() == 0x01 });
     if is_string {
         // Decode bytes as UTF-8 (strings are stored as 1 molecule = 1 byte)
-        let bytes: Vec<u8> = chain.0.iter().map(|m| m.valence_u8()).collect();
+        let bytes: Vec<u8> = chain.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
         match String::from_utf8(bytes) {
             Ok(s) => Some(s),
             Err(e) => {
@@ -45,7 +45,7 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
 /// Encode a string as a MolecularChain (each byte → 1 molecule).
 /// Inverse of chain_to_string.
 pub fn string_to_chain(s: &str) -> MolecularChain {
-    let mols: Vec<Molecule> = s.bytes().map(|b| Molecule::raw(0x02, 0x01, b, 0, 0x01)).collect();
+    let mols: Vec<u16> = s.bytes().map(|b| Molecule::raw(0x02, 0x01, b, 0, 0x01).bits).collect();
     MolecularChain(mols)
 }
 
@@ -316,14 +316,15 @@ fn split_iter_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     }
     let mut result = Vec::new();
     let mut current = Vec::new();
-    for mol in &chain.0 {
+    for &bits in &chain.0 {
+        let mol = Molecule::from_u16(bits);
         if mol.shape_u8() == 0xFE && mol.relation_u8() == 0
             && mol.valence_u8() == 0 && mol.arousal_u8() == 0
             && mol.time_u8() == 0
         {
             result.push(MolecularChain(core::mem::take(&mut current)));
         } else {
-            current.push(*mol);
+            current.push(bits);
         }
     }
     result.push(MolecularChain(current));
@@ -345,20 +346,24 @@ fn make_array_ref(idx: usize) -> MolecularChain {
 
 /// Check if chain is a dict heap reference.
 fn as_dict_ref(chain: &MolecularChain) -> Option<usize> {
-    if chain.0.len() == 1 && chain.0[0].shape_u8() == 0xFC && chain.0[0].relation_u8() == 0x01 {
-        Some(chain.0[0].valence_u8() as usize | ((chain.0[0].arousal_u8() as usize) << 8))
-    } else {
-        None
+    if chain.0.len() == 1 {
+        let m = Molecule::from_u16(chain.0[0]);
+        if m.shape_u8() == 0xFC && m.relation_u8() == 0x01 {
+            return Some(m.valence_u8() as usize | ((m.arousal_u8() as usize) << 8));
+        }
     }
+    None
 }
 
 /// Check if chain is an array heap reference.
 fn as_array_ref(chain: &MolecularChain) -> Option<usize> {
-    if chain.0.len() == 1 && chain.0[0].shape_u8() == 0xFD && chain.0[0].relation_u8() == 0x01 {
-        Some(chain.0[0].valence_u8() as usize | ((chain.0[0].arousal_u8() as usize) << 8))
-    } else {
-        None
+    if chain.0.len() == 1 {
+        let m = Molecule::from_u16(chain.0[0]);
+        if m.shape_u8() == 0xFD && m.relation_u8() == 0x01 {
+            return Some(m.valence_u8() as usize | ((m.arousal_u8() as usize) << 8));
+        }
     }
+    None
 }
 
 /// Materialize a heap ref into a flat chain for external consumption (e.g. Emit).
@@ -373,7 +378,7 @@ fn materialize_heap_value(
             let sep = Molecule::raw(0, 0, 0, 0, 0);
             let mut result = MolecularChain(Vec::new());
             for (i, elem) in array_heap[arr_idx].iter().enumerate() {
-                if i > 0 { result.0.push(sep); }
+                if i > 0 { result.0.push(sep.bits); }
                 let mat = materialize_heap_value(elem, array_heap, dict_heap);
                 result.0.extend(mat.0.iter().copied());
             }
@@ -385,10 +390,10 @@ fn materialize_heap_value(
             let sep = Molecule::raw(0, 0, 0, 0, 0);
             let mut result = MolecularChain(Vec::new());
             for (i, (k, v)) in dict_heap[dict_idx].iter().enumerate() {
-                if i > 0 { result.0.push(sep); }
+                if i > 0 { result.0.push(sep.bits); }
                 let mk = materialize_heap_value(k, array_heap, dict_heap);
                 result.0.extend(mk.0.iter().copied());
-                result.0.push(sep);
+                result.0.push(sep.bits);
                 let mv = materialize_heap_value(v, array_heap, dict_heap);
                 result.0.extend(mv.0.iter().copied());
             }
@@ -399,14 +404,16 @@ fn materialize_heap_value(
 }
 
 /// Check if a molecule is a null separator (used by dicts: key|null|val|null|key|null|val).
-fn is_null_separator(mol: &Molecule) -> bool {
+fn is_null_separator(bits: &u16) -> bool {
+    let mol = Molecule::from_u16(*bits);
     mol.shape_u8() == 0 && mol.relation_u8() == 0
         && mol.valence_u8() == 0 && mol.arousal_u8() == 0
         && mol.time_u8() == 0
 }
 
 /// Check if a molecule is an array element separator (0xFE tag).
-fn is_array_separator(mol: &Molecule) -> bool {
+fn is_array_separator(bits: &u16) -> bool {
+    let mol = Molecule::from_u16(*bits);
     mol.shape_u8() == 0xFE && mol.relation_u8() == 0
         && mol.valence_u8() == 0 && mol.arousal_u8() == 0
         && mol.time_u8() == 0
@@ -420,7 +427,7 @@ pub fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     let mut result = Vec::new();
     let mut current = Vec::new();
     // Skip the 0xFD tag molecule used by __array_push to track element count
-    let start = if !chain.0.is_empty() && chain.0[0].shape_u8() == 0xFD { 1 } else { 0 };
+    let start = if !chain.0.is_empty() && Molecule::from_u16(chain.0[0]).shape_u8() == 0xFD { 1 } else { 0 };
     // Check if this array uses 0xFE array separators (modern format)
     let has_array_seps = chain.0[start..].iter().any(|m| is_array_separator(m));
     for mol in &chain.0[start..] {
@@ -487,7 +494,8 @@ fn classify_chain(chain: &MolecularChain) -> String {
         return "Empty".into();
     }
     let (mut sdf, mut emo) = (0u32, 0u32);
-    for mol in &chain.0 {
+    for &bits in &chain.0 {
+        let mol = Molecule::from_u16(bits);
         // v2: all 18 ShapeBase variants are SDF primitives
         let _shape = mol.shape_base();
         sdf += 1;
@@ -769,7 +777,7 @@ impl OlangVM {
                     // Used by LeoAI to express knowledge as Olang code:
                     //   { S=1 R=2 V=128 A=128 T=3 } → Molecule → Chain
                     let mol = Molecule::raw(*s, *r, *v, *a, *t);
-                    let chain = MolecularChain(alloc::vec![mol]);
+                    let chain = MolecularChain(alloc::vec![mol.bits]);
                     if let Err(e) = stack.push(chain) {
                         events.push(VmEvent::Error(e));
                         break;
@@ -1020,14 +1028,15 @@ impl OlangVM {
 
                             // Extract tag from subject: everything before first null separator
                             let mut tag_mols = Vec::new();
-                            for mol in &subject.0 {
+                            for &bits in &subject.0 {
+                                let mol = Molecule::from_u16(bits);
                                 if mol.shape() == 0 && mol.relation() == 0
                                     && mol.valence_u8() == 0 && mol.arousal_u8() == 0
                                     && mol.time() == 0
                                 {
                                     break; // stop at first separator
                                 }
-                                tag_mols.push(*mol);
+                                tag_mols.push(bits);
                             }
                             let actual_tag = chain_to_string(&MolecularChain(tag_mols)).unwrap_or_default();
 
@@ -1107,8 +1116,8 @@ impl OlangVM {
                             let actual = vm_pop!(stack, events);
                             // Compare molecule dimensions
                             let matches = if !actual.is_empty() && !expected.is_empty() {
-                                let a = &actual.0[0];
-                                let e = &expected.0[0];
+                                let a = Molecule::from_u16(actual.0[0]);
+                                let e = Molecule::from_u16(expected.0[0]);
                                 a.shape() == e.shape()
                                     && a.relation() == e.relation()
                                     && a.valence_u8() == e.valence_u8()
@@ -1142,10 +1151,10 @@ impl OlangVM {
                             let matches = if actual.is_empty() {
                                 false
                             } else {
-                                let mol = &actual.0[0];
+                                let mol = Molecule::from_u16(actual.0[0]);
                                 constraints.iter().all(|c| {
                                     if c.is_empty() { return true; }
-                                    let cm = &c.0[0];
+                                    let cm = Molecule::from_u16(c.0[0]);
                                     let dim_val = match cm.shape() {
                                         1 => mol.shape(),
                                         2 => mol.relation(),
@@ -1187,10 +1196,10 @@ impl OlangVM {
                             constraints.reverse();
                             let actual = vm_pop!(stack, events);
                             if !actual.is_empty() {
-                                let mol = &actual.0[0];
+                                let mol = Molecule::from_u16(actual.0[0]);
                                 for c in &constraints {
                                     if c.is_empty() { continue; }
-                                    let cm = &c.0[0];
+                                    let cm = Molecule::from_u16(c.0[0]);
                                     let dim_name = match cm.shape() {
                                         1 => "S", 2 => "R", 3 => "V", 4 => "A", 5 => "T", _ => "?",
                                     };
@@ -1266,13 +1275,13 @@ impl OlangVM {
                                 let _ = stack.push(MolecularChain::from_number(count as f64));
                             } else if arr.is_empty() {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
-                            } else if !arr.0.is_empty() && arr.0[0].shape() == (0xFD >> 4) {
+                            } else if !arr.0.is_empty() && Molecule::from_u16(arr.0[0]).shape() == (0xFD >> 4) {
                                 // Tagged array (from push): count is stored in tag molecule
-                                let count = arr.0[0].valence_u8() as f64;
+                                let count = Molecule::from_u16(arr.0[0]).valence_u8() as f64;
                                 let _ = stack.push(MolecularChain::from_number(count));
                             } else if !arr.0.is_empty()
-                                && arr.0[0].shape() == (0x02 >> 4) && arr.0[0].relation() == (0x01 >> 4)
-                                && arr.0.iter().all(|m| m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4))
+                                && Molecule::from_u16(arr.0[0]).shape() == (0x02 >> 4) && Molecule::from_u16(arr.0[0]).relation() == (0x01 >> 4)
+                                && arr.0.iter().all(|&bits| { let m = Molecule::from_u16(bits); m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4) })
                             {
                                 // Pure string chain: length = number of characters
                                 let _ = stack.push(MolecularChain::from_number(arr.0.len() as f64));
@@ -1407,7 +1416,7 @@ impl OlangVM {
                                 let mut i = 0;
                                 while i < elements.len() {
                                     if key_idx > 0 {
-                                        result.0.push(sep);
+                                        result.0.push(sep.bits);
                                     }
                                     result.0.extend(elements[i].0.iter().cloned());
                                     key_idx += 1;
@@ -1458,7 +1467,7 @@ impl OlangVM {
                                 let mut result = MolecularChain(Vec::new());
                                 for (j, elem) in elements.into_iter().enumerate() {
                                     if j > 0 {
-                                        result.0.push(sep);
+                                        result.0.push(sep.bits);
                                     }
                                     result.0.extend(elem.0.iter().cloned());
                                 }
@@ -1482,7 +1491,7 @@ impl OlangVM {
                             // Convert value to string chain
                             let val = vm_pop!(stack, events);
                             // If already a string chain, keep as-is
-                            if !val.is_empty() && val.0.iter().all(|m| m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4)) {
+                            if !val.is_empty() && val.0.iter().all(|&bits| { let m = Molecule::from_u16(bits); m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4) }) {
                                 let _ = stack.push(val);
                             } else {
                                 // Number → string chain
@@ -1504,7 +1513,7 @@ impl OlangVM {
                             } else {
                                 // Decode string bytes from valence
                                 let s: String = val.0.iter()
-                                    .map(|m| m.valence_u8() as char)
+                                    .map(|&bits| Molecule::from_u16(bits).valence_u8() as char)
                                     .collect();
                                 if let Ok(n) = s.parse::<f64>() {
                                     let _ = stack.push(MolecularChain::from_number(n));
@@ -1626,8 +1635,8 @@ impl OlangVM {
                             let delim = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
                             // Decode both to byte strings via valence
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
-                            let d_bytes: Vec<u8> = delim.0.iter().map(|m| m.valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let d_bytes: Vec<u8> = delim.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
                             if d_bytes.is_empty() {
                                 let _ = stack.push(s); // no split on empty delim
                             } else {
@@ -1648,9 +1657,9 @@ impl OlangVM {
                                         Some(pos) => start + pos,
                                         None => s_bytes.len(),
                                     };
-                                    if elem_idx > 0 { result.0.push(sep); }
+                                    if elem_idx > 0 { result.0.push(sep.bits); }
                                     for &b in &s_bytes[start..end] {
-                                        result.0.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
+                                        result.0.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
                                     }
                                     elem_idx += 1;
                                     if found.is_some() {
@@ -1666,8 +1675,8 @@ impl OlangVM {
                             // Stack: [haystack, needle] → 1.0 if contains, empty if not
                             let needle = vm_pop!(stack, events);
                             let haystack = vm_pop!(stack, events);
-                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.valence_u8()).collect();
-                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.valence_u8()).collect();
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
                             let found = if n_bytes.is_empty() {
                                 true
                             } else {
@@ -1684,9 +1693,9 @@ impl OlangVM {
                             let new_pat = vm_pop!(stack, events);
                             let old_pat = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
-                            let old_bytes: Vec<u8> = old_pat.0.iter().map(|m| m.valence_u8()).collect();
-                            let new_bytes: Vec<u8> = new_pat.0.iter().map(|m| m.valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let old_bytes: Vec<u8> = old_pat.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let new_bytes: Vec<u8> = new_pat.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
                             let mut result_bytes = Vec::new();
                             let mut i = 0;
                             if old_bytes.is_empty() {
@@ -1706,7 +1715,7 @@ impl OlangVM {
                             }
                             let mut mols = Vec::new();
                             for b in result_bytes {
-                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
+                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1714,8 +1723,8 @@ impl OlangVM {
                             // Stack: [string, prefix] → 1.0 if starts with, empty if not
                             let prefix = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
-                            let p_bytes: Vec<u8> = prefix.0.iter().map(|m| m.valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let p_bytes: Vec<u8> = prefix.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
                             let starts = s_bytes.starts_with(&p_bytes);
                             if starts {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
@@ -1726,8 +1735,8 @@ impl OlangVM {
                         "__str_ends_with" => {
                             let suffix = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
-                            let x_bytes: Vec<u8> = suffix.0.iter().map(|m| m.valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let x_bytes: Vec<u8> = suffix.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
                             let ends = s_bytes.ends_with(&x_bytes);
                             if ends {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
@@ -1739,8 +1748,8 @@ impl OlangVM {
                             // Stack: [haystack, needle] → index (number) or -1
                             let needle = vm_pop!(stack, events);
                             let haystack = vm_pop!(stack, events);
-                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.valence_u8()).collect();
-                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.valence_u8()).collect();
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
                             let idx = if n_bytes.is_empty() {
                                 0i64
                             } else {
@@ -1754,7 +1763,7 @@ impl OlangVM {
                         "__str_trim" => {
                             let s = vm_pop!(stack, events);
                             // Trim leading/trailing whitespace (space=0x20, tab=0x09, etc)
-                            let bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
+                            let bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
                             let trimmed: &[u8] = {
                                 let start = bytes.iter().position(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').unwrap_or(bytes.len());
                                 let end = bytes.iter().rposition(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').map(|i| i + 1).unwrap_or(start);
@@ -1762,27 +1771,27 @@ impl OlangVM {
                             };
                             let mut mols = Vec::new();
                             for &b in trimmed {
-                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
+                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
                         "__str_upper" => {
                             let s = vm_pop!(stack, events);
                             let mut mols = Vec::new();
-                            for m in &s.0 {
-                                let b = m.valence_u8();
+                            for &bits in &s.0 {
+                                let b = Molecule::from_u16(bits).valence_u8();
                                 let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
-                                mols.push(Molecule::raw(0x02, 0x01, upper, 0 , 0x01));
+                                mols.push(Molecule::raw(0x02, 0x01, upper, 0 , 0x01).bits);
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
                         "__str_lower" => {
                             let s = vm_pop!(stack, events);
                             let mut mols = Vec::new();
-                            for m in &s.0 {
-                                let b = m.valence_u8();
+                            for &bits in &s.0 {
+                                let b = Molecule::from_u16(bits).valence_u8();
                                 let lower = if b.is_ascii_uppercase() { b + 32 } else { b };
-                                mols.push(Molecule::raw(0x02, 0x01, lower, 0 , 0x01));
+                                mols.push(Molecule::raw(0x02, 0x01, lower, 0 , 0x01).bits);
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1796,7 +1805,7 @@ impl OlangVM {
                             let end = end_chain.to_number().unwrap_or(0.0) as usize;
                             let end = end.min(s.0.len());
                             let start = start.min(end);
-                            let mols: Vec<Molecule> = s.0[start..end].to_vec();
+                            let mols: Vec<u16> = s.0[start..end].to_vec();
                             let _ = stack.push(MolecularChain(mols));
                         }
                         // ── Math builtins ──────────────────────────────────
@@ -1874,7 +1883,7 @@ impl OlangVM {
                             let mut val_idx = 0;
                             let mut i = 1; // start at first value
                             while i < elements.len() {
-                                if val_idx > 0 { result.0.push(sep); }
+                                if val_idx > 0 { result.0.push(sep.bits); }
                                 result.0.extend(elements[i].0.iter().cloned());
                                 val_idx += 1;
                                 i += 2;
@@ -1911,7 +1920,7 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (idx, elem) in a_elems.into_iter().enumerate() {
-                                if idx > 0 { result.0.push(sep); }
+                                if idx > 0 { result.0.push(sep.bits); }
                                 result.0.extend(elem.0.iter().cloned());
                             }
                             let _ = stack.push(result);
@@ -1927,9 +1936,9 @@ impl OlangVM {
                             let mut i = 0;
                             while i + 1 < elements.len() {
                                 if elements[i].0 != key.0 {
-                                    if out_idx > 0 { result.0.push(sep); }
+                                    if out_idx > 0 { result.0.push(sep.bits); }
                                     result.0.extend(elements[i].0.iter().cloned());
-                                    result.0.push(sep);
+                                    result.0.push(sep.bits);
                                     result.0.extend(elements[i + 1].0.iter().cloned());
                                     out_idx += 1;
                                 }
@@ -2024,9 +2033,9 @@ impl OlangVM {
                                 let isep = iter_sep();
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(arr.0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 result.0.extend(string_to_chain("M").0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 result.0.extend(closure_marker.0.iter().copied());
                                 let _ = stack.push(result);
                             } else {
@@ -2064,9 +2073,9 @@ impl OlangVM {
                                 let isep = iter_sep();
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(arr.0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 result.0.extend(string_to_chain("F").0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 result.0.extend(closure_marker.0.iter().copied());
                                 let _ = stack.push(result);
                             } else {
@@ -2212,11 +2221,11 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0 , 0);
                             let mut result = MolecularChain(Vec::new());
                             for (i, elem) in elements.iter().enumerate() {
-                                if i > 0 { result.0.push(sep); }
+                                if i > 0 { result.0.push(sep.bits); }
                                 // Each pair is [idx_chain + sep + elem_chain]
                                 let idx_chain = MolecularChain::from_number(i as f64);
                                 result.0.extend(idx_chain.0.iter().cloned());
-                                result.0.push(sep);
+                                result.0.push(sep.bits);
                                 result.0.extend(elem.0.iter().cloned());
                             }
                             let _ = stack.push(result);
@@ -2251,7 +2260,7 @@ impl OlangVM {
                             let payload = vm_pop!(stack, events);
                             let addr = vm_pop!(stack, events);
                             events.push(VmEvent::Output(MolecularChain(alloc::vec![
-                                Molecule::raw(0x0A, 0x06, 0x01, 0 , 0x03 )
+                                Molecule::raw(0x0A, 0x06, 0x01, 0 , 0x03 ).bits
                             ])));
                             // Emit ISL send event for runtime to handle
                             events.push(VmEvent::CreateEdge {
@@ -2272,9 +2281,9 @@ impl OlangVM {
                             let val = vm_pop!(stack, events);
                             let type_name = classify_chain(&val);
                             // Encode type name as string chain
-                            let mut mols = Vec::new();
+                            let mut mols: Vec<u16> = Vec::new();
                             for b in type_name.bytes() {
-                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
+                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -2549,10 +2558,10 @@ impl OlangVM {
                                 let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut tagged = MolecularChain(Vec::new());
                                 tagged.0.extend(type_key.0.iter().copied());
-                                tagged.0.push(sep);
+                                tagged.0.push(sep.bits);
                                 tagged.0.extend(name_chain.0.iter().copied());
                                 if !dict.is_empty() {
-                                    tagged.0.push(sep);
+                                    tagged.0.push(sep.bits);
                                     tagged.0.extend(dict.0.iter().copied());
                                 }
                                 let _ = stack.push(tagged);
@@ -2587,7 +2596,7 @@ impl OlangVM {
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
                             for arg in args {
-                                result.0.push(sep);
+                                result.0.push(sep.bits);
                                 result.0.extend(arg.0.iter().copied());
                             }
                             let _ = stack.push(result);
@@ -2602,7 +2611,7 @@ impl OlangVM {
                             let isep = iter_sep();
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             result.0.extend(arr.0.iter().copied());
                             let _ = stack.push(result);
                         }
@@ -2614,9 +2623,9 @@ impl OlangVM {
                             let isep = iter_sep();
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(iter_val.0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             result.0.extend(string_to_chain(transform_tag).0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             result.0.extend(closure.0.iter().copied());
                             let _ = stack.push(result);
                         }
@@ -2702,7 +2711,7 @@ impl OlangVM {
                                     let sep = Molecule::raw(0, 0, 0, 0, 0);
                                     let mut result = MolecularChain(Vec::new());
                                     result.0.extend(tag.0.iter().copied());
-                                    result.0.push(sep);
+                                    result.0.push(sep.bits);
                                     result.0.extend(first.0.iter().copied());
                                     let _ = stack.push(result);
                                 }
@@ -2730,11 +2739,11 @@ impl OlangVM {
                                 let isep = iter_sep();
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(tag.0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 result.0.extend(new_source.0.iter().copied());
                                 // Keep transforms
                                 for p in parts.iter().skip(2) {
-                                    result.0.push(isep);
+                                    result.0.push(isep.bits);
                                     result.0.extend(p.0.iter().copied());
                                 }
                                 let _ = stack.push(result);
@@ -2761,10 +2770,10 @@ impl OlangVM {
                                 let isep = iter_sep();
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(tag.0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 result.0.extend(new_source.0.iter().copied());
                                 for p in parts.iter().skip(2) {
-                                    result.0.push(isep);
+                                    result.0.push(isep.bits);
                                     result.0.extend(p.0.iter().copied());
                                 }
                                 let _ = stack.push(result);
@@ -2836,14 +2845,14 @@ impl OlangVM {
                                 let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut combined = MolecularChain(Vec::new());
                                 for (i, e) in src_a.iter().chain(src_b.iter()).enumerate() {
-                                    if i > 0 { combined.0.push(sep); }
+                                    if i > 0 { combined.0.push(sep.bits); }
                                     combined.0.extend(e.0.iter().copied());
                                 }
                                 let tag = string_to_chain("__ITER__");
                                 let isep = iter_sep();
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(tag.0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 result.0.extend(combined.0.iter().copied());
                                 let _ = stack.push(result);
                             } else {
@@ -2871,17 +2880,17 @@ impl OlangVM {
                             let mut result = MolecularChain(Vec::new());
                             let len = elems_a.len().min(elems_b.len());
                             for i in 0..len {
-                                if i > 0 { result.0.push(sep); }
+                                if i > 0 { result.0.push(sep.bits); }
                                 // Each pair is a 2-element sub-array: [a_i, b_i]
                                 result.0.extend(elems_a[i].0.iter().copied());
-                                result.0.push(sep);
+                                result.0.push(sep.bits);
                                 result.0.extend(elems_b[i].0.iter().copied());
                             }
                             let tag = string_to_chain("__ITER__");
                             let isep = iter_sep();
                             let mut iter_result = MolecularChain(Vec::new());
                             iter_result.0.extend(tag.0.iter().copied());
-                            iter_result.0.push(isep);
+                            iter_result.0.push(isep.bits);
                             iter_result.0.extend(result.0.iter().copied());
                             let _ = stack.push(iter_result);
                         }
@@ -2910,7 +2919,7 @@ impl OlangVM {
                                         // Flatten: split mapped result and add each sub-element
                                         let sub_elems = split_array_chain(&mapped);
                                         for sub in &sub_elems {
-                                            if count > 0 { result.0.push(sep); }
+                                            if count > 0 { result.0.push(sep.bits); }
                                             result.0.extend(sub.0.iter().cloned());
                                             count += 1;
                                         }
@@ -2948,9 +2957,9 @@ impl OlangVM {
                                 let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(tag.0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 for (i, e) in elements.iter().enumerate() {
-                                    if i > 0 { result.0.push(sep); }
+                                    if i > 0 { result.0.push(sep.bits); }
                                     result.0.extend(e.0.iter().copied());
                                 }
                                 let _ = stack.push(result);
@@ -2982,9 +2991,9 @@ impl OlangVM {
                                 let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut result = MolecularChain(Vec::new());
                                 result.0.extend(tag.0.iter().copied());
-                                result.0.push(isep);
+                                result.0.push(isep.bits);
                                 for (i, e) in filtered.iter().enumerate() {
-                                    if i > 0 { result.0.push(sep); }
+                                    if i > 0 { result.0.push(sep.bits); }
                                     result.0.extend(e.0.iter().copied());
                                 }
                                 let _ = stack.push(result);
@@ -3020,9 +3029,9 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             for (i, e) in union_elems.iter().enumerate() {
-                                if i > 0 { result.0.push(sep); }
+                                if i > 0 { result.0.push(sep.bits); }
                                 result.0.extend(e.0.iter().copied());
                             }
                             let _ = stack.push(result);
@@ -3040,9 +3049,9 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             for (i, e) in inter.iter().enumerate() {
-                                if i > 0 { result.0.push(sep); }
+                                if i > 0 { result.0.push(sep.bits); }
                                 result.0.extend(e.0.iter().copied());
                             }
                             let _ = stack.push(result);
@@ -3060,9 +3069,9 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             for (i, e) in diff.iter().enumerate() {
-                                if i > 0 { result.0.push(sep); }
+                                if i > 0 { result.0.push(sep.bits); }
                                 result.0.extend(e.0.iter().copied());
                             }
                             let _ = stack.push(result);
@@ -3095,9 +3104,9 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             for (i, e) in elements.iter().enumerate() {
-                                if i > 0 { result.0.push(sep); }
+                                if i > 0 { result.0.push(sep.bits); }
                                 result.0.extend(e.0.iter().copied());
                             }
                             let _ = stack.push(result);
@@ -3115,9 +3124,9 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(isep);
+                            result.0.push(isep.bits);
                             for (i, e) in elements.iter().enumerate() {
-                                if i > 0 { result.0.push(sep); }
+                                if i > 0 { result.0.push(sep.bits); }
                                 result.0.extend(e.0.iter().copied());
                             }
                             let _ = stack.push(result);
@@ -3137,9 +3146,9 @@ impl OlangVM {
                                     let sep = Molecule::raw(0, 0, 0, 0, 0);
                                     let mut result = MolecularChain(Vec::new());
                                     result.0.extend(tag.0.iter().copied());
-                                    result.0.push(isep);
+                                    result.0.push(isep.bits);
                                     for (i, e) in elements.iter().enumerate() {
-                                        if i > 0 { result.0.push(sep); }
+                                        if i > 0 { result.0.push(sep.bits); }
                                         result.0.extend(e.0.iter().copied());
                                     }
                                     let _ = stack.push(result); // updated deque (caller must re-assign)
@@ -3163,9 +3172,9 @@ impl OlangVM {
                                     let sep = Molecule::raw(0, 0, 0, 0, 0);
                                     let mut result = MolecularChain(Vec::new());
                                     result.0.extend(tag.0.iter().copied());
-                                    result.0.push(isep);
+                                    result.0.push(isep.bits);
                                     for (i, e) in elements.iter().enumerate() {
-                                        if i > 0 { result.0.push(sep); }
+                                        if i > 0 { result.0.push(sep.bits); }
                                         result.0.extend(e.0.iter().copied());
                                     }
                                     let _ = stack.push(result);
@@ -3233,7 +3242,7 @@ impl OlangVM {
                                 let sep = Molecule::raw(0, 0, 0, 0, 0);
                                 let mut result = MolecularChain(Vec::new());
                                 for (j, elem) in elements[actual_start..actual_end].iter().enumerate() {
-                                    if j > 0 { result.0.push(sep); }
+                                    if j > 0 { result.0.push(sep.bits); }
                                     result.0.extend(elem.0.iter().cloned());
                                 }
                                 let _ = stack.push(result);
@@ -3258,7 +3267,7 @@ impl OlangVM {
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
                                         let mut result = MolecularChain(Vec::new());
                                         result.0.extend(some_tag.0.iter().cloned());
-                                        result.0.push(sep);
+                                        result.0.push(sep.bits);
                                         result.0.extend(mapped.0.iter().cloned());
                                         let _ = stack.push(result);
                                     } else { let _ = stack.push(val); }
@@ -3281,7 +3290,7 @@ impl OlangVM {
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
                                         let mut result = MolecularChain(Vec::new());
                                         result.0.extend(ok_tag.0.iter().cloned());
-                                        result.0.push(sep);
+                                        result.0.push(sep.bits);
                                         result.0.extend(mapped.0.iter().cloned());
                                         let _ = stack.push(result);
                                     } else { let _ = stack.push(val); }
@@ -3339,7 +3348,7 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(sep);
+                            result.0.push(sep.bits);
                             result.0.extend(val.0.iter().copied());
                             let _ = stack.push(result);
                         }
@@ -3354,7 +3363,7 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(sep);
+                            result.0.push(sep.bits);
                             result.0.extend(val.0.iter().copied());
                             let _ = stack.push(result);
                         }
@@ -3365,7 +3374,7 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             result.0.extend(tag.0.iter().copied());
-                            result.0.push(sep);
+                            result.0.push(sep.bits);
                             result.0.extend(val.0.iter().copied());
                             let _ = stack.push(result);
                         }
@@ -3443,7 +3452,7 @@ impl OlangVM {
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
                                         let mut result = MolecularChain(Vec::new());
                                         result.0.extend(err_tag.0.iter().cloned());
-                                        result.0.push(sep);
+                                        result.0.push(sep.bits);
                                         result.0.extend(mapped.0.iter().cloned());
                                         let _ = stack.push(result);
                                     } else { let _ = stack.push(val); }
@@ -3516,7 +3525,7 @@ impl OlangVM {
                             let type_entry = string_to_chain(&type_name);
                             let mut list = found.unwrap_or_else(MolecularChain::empty);
                             if !list.is_empty() {
-                                list.0.push(sep);
+                                list.0.push(sep.bits);
                             }
                             list.0.extend(type_entry.0.iter().copied());
                             let scope = scopes.last_mut().unwrap();
@@ -3626,13 +3635,13 @@ impl OlangVM {
                             let s = vm_pop!(stack, events);
                             let s_str = chain_to_string(&s).unwrap_or_default();
                             let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut mols = Vec::new();
+                            let mut mols: Vec<u16> = Vec::new();
                             for ch in s_str.chars() {
-                                if !mols.is_empty() { mols.push(sep.clone()); }
+                                if !mols.is_empty() { mols.push(sep.bits); }
                                 let mut buf = [0u8; 4];
                                 let c_str = ch.encode_utf8(&mut buf);
                                 for b in c_str.bytes() {
-                                    mols.push(Molecule::raw(b, 1, 0x80, 0x80 , 3));
+                                    mols.push(Molecule::raw(b, 1, 0x80, 0x80 , 3).bits);
                                 }
                             }
                             let _ = stack.push(MolecularChain(mols));
@@ -3809,9 +3818,9 @@ impl OlangVM {
                             let size = vm_pop!(stack, events);
                             let n = size.to_number().unwrap_or(0.0) as usize;
                             let n = n.min(65536); // safety limit
-                            let mut mols = Vec::with_capacity(n);
+                            let mut mols: Vec<u16> = Vec::with_capacity(n);
                             for _ in 0..n {
-                                mols.push(Molecule::raw(0, 1, 0x80, 0x80 , 3));
+                                mols.push(Molecule::raw(0, 1, 0x80, 0x80 , 3).bits);
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -3825,7 +3834,7 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i < buf.0.len() {
-                                let _ = stack.push(MolecularChain::from_number(buf.0[i].shape() as f64));
+                                let _ = stack.push(MolecularChain::from_number(Molecule::from_u16(buf.0[i]).shape() as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
                             }
@@ -3838,7 +3847,7 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u8;
                             if i < buf.0.len() {
-                                buf.0[i] = Molecule::raw(v, 0, 0, 0, 0);
+                                buf.0[i] = Molecule::raw(v, 0, 0, 0, 0).bits;
                             }
                             let _ = stack.push(buf);
                         }
@@ -3848,8 +3857,8 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i + 1 < buf.0.len() {
-                                let hi = buf.0[i].shape() as u16;
-                                let lo = buf.0[i + 1].shape() as u16;
+                                let hi = Molecule::from_u16(buf.0[i]).shape() as u16;
+                                let lo = Molecule::from_u16(buf.0[i + 1]).shape() as u16;
                                 let _ = stack.push(MolecularChain::from_number(((hi << 8) | lo) as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
@@ -3863,8 +3872,8 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u16;
                             if i + 1 < buf.0.len() {
-                                buf.0[i] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0);
-                                buf.0[i + 1] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0);
+                                buf.0[i] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0).bits;
+                                buf.0[i + 1] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0).bits;
                             }
                             let _ = stack.push(buf);
                         }
@@ -3874,10 +3883,10 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i + 3 < buf.0.len() {
-                                let v = (buf.0[i].shape() as u32) << 24
-                                    | (buf.0[i + 1].shape() as u32) << 16
-                                    | (buf.0[i + 2].shape() as u32) << 8
-                                    | (buf.0[i + 3].shape() as u32);
+                                let v = (Molecule::from_u16(buf.0[i]).shape() as u32) << 24
+                                    | (Molecule::from_u16(buf.0[i + 1]).shape() as u32) << 16
+                                    | (Molecule::from_u16(buf.0[i + 2]).shape() as u32) << 8
+                                    | (Molecule::from_u16(buf.0[i + 3]).shape() as u32);
                                 let _ = stack.push(MolecularChain::from_number(v as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
@@ -3891,10 +3900,10 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u32;
                             if i + 3 < buf.0.len() {
-                                buf.0[i] = Molecule::raw((v >> 24) as u8, 0, 0, 0, 0);
-                                buf.0[i + 1] = Molecule::raw((v >> 16) as u8, 0, 0, 0, 0);
-                                buf.0[i + 2] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0);
-                                buf.0[i + 3] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0);
+                                buf.0[i] = Molecule::raw((v >> 24) as u8, 0, 0, 0, 0).bits;
+                                buf.0[i + 1] = Molecule::raw((v >> 16) as u8, 0, 0, 0, 0).bits;
+                                buf.0[i + 2] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0).bits;
+                                buf.0[i + 3] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0).bits;
                             }
                             let _ = stack.push(buf);
                         }
@@ -3910,12 +3919,12 @@ impl OlangVM {
                                 values.push(vm_pop!(stack, events));
                             }
                             values.reverse();
-                            let mut result_mols = Vec::new();
+                            let mut result_mols: Vec<u16> = Vec::new();
                             for (field, val) in fields.iter().zip(values.iter()) {
                                 let size: usize = field.trim_end_matches('B').parse().unwrap_or(1);
                                 let n = val.to_number().unwrap_or(0.0) as u64;
                                 for bi in (0..size).rev() {
-                                    result_mols.push(Molecule::raw(((n >> (bi * 8)) & 0xFF) as u8, 1, 0x80, 0x80 , 3));
+                                    result_mols.push(Molecule::raw(((n >> (bi * 8)) & 0xFF) as u8, 1, 0x80, 0x80 , 3).bits);
                                 }
                             }
                             let _ = stack.push(MolecularChain(result_mols));
@@ -3927,18 +3936,18 @@ impl OlangVM {
                             let fmt_str = chain_to_string(&fmt).unwrap_or_default();
                             let fields: Vec<&str> = fmt_str.split_whitespace().collect();
                             let sep = Molecule::raw(0, 0, 0, 0 , 0);
-                            let mut result_mols = Vec::new();
+                            let mut result_mols: Vec<u16> = Vec::new();
                             let mut offset = 0usize;
                             for field in &fields {
                                 let size: usize = field.trim_end_matches('B').parse().unwrap_or(1);
                                 let mut val: u64 = 0;
                                 for bi in 0..size {
                                     if offset + bi < bytes.0.len() {
-                                        val = (val << 8) | bytes.0[offset + bi].shape() as u64;
+                                        val = (val << 8) | Molecule::from_u16(bytes.0[offset + bi]).shape() as u64;
                                     }
                                 }
                                 offset += size;
-                                if !result_mols.is_empty() { result_mols.push(sep.clone()); }
+                                if !result_mols.is_empty() { result_mols.push(sep.bits); }
                                 let num_chain = MolecularChain::from_number(val as f64);
                                 result_mols.extend(num_chain.0);
                             }
@@ -4319,7 +4328,7 @@ impl OlangVM {
                     // Extract value: nếu là number chain → u8, nếu là mol → valence
                     let value = if let Some(n) = val_chain.to_number() {
                         n as u8
-                    } else if let Some(mol) = val_chain.0.first() {
+                    } else if let Some(mol) = val_chain.first() {
                         mol.valence_u8()
                     } else {
                         0
@@ -4572,7 +4581,7 @@ impl OlangVM {
                             }
                             Op::PushMol(s, r, v, a, t) => {
                                 let mol = Molecule::raw(*s, *r, *v, *a , *t);
-                                let chain = MolecularChain(alloc::vec![mol]);
+                                let chain = MolecularChain(alloc::vec![mol.bits]);
                                 let _ = stack.push(chain);
                             }
                             Op::Dup => {
@@ -5842,11 +5851,11 @@ pub mod tests {
     // ── Dict builtins ────────────────────────────────────────────────────────
 
     fn key_chain(s: &str) -> MolecularChain {
-        let mut mols = alloc::vec::Vec::new();
+        let mut bits = alloc::vec::Vec::new();
         for b in s.bytes() {
-            mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
+            bits.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
         }
-        MolecularChain(mols)
+        MolecularChain(bits)
     }
 
     #[test]
@@ -5902,11 +5911,11 @@ pub mod tests {
     // ── Phase 5: String Builtins ────────────────────────────────────────────
 
     fn str_chain(s: &str) -> MolecularChain {
-        let mut mols = Vec::new();
+        let mut bits = Vec::new();
         for b in s.bytes() {
-            mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01));
+            bits.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
         }
-        MolecularChain(mols)
+        MolecularChain(bits)
     }
 
     #[test]
@@ -5973,7 +5982,7 @@ pub mod tests {
         assert!(!result.has_error());
         let out = &result.outputs()[0];
         // Result should be "hello olang" encoded as molecules
-        let decoded: Vec<u8> = out.0.iter().map(|m| m.valence_u8()).collect();
+        let decoded: Vec<u8> = out.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
         assert_eq!(&decoded, b"hello olang");
     }
 
@@ -5999,7 +6008,7 @@ pub mod tests {
             .push_op(Op::Emit)
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
-        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.valence_u8()).collect();
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
         assert_eq!(&decoded, b"hello");
     }
 
@@ -6011,7 +6020,7 @@ pub mod tests {
             .push_op(Op::Emit)
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
-        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.valence_u8()).collect();
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
         assert_eq!(&decoded, b"HELLO");
     }
 

@@ -14,7 +14,7 @@ use silk::graph::SilkGraph;
 #[test]
 fn evolve_valence_creates_new_molecule() {
     let chain = encode_codepoint(FIRE);
-    let mol = &chain.0[0];
+    let mol = chain.first().unwrap();
 
     let result = mol.evolve(Dimension::Valence, 0x40);
 
@@ -32,7 +32,7 @@ fn evolve_valence_creates_new_molecule() {
 #[test]
 fn evolve_shape_creates_new_molecule() {
     let chain = encode_codepoint(FIRE);
-    let mol = &chain.0[0];
+    let mol = chain.first().unwrap();
 
     // Evolve shape to Cone (0x04)
     let result = mol.evolve(Dimension::Shape, 0x04);
@@ -42,7 +42,7 @@ fn evolve_shape_creates_new_molecule() {
 #[test]
 fn evolve_time_creates_new_molecule() {
     let chain = encode_codepoint(FIRE);
-    let mol = &chain.0[0];
+    let mol = chain.first().unwrap();
 
     // Evolve time to Static (0x01)
     let result = mol.evolve(Dimension::Time, 0x01);
@@ -54,7 +54,7 @@ fn evolve_time_creates_new_molecule() {
 #[test]
 fn dimension_delta_detects_valence_change() {
     let chain = encode_codepoint(FIRE);
-    let mol = &chain.0[0];
+    let mol = chain.first().unwrap();
 
     let result = mol.evolve(Dimension::Valence, 0x40);
     let deltas = mol.dimension_delta(&result.molecule);
@@ -73,8 +73,8 @@ fn dimension_delta_detects_valence_change() {
 #[test]
 fn dimension_delta_empty_for_identical() {
     let chain = encode_codepoint(FIRE);
-    let mol = &chain.0[0];
-    let deltas = mol.dimension_delta(mol);
+    let mol = chain.first().unwrap();
+    let deltas = mol.dimension_delta(&mol);
     assert!(deltas.is_empty(), "identical molecules should have no deltas");
 }
 

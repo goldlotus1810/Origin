@@ -1664,7 +1664,8 @@ impl HomeRuntime {
                 let hash = chain.chain_hash();
                 let bytes = chain.to_bytes();
                 let classification = classify_chain_type(&chain);
-                let mol_details: alloc::vec::Vec<String> = chain.0.iter().enumerate().map(|(i, mol)| {
+                let mol_details: alloc::vec::Vec<String> = chain.0.iter().enumerate().map(|(i, &bits)| {
+                    let mol = olang::molecular::Molecule::from_u16(bits);
                     format!(
                         "  mol[{}]: S={} R={} V={} A={} T={}",
                         i, mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), mol.time_u8()
@@ -4964,7 +4965,7 @@ mod tests {
         let chain = olang::encoder::encode_codepoint(0x1F525);
         assert!(!chain.is_empty());
         // Chain phải match UCD values
-        let mol = &chain.0[0];
+        let mol = olang::molecular::Molecule::from_u16(chain.0[0]);
         assert_eq!(mol.shape_u8(), ucd::shape_of(0x1F525) & 0xF0, "Shape phải từ UCD (quantized)");
         assert_eq!(
             mol.valence_u8(),
@@ -5230,7 +5231,8 @@ fn classify_chain_type(chain: &olang::molecular::MolecularChain) -> alloc::strin
         return String::from("Empty");
     }
     let (mut sdf, mut math, mut emo) = (0u32, 0u32, 0u32);
-    for mol in &chain.0 {
+    for &bits in &chain.0 {
+        let mol = olang::molecular::Molecule::from_u16(bits);
         match mol.shape_base() {
             ShapeBase::Sphere | ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Cone
             | ShapeBase::Ellipsoid | ShapeBase::Cylinder | ShapeBase::Octahedron
@@ -5269,7 +5271,7 @@ fn chain_info(chain: &olang::molecular::MolecularChain, cp: Option<u32>) -> allo
         return String::from("(empty)");
     }
 
-    let mol = &chain.0[0];
+    let mol = olang::molecular::Molecule::from_u16(chain.0[0]);
     let shape_sym = match mol.shape_base() {
         olang::molecular::ShapeBase::Sphere => "●",
         olang::molecular::ShapeBase::Box => "■",

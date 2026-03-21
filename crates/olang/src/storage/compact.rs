@@ -418,9 +418,9 @@ impl CompactNode {
         // 2. Delta encoding nếu có parent
         if let Some(parent_chain) = parent {
             if !parent_chain.is_empty() && !chain.is_empty() {
-                let parent_mol = &parent_chain.0[0];
-                let child_mol = &chain.0[0];
-                let delta = DeltaMolecule::encode(parent_mol, child_mol);
+                let parent_mol = parent_chain.first().unwrap();
+                let child_mol = chain.first().unwrap();
+                let delta = DeltaMolecule::encode(&parent_mol, &child_mol);
 
                 // Nếu delta nhỏ hơn tagged full → dùng delta
                 if delta.size() < child_mol.tagged_size() {
@@ -476,8 +476,8 @@ impl CompactNode {
                     return None;
                 }
                 let delta = DeltaMolecule::from_bytes(&self.data)?;
-                let parent_mol = &parent_chain.0[0];
-                let child_mol = delta.decode(parent_mol)?;
+                let parent_mol = parent_chain.first()?;
+                let child_mol = delta.decode(&parent_mol)?;
                 Some(MolecularChain::single(child_mol))
             }
             CompactKind::DictRef | CompactKind::Dedup => {
@@ -2040,7 +2040,7 @@ mod tests {
         let node = CompactNode::encode(&child, Some(&parent), &mut dict, 2, 1000);
         // Delta should be chosen (2 bytes < tagged ~6 bytes)
         assert_eq!(node.kind, CompactKind::Delta, "Should use delta encoding");
-        let child_tagged = child.0[0].tagged_size();
+        let child_tagged = child.first().unwrap().tagged_size();
         assert!(
             node.data_size() < child_tagged,
             "Delta {} bytes < tagged {} bytes",
