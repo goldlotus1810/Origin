@@ -392,9 +392,60 @@ impl Maturity {
 
 /// Node = Molecule + lifecycle state + nguồn gốc composition.
 ///
+/// Thế hệ QR — §IX.D Generational QR.
+///
+/// Dream promote: Gen3 → Gen2 → Gen1 theo thời gian.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum QrGeneration {
+    /// 8,846 UDC gốc — bất tử, không bao giờ bị GC
+    Gen0 = 0,
+    /// Nền tảng — read-mostly, rất ít update
+    Gen1 = 1,
+    /// Chuyên môn — thỉnh thoảng update
+    Gen2 = 2,
+    /// Mới học — write-optimized, hot zone
+    #[default]
+    Gen3 = 3,
+}
+
+impl QrGeneration {
+    /// Parse from byte.
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            0 => Self::Gen0,
+            1 => Self::Gen1,
+            2 => Self::Gen2,
+            _ => Self::Gen3,
+        }
+    }
+
+    /// Byte representation.
+    pub fn as_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// Promote lên thế hệ thấp hơn (ổn định hơn).
+    /// Gen0 không promote được (đã bất tử).
+    pub fn promote(self) -> Self {
+        match self {
+            Self::Gen3 => Self::Gen2,
+            Self::Gen2 => Self::Gen1,
+            Self::Gen1 | Self::Gen0 => self, // Gen0+Gen1 không đổi
+        }
+    }
+
+    /// Có phải node bất tử (UDC gốc)?
+    pub fn is_immortal(self) -> bool {
+        matches!(self, Self::Gen0)
+    }
+}
+
 /// Molecule vẫn là 5 bytes tĩnh. NodeState bọc thêm:
 /// - `maturity`: Formula → Evaluating → Mature
 /// - `origin`: node sinh ra từ đâu? (Innate/Composed/Evolved)
+/// - `generation`: §IX.D thế hệ QR (Gen0..Gen3)
+/// - `ref_age`: §IX.G Telomere — đếm lần reference
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeState {
     /// 5D molecule (5 bytes).
@@ -403,15 +454,22 @@ pub struct NodeState {
     pub maturity: Maturity,
     /// Nguồn gốc: L0 innate, LCA composed, hoặc evolved.
     pub origin: CompositionOrigin,
+    /// §IX.D Thế hệ QR: Gen0 (UDC bất tử) → Gen3 (mới học).
+    pub generation: QrGeneration,
+    /// §IX.G Telomere: đếm lần reference. age > threshold → re-evaluate.
+    pub ref_age: u32,
 }
 
 impl NodeState {
     /// Tạo NodeState từ Molecule (innate L0, codepoint đã biết).
+    /// Gen0 = UDC bất tử.
     pub fn innate(mol: Molecule, codepoint: u32) -> Self {
         Self {
             mol,
             maturity: Maturity::Formula,
             origin: CompositionOrigin::Innate(codepoint),
+            generation: QrGeneration::Gen0,
+            ref_age: 0,
         }
     }
 
@@ -421,6 +479,8 @@ impl NodeState {
             mol,
             maturity: Maturity::Formula,
             origin: CompositionOrigin::Composed { sources, op },
+            generation: QrGeneration::Gen3,
+            ref_age: 0,
         }
     }
 
@@ -435,7 +495,32 @@ impl NodeState {
                 old_val,
                 new_val,
             },
+            generation: QrGeneration::Gen3,
+            ref_age: 0,
         }
+    }
+
+    /// §IX.G Telomere: ghi nhận 1 lần reference. Tránh stale knowledge.
+    pub fn touch(&mut self) {
+        self.ref_age = self.ref_age.saturating_add(1);
+    }
+
+    /// §IX.G Telomere: kiểm tra cần re-evaluate không.
+    /// threshold phụ thuộc generation: Gen3=10, Gen2=50, Gen1=200, Gen0=∞.
+    pub fn needs_reevaluation(&self) -> bool {
+        let threshold = match self.generation {
+            QrGeneration::Gen0 => return false, // bất tử
+            QrGeneration::Gen1 => 200,
+            QrGeneration::Gen2 => 50,
+            QrGeneration::Gen3 => 10,
+        };
+        self.ref_age > threshold
+    }
+
+    /// §IX.D Promote generation (Dream cycle).
+    pub fn promote_generation(&mut self) {
+        self.generation = self.generation.promote();
+        self.ref_age = 0; // reset telomere sau promote
     }
 }
 
@@ -1155,6 +1240,134 @@ impl MolecularChain {
     /// Check if this chain represents a number.
     pub fn is_number(&self) -> bool {
         self.0.len() == 4 && self.to_number().is_some()
+    }
+
+    // ── §IX.B Copy-on-Write splice ──────────────────────────────────────
+
+    /// CoW splice: tạo chain mới từ chain gốc + thay 1 vị trí.
+    ///
+    /// Không clone toàn bộ — chỉ tạo chain mới khi cần sửa.
+    /// Spec: 1 chain 1000 links × 100 variants: Copy 200KB vs CoW 400B.
+    ///
+    /// Trả None nếu position out of bounds.
+    pub fn cow_splice(&self, position: usize, new_link: u16) -> Option<Self> {
+        if position >= self.0.len() {
+            return None;
+        }
+        let mut v = self.0.clone();
+        v[position] = new_link;
+        Some(Self(v))
+    }
+
+    /// CoW splice nhiều vị trí — batch version.
+    ///
+    /// `patches`: danh sách (position, new_link).
+    /// Trả None nếu bất kỳ position nào out of bounds.
+    pub fn cow_splice_many(&self, patches: &[(usize, u16)]) -> Option<Self> {
+        let mut v = self.0.clone();
+        for &(pos, link) in patches {
+            if pos >= v.len() {
+                return None;
+            }
+            v[pos] = link;
+        }
+        Some(Self(v))
+    }
+
+    // ── §IX.E Chain Compression ─────────────────────────────────────────
+
+    /// Compress chain: detect consecutive repeats → (value, count) pairs.
+    ///
+    /// Run-length encoding. Tỉ lệ nén 40-60% cho chain có repeats.
+    /// Format: Vec<(u16, u16)> = (link_value, repeat_count).
+    pub fn compress_rle(&self) -> Vec<(u16, u16)> {
+        let mut result = Vec::new();
+        if self.0.is_empty() {
+            return result;
+        }
+        let mut cur = self.0[0];
+        let mut count: u16 = 1;
+        for &val in &self.0[1..] {
+            if val == cur && count < u16::MAX {
+                count += 1;
+            } else {
+                result.push((cur, count));
+                cur = val;
+                count = 1;
+            }
+        }
+        result.push((cur, count));
+        result
+    }
+
+    /// Decompress RLE back to chain.
+    pub fn decompress_rle(rle: &[(u16, u16)]) -> Self {
+        let mut v = Vec::new();
+        for &(val, count) in rle {
+            for _ in 0..count {
+                v.push(val);
+            }
+        }
+        Self(v)
+    }
+
+    /// Compression ratio: compressed_size / original_size.
+    /// < 1.0 = compression giúp ích. > 1.0 = không nên compress.
+    pub fn compression_ratio(&self) -> f32 {
+        if self.0.is_empty() {
+            return 1.0;
+        }
+        let rle = self.compress_rle();
+        // RLE: mỗi entry = 2 × u16 = 4 bytes. Original: mỗi link = 2 bytes.
+        (rle.len() as f32 * 4.0) / (self.0.len() as f32 * 2.0)
+    }
+
+    // ── §IX.F Strand Complementarity ────────────────────────────────────
+
+    /// Complement chain: invert Valence → anti-chain.
+    ///
+    /// Dùng cho: kiểm tra nhất quán, suy luận ngược, error detection.
+    /// V' = max_V − V (invert trên thang 3-bit: 0..7).
+    pub fn complement(&self) -> Self {
+        let v = self.0.iter().map(|&bits| {
+            let mol = Molecule::from_u16(bits);
+            // V is 3 bits (0..7), invert: new_v = 7 - old_v
+            let new_v = 7u8.saturating_sub(mol.valence());
+            Molecule::pack(mol.shape(), mol.relation(), new_v, mol.arousal(), mol.time()).bits
+        }).collect();
+        Self(v)
+    }
+
+    /// Check if two chains are complements (V inverted).
+    ///
+    /// Trả true nếu chain này là complement của other.
+    pub fn is_complement_of(&self, other: &Self) -> bool {
+        if self.0.len() != other.0.len() {
+            return false;
+        }
+        self.0.iter().zip(other.0.iter()).all(|(&a, &b)| {
+            let ma = Molecule::from_u16(a);
+            let mb = Molecule::from_u16(b);
+            ma.shape() == mb.shape() && ma.relation() == mb.relation()
+                && ma.arousal() == mb.arousal() && ma.time() == mb.time()
+                && ma.valence() == 7u8.saturating_sub(mb.valence())
+        })
+    }
+
+    // ── §IX.H Intron/Exon marking ───────────────────────────────────────
+
+    /// Extract exon (hữu ích) — bỏ intron (noise) ranges.
+    ///
+    /// `intron_ranges`: danh sách (start, end) inclusive ranges to skip.
+    /// Chain gốc KHÔNG bị sửa (append-only). Trả chain mới chỉ có exon.
+    pub fn extract_exons(&self, intron_ranges: &[(usize, usize)]) -> Self {
+        let v: Vec<u16> = self.0.iter().enumerate()
+            .filter(|(i, _)| {
+                !intron_ranges.iter().any(|&(start, end)| *i >= start && *i <= end)
+            })
+            .map(|(_, &val)| val)
+            .collect();
+        Self(v)
     }
 }
 

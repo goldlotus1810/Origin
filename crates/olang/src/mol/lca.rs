@@ -358,6 +358,8 @@ pub fn lca_to_node_state(pairs: &[(&MolecularChain, u32)]) -> Option<NodeState> 
         mol,
         maturity: crate::molecular::Maturity::Formula,
         origin,
+        generation: crate::molecular::QrGeneration::Gen3,
+        ref_age: 0,
     })
 }
 
