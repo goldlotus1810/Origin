@@ -5,6 +5,26 @@
 
 ---
 
+## Mô hình vật lý tổng quát
+
+```
+  Time = tham số sóng trong cơ học sóng
+
+  Sóng tổng quát: ψ(x,t) = A · sin(kx − ωt + φ)
+
+  Trong đó:
+    A = amplitude (biên độ) → dynamics/cường độ
+    ω = 2πf = angular frequency → pitch/cao độ
+    T = 2π/ω = period → duration/trường độ
+    k = 2π/λ = wave number → spatial frequency
+    φ = phase → trạng thái ban đầu
+
+  Mỗi ký tự T = 1 tham số hoặc 1 modifier của hàm sóng.
+  Chuỗi ký tự T = superposition: Ψ = Σ Aₙ·sin(kₙx − ωₙt + φₙ)  (Fourier series)
+```
+
+---
+
 ## T.0 — QUẺ DỊCH (Hexagram) · 64 cụm
 
 ### Tầng 1: "Thuộc nhóm trạng thái nào?"
@@ -45,6 +65,37 @@ HEXAGRAM FOR BEFORE COMPLETION           → trước hoàn thành
 HEXAGRAM FOR AFTER COMPLETION            → sau hoàn thành
 → "ah, quẻ dịch — [trạng thái thời gian/biến đổi]"
   Mỗi quẻ = 1 phase trong chu kỳ biến đổi
+```
+
+### Mô hình toán học
+
+```
+  Mô hình: Máy trạng thái hữu hạn (FSM) với 2⁶ = 64 trạng thái
+
+  Mỗi quẻ = vector v⃗ ∈ {0,1}⁶ (6 hào × âm/dương)
+    Bit 0 (hào 1) = sơ quái hạ (lower trigram) bit 0
+    ...
+    Bit 5 (hào 6) = sơ quái thượng (upper trigram) bit 2
+
+  Quẻ = upper_trigram ⊗ lower_trigram  (tensor product of 2 trigrams)
+
+  State transition: biến quẻ = flip 1 bit
+    d(q₁, q₂) = Hamming distance = số hào khác nhau
+    Transition graph: hypercube Q₆ (6-dimensional hypercube)
+
+  Chu kỳ: 64 states form a directed graph of I Ching sequence
+  Duality: mỗi quẻ có quẻ đối (complement: v⃗' = 1⃗ − v⃗)
+```
+
+### Góc pha theo nhóm ngữ nghĩa
+
+```
+  SÁNG TẠO / KHỞI ĐẦU     → φ = 0       (phase = 0, đầu chu kỳ)
+  PHÁT TRIỂN / TĂNG        → φ = π/3     (pha tăng trưởng)
+  ỔN ĐỊNH                  → φ = 2π/3    (đỉnh/ổn định)
+  CHUYỂN ĐỔI               → φ = π       (điểm uốn)
+  KHÓ KHĂN / GIẢM          → φ = 4π/3    (pha suy giảm)
+  PHÂN TÁN / KẾT THÚC      → φ = 5π/3    (tiến về không)
 ```
 
 ---
@@ -90,6 +141,20 @@ TETRAGRAM FOR CONTACT                     → tứ quái + tiếp xúc
 TETRAGRAM FOR ENDEAVOUR                   → tứ quái + nỗ lực
 TETRAGRAM FOR STILLNESS                   → tứ quái + tĩnh lặng
 → "ah, [mono/di/tetra]gram — [trạng thái]"
+```
+
+### Mô hình toán học
+
+```
+  Monogram: v ∈ {0,1} (binary, 2 states = 1 bit)
+  Digram: v ∈ {0,1,2}² (ternary pairs)
+  Tetragram: v ∈ {0,1,2}⁴ (ternary 4-tuples, 3⁴ = 81 states)
+
+  Each hào has 3 values (not 2 like hexagram):
+    0 = broken (âm), 1 = solid (dương), 2 = changing (biến)
+
+  State space: |S| = 3⁴ = 81 (Tai Xuan Jing)
+  Information: log₂(81) ≈ 6.34 bits per tetragram
 ```
 
 ---
@@ -141,6 +206,26 @@ BYZANTINE MUSICAL SYMBOL PETASTI          → neume + petasti (lên 1)
 → "ah, Byzantine [loại ký hiệu] [chi tiết]"
 ```
 
+### Mô hình toán học
+
+```
+  Neume = Δpitch (thay đổi cao độ, không phải cao độ tuyệt đối)
+    oligon = +1 step, petasti = +1 step (đi lên)
+    apostrofos = −1 step (đi xuống)
+    ison = 0 steps (giữ nguyên, drone)
+
+  Melody m(t) = Σ Δpᵢ · H(t − tᵢ)  (tổng tích lũy các hàm bước)
+
+  Agogi (tempo) — co giãn thời gian:
+    t' = α·t  where α = hệ số tempo
+    poli argi: α << 1 (rất chậm)
+    metria: α = 1 (chuẩn)
+    poli gorgi: α >> 1 (rất nhanh)
+
+  Fthora = chuyển điệu thức = phép biến đổi cơ sở của không gian cao độ
+  Diesis/Yfesis = vi chỉnh cung: Δf = ±ε (nhiễu loạn tần số)
+```
+
 ---
 
 ## T.3 — ZNAMENNY (Neume Slavonic) · 185 cụm
@@ -179,6 +264,17 @@ ZNAMENNY COMBINING MARK MALO POVYSHE ON LEFT  → dấu + hơi cao + trái
 ZNAMENNY COMBINING MARK MALO POVYSHE ON RIGHT → dấu + hơi cao + phải
 ZNAMENNY COMBINING LOWER TONAL RANGE INDICATOR → chỉ quãng thấp
 → "ah, Znamenny [loại] [chi tiết cao/thấp/nhanh/vị trí]"
+```
+
+### Mô hình toán học
+
+```
+  Mỗi dấu kết hợp = toán tử vi phân trên hàm cao độ p(t):
+    vysoko (cao) = p(t) + Δ (dịch dương)
+    nizko (thấp) = p(t) − Δ (dịch âm)
+    borzaya (nhanh) = dp/dt tăng (gia tốc)
+    lomka (gãy) = d²p/dt² có gián đoạn (góc gãy trong giai điệu)
+    kachka (lắc) = p(t) + A·sin(ωt) (vibrato/tremolo)
 ```
 
 ---
@@ -255,6 +351,37 @@ MUSICAL SYMBOL SEGNO                     → dấu hiệu nhảy
 → "ah, nhạc phương Tây [loại] [chi tiết]"
 ```
 
+### Mô hình toán học — Phân tích Fourier đầy đủ
+
+```
+  Mỗi nốt = 1 thành phần Fourier: fₙ(t) = Aₙ · sin(2πfₙt + φₙ) · w(t)
+
+  Duration w(t): hàm bao (envelope function)
+    whole note: w(t) = rect(t/4T)  (4 phách)
+    half note:  w(t) = rect(t/2T)  (2 phách)
+    quarter:    w(t) = rect(t/T)   (1 phách)
+    eighth:     w(t) = rect(t/(T/2))  (½ phách)
+    sixteenth:  w(t) = rect(t/(T/4))  (¼ phách)
+
+    Chuỗi trường độ: {4, 2, 1, ½, ¼, ⅛, ...}T = cấp số nhân 2⁻ⁿ·4T
+
+  Pitch (khóa nhạc + vị trí nốt):
+    f = f₀ · 2^(n/12)  (bình quân luật, n bán cung từ tần số tham chiếu f₀)
+    Sharp: n → n+1, Flat: n → n−1, Natural: hủy dấu trước
+
+  Dynamics — biên độ:
+    ppp → pp → p → mp → mf → f → ff → fff
+    Xấp xỉ: A = A₀ · 10^(L/20) trong đó L ∈ [-40, +20] dB
+
+  Crescendo/Decrescendo: dA/dt > 0 / dA/dt < 0 (biên độ tăng/giảm dần)
+  Fermata: w(t) kéo giãn hệ số α > 1 (giãn nở thời gian)
+
+  Ornament — điều biến:
+    Trill: f(t) = f₀ + Δf·square(2πf_trill·t)  (luân phiên nhanh)
+    Mordent: một xung luân phiên đơn
+    Glissando: f(t) = f₁ + (f₂−f₁)·t/T  (quét tần số tuyến tính)
+```
+
 ---
 
 ## T.5 — KHÁC (Greek notation, supplement) · 70 cụm
@@ -279,6 +406,18 @@ COMBINING GREEK MUSICAL TRISEME          → nhịp 3 (3 mora)
 COMBINING GREEK MUSICAL TETRASEME        → nhịp 4 (4 mora)
 COMBINING GREEK MUSICAL PENTASEME        → nhịp 5 (5 mora)
 → "ah, nhạc Hy Lạp cổ [instrumental/vocal] [số thứ tự]"
+```
+
+### Mô hình toán học
+
+```
+  Greek notation: cao độ mã hóa bằng số thứ tự
+    Symbol-N → lớp cao độ N trong hệ thống điệu thức Hy Lạp
+
+  Triseme/Tetraseme/Pentaseme = nhóm nhịp:
+    mora = đơn vị thời gian nguyên tử μ
+    triseme = 3μ, tetraseme = 4μ, pentaseme = 5μ
+    Tỷ lệ: tạo thành các tỷ số nhịp hữu tỉ 3:4:5
 ```
 
 ---
@@ -311,4 +450,27 @@ T.4  NHẠC TÂY         306 cụm   2 tầng: loại × trường_độ/cườn
 T.5  KHÁC              70 cụm   2 tầng: hệ × số_thứ_tự
 ─────────────────────────────────────────
 TỔNG                  958 cụm
+```
+
+### Bảng tóm tắt công thức
+
+| Nhóm | Mô hình toán/vật lý | Công thức chính | Không gian trạng thái |
+|------|---------------------|----------------|----------------------|
+| T.0 Quẻ Dịch | Máy trạng thái hữu hạn (FSM) trên siêu khối 6 chiều | v⃗ ∈ {0,1}⁶; chuyển trạng thái = lật bit; khoảng cách Hamming | 2⁶ = 64 trạng thái |
+| T.1 Tứ Quái | Mã hóa tam phân (ternary encoding) | v ∈ {0,1,2}⁴; thông tin = log₂(81) ≈ 6.34 bit | 3⁴ = 81 trạng thái |
+| T.2 Byzantine | Đường viền giai điệu = hàm bước từng đoạn | m(t) = Σ Δpᵢ·H(t−tᵢ); co giãn thời gian t' = α·t | Liên tục (bước rời rạc) |
+| T.3 Znamenny | Toán tử vi phân trên hàm cao độ | vysoko: p+Δ; borzaya: dp/dt↑; kachka: p+A·sin(ωt) | Liên tục (biến đổi) |
+| T.4 Nhạc Tây | Phân tích Fourier đầy đủ | fₙ(t) = Aₙ·sin(2πfₙt+φₙ)·w(t); f = f₀·2^(n/12) | Rời rạc (12-TET) × liên tục |
+| T.5 Hy Lạp cổ | Quãng điệu thức + tỷ số nhịp hữu tỉ | mora μ; nhóm nhịp 3:4:5; cao độ = số thứ tự | Rời rạc (thứ tự) |
+
+```
+  Mô hình thống nhất: Mỗi chiều T mã hóa một tham số của hàm sóng tổng quát
+
+  ψ(x,t) = Σₙ Aₙ · sin(kₙx − ωₙt + φₙ) · wₙ(t)
+
+  T.0/T.1 → φₙ (pha, trạng thái trong chu kỳ)
+  T.2     → Δp (đường viền giai điệu, biến thiên cao độ)
+  T.3     → dp/dt, d²p/dt² (toán tử vi phân trên cao độ)
+  T.4     → Aₙ, fₙ, wₙ(t) (biên độ, tần số, bao thời gian)
+  T.5     → μ (đơn vị thời gian nguyên tử, tỷ số nhịp)
 ```
