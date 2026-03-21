@@ -10,7 +10,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use crate::response_template::{render, compose_response, detect_language, Lang, ResponseContext, ResponseParams};
+use crate::response_template::{compose_response, detect_language, Lang, ResponseContext, ResponseParams};
 use agents::encoder::ContentInput;
 use agents::gate::GateVerdict;
 use agents::learning::{LearningLoop, ProcessResult};
@@ -3341,6 +3341,25 @@ impl HomeRuntime {
             ctx
         };
 
+        // ── T7a2: Context-aware intent override ─────────────────────────
+        // Dùng ResponseContext để sửa action không phù hợp.
+        // Plan 12.3: tránh AddClarify khi đã có context đủ.
+        {
+            use context::intent::IntentAction;
+            // Nếu AddClarify nhưng user đã nêu causality → EmpathizeFirst
+            if matches!(action, IntentAction::AddClarify { .. }) && resp_ctx.causality.is_some() {
+                action = IntentAction::EmpathizeFirst;
+            }
+            // Nếu AddClarify nhưng user lặp topic > 2 lần → EmpathizeFirst (đã nói nhiều, không cần hỏi thêm)
+            if matches!(action, IntentAction::AddClarify { .. }) && resp_ctx.repetition_count > 2 {
+                action = IntentAction::EmpathizeFirst;
+            }
+            // Nếu Observe nhưng có topic + emotion rõ → EmpathizeFirst
+            if action == IntentAction::Observe && !resp_ctx.topics.is_empty() && cur_v < -0.30 {
+                action = IntentAction::EmpathizeFirst;
+            }
+        }
+
         // ── T7b: Reference resolution — "bà ấy", "anh ta"... ─────────────
         // Nếu Observe vì unresolved_ref → thử resolve từ recent_texts
         if action == IntentAction::Observe && est.has_unresolved_ref {
@@ -3499,7 +3518,7 @@ impl HomeRuntime {
                         None
                     };
 
-                    let text = render(&ResponseParams {
+                    let text = compose_response(&ResponseParams {
                         tone,
                         action: IntentAction::Observe,
                         valence: final_v,
@@ -3507,7 +3526,7 @@ impl HomeRuntime {
                         context: recall,
                         original: observe_original,
                         language: lang,
-                    });
+                    }, &resp_ctx);
                     return Response {
                         text,
                         tone,
@@ -3536,7 +3555,7 @@ impl HomeRuntime {
                     }
                 };
 
-                let mut text = render(&ResponseParams {
+                let mut text = compose_response(&ResponseParams {
                     tone,
                     action,
                     valence: final_v,
@@ -3544,7 +3563,7 @@ impl HomeRuntime {
                     context: recall,
                     original,
                     language: lang,
-                });
+                }, &resp_ctx);
 
                 // ── T7e: Instinct enrichment — bản năng làm giàu response ──
                 if let Some(ref insight) = instinct_ctx {
@@ -3601,7 +3620,7 @@ impl HomeRuntime {
                 }
             }
             ProcessResult::Empty => {
-                let text = render(&ResponseParams {
+                let text = compose_response(&ResponseParams {
                     tone,
                     action,
                     valence: cur_v,
@@ -3609,7 +3628,7 @@ impl HomeRuntime {
                     context: None,
                     original: None,
                     language: lang,
-                });
+                }, &resp_ctx);
                 Response {
                     text,
                     tone,
