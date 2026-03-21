@@ -86,12 +86,12 @@ impl FfrPoint {
 
 /// Tạo MolecularChain từ n điểm Fibonacci liên tiếp bắt đầu từ start.
 pub fn ffr_chain(start: u64, n: usize) -> MolecularChain {
-    let mut mols = alloc::vec::Vec::with_capacity(n);
+    let mut bits = alloc::vec::Vec::with_capacity(n);
     for i in 0..n as u64 {
         let pt = FfrPoint::at(start.wrapping_add(i));
-        mols.push(pt.to_molecule());
+        bits.push(pt.to_molecule().bits);
     }
-    MolecularChain(mols)
+    MolecularChain(bits)
 }
 
 /// Tìm index Fibonacci gần nhất với một Molecule.

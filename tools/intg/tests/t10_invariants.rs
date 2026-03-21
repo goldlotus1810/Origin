@@ -115,7 +115,7 @@ fn qt18_gate_no_fabrication() {
 #[test]
 fn evolution_consistency() {
     let chain = encode_codepoint(FIRE);
-    let mol = &chain.0[0];
+    let mol = chain.first().unwrap();
     let result = mol.evolve(Dimension::Valence, 0x40);
     assert!(result.consistency >= 3, "consistency = {}", result.consistency);
 }

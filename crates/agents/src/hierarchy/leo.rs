@@ -622,7 +622,7 @@ impl LeoAI {
         let e_mol = evolved_obs.chain.first()?;
 
         // Find which dimension changed
-        let deltas = s_mol.dimension_delta(e_mol);
+        let deltas = s_mol.dimension_delta(&e_mol);
         let dim_name = if deltas.len() == 1 {
             match deltas[0].0 {
                 olang::molecular::Dimension::Shape => "S",

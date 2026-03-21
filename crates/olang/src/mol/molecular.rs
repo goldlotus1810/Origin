@@ -861,15 +861,16 @@ impl Molecule {
 // MolecularChain
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Chuỗi molecules — tọa độ vật lý của một khái niệm.
+/// Chuỗi codepoint references — DNA của một khái niệm.
 ///
-/// Chain ngắn = khái niệm đơn giản (1 molecule = 5 bytes).
+/// v2: Mỗi link = u16 codepoint address (vào KnowTree).
+/// Chain ngắn = khái niệm đơn giản (1 link = 2 bytes).
 /// Chain dài  = khái niệm phức tạp (ZWJ sequence, composite).
 ///
 /// **Không bao giờ tạo chain bằng tay.**
 /// Dùng `encoder::encode_codepoint(cp)` hoặc `lca::lca(&chains)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MolecularChain(pub Vec<Molecule>);
+pub struct MolecularChain(pub Vec<u16>);
 
 impl MolecularChain {
     /// Chain rỗng.
@@ -877,12 +878,17 @@ impl MolecularChain {
         Self(Vec::new())
     }
 
-    /// Chain từ 1 molecule.
+    /// Chain từ 1 molecule (lưu bits u16).
     pub fn single(m: Molecule) -> Self {
-        Self(alloc::vec![m])
+        Self(alloc::vec![m.bits])
     }
 
-    /// Số molecules.
+    /// Chain từ 1 raw u16 value.
+    pub fn single_raw(bits: u16) -> Self {
+        Self(alloc::vec![bits])
+    }
+
+    /// Số links.
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -892,16 +898,31 @@ impl MolecularChain {
         self.0.is_empty()
     }
 
-    /// Molecule đầu tiên.
-    pub fn first(&self) -> Option<&Molecule> {
-        self.0.first()
+    /// Molecule đầu tiên (wrap u16 → Molecule).
+    pub fn first(&self) -> Option<Molecule> {
+        self.0.first().map(|&bits| Molecule::from_u16(bits))
+    }
+
+    /// Raw u16 đầu tiên.
+    pub fn first_raw(&self) -> Option<u16> {
+        self.0.first().copied()
+    }
+
+    /// Molecule tại index (wrap u16 → Molecule).
+    pub fn mol_at(&self, idx: usize) -> Option<Molecule> {
+        self.0.get(idx).map(|&bits| Molecule::from_u16(bits))
+    }
+
+    /// Iterator over Molecules (wrap u16 → Molecule).
+    pub fn mols(&self) -> impl Iterator<Item = Molecule> + '_ {
+        self.0.iter().map(|&bits| Molecule::from_u16(bits))
     }
 
     /// Serialize → bytes (len × 2, v2 format).
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.0.len() * 2);
-        for m in &self.0 {
-            out.extend_from_slice(&m.to_bytes());
+        for &bits in &self.0 {
+            out.extend_from_slice(&bits.to_be_bytes());
         }
         out
     }
@@ -911,11 +932,11 @@ impl MolecularChain {
         if b.len() % 2 != 0 {
             return None;
         }
-        let mut ms = Vec::with_capacity(b.len() / 2);
+        let mut links = Vec::with_capacity(b.len() / 2);
         for chunk in b.chunks_exact(2) {
-            ms.push(Molecule::from_bytes_v2(&[chunk[0], chunk[1]]));
+            links.push(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
-        Some(Self(ms))
+        Some(Self(links))
     }
 
     /// Deserialize từ legacy 5-byte format.
@@ -923,15 +944,18 @@ impl MolecularChain {
         if b.len() % 5 != 0 {
             return None;
         }
-        let mut ms = Vec::with_capacity(b.len() / 5);
+        let mut links = Vec::with_capacity(b.len() / 5);
         for chunk in b.chunks_exact(5) {
             let arr: [u8; 5] = [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4]];
-            ms.push(Molecule::from_bytes(&arr)?);
+            let mol = Molecule::from_bytes(&arr)?;
+            links.push(mol.bits);
         }
-        Some(Self(ms))
+        Some(Self(links))
     }
 
     /// FNV-1a hash — dùng trong Registry và reverse index.
+    ///
+    /// v2: hash trên 2B/link (raw u16 bytes).
     pub fn chain_hash(&self) -> u64 {
         crate::hash::fnv1a(&self.to_bytes())
     }
@@ -945,8 +969,10 @@ impl MolecularChain {
             return 0.0;
         }
         let mut overlap = 0usize;
-        for a in &self.0 {
-            for b in &other.0 {
+        for &a_bits in &self.0 {
+            let a = Molecule::from_u16(a_bits);
+            for &b_bits in &other.0 {
+                let b = Molecule::from_u16(b_bits);
                 if a.shape_base() == b.shape_base()
                     && a.relation_base() == b.relation_base()
                 {
@@ -969,8 +995,8 @@ impl MolecularChain {
         let n = self.0.len().min(other.0.len());
         let mut total = 0.0f32;
         for i in 0..n {
-            let a = &self.0[i];
-            let b = &other.0[i];
+            let a = Molecule::from_u16(self.0[i]);
+            let b = Molecule::from_u16(other.0[i]);
             let shape_m = if a.shape_base() == b.shape_base() {
                 1.0f32
             } else {
@@ -997,8 +1023,8 @@ impl MolecularChain {
         let estimated = 1 + self.0.len() * 3; // average ~3 bytes per mol
         let mut out = Vec::with_capacity(estimated);
         out.push(self.0.len() as u8);
-        for m in &self.0 {
-            out.extend_from_slice(&m.to_tagged_bytes());
+        for &bits in &self.0 {
+            out.extend_from_slice(&Molecule::from_u16(bits).to_tagged_bytes());
         }
         out
     }
@@ -1014,22 +1040,22 @@ impl MolecularChain {
         if mol_count == 0 {
             return Some(Self(Vec::new()));
         }
-        let mut ms = Vec::with_capacity(mol_count);
+        let mut links = Vec::with_capacity(mol_count);
         let mut pos = 1usize;
         for _ in 0..mol_count {
             if pos >= b.len() {
                 return None;
             }
             let (mol, consumed) = Molecule::from_tagged_bytes(&b[pos..])?;
-            ms.push(mol);
+            links.push(mol.bits);
             pos += consumed;
         }
-        Some(Self(ms))
+        Some(Self(links))
     }
 
     /// Tagged byte size (without serializing).
     pub fn tagged_byte_size(&self) -> usize {
-        1 + self.0.iter().map(|m| m.tagged_size()).sum::<usize>()
+        1 + self.0.iter().map(|&bits| Molecule::from_u16(bits).tagged_size()).sum::<usize>()
     }
 
     /// Nối 2 chains.
@@ -1039,9 +1065,14 @@ impl MolecularChain {
         Self(v)
     }
 
-    /// Thêm molecule vào cuối.
+    /// Thêm molecule vào cuối (lưu bits u16).
     pub fn push(&mut self, m: Molecule) {
-        self.0.push(m);
+        self.0.push(m.bits);
+    }
+
+    /// Thêm raw u16 vào cuối.
+    pub fn push_raw(&mut self, bits: u16) {
+        self.0.push(bits);
     }
 
     // ── Evolution ─────────────────────────────────────────────────────────
@@ -1050,14 +1081,8 @@ impl MolecularChain {
     ///
     /// Trả None nếu index out of bounds.
     /// Chain mới có chain_hash khác → loài khác.
-    ///
-    /// ```text
-    /// 🔥 [Sphere][Member][0xE0][0xD0][Fast]  chain_hash = 0xAAAA
-    ///    evolve_at(0, Shape, Plane.as_byte())
-    /// 🌊 [Plane][Member][0xE0][0xD0][Fast]   chain_hash = 0xBBBB  ← loài mới
-    /// ```
     pub fn evolve_at(&self, mol_idx: usize, dim: Dimension, new_value: u8) -> Option<EvolveResult> {
-        let mol = self.0.get(mol_idx)?;
+        let mol = self.mol_at(mol_idx)?;
         let result = mol.evolve(dim, new_value);
         Some(result)
     }
@@ -1070,9 +1095,9 @@ impl MolecularChain {
         if !result.valid || mol_idx >= self.0.len() {
             return None;
         }
-        let mut new_mols = self.0.clone();
-        new_mols[mol_idx] = result.molecule;
-        Some(Self(new_mols))
+        let mut new_links = self.0.clone();
+        new_links[mol_idx] = result.molecule.bits;
+        Some(Self(new_links))
     }
 
     /// Evolve và apply trong 1 bước — tiện cho learning pipeline.
@@ -1097,39 +1122,29 @@ impl MolecularChain {
     /// 8 bytes of f64 = 4 × u16 stored as raw Molecule::from_u16().
     pub fn from_number(n: f64) -> Self {
         let bytes = n.to_bits().to_le_bytes();
-        let mut mols = Vec::with_capacity(4);
+        let mut links = Vec::with_capacity(4);
         for chunk in bytes.chunks(2) {
-            // Use 0xF in top 4 bits as numeric marker + store data in remaining 12 bits
-            // Actually, store the full u16 with marker bit pattern
             let raw = u16::from_le_bytes([chunk[0], chunk[1]]);
-            // Prefix with marker: set bits[15:14] = 0b11 (value >= 0xC000 is marker)
-            // But this loses 2 bits. Instead, use a dedicated marker molecule approach:
-            // Just store raw u16 and use a separate scheme for detection.
-            mols.push(Molecule::from_u16(raw));
+            links.push(raw);
         }
-        Self(mols)
+        Self(links)
     }
 
     /// Decode chain → f64 if it's a numeric chain.
     ///
-    /// v2: 4-molecule chain with raw u16 bits = f64.
-    /// Detection: chain len == 4 (heuristic — numbers are always exactly 4 molecules).
+    /// v2: 4-link chain with raw u16 bits = f64.
+    /// Detection: chain len == 4 (heuristic — numbers are always exactly 4 links).
     pub fn to_number(&self) -> Option<f64> {
         if self.0.len() != 4 {
             return None;
         }
-        // v2: Check if this could be a numeric chain
-        // We use a heuristic: if none of the molecules look like valid quantized 5D molecules,
-        // it's likely numeric. But this is fragile. Better approach: marker molecule.
-        // For now, just extract and validate.
         let mut bytes = [0u8; 8];
-        for (i, m) in self.0.iter().enumerate() {
-            let raw = m.bits.to_le_bytes();
+        for (i, &bits) in self.0.iter().enumerate() {
+            let raw = bits.to_le_bytes();
             bytes[i * 2] = raw[0];
             bytes[i * 2 + 1] = raw[1];
         }
         let val = f64::from_bits(u64::from_le_bytes(bytes));
-        // Validate: must be a finite number (not NaN from random molecule data)
         if val.is_finite() || val == 0.0 {
             Some(val)
         } else {
@@ -1638,9 +1653,9 @@ mod tests {
     fn chain_roundtrip() {
         let m1 = test_mol(0x10, 0x10, 0xFF, 0xFF, 0xC0);
         let m2 = test_mol(0x20, 0x60, 0x30, 0x20, 0x40);
-        let chain = MolecularChain(alloc::vec![m1, m2]);
+        let chain = MolecularChain(alloc::vec![m1.bits, m2.bits]);
         let bytes = chain.to_bytes();
-        assert_eq!(bytes.len(), 4, "v2: 2 mols × 2 bytes = 4");
+        assert_eq!(bytes.len(), 4, "v2: 2 links × 2 bytes = 4");
         let decoded = MolecularChain::from_bytes(&bytes).unwrap();
         assert_eq!(chain, decoded);
     }
@@ -1843,7 +1858,7 @@ mod tests {
     fn tagged_chain_roundtrip() {
         let m1 = test_mol(0x01, 0x01, 0xC0, 0xFF, 0x04);
         let m2 = test_mol(0x02, 0x06, 0x30, 0x20, 0x02);
-        let chain = MolecularChain(alloc::vec![m1, m2]);
+        let chain = MolecularChain(alloc::vec![m1.bits, m2.bits]);
         let tagged = chain.to_tagged_bytes();
         let decoded = MolecularChain::from_tagged_bytes(&tagged).unwrap();
         assert_eq!(chain, decoded);
@@ -1863,7 +1878,7 @@ mod tests {
         // Chain of 2 sparse molecules
         let m1 = test_mol(0x01, 0x01, 0x80, 0x80, 0x01); // only time non-default
         let m2 = test_mol(0x01, 0x01, 0xC0, 0x80, 0x03); // only valence non-default
-        let chain = MolecularChain(alloc::vec![m1, m2]);
+        let chain = MolecularChain(alloc::vec![m1.bits, m2.bits]);
         let legacy_size = chain.to_bytes().len(); // 10 bytes
         let tagged_size = chain.tagged_byte_size();
         assert!(
@@ -1914,12 +1929,12 @@ mod tests {
         let new_chain = chain.apply_evolution(0, &result).unwrap();
         let new_hash = new_chain.chain_hash();
         assert_ne!(old_hash, new_hash, "Evolved chain = new species (different hash)");
-        assert_eq!(new_chain.0[0].shape_base(), ShapeBase::Capsule);
+        assert_eq!(new_chain.mol_at(0).unwrap().shape_base(), ShapeBase::Capsule);
         // Other dimensions unchanged
-        assert_eq!(new_chain.0[0].relation(), fire.relation());
-        assert_eq!(new_chain.0[0].valence(), fire.valence());
-        assert_eq!(new_chain.0[0].arousal(), fire.arousal());
-        assert_eq!(new_chain.0[0].time(), fire.time());
+        assert_eq!(new_chain.mol_at(0).unwrap().relation(), fire.relation());
+        assert_eq!(new_chain.mol_at(0).unwrap().valence(), fire.valence());
+        assert_eq!(new_chain.mol_at(0).unwrap().arousal(), fire.arousal());
+        assert_eq!(new_chain.mol_at(0).unwrap().time(), fire.time());
     }
 
     #[test]
@@ -1967,7 +1982,7 @@ mod tests {
         assert!(result.is_some());
         let (new_chain, ev) = result.unwrap();
         assert!(ev.valid);
-        assert_eq!(new_chain.0[0].relation_base(), RelationBase::Causes);
+        assert_eq!(new_chain.mol_at(0).unwrap().relation_base(), RelationBase::Causes);
         assert_ne!(chain.chain_hash(), new_chain.chain_hash());
     }
 

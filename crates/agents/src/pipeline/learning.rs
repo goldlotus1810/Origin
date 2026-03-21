@@ -111,7 +111,7 @@ impl ShortTermMemory {
         }
 
         // Cache MolSummary cho Silk 5D comparison
-        let mol_summary = chain.first().map(mol_to_summary);
+        let mol_summary = chain.first().as_ref().map(mol_to_summary);
 
         self.observations.push(Observation {
             chain,
@@ -321,7 +321,7 @@ impl LearningLoop {
 
         // ── 4. Silk — BẢN NĂNG: co_activate với node trước (liên tưởng) ──────
         // Dùng co_activate_mol: 5D similarity boost kết nối giữa nodes tương đồng
-        let current_mol = chain.first().map(mol_to_summary);
+        let current_mol = chain.first().as_ref().map(mol_to_summary);
         if let Some(prev) = self.prev_hash {
             if prev != hash {
                 self.graph.co_activate_mol(
@@ -614,7 +614,7 @@ impl LearningLoop {
             }
 
             if let Some(obs_mol) = obs.chain.first() {
-                let deltas = obs_mol.dimension_delta(new_mol);
+                let deltas = obs_mol.dimension_delta(&new_mol);
                 if deltas.len() == 1 {
                     // Đúng 1 dimension khác → evolution candidate!
                     let (dim, old_val, new_val) = deltas[0];
@@ -1110,7 +1110,7 @@ mod evolution_tests {
 
     /// Tạo chain từ 1 molecule — CHỈ trong tests.
     fn chain_from_mol(shape: u8, relation: u8, v: u8, a: u8, t: u8) -> MolecularChain {
-        MolecularChain(alloc::vec![Molecule::raw(shape, relation, v, a, t)])
+        MolecularChain(alloc::vec![Molecule::raw(shape, relation, v, a, t).bits])
     }
 
     #[test]

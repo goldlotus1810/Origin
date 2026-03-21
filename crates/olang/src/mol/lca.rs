@@ -93,7 +93,7 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
     }
     if valid.len() == 1 {
         // Single chain: extremity = how extreme its valence+arousal are
-        let m = &valid[0].0 .0[0];
+        let m = Molecule::from_u16(valid[0].0 .0[0]);
         let ext = extremity_single(m.valence_u8(), m.arousal_u8());
         return LcaResult {
             chain: valid[0].0.clone(),
@@ -120,23 +120,23 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         // Collect dimension values từ mọi chain tại vị trí mol_idx
         let shapes: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].shape_u8(), *w))
+            .map(|(c, w)| (Molecule::from_u16(c.0[mol_idx]).shape_u8(), *w))
             .collect();
         let relations: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].relation_u8(), *w))
+            .map(|(c, w)| (Molecule::from_u16(c.0[mol_idx]).relation_u8(), *w))
             .collect();
         let valences: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].valence_u8(), *w))
+            .map(|(c, w)| (Molecule::from_u16(c.0[mol_idx]).valence_u8(), *w))
             .collect();
         let arousals: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].arousal_u8(), *w))
+            .map(|(c, w)| (Molecule::from_u16(c.0[mol_idx]).arousal_u8(), *w))
             .collect();
         let times: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].time_u8(), *w))
+            .map(|(c, w)| (Molecule::from_u16(c.0[mol_idx]).time_u8(), *w))
             .collect();
 
         // ── v2 Compose Rules ──────────────────────────────────────────────
@@ -185,7 +185,7 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         let mol = Molecule::formula(shape, relation, valence, arousal, time);
         // LCA result = CÔNG THỨC MỚI — chờ evidence để evaluate
         // evaluated = 0x00 (từ Molecule::formula)
-        result_mols.push(mol);
+        result_mols.push(mol.bits);
     }
 
     let chain = MolecularChain(result_mols);
@@ -355,7 +355,7 @@ pub fn lca_to_node_state(pairs: &[(&MolecularChain, u32)]) -> Option<NodeState> 
     let (result, origin) = lca_with_origin(pairs);
     let mol = result.chain.first()?;
     Some(NodeState {
-        mol: *mol,
+        mol,
         maturity: crate::molecular::Maturity::Formula,
         origin,
     })
@@ -387,10 +387,8 @@ pub fn lca_many_with_variance(chains: &[MolecularChain]) -> LcaResult {
         let ext = if chains[0].is_empty() {
             0.0
         } else {
-            extremity_single(
-                chains[0].0[0].valence_u8(),
-                chains[0].0[0].arousal_u8(),
-            )
+            let m = Molecule::from_u16(chains[0].0[0]);
+            extremity_single(m.valence_u8(), m.arousal_u8())
         };
         return LcaResult {
             chain: chains[0].clone(),
@@ -530,9 +528,9 @@ mod tests {
 
         assert_eq!(parent.len(), 1, "LCA of 2 single-mol chains = 1 molecule");
 
-        let fm = &f.0[0];
-        let wm = &w.0[0];
-        let pm = &parent.0[0];
+        let fm = Molecule::from_u16(f.0[0]);
+        let wm = Molecule::from_u16(w.0[0]);
+        let pm = Molecule::from_u16(parent.0[0]);
 
         // v2 amplify: base = avg, then push towards dominant direction
         // Both fire and water have high valence (>128) → amplify pushes UP
@@ -577,8 +575,8 @@ mod tests {
         let w = water();
         let result = lca_many_weighted(&[f.clone(), w.clone()], &[10, 1]);
         assert_eq!(
-            result.0[0].shape_u8(),
-            f.0[0].shape_u8(),
+            Molecule::from_u16(result.0[0]).shape_u8(),
+            Molecule::from_u16(f.0[0]).shape_u8(),
             "Union: weight=10 fire shape dominates"
         );
     }
@@ -590,9 +588,9 @@ mod tests {
         let f = fire();
         let w = water();
         let result = lca_many_weighted(&[f.clone(), w.clone()], &[10, 1]);
-        let fire_val = f.0[0].valence_u8();
-        let water_val = w.0[0].valence_u8();
-        let result_val = result.0[0].valence_u8();
+        let fire_val = Molecule::from_u16(f.0[0]).valence_u8();
+        let water_val = Molecule::from_u16(w.0[0]).valence_u8();
+        let result_val = Molecule::from_u16(result.0[0]).valence_u8();
         // Result should still be closer to fire (dominant weight)
         let dist_to_fire = result_val.abs_diff(fire_val);
         let dist_to_water = result_val.abs_diff(water_val);
@@ -630,9 +628,9 @@ mod tests {
         let c = cold();
         let result = lca(&f, &c);
 
-        let fire_val = f.0[0].valence_u8();
-        let cold_val = c.0[0].valence_u8();
-        let res_val = result.0[0].valence_u8();
+        let fire_val = Molecule::from_u16(f.0[0]).valence_u8();
+        let cold_val = Molecule::from_u16(c.0[0]).valence_u8();
+        let res_val = Molecule::from_u16(result.0[0]).valence_u8();
 
         // v2 amplify: base = avg, boost pushes in sign(base-128) direction
         let avg = ((fire_val as u16 + cold_val as u16) / 2) as u8;
