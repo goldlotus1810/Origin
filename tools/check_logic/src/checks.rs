@@ -12,7 +12,7 @@ use crate::{CheckResult, scan_rs_files, grep_pattern, grep_pattern_ci};
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_compose_no_average(root: &Path) -> CheckResult {
-    println!("[1/14] Compose — no simple average for Valence...");
+    println!("[1/37] Compose — no simple average for Valence...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -77,7 +77,7 @@ pub fn check_compose_no_average(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_self_correct_rollback(root: &Path) -> CheckResult {
-    println!("[2/14] Self-correct — rollback guard...");
+    println!("[2/37] Self-correct — rollback guard...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -115,7 +115,7 @@ pub fn check_self_correct_rollback(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_quality_weights(root: &Path) -> CheckResult {
-    println!("[3/14] Quality weights — Σ = 1.0...");
+    println!("[3/37] Quality weights — Σ = 1.0...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -146,7 +146,7 @@ pub fn check_quality_weights(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_entropy_floor(root: &Path) -> CheckResult {
-    println!("[4/14] Entropy — ε_floor for Σc...");
+    println!("[4/37] Entropy — ε_floor for Σc...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -184,7 +184,7 @@ pub fn check_entropy_floor(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_hnsw_tiebreak(root: &Path) -> CheckResult {
-    println!("[5/14] HNSW insert — deterministic tie-breaking...");
+    println!("[5/37] HNSW insert — deterministic tie-breaking...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -216,7 +216,7 @@ pub fn check_hnsw_tiebreak(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_security_gate_3layer(root: &Path) -> CheckResult {
-    println!("[6/14] SecurityGate — 3-layer detection...");
+    println!("[6/37] SecurityGate — 3-layer detection...");
     let gate_path = root.join("crates/agents/src/pipeline/gate.rs");
 
     if !gate_path.exists() {
@@ -259,7 +259,7 @@ pub fn check_security_gate_3layer(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_pipeline_checkpoints(root: &Path) -> CheckResult {
-    println!("[7/14] Pipeline — 5 checkpoints...");
+    println!("[7/37] Pipeline — 5 checkpoints...");
     let runtime_dir = root.join("crates/runtime");
     let agents_dir = root.join("crates/agents");
     let memory_dir = root.join("crates/memory");
@@ -344,7 +344,7 @@ pub fn check_pipeline_checkpoints(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_molecule_not_handwritten(root: &Path) -> CheckResult {
-    println!("[8/14] Invariant — Molecule not handwritten (QT④)...");
+    println!("[8/37] Invariant — Molecule not handwritten (QT④)...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -401,7 +401,7 @@ pub fn check_molecule_not_handwritten(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_append_only(root: &Path) -> CheckResult {
-    println!("[9/14] Invariant — Append-only (QT⑧⑨⑩)...");
+    println!("[9/37] Invariant — Append-only (QT⑧⑨⑩)...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -449,7 +449,7 @@ pub fn check_append_only(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_agent_tiers(root: &Path) -> CheckResult {
-    println!("[10/14] Invariant — Agent tiers (QT⑮)...");
+    println!("[10/37] Invariant — Agent tiers (QT⑮)...");
     let agents_dir = root.join("crates/agents");
     let files = scan_rs_files(&agents_dir);
 
@@ -503,7 +503,7 @@ pub fn check_agent_tiers(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_l0_no_import_l1(root: &Path) -> CheckResult {
-    println!("[11/14] Invariant — L0 does not import L1 (QT⑭)...");
+    println!("[11/37] Invariant — L0 does not import L1 (QT⑭)...");
     // L0 crates: ucd, olang
     // L1 crates: silk, context, agents, memory, runtime
     let l0_crates = ["ucd", "olang"];
@@ -545,7 +545,7 @@ pub fn check_l0_no_import_l1(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_skill_stateless(root: &Path) -> CheckResult {
-    println!("[12/14] Invariant — Skill stateless (QT⑲-㉓)...");
+    println!("[12/37] Invariant — Skill stateless (QT⑲-㉓)...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -593,7 +593,7 @@ pub fn check_skill_stateless(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_worker_sends_chain(root: &Path) -> CheckResult {
-    println!("[13/14] Invariant — Worker sends chain, not raw data...");
+    println!("[13/37] Invariant — Worker sends chain, not raw data...");
     let agents_dir = root.join("crates/agents");
     let files = scan_rs_files(&agents_dir);
 
@@ -640,7 +640,7 @@ pub fn check_worker_sends_chain(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_udc_utf32_data(root: &Path) -> CheckResult {
-    println!("[14/14] Data — json/udc_utf32.json integrity...");
+    println!("[14/37] Data — json/udc_utf32.json integrity...");
 
     let json_path = root.join("json/udc_utf32_compact.json");
     let bin_path = root.join("json/udc_p_table.bin");
@@ -719,7 +719,7 @@ pub fn check_udc_utf32_data(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_pweight_molecule_struct(root: &Path) -> CheckResult {
-    println!("[15/18] DEEP — Molecule struct P_weight layout...");
+    println!("[15/37] DEEP — Molecule struct P_weight layout...");
     let mol_path = root.join("crates/olang/src/mol/molecular.rs");
 
     if !mol_path.exists() {
@@ -777,7 +777,7 @@ pub fn check_pweight_molecule_struct(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_pweight_compactqr_layout(root: &Path) -> CheckResult {
-    println!("[16/18] DEEP — CompactQR bit layout vs v2...");
+    println!("[16/37] DEEP — CompactQR bit layout vs v2...");
     let mol_path = root.join("crates/olang/src/mol/molecular.rs");
 
     if !mol_path.exists() {
@@ -827,7 +827,7 @@ pub fn check_pweight_compactqr_layout(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_pweight_ucd_build(root: &Path) -> CheckResult {
-    println!("[17/18] DEEP — UCD build.rs P_weight format...");
+    println!("[17/37] DEEP — UCD build.rs P_weight format...");
     let build_path = root.join("crates/ucd/build.rs");
 
     if !build_path.exists() {
@@ -886,7 +886,7 @@ pub fn check_pweight_ucd_build(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_pweight_knowtree_size(root: &Path) -> CheckResult {
-    println!("[18/18] DEEP — KnowTree node size...");
+    println!("[18/37] DEEP — KnowTree node size...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -933,7 +933,7 @@ pub fn check_pweight_knowtree_size(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_wiring_dream_aam(root: &Path) -> CheckResult {
-    println!("[19/22] WIRING — Dream → AAM → QR promotion...");
+    println!("[19/37] WIRING — Dream → AAM → QR promotion...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -989,7 +989,7 @@ pub fn check_wiring_dream_aam(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_wiring_epistemic(root: &Path) -> CheckResult {
-    println!("[20/22] WIRING — EpistemicFirewall in response...");
+    println!("[20/37] WIRING — EpistemicFirewall in response...");
     let agents_dir = root.join("crates/agents");
     let runtime_dir = root.join("crates/runtime");
 
@@ -1043,7 +1043,7 @@ pub fn check_wiring_epistemic(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_wiring_unified_affect(root: &Path) -> CheckResult {
-    println!("[21/22] WIRING — sentence_affect_unified() usage...");
+    println!("[21/37] WIRING — sentence_affect_unified() usage...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -1101,7 +1101,7 @@ pub fn check_wiring_unified_affect(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_wiring_word_selection(root: &Path) -> CheckResult {
-    println!("[22/22] WIRING — Word selection pipeline...");
+    println!("[22/37] WIRING — Word selection pipeline...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -1158,7 +1158,7 @@ pub fn check_wiring_word_selection(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_shapebase_18sdf(root: &Path) -> CheckResult {
-    println!("[23/27] AUDIT — ShapeBase 8 vs v2 18 SDF...");
+    println!("[23/37] AUDIT — ShapeBase 8 vs v2 18 SDF...");
     let mol_path = root.join("crates/olang/src/mol/molecular.rs");
 
     if !mol_path.exists() {
@@ -1221,7 +1221,7 @@ pub fn check_shapebase_18sdf(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_knowtree_array(root: &Path) -> CheckResult {
-    println!("[24/27] AUDIT — KnowTree = array, not hash...");
+    println!("[24/37] AUDIT — KnowTree = array, not hash...");
     let olang_dir = root.join("crates/olang");
     let files = scan_rs_files(&olang_dir);
 
@@ -1264,7 +1264,7 @@ pub fn check_knowtree_array(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_chain_u16(root: &Path) -> CheckResult {
-    println!("[25/27] AUDIT — MolecularChain = Vec<u16> vs Vec<Molecule>...");
+    println!("[25/37] AUDIT — MolecularChain = Vec<u16> vs Vec<Molecule>...");
     let mol_path = root.join("crates/olang/src/mol/molecular.rs");
 
     if !mol_path.exists() {
@@ -1305,7 +1305,7 @@ pub fn check_chain_u16(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_lca_compose_rules(root: &Path) -> CheckResult {
-    println!("[26/27] AUDIT — LCA compose rules vs v2...");
+    println!("[26/37] AUDIT — LCA compose rules vs v2...");
     let lca_path = root.join("crates/olang/src/mol/lca.rs");
 
     if !lca_path.exists() {
@@ -1369,7 +1369,7 @@ pub fn check_lca_compose_rules(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_ucd_block_count(root: &Path) -> CheckResult {
-    println!("[27/27] AUDIT — UCD blocks 29 vs v2 58...");
+    println!("[27/37] AUDIT — UCD blocks 29 vs v2 58...");
     let build_path = root.join("crates/ucd/build.rs");
 
     if !build_path.exists() {
@@ -1429,7 +1429,7 @@ pub fn check_ucd_block_count(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_olang_compile_gap(root: &Path) -> CheckResult {
-    println!("[28/32] OLANG — Parsed-but-not-compiled features...");
+    println!("[28/37] OLANG — Parsed-but-not-compiled features...");
     let ir_path = root.join("crates/olang/src/exec/ir.rs");
 
     if !ir_path.exists() {
@@ -1493,7 +1493,7 @@ pub fn check_olang_compile_gap(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_olang_stdlib_builtins(root: &Path) -> CheckResult {
-    println!("[29/32] OLANG — Stdlib builtin availability...");
+    println!("[29/37] OLANG — Stdlib builtin availability...");
     let stdlib_dir = root.join("stdlib");
     let vm_path = root.join("crates/olang/src/exec/vm.rs");
 
@@ -1577,7 +1577,7 @@ pub fn check_olang_stdlib_builtins(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_olang_handbook_vs_v2(root: &Path) -> CheckResult {
-    println!("[30/32] OLANG — Handbook 5B vs v2 2B conflict...");
+    println!("[30/37] OLANG — Handbook 5B vs v2 2B conflict...");
 
     let handbook = root.join("docs/olang_handbook.md");
     let handbook_content = std::fs::read_to_string(&handbook).unwrap_or_default();
@@ -1607,7 +1607,7 @@ pub fn check_olang_handbook_vs_v2(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_olang_pushmol(root: &Path) -> CheckResult {
-    println!("[31/32] OLANG — PushMol opcode size...");
+    println!("[31/37] OLANG — PushMol opcode size...");
     let ir_path = root.join("crates/olang/src/exec/ir.rs");
 
     if !ir_path.exists() {
@@ -1639,7 +1639,7 @@ pub fn check_olang_pushmol(root: &Path) -> CheckResult {
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_olang_bootstrap(root: &Path) -> CheckResult {
-    println!("[32/32] OLANG — Bootstrap compiler...");
+    println!("[32/37] OLANG — Bootstrap compiler...");
     let bootstrap_dir = root.join("stdlib/bootstrap");
 
     let mut details = Vec::new();

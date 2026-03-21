@@ -103,7 +103,7 @@ pub fn check_molecule_roundtrip() -> CheckResult {
         let bytes = chain.to_bytes();
         let hash = chain.chain_hash();
 
-        if chain.len() == 0 {
+        if chain.is_empty() {
             fails += 1;
             details.push(format!("❌ U+{:04X} — encode returned EMPTY chain", cp));
             continue;
@@ -172,7 +172,7 @@ pub fn check_lca_rules() -> CheckResult {
 
     let result = olang::mol::lca::lca(&chain_a, &chain_b);
 
-    if result.len() == 0 {
+    if result.is_empty() {
         return CheckResult::fail("F3 LCA Rules", "LCA returned EMPTY chain");
     }
 
@@ -248,7 +248,7 @@ pub fn check_hebbian_math() -> CheckResult {
     // Property 2: strengthen output ∈ [0.0, 1.0] (bounded)
     for &w in &[0.0f32, 0.1, 0.5, 0.9, 0.99, 1.0] {
         let result = silk::hebbian::hebbian_strengthen(w, 1.0);
-        if result < 0.0 || result > 1.0 {
+        if !(0.0..=1.0).contains(&result) {
             fails += 1;
             details.push(format!("❌ strengthen({}) = {} — OUT OF BOUNDS [0,1]", w, result));
         }
@@ -265,13 +265,13 @@ pub fn check_hebbian_math() -> CheckResult {
     }
 
     // Property 4: decay output ∈ [0.0, 1.0]
-    if decayed < 0.0 || decayed > 1.0 {
+    if !(0.0..=1.0).contains(&decayed) {
         fails += 1;
         details.push(format!("❌ decay output {} — OUT OF BOUNDS", decayed));
     }
 
     // Property 5: Fibonacci sequence correct
-    let fib_vals: Vec<u32> = (0..10).map(|i| silk::hebbian::fib(i)).collect();
+    let fib_vals: Vec<u32> = (0..10).map(silk::hebbian::fib).collect();
     let expected = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
     if fib_vals != expected {
         fails += 1;
@@ -451,7 +451,7 @@ pub fn check_performance() -> CheckResult {
         ("UCD lookup", ucd_per),
         ("encode_codepoint", encode_per),
         ("LCA", lca_per),
-        ("sentence_affect", affect_per as u128 * 1000), // convert µs→ns
+        ("sentence_affect", affect_per * 1000), // convert µs→ns
         ("hebbian_strengthen", heb_per),
         ("chain_hash", hash_per),
     ];

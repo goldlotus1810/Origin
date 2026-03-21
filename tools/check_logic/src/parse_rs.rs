@@ -99,7 +99,7 @@ fn type_size(ty: &str) -> usize {
                 type_size(inner) + 1
             } else if t.starts_with("[u8;") || t.starts_with("[u8 ;") {
                 // Fixed array [u8; N]
-                if let Some(n) = extract_array_len(t) { n } else { 8 }
+                extract_array_len(t).unwrap_or(8)
             } else {
                 // Unknown type — assume 8 bytes (1 word)
                 8
@@ -250,7 +250,7 @@ fn parse_variant(line: &str) -> Option<EnumVariant> {
     if line.is_empty() || line.starts_with("//") { return None; }
 
     // "Push," or "Push(Chain)," or "Push = 0x01,"
-    let name_end = line.find(|c: char| c == '(' || c == ',' || c == '=' || c == '{' || c == ' ')
+    let name_end = line.find(['(', ',', '=', '{', ' '])
         .unwrap_or(line.len());
     let name = line[..name_end].trim().to_string();
     if name.is_empty() { return None; }
@@ -298,8 +298,8 @@ pub fn extract_match_arms(source: &str, match_target: &str) -> Vec<String> {
                     // Extract the variant name
                     if let Some(last_colon) = pattern.rfind("::") {
                         let variant = pattern[last_colon + 2..]
-                            .trim_start_matches(|c: char| c == ' ')
-                            .split(|c: char| c == '(' || c == '{' || c == ' ')
+                            .trim_start_matches(' ')
+                            .split(['(', '{', ' '])
                             .next()
                             .unwrap_or("");
                         if !variant.is_empty() && variant != "_" {
