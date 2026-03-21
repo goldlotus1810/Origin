@@ -233,10 +233,11 @@ fn same_codepoint_same_hash() {
 
 #[test]
 fn different_groups_different_hashes() {
-    // Codepoints from DIFFERENT Unicode groups should produce different hashes
-    let math_cp = 0x2200_u32;  // ∀ (MATH group)
-    let emoji_cp = 0x1F525_u32; // 🔥 (EMOTICON group)
-    let sdf_cp = 0x25A0_u32;   // ■ (SDF group)
+    // Codepoints from DIFFERENT Unicode groups with DISTINCT p_weights.
+    // Must use codepoints in UCD_TABLE with different packed P_weight to produce different hashes.
+    let sdf_cp = 0x2190_u32;   // ← LEFTWARDS ARROW (SDF, pw=0x0088)
+    let math_cp = 0x2074_u32;  // ⁴ SUPERSCRIPT FOUR (MATH, pw=0x1188)
+    let emoji_cp = 0x2460_u32; // ① CIRCLED DIGIT ONE (EMOTICON, pw=0x008C)
 
     let h_math = encode_codepoint(math_cp).chain_hash();
     let h_emoji = encode_codepoint(emoji_cp).chain_hash();

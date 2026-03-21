@@ -69,13 +69,14 @@ impl FfrPoint {
 
     /// Convert sang Molecule.
     pub fn to_molecule(&self) -> Molecule {
-        Molecule::raw(
-            self.shape + 1,       // +1: 0x01..0x07
-            self.relation + 1, // +1: 0x01..0x08
-            self.valence,
-            self.arousal,
-            self.time + 1, // +1: 0x01..0x05
-        )
+        // Pack directly with quantized values (4-bit shape/relation, 3-bit V/A, 2-bit T)
+        // Avoids precision loss from raw u8 → quantize → dequantize round-trip
+        let s4 = ((self.shape + 1) & 0xF) as u16;    // 1..7 (4 bits)
+        let r4 = ((self.relation + 1) & 0xF) as u16;  // 1..8 (4 bits)
+        let v3 = (self.valence >> 5 & 0x7) as u16;    // 3 bits
+        let a3 = (self.arousal >> 5 & 0x7) as u16;    // 3 bits
+        let t2 = ((self.time + 1) & 0x3) as u16;      // 1..4 (2 bits)
+        Molecule::from_u16((s4 << 12) | (r4 << 8) | (v3 << 5) | (a3 << 2) | t2)
     }
 
     /// Khoảng cách Fibonacci giữa 2 điểm (5D Manhattan trên index).
