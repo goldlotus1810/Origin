@@ -14,17 +14,21 @@ use crate::molecular::{MolecularChain, Molecule, RelationBase};
 /// Raw hierarchical bytes giữ nguyên từ UCD → phân biệt ~5400 mẫu.
 /// Đây là hàm gốc của mọi chain trong HomeOS.
 pub fn encode_codepoint(cp: u32) -> MolecularChain {
-    let shape = ucd::shape_of(cp);
-    let relation = ucd::relation_of(cp);
-    let valence = ucd::valence_of(cp);
-    let arousal = ucd::arousal_of(cp);
-    let time = ucd::time_of(cp);
-
-    let mol = Molecule::raw(shape, relation, valence, arousal, time);
-    // v2: P_weight trực tiếp từ udc.json, không cần formula rule IDs.
-    // Molecule.fs/fr/fv/fa/ft giữ 0xFF (UNSET) — metadata runtime only.
-
-    MolecularChain::single(mol)
+    // v2: Lấy p_weight trực tiếp từ UCD_TABLE (đã packed sẵn [S:4][R:4][V:3][A:3][T:2]).
+    // KHÔNG re-pack từ raw u8 values — tránh mất precision do quantization.
+    let p_weight = ucd::p_weight_of(cp);
+    if p_weight != 0 {
+        MolecularChain::single(Molecule::from_u16(p_weight))
+    } else {
+        // Fallback cho cp không có trong UCD_TABLE: dùng raw values
+        let shape = ucd::shape_of(cp);
+        let relation = ucd::relation_of(cp);
+        let valence = ucd::valence_of(cp);
+        let arousal = ucd::arousal_of(cp);
+        let time = ucd::time_of(cp);
+        let mol = Molecule::raw(shape, relation, valence, arousal, time);
+        MolecularChain::single(mol)
+    }
 }
 
 /// Encode ZWJ sequence → MolecularChain (N molecules).
