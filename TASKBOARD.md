@@ -570,6 +570,10 @@ INTG (song song với tất cả):
 | T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | silk✅ready, agents:instinct.rs v2 quantized, memory✅ready, vsdf✅ready, runtime✅ready, context✅no dead code |
 | T11 | .ol files update (15 files) | `PLAN_V2_MIGRATION` | T9 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | 13 files: mol/chain/hash + HomeOS pipeline + bootstrap compiler + agents, u16 packed |
 | T12 | Tests rebuild | `PLAN_V2_MIGRATION` | T10,T11 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | Fixed v2-related test failures: intg t01 (UDC consistency not hardcode), check_logic bit_shifts (v2 layout), dream cluster (3-bit quantization), evict_cold (hash collision). 172 olang VM/semantic pre-existing failures = separate issue (olang rewrite) |
+| T13 | check_logic test_bit_shifts fix | `PLAN_V2_MIGRATION` | T12 | FREE | | | parse_rs.rs:489 — assertion `r` bit shift 10 fails. Đợi entropy control xong. |
+| T14 | **KnowTree → cây phân tầng** | `PLAN_V2_MIGRATION` | T12 | FREE | | | ⚠️ **CRITICAL DESIGN FIX**: knowtree.rs hiện là mảng phẳng Vec<u16>[131072] — SAI thiết kế. Phải là CÂY: L0(5 nhóm) → L1(58 blocks) → L2(~200 sub) → L3(9,584 UDC chars). Emoji/UTF-32 = alias table riêng, KHÔNG nằm trong KnowTree. KnowTree ~20KB, alias ~248KB. Xem spec v3.1 section 1.7. |
+| T15 | Alias table tách riêng | `PLAN_V2_MIGRATION` | T14 | FREE | | | 41,338 emoji/UTF-32 → alias table riêng biệt (cp:4B + L3_index:2B). Không gộp vào KnowTree. udc_p_table.bin hiện đang chứa cả alias lẫn UDC — cần tách. |
+| T16 | olang_handbook.md update v2 | `PLAN_V2_MIGRATION` | T3 | FREE | | | 3 xung đột CRITICAL: Molecule 5B→2B, Chain Vec<Mol>→Vec<u16>, Shape 8→18 primitives. |
 
 ### Execution Layers (song song trong cùng layer)
 

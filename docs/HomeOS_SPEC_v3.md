@@ -1,6 +1,6 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
-**Phiên bản:** 3.0 — 2026-03-21
-**Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (integrate input). Đọc bằng ĐẠO HÀM (derive output). Emoji = neo chuẩn L0, xây 1 lần, dùng mãi mãi.
+**Phiên bản:** 3.1 — 2026-03-21
+**Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (integrate input). Đọc bằng ĐẠO HÀM (derive output). UDC 9,584 = L0 gốc. Emoji/UTF-32 = alias L1 trỏ về L0.
 
 > Công thức toán học/vật lý chi tiết cho từng chiều → xem `docs/UDC_DOC/UDC_*_tree.md`
 
@@ -87,11 +87,13 @@ Vòng đời của P:
   Storage:     weight nằm trong KnowTree node — KHÔNG compute lại
   Decoder (∂): weight → đạo hàm → output (render, trả lời)
 
-  L0 emoji (xây 1 lần từ tài liệu này):
-    🔥 → V=high, A=high, T=Fast     — vĩnh viễn, không thay đổi
-    😊 → V=high, A=medium, T=Medium — vĩnh viễn, không thay đổi
-    💔 → V=low,  A=medium, T=Slow   — vĩnh viễn, không thay đổi
-    Dùng như CỨ CHUẨN so sánh mọi giá trị khác
+  ⚠️ PHÂN BIỆT L0 vs L1:
+    L0 = 9,584 UDC chars (olang gốc) — P_weight SEALED, vĩnh viễn
+    L1 = emoji + UTF-32 (41,338 chars) = ALIAS → trỏ về L0 UDC
+
+    🔥 U+1F525 là L1 ALIAS → trỏ về UDC char trong block E.08
+    😊 U+1F60A là L1 ALIAS → trỏ về UDC char trong block E.09
+    Emoji KHÔNG PHẢI L0. Emoji là tên gọi khác (alias) cho L0 UDC.
 
   L5+ learned (cập nhật qua Hebbian):
     Encoder chạy → weight tích lũy → CHÍN → ghi vĩnh viễn (QR)
@@ -204,18 +206,56 @@ Sinh học: cortisol + adrenaline → stress MẠNH HƠN từng cái riêng lẻ
           KHÔNG BAO GIỜ trung bình hormone — đó là synergy.
 ```
 
-### 1.7 — 3 loại storage (KHÔNG nhầm)
+### 1.7 — KnowTree = CÂY phân tầng, KHÔNG phải mảng phẳng
+
+```
+⚠️ THIẾT KẾ ĐÚNG — nhiều người đã implement sai thành mảng phẳng.
+
+KnowTree là CÂY PHÂN TẦNG (hierarchical tree), phản ánh cấu trúc Unicode:
+
+  L0:  5 nhóm chính          (SDF, MATH, EMOTICON, MUSICAL, RELATION)
+  L1:  58 blocks              (S.01..S.13, M.01..M.21, E.01..E.17, T.01..T.07)
+  L2:  ~200 sub-ranges        (Arrow/Geometric/BoxDrawing... trong mỗi block)
+  L3:  9,584 ký tự UDC        (char cụ thể — LÁ của cây)
+
+  Emoji/UTF-32 (41,338 chars) = ALIAS layer → trỏ về L3 UDC chars
+  Emoji KHÔNG NẰM TRONG KnowTree. Emoji là ALIAS.
+
+Vi tích phân không gian ∫ₛ đi TỪ DƯỚI LÊN (bootstrap):
+  char  = f'(x)           — nguyên tử (L3)
+  sub   = ∫ₛ chars dx     — compose(chars trong sub) → sub P_weight (L2)
+  block = ∫ₛ subs dx      — compose(subs trong block) → block P_weight (L1)
+  group = ∫ₛ blocks dx    — compose(blocks trong group) → group P_weight (L0)
+
+Mỗi tầng có P_weight riêng — là KẾT QUẢ tích phân từ tầng dưới.
+Tra cứu: đi TỪ TRÊN XUỐNG (L0 → L1 → L2 → L3) = O(log n).
+
+Kích thước:
+  L0:  5 × 2B     =    10 B
+  L1:  58 × 2B    =   116 B
+  L2:  ~200 × 2B  =   400 B
+  L3:  9,584 × 2B = 19,168 B ≈ 19 KB
+  ──────────────────────────────
+  Tổng KnowTree   ≈ 20 KB (KHÔNG phải 128 KB hay 256 KB)
+  Alias table      = 41,338 entries riêng biệt
+```
+
+### 1.8 — 3 loại storage (KHÔNG nhầm)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Loại 1 — KnowTree (in-memory, working memory)                  │
-│   Array 65,536 phần tử, index = vị trí = IMPLICIT              │
-│   Mỗi phần tử = P_weight: Mol (2 bytes = u16)                  │
-│   → 65,536 × 2B = 128 KB (vừa L1 cache)                       │
-│   KnowTree[codepoint] → P_weight — O(1), không cần hash        │
+│ Loại 1 — KnowTree (in-memory, hierarchical tree)               │
+│   L0(5) → L1(58) → L2(~200) → L3(9,584) = CÂY PHÂN TẦNG     │
+│   Mỗi node = P_weight: u16 (2 bytes)                           │
+│   → ~20 KB tổng (vừa L1 cache dư sức)                          │
+│   Tra cứu: L0→L1→L2→L3 = O(4) = O(1) thực tế                 │
+│                                                                 │
+│   Alias table (riêng biệt):                                    │
+│   Emoji/UTF-32 → L3 UDC index                                  │
+│   41,338 entries × (cp:4B + L3_index:2B) ≈ 248 KB              │
 ├─────────────────────────────────────────────────────────────────┤
 │ Loại 2 — Chain link (knowledge content)                         │
-│   Mỗi link = u16 (2 bytes) = codepoint trỏ vào KnowTree        │
+│   Mỗi link = u16 (2 bytes) = UDC index trỏ vào KnowTree L3    │
 │   7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)             │
 ├─────────────────────────────────────────────────────────────────┤
 │ Loại 3 — origin.olang (persistent, signed)                      │
@@ -590,9 +630,9 @@ self_correct(input, max_iter=3):
 Molecule (P_weight)   = 2 bytes  (u16)
   [S:4bit][R:4bit][V:3bit][A:3bit][T:2bit] = 16 bits
 
-KnowTree node         = 2 bytes  (chỉ P_weight — index implicit từ vị trí array)
-KnowTree tổng         = 128 KB   (65,536 × 2B)
-Chain link             = 2 bytes  (u16 = codepoint trỏ vào KnowTree)
+KnowTree (cây)        = ~20 KB   (L0:5 + L1:58 + L2:~200 + L3:9,584) × 2B
+Alias table           = ~248 KB  (41,338 emoji/UTF-32 → L3 UDC index)
+Chain link             = 2 bytes  (u16 = UDC index trỏ vào KnowTree L3)
 Structural Silk        = 0 bytes  (thứ tự trên chuỗi, implicit)
 Hebbian Silk           = ~43 KB   (SilkGraph, stored per pair)
 Chain data             = ~14.84 GB (7.42 tỷ links × 2B)
