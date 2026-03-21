@@ -291,7 +291,7 @@ impl<'a> OlangReader<'a> {
                             return Err(ParseError::Truncated);
                         }
                         let chain_bytes = &self.data[pos..pos + chain_bytes_len];
-                        let chain = MolecularChain::from_bytes(chain_bytes)
+                        let chain = MolecularChain::from_bytes_legacy(chain_bytes)
                             .ok_or(ParseError::InvalidChain)?;
                         pos += chain_bytes_len;
                         chain
