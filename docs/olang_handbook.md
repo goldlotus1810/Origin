@@ -1,6 +1,6 @@
 # Olang Handbook — So tay Ngon ngu Olang
 
-> **Phien ban:** 0.05 | **Cap nhat:** 2026-03-18
+> **Phien ban:** 0.06 | **Cap nhat:** 2026-03-21
 >
 > Olang = ngon ngu lap trinh + suy luan + sang tao cua HomeOS.
 > Moi thu la MolecularChain. Moi phep toan la bien doi chain.
@@ -38,15 +38,15 @@
 ### Olang la gi?
 
 Olang la ngon ngu cua HomeOS — mot he dieu hanh chay tren dien thoai, dung
-5 bytes (Molecule) de bieu dien bat ky khai niem nao. Olang khong lam viec
-voi text hay so thong thuong — no lam viec voi **MolecularChain**: chuoi cac
-phan tu 5 chieu.
+2 bytes (Molecule = u16) de bieu dien bat ky khai niem nao. Olang khong lam
+viec voi text hay so thong thuong — no lam viec voi **MolecularChain**: chuoi
+cac phan tu 5 chieu nen thanh 16 bits.
 
 ### Moi thu la MolecularChain
 
 ```
-Molecule = [Shape][Relation][Valence][Arousal][Time] = 5 bytes
-MolecularChain = Vec<Molecule> = chuoi nhieu molecules
+Molecule = [S:4][R:4][V:3][A:3][T:2] = 16 bits = 2 bytes (u16)
+MolecularChain = Vec<u16> = chuoi nhieu molecules (moi link 2 bytes)
 
 Khi ban viet:
   fire           -> tra Registry -> MolecularChain
@@ -847,7 +847,7 @@ Vong doi cong thuc:
   Co input       → GIA TRI     (the vao cong thuc → gia tri cu the)
   Du gia tri     → CHIN        (thay cong thuc bang hang so → promote QR)
 
-5400 L0 node = 5400 CONG THUC GOC = 5400 KENH SILK
+8,846 L0 node = 8,846 CONG THUC GOC = 8,846 KENH SILK
 Moi concept = TO HOP cac cong thuc L0:
   "Insulin" = compose(f_protein, f_signal, f_regulate)
             = [ref_L0_1] [ref_L0_2] [ref_L0_3] [op]
@@ -857,11 +857,14 @@ Moi concept = TO HOP cac cong thuc L0:
 ### 5 chieu — 8 ho co ban moi chieu
 
 ```
-Shape    (8 primitives):  Sphere, Capsule, Box, Cone, Torus, Union, Intersect, Subtract
-Relation (8 bases):       Member, Subset, Equiv, Ortho, Compose, Causes, Similar, Derived
-Valence  (0x00..0xFF):    0x00=tieu cuc, 0x80=trung tinh, 0xFF=tich cuc
-Arousal  (0x00..0xFF):    0x00=binh tinh, 0xFF=kich dong
-Time     (5 loai):        Static, Slow, Medium, Fast, Instant
+Shape    (4 bits, 0-15):   Sphere, Plane, Box, Cone, Torus, Cylinder, Capsule,
+                           Ellipsoid, Helix, Fractal, Wave, Lattice, Point,
+                           Line, Ring, Cross  (VSDF maps to 18 SDF primitives)
+Relation (4 bits, 0-15):  Member, Subset, Equiv, Ortho, Compose, Causes, Similar,
+                           Derived (+ 8 reserved)
+Valence  (3 bits, 0-7):   0=tieu cuc, 4=trung tinh, 7=tich cuc
+Arousal  (3 bits, 0-7):   0=binh tinh, 7=kich dong
+Time     (2 bits, 0-3):   Static, Slow, Fast, Instant
 
 2 node cung (index: f(x)) tren chieu nao = Silk tren chieu do.
 Silk KHONG CAN LUU — chi can SO SANH index.
@@ -870,15 +873,14 @@ Silk KHONG CAN LUU — chi can SO SANH index.
 ### Molecular Literal
 
 ```olang
-// Tao molecule truc tiep tu 5 chieu:
-let fire_mol = { S=1 R=6 V=200 A=180 T=4 };
+// Tao molecule truc tiep tu 5 chieu (v2: 2 bytes/mol):
+let fire_mol = { S=1 R=6 V=6 A=5 T=3 };
 
-// Gia tri mac dinh: S=1(Sphere) R=1(Member) V=128 A=128 T=3(Medium)
+// Gia tri mac dinh: S=1(Sphere) R=1(Member) V=4(trung tinh) A=4 T=2(Fast)
 let default_mol = { S=1 };     // chi dinh Shape, con lai la mac dinh
 
-// Kieu ngan gon (tagged sparse — 1 den 6 bytes khi serialize):
-// { S=1, T=1 }  -> chi 2 bytes (bo qua gia tri mac dinh)
-// { V=192 A=192 T=4 } -> chi 4 bytes
+// v2 layout: [S:4][R:4][V:3][A:3][T:2] = 16 bits = 1 u16
+// Toan bo molecule nen vao 2 bytes — tiet kiem 60% so voi v1 (5B)
 ```
 
 ### Compose (LCA) — To hop cong thuc
