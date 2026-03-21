@@ -139,14 +139,14 @@ HomeOS:  ○{○{○{○{○{...}}}}}              (mỗi char = 1 node có tọ
 
 ---
 
-## 2. KIẾN TRÚC MỚI: UDC 9,584 = L0 KnowTree
+## 2. KIẾN TRÚC MỚI: UDC 8,846 = L0 KnowTree
 
 ### Nguyên lý — từ SINH_HOC_v2:
 ```
 P[gốc] = 1 công thức duy nhất (S, R, V, A, T)
        → sinh ra 3 loại node, tất cả đều có P riêng, SEALED vĩnh viễn:
 
-  P[UDC]   = P của 9,584 chars trong 58 Unicode blocks (base layer)
+  P[UDC]   = P của 8,846 chars trong 59 Unicode blocks (base layer)
                SDF chars   → S dominant (hình dạng rõ)
                MATH chars  → R dominant (quan hệ rõ)
                EMOTICON    → V/A dominant (cảm xúc rõ)
@@ -170,10 +170,10 @@ KnowTree = cây Fibonacci nhiều tầng:
   Root branch (L0 working memory):
     Array 65,536 × 2B = 128KB  ← v2 (was 5B = 328KB)
     KnowTree[u16] → P_weight   — O(1), không cần hash
-    9,584 slots đầu = UDC L0   — phần còn lại = learned/system
+    8,846 slots đầu = UDC L0   — phần còn lại = learned/system
 
   Cây đầy đủ (nhiều tầng):
-    L0: 9,584 UDC nodes (root)
+    L0: 8,846 UDC nodes (root)
     L1: LCA clusters của kinh nghiệm học
     L2: LCA clusters cấp cao hơn
     ...
@@ -264,12 +264,12 @@ A: 0x00 (tĩnh lặng) → 0x80 (trung bình) → 0xFF (kích động mạnh)
 
 ---
 
-## 4. 58 UNICODE BLOCKS = 9,584 UDC (từ SINH_HOC_v2)
+## 4. 59 UNICODE BLOCKS = 8,846 UDC (từ SINH_HOC_v2)
 
 > **Nguồn:** `old/HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2.md` Section 1.4
 
 ```
-SDF — 13 blocks, 1,904 chars (Shape)
+SDF — 14 blocks, 1,838 chars (Shape)
   S.01  Arrows                 2190..21FF    112
   S.02  Box Drawing            2500..257F    128
   S.03  Block Elements         2580..259F     32
@@ -284,7 +284,7 @@ SDF — 13 blocks, 1,904 chars (Shape)
   S.12  Misc Technical         2300..23FF    256
   S.13  Braille Patterns       2800..28FF    256
 
-MATH — 21 blocks, 3,088 chars (Relation)
+MATH — 21 blocks, 2,563 chars (Relation)
   M.01  Superscripts+Subscripts   2070..209F     48
   M.02  Letterlike Symbols        2100..214F     80
   M.03  Number Forms              2150..218F     64
@@ -295,7 +295,7 @@ MATH — 21 blocks, 3,088 chars (Relation)
   M.08  Math Alphanum Symbols     1D400..1D7FF 1024
   M.09–M.21  (Ancient numerics, Siyaq, Arab math...)  1,184
 
-EMOTICON — 17 blocks, 3,568 chars (Valence + Arousal)
+EMOTICON — 17 blocks, 3,487 chars (Valence + Arousal)
   E.01  Enclosed Alphanumerics    2460..24FF    160
   E.02  Misc Symbols              2600..26FF    256
   E.03–E.05  (Mahjong, Domino, Playing Cards)   256
@@ -304,7 +304,7 @@ EMOTICON — 17 blocks, 3,568 chars (Valence + Arousal)
   E.09  Emoticons                 1F600..1F64F   80
   E.10–E.17  (Transport, Alchemical, Chess...)  1,536
 
-MUSICAL — 7 blocks, 1,024 chars (Time)
+MUSICAL — 7 blocks, 958 chars (Time)
   T.01  Yijing Hexagram           4DC0..4DFF     64
   T.02  Znamenny Musical          1CF00..1CFCF  208
   T.03  Byzantine Musical         1D000..1D0FF  256
@@ -312,7 +312,7 @@ MUSICAL — 7 blocks, 1,024 chars (Time)
   T.05–T.07  (Ancient Greek, Supp, Tai Xuan)    240
 
 ─────────────────────────────────────
-TỔNG: 58 blocks = 9,584 UDC chars = L0 KnowTree
+TỔNG: 59 blocks = 8,846 UDC chars = L0 KnowTree
 ```
 
 ---
@@ -449,7 +449,7 @@ Checklist:
 
 ### Task 1: Blocks metadata (1 session)
 
-**Mục tiêu:** Điền `"blocks"` section — P_default cho 58 blocks.
+**Mục tiêu:** Điền `"blocks"` section — P_default cho 59 blocks.
 
 ```
 Ưu tiên điền trước (theo dimension dominant):
@@ -706,7 +706,7 @@ Checklist:
 ```
 Đợt 1 (BẮT BUỘC làm trước):
   Task 0 → scaffold JSON + build.rs wire
-  Task 1 → blocks metadata (P_default cho 58 blocks)
+  Task 1 → blocks metadata (P_default cho 59 blocks)
 
 Đợt 2 (Core anchors — cần sớm):
   Task 2 → Emoticons/Faces (VA anchors)
@@ -736,7 +736,7 @@ Total estimate: ~15-20 sessions (mỗi task = 1 session)
 
 ```
 docs/
-  UDC.md          — P definition cho ~9,584 chars (draft, human-readable)
+  UDC.md          — P definition cho ~8,846 chars (draft, human-readable)
 
 json/
   ucd.json        — canonical source: blocks + codepoints + language aliases
@@ -752,8 +752,8 @@ json/
     "integral_levels": ["L1_Char", "L2_SubGroup", "L3_Block"],
     "seal_mechanism": "Inheritance_By_Reference",
     "dimensions": ["S (Shape)", "R (Relation)", "V (Valence)", "A (Arousal)", "T (Time)"],
-    "total_blocks": 58,
-    "total_L0_anchors": 9584
+    "total_blocks": 59,
+    "total_L0_anchors": 8846
   },
   "blocks": [
     {
@@ -1009,12 +1009,12 @@ json/
 
 ```
 "blocks"         → Block nodes: dominant_axis (S/R/VA/T) — input để tính P
-                   58 blocks thuộc 4 nhóm: SDF(13), MATH(21), EMOTICON(17), MUSICAL(7)
+                   59 blocks thuộc 4 nhóm: SDF(14), MATH(21), EMOTICON(17), MUSICAL(7)
                    integral_kernel = công thức ∫ₛ cho block/sub_group
 
 "characters"     → Từng char: block_ref + category + physics_logic
                    P_weight = kết quả ∫ₛ 3 cấp (char → sub → block)
-                   anchor = L0_SEALED: 9,584 chars xây 1 lần, dùng mãi mãi
+                   anchor = L0_SEALED: 8,846 chars xây 1 lần, dùng mãi mãi
 
 "alias_mapping"  → Natural language → codepoint mapping
                    "lửa" → "1F525" (alias kế thừa P[char])
@@ -1158,13 +1158,13 @@ Unicode codepoint U+1F525:
 
 ### Số liệu chuẩn (từ SINH_HOC_v2):
 ```
-UDC chars (58 blocks):         9,584  ← L0 canonical nodes
+UDC chars (59 blocks):         8,846  ← L0 canonical nodes
 KnowTree root branch:         65,536 slots (u16, 2^16) = 1 nhánh
 KnowTree root branch size:     328 KB (65,536 × 5B)
 KnowTree toàn cây:             nhiều tầng, tăng theo Fibonacci khi học
 Chain link size:                 2B   (u16) = index vào branch hiện tại
 Bootstrap: người encode tay → SEAL → json/ucd.json
-Canonical emoji nodes:       ~3,568  (EMOTICON group E.01-E.17) + S/M/T groups
+Canonical emoji nodes:       ~3,487  (EMOTICON group E.01-E.17) + S/M/T groups
 Reference files (tên/range): ucd_source/emoji-data.txt, ucd_source/UnicodeData.txt
 JSON canonical source:       json/ucd.json (chúng ta xây thủ công)
 ```

@@ -1,4 +1,4 @@
-# UDC Map — 9,584 Unicode Dimensional Coordinates
+# UDC Map — 8,846 Unicode Dimensional Coordinates
 
 > **Bản đồ 5D của HomeOS Olang**
 > Nguồn: `Blocks.txt`, `UnicodeData.txt`, `PropList.txt`, `NameAliases.txt`,
@@ -16,14 +16,14 @@
      S           R            V            A            T
   (Shape)    (Relation)   (Valence)    (Arousal)     (Time)
    SDF         MATH       EMOTICON     EMOTICON     MUSICAL
-  13 blk      21 blk     ──17 blk──   ──shared──    7 blk
-  1,904 cp    3,088 cp      3,568 cp                1,024 cp
+  14 blk      21 blk     ──17 blk──   ──shared──    7 blk
+  1,838 cp    2,563 cp      3,487 cp                  958 cp
      |           |            |            |            |
   P_weight = [S] [R] [V] [A] [T]  = 2 bytes = tọa độ 5D
               4b   4b  3b  3b  2b    SEALED tại bootstrap
 ```
 
-**Tổng: 58 blocks · 9,584 codepoints = L0 anchor points**
+**Tổng: 59 blocks · 8,846 codepoints = L0 anchor points**
 
 ---
 
@@ -32,7 +32,7 @@
 | File nguồn | S (Shape) | R (Relation) | V (Valence) | A (Arousal) | T (Time) |
 |-------------|-----------|--------------|-------------|-------------|----------|
 | `UnicodeData.txt` | Char names: ARROW, BOX DRAWINGS, GEOMETRIC, BRAILLE | Char names: MATHEMATICAL, SUPERSCRIPT, NUMERAL, FRACTION | Char names: FACE WITH, SMILING, HEART, PLAYING CARD | (shared V) | Char names: HEXAGRAM, MUSICAL SYMBOL, BYZANTINE, TETRAGRAM |
-| `Blocks.txt` | 13 block ranges (2190→1F8FF) | 21 block ranges (2000→2E7F) | 17 block ranges (2460→1DBFF) | (shared V) | 7 block ranges (4DC0→1D35F) |
+| `Blocks.txt` | 14 block ranges (2190→1F8FF) | 21 block ranges (2000→2E7F) | 17 block ranges (2460→1DBFF) | (shared V) | 7 block ranges (4DC0→1D35F) |
 | `PropList.txt` | `Pattern_Syntax`, `Other_Math` | `Other_Math`, `ID_Compat_Math_*`, `Other_Lowercase/Uppercase` | `Other_Alphabetic`, `Regional_Indicator` | (shared V) | `Diacritic`, `Other_Grapheme_Extend` |
 | `NameAliases.txt` | 2 corrections (Arrows) | 1 correction (WEIERSTRASS) | — | — | 1 correction (BYZANTINE) |
 | `StandardizedVariants.txt` | — | 87 variants (chancery, serifs, slant) | — | — | — |
@@ -43,7 +43,7 @@
 
 ---
 
-## P_S — Shape (SDF) · 13 Blocks · 1,904 codepoints
+## P_S — Shape (SDF) · 14 Blocks · 1,838 codepoints
 
 ```
 P_S ──┬── S.01  Arrows                         [2190..21FF]  112 cp
@@ -183,13 +183,13 @@ P_S ──┬── S.01  Arrows                         [2190..21FF]  112 cp
                 emoji-data: Extended_Pictographic(85)
 ```
 
-**S tổng: 13 blocks · range 1,904 · actual assigned 1,809**
+**S tổng: 14 blocks · range 1,838 · actual assigned 1,809**
 **gc chủ đạo: `So` (Other_Symbol) + `Sm` (Math_Symbol)**
 **PropList chủ đạo: `Pattern_Syntax` — ký hiệu hình học dùng trong pattern matching**
 
 ---
 
-## P_R — Relation (MATH) · 21 Blocks · 3,088 codepoints
+## P_R — Relation (MATH) · 21 Blocks · 2,563 codepoints
 
 ```
 P_R ──┬── R.01  Superscripts and Subscripts     [2070..209F]  48 cp
@@ -378,14 +378,14 @@ P_R ──┬── R.01  Superscripts and Subscripts     [2070..209F]  48 cp
                 PropList: Other_Math(141)
 ```
 
-**R tổng: 21 blocks · range 3,088 · actual assigned ~2,717**
+**R tổng: 21 blocks · range 2,563 · actual assigned ~2,717**
 **gc chủ đạo: `Sm` (Math_Symbol) + `No` (Other_Number) + `Nl` (Letter_Number)**
 **PropList chủ đạo: `Other_Math`, `Pattern_Syntax` — quan hệ toán học logic**
 **StandardizedVariants: 87 biến thể (chancery style, serifs, slant, vertical stroke)**
 
 ---
 
-## P_V + P_A — Valence + Arousal (EMOTICON) · 17 Blocks · 3,568 codepoints
+## P_V + P_A — Valence + Arousal (EMOTICON) · 17 Blocks · 3,487 codepoints
 
 > **V và A chia sẻ cùng 17 blocks.** Mỗi ký tự có CẢ V lẫn A.
 > V = cảm xúc tích cực/tiêu cực (polarity). A = cường độ kích thích (intensity).
@@ -607,7 +607,7 @@ P_A   │         ├── sub: CIRCLED LATIN (×52)
                 StandardizedVariants: 1 (CARTESIAN EQUALS SIGN with descender)
 ```
 
-**V+A tổng: 17 blocks · range 3,568 · actual assigned ~2,821**
+**V+A tổng: 17 blocks · range 3,487 · actual assigned ~2,821**
 **gc chủ đạo: `So` (Other_Symbol) — ký hiệu biểu tượng cảm xúc**
 **PropList chủ đạo: `Regional_Indicator`(26), `Other_Alphabetic`(130)**
 **emoji-data: 1,335 Emoji, 1,166 Emoji_Presentation, 132 Emoji_Modifier_Base**
@@ -635,7 +635,7 @@ Ví dụ P_weight [S, R, V, A, T]:
 
 ---
 
-## P_T — Time (MUSICAL) · 7 Blocks · 1,024 codepoints
+## P_T — Time (MUSICAL) · 7 Blocks · 958 codepoints
 
 > **T = chiều thời gian / nhịp điệu / dao động.**
 > Spline — công thức tạo hình dạng âm thanh, bước sóng, sự giao động.
@@ -750,7 +750,7 @@ P_T ──┬── T.01  Yijing Hexagram Symbols         [4DC0..4DFF]  64 cp
                 gc: Other_Symbol(87)
 ```
 
-**T tổng: 7 blocks · range 1,024 · actual assigned 958**
+**T tổng: 7 blocks · range 958 · actual assigned 958**
 **gc chủ đạo: `So` (Other_Symbol) + `Mn` (Nonspacing_Mark)**
 **PropList chủ đạo: `Diacritic`(102) — biến âm = frequency/amplitude modulation**
 
@@ -781,12 +781,12 @@ Spline interpretation:
 ## Tổng kết
 
 ```
-                          o{9,584 L0 anchors}
+                          o{8,846 L0 anchors}
      ─────────────────────────┼─────────────────────────
      |           |            |            |            |
      S           R            V            A            T
-   13 blk      21 blk       ──17 blk──                7 blk
-   1,904       3,088          3,568                   1,024
+   14 blk      21 blk       ──17 blk──                7 blk
+   1,838       2,563          3,487                     958
    1,809*      2,717*         2,821*                    958*
      |           |            |            |            |
   Pattern     Other_Math    Emoji       NRC-VAD      Diacritic
@@ -795,11 +795,11 @@ Spline interpretation:
                                          V/A scores   Extend
 
   * actual assigned (UnicodeData.txt) vs range (Blocks.txt)
-  * Δ = 9,584 - 8,305 = 1,279 unassigned slots trong ranges
+  * Δ = 8,846 - 8,305 = 541 unassigned slots trong ranges
 
 Nguồn:
   UnicodeData.txt          → char names (TEXT tên ký tự = tên node)
-  Blocks.txt               → block ranges (58 blocks)
+  Blocks.txt               → block ranges (59 blocks)
   PropList.txt             → Pattern_Syntax, Other_Math, Diacritic...
   NameAliases.txt          → 4 corrections
   StandardizedVariants.txt → 87 glyph variants (chủ yếu MATH)

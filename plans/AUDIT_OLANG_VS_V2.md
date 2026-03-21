@@ -111,7 +111,7 @@ KnowTree = array 65,536 phần tử
 - Dùng `CompactNode` (hash:8B + mol bytes + metadata)
 - Node lookup qua hash, KHÔNG qua array index
 - Có `SlimKnowTree` dùng `SlimNode` nhưng vẫn hash-based (10-15B/node)
-- L0 chỉ seed 35 nodes (comment dòng 11), v2 = 9,584 nodes
+- L0 chỉ seed 35 nodes (comment dòng 11), v2 = 8,846 nodes
 
 **Sai lệch:**
 - v2: O(1) array lookup bằng codepoint index, 128KB fixed
@@ -208,7 +208,7 @@ let time_byte = mode_or_wavg_base(&times, total_weight, 5);
 
 **v2 spec (Section 1.4):**
 ```
-58 blocks tổng cộng:
+59 blocks tổng cộng:
   SDF: 13 blocks (Arrows, Box Drawing, Block Elements, Geometric Shapes,
        Dingbats, Supp Arrows-A/B, Misc Sym+Arrows, Geom Ext, Supp Arrows-C,
        Ornamental Dingbats, Misc Technical, Braille Patterns)
@@ -220,7 +220,7 @@ let time_byte = mode_or_wavg_base(&times, total_weight, 5);
 **Code hiện tại (`ucd/build.rs:45-99`):**
 ```rust
 GROUPS = [SDF(10 ranges), MATH(8 ranges), EMOTICON(8 ranges), MUSICAL(3 ranges)]
-// Total: 29 ranges vs v2's 58 blocks
+// Total: 29 ranges vs v2's 59 blocks
 ```
 
 **Sai lệch:**
@@ -228,7 +228,7 @@ GROUPS = [SDF(10 ranges), MATH(8 ranges), EMOTICON(8 ranges), MUSICAL(3 ranges)]
 - MATH: 8 ranges vs v2's 21 blocks → thiếu Ancient numerics, Siyaq, Arab math...
 - EMOTICON: 8 ranges vs v2's 17 blocks → thiếu Mahjong, Domino, Playing Cards...
 - MUSICAL: 3 ranges vs v2's 7 blocks → thiếu Znamenny, Byzantine, Ancient Greek...
-- **Kết quả:** ~5400 entries trong UCD_TABLE vs v2's 9,584 expected
+- **Kết quả:** ~5400 entries trong UCD_TABLE vs v2's 8,846 expected
 
 ---
 

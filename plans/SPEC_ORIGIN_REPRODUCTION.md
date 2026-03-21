@@ -15,7 +15,7 @@ HomeOS v1 = cơ thể mẹ.
 Origin con = sinh linh mới, mang gene mẹ, nhưng KHÔNG phải bản sao.
 
   Mẹ truyền cho con:
-    ✅ L0 — 9,584 công thức (⚠️ v2: was 5400) (DNA = bất biến, không đổi)
+    ✅ L0 — 8,846 công thức (⚠️ v2: was 5400) (DNA = bất biến, không đổi)
     ✅ L1 — trọng số Hebbian từ KnowTree (epigenetics = khuynh hướng)
     ❌ KnowTree đầy đủ — con tự xây
     ❌ STM/QR — ký ức là của riêng mỗi cá thể
@@ -80,7 +80,7 @@ origin_child.olang (~200 KB seed)
 ├─────────────────────────────────────────────────────────────┤
 │ SECTION 2: KNOWLEDGE — Chỉ L0 + L1 weights                   │
 │                                                               │
-│   L0 nodes:      9,584 UCD (⚠️ v2) × 2B = ~19 KB (was 33B×5400=180KB) │
+│   L0 nodes:      8,846 UCD (⚠️ v2) × 2B = ~19 KB (was 33B×5400=180KB) │
 │     → DNA: mọi Origin con đều có cùng L0                     │
 │     → Bất biến: không thay đổi qua thế hệ                    │
 │                                                               │
@@ -197,7 +197,7 @@ Module manifest trong header (bitfield):
    o reproduce --profile personal --name "my_child"
 
 2. Extract L0 + L1:
-   a. L0: copy nguyên 9,584 UCD (⚠️ v2) nodes (bất biến)
+   a. L0: copy nguyên 8,846 UCD (⚠️ v2) nodes (bất biến)
    b. L1: snapshot Hebbian weights > threshold
       - SilkGraph.export_strong_weights(threshold=0.5) → Vec<(u64,u64,u8)>
       - Chỉ L1 layer weights, không cross-layer
@@ -264,7 +264,7 @@ Sau N thế hệ: L1 weights khác nhau → "loài" khác nhau
   → Con B chuyên security (guardian AI)
   → Cháu B1 chuyên network (network AI)
 
-TẤT CẢ chia sẻ cùng L0 DNA (9,584 formulas (⚠️ v2)).
+TẤT CẢ chia sẻ cùng L0 DNA (8,846 formulas (⚠️ v2)).
 TẤT CẢ khác nhau ở L1 weights + KnowTree tự xây.
 = EVOLUTION qua thế hệ.
 ```
@@ -369,7 +369,7 @@ Record mới trong origin.olang:
 ## Nguyên tắc thiết kế (bất biến)
 
 ```
-① L0 DNA bất biến qua mọi thế hệ — 9,584 formulas (⚠️ v2) không đổi
+① L0 DNA bất biến qua mọi thế hệ — 8,846 formulas (⚠️ v2) không đổi
 ② L1 weights = epigenetics, KHÔNG phải ký ức — chỉ khuynh hướng
 ③ Mỗi Origin = cá thể độc lập — không phụ thuộc mẹ để chạy
 ④ Master key riêng — danh tính không kế thừa

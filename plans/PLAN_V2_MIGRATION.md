@@ -10,7 +10,7 @@
 ## Dependency Graph
 
 ```
-T1 UCD build.rs (58 blocks, 9584 entries, đọc udc.json)
+T1 UCD build.rs (59 blocks, 8846 entries, đọc udc.json)
  ├→ T2 ShapeBase 8→18 SDF (tách CSG ops)
  │   └→ T2b SdfPrimitive agents 5→18
  └→ T3 Molecule 5B→2B (packed u16)
@@ -72,21 +72,21 @@ Layer 5: T12 (Tests)                    ← cuối cùng
 - Không đọc `json/udc.json`
 
 **v2 yêu cầu:**
-- 58 blocks → 9,584 entries
+- 59 blocks → 8,846 entries
 - Đọc `json/udc.json` (323K dòng) làm source of truth
 - UcdEntry = 2B (u16 packed P_weight)
 - `json/udc_p_table.bin` (248KB) = lookup table sẵn
 
 **Việc cần làm:**
 1. build.rs đọc `json/udc.json` thay vì heuristic
-2. Sinh UCD_TABLE với 9,584 entries, mỗi entry = u16
-3. 58 blocks: SDF(13), MATH(21), EMOTICON(17), MUSICAL(7)
+2. Sinh UCD_TABLE với 8,846 entries, mỗi entry = u16
+3. 59 blocks: SDF(14), MATH(21), EMOTICON(17), MUSICAL(7)
 4. `lib.rs`: lookup trả u16 thay vì UcdEntry 24B
 5. Verify roundtrip với `udc_p_table.bin`
 
 **DoD:**
 ```
-□ 58 blocks, 9,584 entries
+□ 59 blocks, 8,846 entries
 □ Đọc udc.json, không heuristic
 □ UcdEntry = u16 packed [S:4][R:4][V:3][A:3][T:2]
 □ check-logic PASS cho UCD checks
@@ -278,14 +278,14 @@ Cᵀ = dominant(Aᵀ, Bᵀ)        → lấy cái có weight cao hơn
 KnowTree = [u16; 65536]  // 128KB fixed
 KnowTree[codepoint] = P_weight (2B Molecule)
 O(1) lookup by codepoint index
-L0 = 9,584 pre-filled entries
+L0 = 8,846 pre-filled entries
 ```
 
 **Việc cần làm:**
 1. `KnowTree` → `pub struct KnowTree([u16; 65536])`
 2. `get(cp: u16) -> u16` = O(1) array index
 3. `set(cp: u16, mol: u16)` = O(1) write
-4. Bootstrap: fill 9,584 entries từ UCD table (T1)
+4. Bootstrap: fill 8,846 entries từ UCD table (T1)
 5. Còn lại 55,952 slots = 0 (chưa learn)
 6. Xóa TieredStore, CompactNode, SlimKnowTree (dead code)
 
@@ -293,7 +293,7 @@ L0 = 9,584 pre-filled entries
 ```
 □ KnowTree = [u16; 65536] = 128KB
 □ O(1) lookup
-□ 9,584 L0 entries pre-filled
+□ 8,846 L0 entries pre-filled
 □ TieredStore/SlimKnowTree xóa
 □ check-logic PASS
 ```
@@ -334,18 +334,18 @@ L0 = 9,584 pre-filled entries
 
 **v2 yêu cầu:**
 - Registry index by codepoint (u16), NOT by hash
-- 9,584 L0 nodes known at bootstrap
+- 8,846 L0 nodes known at bootstrap
 
 **Việc cần làm:**
 1. Registry index: codepoint-based lookup (có thể dùng array hoặc HashMap<u16, _>)
-2. Bootstrap seed 9,584 nodes từ UCD table
+2. Bootstrap seed 8,846 nodes từ UCD table
 3. `registry.get(cp: u16)` thay vì `registry.get(hash: u64)`
 4. Giữ append-only semantics
 
 **DoD:**
 ```
 □ Registry lookup by codepoint
-□ 9,584 L0 nodes seeded
+□ 8,846 L0 nodes seeded
 □ Append-only giữ nguyên
 ```
 

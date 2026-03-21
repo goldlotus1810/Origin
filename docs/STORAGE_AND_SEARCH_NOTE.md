@@ -27,7 +27,7 @@ T ∈ {Static, Slow, Medium, Fast, Instant}  → 3 bits đủ, dùng u8
 index: u16  →  P_weight: [u8; 5]
 
 Phân bổ:
-  0x0000..0x256F  →  9,584  L0 anchor (UDC: SDF + MATH + EMOTICON + MUSICAL)
+  0x0000..0x256F  →  8,846  L0 anchor (UDC: SDF + MATH + EMOTICON + MUSICAL)
   0x2570..0xFFFF  → 55,952  alias + learned nodes (sài không hết)
 ```
 
@@ -131,7 +131,7 @@ Hai emoji khác hình nhưng cùng V/A = cảm giác "gần nhau".
 **Bucket index (đã có trong ucd/lib.rs):**
 ```
 Bucket (S, R) → danh sách codepoints
-→ Thu hẹp không gian tìm kiếm từ 9,584 xuống ~50-200
+→ Thu hẹp không gian tìm kiếm từ 8,846 xuống ~50-200
 → Trong bucket, sort theo |V1-V2| + |A1-A2|
 → Top-k là kết quả
 ```
@@ -168,7 +168,7 @@ Giờ:    "lửa" → u16 → P                 (1 bước, P đã sẵn)
 
 **16-bit space đủ vì:**
 ```
-9,584  L0 anchors (UDC)
+8,846  L0 anchors (UDC)
 ~18,000 alias cần thiết (vi + en + ja + zh thực tế)
 ────────────────────────
 ~27,584 tổng cộng   <   65,536   →   còn 37,952 slots trống

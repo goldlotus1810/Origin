@@ -77,7 +77,7 @@ PASS: 16  |  WARN: 3  |  FAIL: 18
 | 24 | KnowTree | ❌ FAIL | hash-based, v2 cần array 65,536×2B |
 | 25 | Chain | ❌ FAIL | Vec\<Molecule\> 11B/link, cần Vec\<u16\> 2B |
 | 26 | LCA Compose | ❌ FAIL | mode_or_wavg ALL dims, v2: mỗi dim khác |
-| 27 | UCD Blocks | ❌ FAIL | 7 blocks thiếu, anchors ≠ 9,584 |
+| 27 | UCD Blocks | ❌ FAIL | 7 blocks thiếu, anchors ≠ 8,846 |
 
 ### H. Olang Kernel — 2 PASS, 3 FAIL
 
@@ -94,7 +94,7 @@ PASS: 16  |  WARN: 3  |  FAIL: 18
 | # | Check | Status | Vấn đề |
 |---|-------|--------|--------|
 | 33 | L0 Valence | ❌ FAIL | build.rs dùng name heuristic (FIRE/SKULL), KHÔNG đọc udc.json |
-| 34 | L0 Seed Count | ❌ FAIL | 35 seeds, v2 cần 9,584 → 44% L0 = Sphere/neutral |
+| 34 | L0 Seed Count | ❌ FAIL | 35 seeds, v2 cần 8,846 → 44% L0 = Sphere/neutral |
 | 35 | L0 Similarity | ❌ FAIL | weights 0.3/0.2/0.5, v2 = equal 5D |
 | 36 | L0 Mol::raw | ❌ FAIL | pub fn + 60 callers → QT④ bypassable |
 | 37 | REWRITE Progress | ⚠️ | Rust 13x > Olang, migration 7.3% |
@@ -106,7 +106,7 @@ PASS: 16  |  WARN: 3  |  FAIL: 18
 ```
 Tầng 0: UCD build.rs
   ├─ [33] Heuristic tên thay vì udc.json
-  ├─ [27] 29 ranges thay vì 58 blocks → thiếu 4,184 codepoints
+  ├─ [27] 29 ranges thay vì 59 blocks → thiếu 4,184 codepoints
   └─ [23] 8 shapes thay vì 18 SDF
       ↓
 Tầng 1: UCD API
@@ -144,7 +144,7 @@ Tầng 7: Pipeline
 ```
 Phase 1 — Tầng 0 (UCD build.rs) → unblock tầng 1-2
   ① build.rs đọc json/udc.json thay vì heuristic      [33]
-  ② Bổ sung 58 blocks → 9,584 entries                  [27]
+  ② Bổ sung 59 blocks → 8,846 entries                  [27]
   ③ 18 SDF primitives (tách CSG ops)                    [23]
 
 Phase 2 — Tầng 2 (Molecule) → unblock tầng 3-5
@@ -160,7 +160,7 @@ Phase 3 — Tầng 3-4 (Chain + LCA) → unblock tầng 5
 
 Phase 4 — Tầng 5 (KnowTree) → unblock tầng 6
   ⑪ KnowTree → array 65,536 × 2B                      [24]
-  ⑫ L0 seed → 9,584 anchors                            [34]
+  ⑫ L0 seed → 8,846 anchors                            [34]
 
 Phase 5 — Tầng 6 (Olang VM)
   ⑬ Compiler: emit 14 missing features                 [28]
