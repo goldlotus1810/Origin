@@ -25,11 +25,14 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
     if chain.is_empty() {
         return Some(String::new());
     }
-    // Check if it looks like a string chain (all shape=0x02, relation=0x01)
-    let is_string = chain.0.iter().all(|&bits| { let m = Molecule::from_u16(bits); m.shape_u8() == 0x02 && m.relation_u8() == 0x01 });
+    // Check if it looks like a string chain: shape=2, relation=1 (quantized 4-bit values)
+    let is_string = chain.0.iter().all(|&bits| {
+        let m = Molecule::from_u16(bits);
+        m.shape() == 2 && m.relation() == 1
+    });
     if is_string {
-        // Decode bytes as UTF-8 (strings are stored as 1 molecule = 1 byte)
-        let bytes: Vec<u8> = chain.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+        // Decode bytes from lower 8 bits [V:3][A:3][T:2] of each molecule
+        let bytes: Vec<u8> = chain.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
         match String::from_utf8(bytes) {
             Ok(s) => Some(s),
             Err(e) => {
@@ -44,8 +47,21 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
 
 /// Encode a string as a MolecularChain (each byte → 1 molecule).
 /// Inverse of chain_to_string.
+///
+/// String molecule marker: shape=2, relation=1 (quantized 4-bit values).
+/// Valence holds the byte value (quantized 3-bit, so only 0-7 range for marker check).
+/// The actual byte is stored in the full V+A+T bits (11 bits = 0-2047, enough for u8 0-255).
 pub fn string_to_chain(s: &str) -> MolecularChain {
-    let mols: Vec<u16> = s.bytes().map(|b| Molecule::raw(0x02, 0x01, b, 0, 0x01).bits).collect();
+    // Use direct bit packing: S=2 (4bit), R=1 (4bit), byte value in lower 8 bits (V+A+T)
+    let mols: Vec<u16> = s.bytes().map(|b| {
+        let s4: u16 = 2;   // string marker shape (quantized)
+        let r4: u16 = 1;   // string marker relation (quantized)
+        // Store byte in lower 8 bits: [V:3][A:3][T:2] = 8 bits = 0..255
+        let v3 = ((b >> 5) & 0x7) as u16;
+        let a3 = ((b >> 2) & 0x7) as u16;
+        let t2 = (b & 0x3) as u16;
+        (s4 << 12) | (r4 << 8) | (v3 << 5) | (a3 << 2) | t2
+    }).collect();
     MolecularChain(mols)
 }
 

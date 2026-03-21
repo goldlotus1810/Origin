@@ -6310,18 +6310,25 @@ mod integration_tests {
     fn v03_file_readable() {
 
         // Manually build v0.03 file: same magic, version=0x03, then a node
+        // v0.03 uses 5-byte molecules (legacy format)
         use olang::writer::{MAGIC, VERSION_V03};
         let chain = olang::encoder::encode_codepoint(0x1F525);
-        let chain_bytes = chain.to_bytes();
+
+        // Build legacy 5-byte chain bytes for v0.03 format
+        let mut chain_bytes_legacy = alloc::vec::Vec::new();
+        for &bits in &chain.0 {
+            let m = olang::mol::molecular::Molecule::from_u16(bits);
+            chain_bytes_legacy.extend_from_slice(&m.to_bytes_legacy());
+        }
 
         let mut buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
         buf.extend_from_slice(&MAGIC);
         buf.push(VERSION_V03);
         buf.extend_from_slice(&42i64.to_le_bytes());
-        // NodeRecord
+        // NodeRecord (v0.03 format: mol_count as u8, then 5 bytes per molecule)
         buf.push(0x01); // RT_NODE
-        buf.push((chain_bytes.len() / 5) as u8);
-        buf.extend_from_slice(&chain_bytes);
+        buf.push(chain.len() as u8); // mol count
+        buf.extend_from_slice(&chain_bytes_legacy);
         buf.push(0); // layer
         buf.push(0); // is_qr
         buf.extend_from_slice(&1000i64.to_le_bytes());
