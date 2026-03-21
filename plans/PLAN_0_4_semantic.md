@@ -192,7 +192,11 @@ fn compile_expr(state, expr) {
             emit(state, Op::Ffi("field_get", 2));  // runtime FFI
         },
         Expr::MolLiteral { s, r, v, a, t } => {
-            emit(state, Op::PushMol(s, r, v, a, t));
+            // ⚠️ v2: PushMol = u16 packed [S:4][R:4][V:3][A:3][T:2]
+            // Thay vì 5 params riêng lẻ, pack thành 1 u16:
+            //   let packed = (s << 12) | (r << 8) | (v << 5) | (a << 2) | t;
+            //   emit(state, Op::PushMol(packed));
+            emit(state, Op::PushMol(s, r, v, a, t)); // TODO(v2): đổi thành PushMol(u16)
         },
     };
 }
