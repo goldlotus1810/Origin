@@ -68,6 +68,8 @@ def classify_block_group(block_name, start, end):
         'MATHEMATICAL', 'MATH', 'SIYAQ', 'COUNTING ROD',
         'ANCIENT GREEK NUMBER', 'COPTIC EPACT', 'MAYAN NUMERAL',
         'INDIC SIYAQ', 'OTTOMAN SIYAQ', 'KAKTOVIK',
+        'CURRENCY SYMBOL', 'GENERAL PUNCTUATION',
+        'CJK SYMBOLS AND PUNCTUATION', 'SMALL FORM VARIANT',
     ]
     for pat in math_patterns:
         if pat in bn:
@@ -81,6 +83,7 @@ def classify_block_group(block_name, start, end):
         'MISCELLANEOUS SYMBOLS AND PICTOGRAPHS',
         'TRANSPORT', 'ALCHEMICAL', 'CHESS', 'SYMBOLS AND PICTOGRAPHS EXTENDED',
         'SUPPLEMENTAL SYMBOLS AND PICTOGRAPHS',
+        'SYMBOLS FOR LEGACY COMPUTING',
     ]
     for pat in emoticon_patterns:
         if pat in bn:
@@ -110,7 +113,7 @@ def classify_block_group(block_name, start, end):
         return "TEXT"
     if 'HEBREW' in bn or 'SYRIAC' in bn or 'THAANA' in bn:
         return "TEXT"
-    if 'GENERAL PUNCTUATION' in bn or 'SPACING' in bn:
+    if 'SPACING' in bn:
         return "TEXT"
     if 'PRIVATE USE' in bn or 'SURROGATE' in bn:
         return "RESERVED"
