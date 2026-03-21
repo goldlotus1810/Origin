@@ -712,3 +712,442 @@ pub fn check_udc_utf32_data(root: &Path) -> CheckResult {
             .with_details(details)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: P_weight — Molecule struct phải dùng packed u16
+// v2 spec: [S:4][R:4][V:3][A:3][T:2] = 16 bits = 2 bytes
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_molecule_struct(root: &Path) -> CheckResult {
+    println!("[15/18] DEEP — Molecule struct P_weight layout...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("P_weight Molecule", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("P_weight Molecule", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check 1: Molecule struct still uses 5 separate u8 fields?
+    let has_shape_u8 = content.contains("pub shape: u8");
+    let has_relation_u8 = content.contains("pub relation: u8");
+    let has_time_u8 = content.contains("pub time: u8");
+
+    // Check 2: to_bytes returns [u8; 5]?
+    let has_5byte_serialize = content.contains("[u8; 5]");
+
+    // Check 3: Has packed u16 p_packed field?
+    let has_p_packed = content.contains("p_packed: u16") || content.contains("p: u16");
+
+    // Check 4: chain_hash uses 5 bytes?
+    let has_5byte_hash = content.contains("chain_hash(&self.to_bytes())");
+
+    if has_p_packed && !has_5byte_serialize {
+        details.push("Molecule has packed u16 P_weight: ✅".into());
+        details.push("No [u8;5] serialization: ✅".into());
+        CheckResult::pass("P_weight Molecule", "OK — Molecule uses packed u16 (v2)")
+            .with_details(details)
+    } else {
+        if has_shape_u8 && has_relation_u8 && has_time_u8 {
+            details.push("Molecule uses 5 × u8 fields (shape, relation, V, A, time): ❌ LEGACY".into());
+        }
+        if has_5byte_serialize {
+            details.push("to_bytes() → [u8; 5]: ❌ should be u16".into());
+        }
+        if has_5byte_hash {
+            details.push("chain_hash uses fnv1a([u8;5]): ❌ should use u16".into());
+        }
+        if !has_p_packed {
+            details.push("No p_packed: u16 field: ❌ need packed P_weight".into());
+        }
+        details.push("Ref: plans/PLAN_PWEIGHT_MIGRATION.md".into());
+        CheckResult::fail("P_weight Molecule", "Molecule still uses 5B layout — v2 requires 2B packed u16")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: CompactQR bit layout phải = [S:4][R:4][V:3][A:3][T:2]
+// Code hiện tại: [S:3][R:3][T:3][V:4][A:3] — SAI
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_compactqr_layout(root: &Path) -> CheckResult {
+    println!("[16/18] DEEP — CompactQR bit layout vs v2...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("P_weight CompactQR", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("P_weight CompactQR", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // v2 layout: (s << 12) | (r << 8) | (v << 5) | (a << 2) | t
+    let has_v2_layout = content.contains("s << 12")
+        && content.contains("r << 8")
+        && content.contains("v << 5")
+        && content.contains("a << 2");
+
+    // Current wrong layout: (s << 13) | (r << 10) | (t << 7) | (v << 3) | a
+    let has_wrong_layout = content.contains("s << 13")
+        || content.contains("r << 10")
+        || content.contains("t << 7");
+
+    if has_v2_layout && !has_wrong_layout {
+        details.push("Bit layout: [S:4][R:4][V:3][A:3][T:2] ✅".into());
+        CheckResult::pass("P_weight CompactQR", "OK — bit layout matches v2 spec")
+            .with_details(details)
+    } else if has_wrong_layout {
+        details.push("Current: [S:3][R:3][T:3][V:4][A:3] — WRONG ❌".into());
+        details.push("Expected: [S:4][R:4][V:3][A:3][T:2] — v2 spec".into());
+        details.push("s << 13 → should be s << 12".into());
+        details.push("r << 10 → should be r << 8".into());
+        details.push("t << 7 → T should be last 2 bits, not middle".into());
+        details.push("Ref: plans/PLAN_PWEIGHT_MIGRATION.md Phase 1".into());
+        CheckResult::fail("P_weight CompactQR", "Bit layout WRONG — [S:3][R:3][T:3][V:4][A:3] vs v2 [S:4][R:4][V:3][A:3][T:2]")
+            .with_details(details)
+    } else {
+        details.push("Cannot determine bit layout — verify manually".into());
+        CheckResult::warn("P_weight CompactQR", "Cannot detect bit layout pattern")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: UCD build.rs sinh UcdEntry — phải có packed u16
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_ucd_build(root: &Path) -> CheckResult {
+    println!("[17/18] DEEP — UCD build.rs P_weight format...");
+    let build_path = root.join("crates/ucd/build.rs");
+
+    if !build_path.exists() {
+        return CheckResult::fail("P_weight UCD", "build.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&build_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("P_weight UCD", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check if build.rs generates u16 packed P
+    let has_u16_p = content.contains("p_packed: u16") || content.contains("p: u16");
+
+    // Check if it still uses 5 separate fields
+    let has_5_fields = content.contains("shape: u8")
+        && content.contains("relation: u8")
+        && content.contains("valence: u8")
+        && content.contains("arousal: u8")
+        && content.contains("time: u8");
+
+    // Check if it reads from udc_p_table.bin
+    let reads_p_table = content.contains("udc_p_table.bin") || content.contains("p_table");
+
+    // Check chain_hash uses 5 bytes
+    let hash_5b = content.contains("fn chain_hash(shape: u8, relation: u8, valence: u8, arousal: u8, time: u8)");
+
+    if has_u16_p && !has_5_fields {
+        details.push("UcdEntry has packed u16 P: ✅".into());
+        CheckResult::pass("P_weight UCD", "OK — build.rs generates packed u16")
+            .with_details(details)
+    } else {
+        if has_5_fields {
+            details.push("UcdEntry still uses 5 × u8 (shape, relation, V, A, T): ❌".into());
+        }
+        if !reads_p_table {
+            details.push("Does not read udc_p_table.bin: ❌ (should use pre-packed P)".into());
+        }
+        if hash_5b {
+            details.push("chain_hash(shape, relation, valence, arousal, time) uses 5B: ❌".into());
+        }
+        if !has_u16_p {
+            details.push("No u16 packed P field: ❌".into());
+        }
+        details.push("Ref: plans/PLAN_PWEIGHT_MIGRATION.md Phase 2-3".into());
+        CheckResult::fail("P_weight UCD", "build.rs still generates 5B UcdEntry — v2 requires packed u16")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: KnowTree size = 65,536 × 2B = 128 KB (v2)
+// Current: 65,536 × 5B = 320 KB
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_knowtree_size(root: &Path) -> CheckResult {
+    println!("[18/18] DEEP — KnowTree node size...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check KnowTree stores Molecule (5B+metadata) or u16 (2B)
+    let knowtree_molecule = grep_pattern(&files, "Vec<Molecule>");
+    let knowtree_u16 = grep_pattern(&files, "Vec<u16>");
+
+    // Check FormulaTable size constant
+    let _formula_65536 = grep_pattern(&files, "65_536");
+    let _formula_64k = grep_pattern(&files, "65536");
+
+    // Check Molecule in FormulaTable (it holds Vec<Molecule>)
+    let formula_table_mol: Vec<_> = knowtree_molecule.iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            ps.contains("molecular") && l.contains("FormulaTable")
+                || l.contains("formula") || l.contains("table")
+        })
+        .collect();
+
+    if !formula_table_mol.is_empty() {
+        details.push("FormulaTable stores Vec<Molecule> (5B+ each): ❌".into());
+        details.push("v2 spec: KnowTree node = 2B (P_weight packed u16)".into());
+        details.push("Current: 65,536 × ~11B = ~704 KB (Molecule is 11 bytes in struct)".into());
+        details.push("Expected: 65,536 × 2B = 128 KB".into());
+        CheckResult::fail("P_weight KnowTree", "FormulaTable uses Molecule (5B+) — v2 requires u16 (2B) per node")
+            .with_details(details)
+    } else if !knowtree_u16.is_empty() {
+        details.push("KnowTree stores u16 entries: ✅".into());
+        CheckResult::pass("P_weight KnowTree", "OK — KnowTree uses u16 (2B per node)")
+            .with_details(details)
+    } else {
+        details.push("Cannot determine KnowTree node type".into());
+        CheckResult::warn("P_weight KnowTree", "Cannot verify KnowTree node size — check manually")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: Dream → AAM → QR Promotion chain
+// v2 spec: Dream sinh proposal → AAM review → approve → QR promote
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_dream_aam(root: &Path) -> CheckResult {
+    println!("[19/22] WIRING — Dream → AAM → QR promotion...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check 1: Dream::run() exists and is called
+    let dream_run = grep_pattern(&files, "run_dream");
+    let dream_exists = !dream_run.is_empty();
+
+    // Check 2: AAM::review() is called from somewhere (not just defined)
+    let aam_review_def = grep_pattern(&files, "fn review");
+    let aam_review_call: Vec<_> = grep_pattern(&files, ".review(")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.trim().starts_with("//") && !l.contains("fn review")
+        })
+        .collect();
+
+    // Check 3: Proposals are submitted to AAM
+    let submit_proposal = grep_pattern(&files, "submit_proposal");
+    let proposal_to_aam = grep_pattern(&files, "aam.review");
+
+    // Check 4: QR promotion after AAM approval
+    let from_approved = grep_pattern(&files, "from_approved");
+    let _promote_qr = grep_pattern(&files, "promote");
+
+    details.push(format!("Dream::run() called: {}", if dream_exists { "✅" } else { "❌" }));
+    details.push(format!("AAM::review() defined: {} refs", aam_review_def.len()));
+    details.push(format!("AAM::review() CALLED: {} refs", aam_review_call.len()));
+    details.push(format!("submit_proposal → AAM: {} refs", submit_proposal.len() + proposal_to_aam.len()));
+    details.push(format!("QRProposal::from_approved(): {} refs", from_approved.len()));
+
+    let chain_complete = dream_exists
+        && !aam_review_call.is_empty()
+        && (!submit_proposal.is_empty() || !proposal_to_aam.is_empty());
+
+    if chain_complete {
+        CheckResult::pass("WIRING Dream→AAM", "OK — Dream → AAM → QR promotion chain complete")
+            .with_details(details)
+    } else {
+        details.push("Dream sinh proposals nhưng KHÔNG submit vào AAM".into());
+        details.push("AAM::review() KHÔNG được gọi → QR KHÔNG promote".into());
+        details.push("→ KnowTree KHÔNG grow dài hạn".into());
+        CheckResult::fail("WIRING Dream→AAM", "Dream→AAM→QR chain BROKEN — long-term learning disconnected")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: EpistemicFirewall wired into response rendering
+// v2 spec: Response phải qua epistemic level (Fact/Opinion/Hypothesis/Unknown)
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_epistemic(root: &Path) -> CheckResult {
+    println!("[20/22] WIRING — EpistemicFirewall in response...");
+    let agents_dir = root.join("crates/agents");
+    let runtime_dir = root.join("crates/runtime");
+
+    let ag_files = scan_rs_files(&agents_dir);
+    let rt_files = scan_rs_files(&runtime_dir);
+    let all: Vec<_> = ag_files.iter().chain(rt_files.iter()).cloned().collect();
+
+    let mut details = Vec::new();
+
+    // Check: EpistemicFirewall::wrap() called outside test
+    let wrap_calls: Vec<_> = grep_pattern(&all, "wrap(")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test")
+                && l.contains("pistemic") || l.contains("firewall")
+                || l.contains("Firewall")
+        })
+        .collect();
+
+    // Check: EpistemicFirewall::should_answer() called outside test
+    let should_answer: Vec<_> = grep_pattern(&all, "should_answer")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn should_answer")
+        })
+        .collect();
+
+    // Check: epistemic level in response rendering
+    let epistemic_render = grep_pattern(&all, "epistemic");
+
+    details.push(format!("EpistemicFirewall::wrap() called: {} refs", wrap_calls.len()));
+    details.push(format!("EpistemicFirewall::should_answer() called: {} refs", should_answer.len()));
+    details.push(format!("Epistemic refs in pipeline: {} total", epistemic_render.len()));
+
+    if !wrap_calls.is_empty() && !should_answer.is_empty() {
+        CheckResult::pass("WIRING Epistemic", "OK — EpistemicFirewall wired into response")
+            .with_details(details)
+    } else {
+        details.push("EpistemicFirewall defined but NOT called from pipeline".into());
+        details.push("Response không có epistemic level (Fact/Opinion/Unknown)".into());
+        CheckResult::fail("WIRING Epistemic", "EpistemicFirewall NOT wired — response lacks epistemic grading")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: sentence_affect_unified() thay vì sentence_affect()
+// v2 spec: Emotion pipeline phải dùng unified (implicit 5D + Hebbian)
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_unified_affect(root: &Path) -> CheckResult {
+    println!("[21/22] WIRING — sentence_affect_unified() usage...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check: sentence_affect_unified exists
+    let unified_def = grep_pattern(&files, "fn sentence_affect_unified");
+
+    // Check: sentence_affect_unified called from runtime/agents (not test)
+    let unified_calls: Vec<_> = grep_pattern(&files, "sentence_affect_unified")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn sentence_affect_unified")
+        })
+        .collect();
+
+    // Check: old sentence_affect still used
+    let old_calls: Vec<_> = grep_pattern(&files, "sentence_affect(")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            (ps.contains("runtime") || ps.contains("agents"))
+                && !ps.contains("test")
+                && !l.contains("fn sentence_affect")
+                && !l.contains("unified")
+        })
+        .collect();
+
+    details.push(format!("sentence_affect_unified() defined: {}", if !unified_def.is_empty() { "✅" } else { "❌" }));
+    details.push(format!("sentence_affect_unified() called: {} refs", unified_calls.len()));
+    details.push(format!("OLD sentence_affect() still called: {} refs", old_calls.len()));
+    for (p, line, text) in &old_calls {
+        let rel = p.strip_prefix(root).unwrap_or(p);
+        details.push(format!("  OLD: {}:{} — {}", rel.display(), line, text));
+    }
+
+    if !unified_calls.is_empty() && old_calls.is_empty() {
+        CheckResult::pass("WIRING Unified Affect", "OK — using sentence_affect_unified()")
+            .with_details(details)
+    } else if !unified_def.is_empty() && unified_calls.is_empty() {
+        details.push("sentence_affect_unified() EXISTS but NEVER CALLED".into());
+        details.push("Pipeline still uses OLD sentence_affect() (Hebbian-only, no implicit 5D)".into());
+        CheckResult::fail("WIRING Unified Affect", "sentence_affect_unified() defined but NOT wired — pipeline uses OLD version")
+            .with_details(details)
+    } else {
+        CheckResult::warn("WIRING Unified Affect", "sentence_affect_unified() not found — may not be implemented yet")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: Word selection pipeline (target_affect → select_words)
+// v2 spec: Response rendering should use emotion-aware word selection
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_word_selection(root: &Path) -> CheckResult {
+    println!("[22/22] WIRING — Word selection pipeline...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check: target_affect / select_words called from outside context/
+    let target_calls: Vec<_> = grep_pattern(&files, "target_affect")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn target_affect")
+                && (ps.contains("runtime") || ps.contains("agents"))
+        })
+        .collect();
+
+    let select_calls: Vec<_> = grep_pattern(&files, "select_words")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn select_words")
+                && (ps.contains("runtime") || ps.contains("agents"))
+        })
+        .collect();
+
+    let affect_comp: Vec<_> = grep_pattern(&files, "affect_components")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn affect_components")
+                && (ps.contains("runtime") || ps.contains("agents"))
+        })
+        .collect();
+
+    details.push(format!("target_affect() called from runtime/agents: {} refs", target_calls.len()));
+    details.push(format!("select_words() called from runtime/agents: {} refs", select_calls.len()));
+    details.push(format!("affect_components() called from runtime/agents: {} refs", affect_comp.len()));
+
+    let any_wired = !target_calls.is_empty() || !select_calls.is_empty() || !affect_comp.is_empty();
+
+    if any_wired {
+        CheckResult::pass("WIRING Word Select", "OK — emotion-aware word selection wired")
+            .with_details(details)
+    } else {
+        details.push("Word selection pipeline defined in context/ but NEVER called from runtime/agents".into());
+        details.push("Response rendering does NOT use emotion-aware word selection".into());
+        CheckResult::fail("WIRING Word Select", "Word selection pipeline NOT wired — response ignores emotion-aware words")
+            .with_details(details)
+    }
+}
