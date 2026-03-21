@@ -1011,7 +1011,7 @@ Cùng bytecode chạy trên vm_x86_64 và vm_arm64:
 
 ```
 HIỆN TẠI (Phase 1): CPU-only là ĐÚNG.
-  - 9,584 L0 nodes (v2, was 5400) → mọi thứ sequential, microseconds
+  - 8,846 L0 nodes (v2, was 5400) → mọi thứ sequential, microseconds
   - Dream cluster vài trăm observations → trivial
   - Silk walk vài nghìn edges → instant
 

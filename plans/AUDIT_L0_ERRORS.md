@@ -29,7 +29,7 @@ Registry (tầng 7) ─── 2 lỗi
 
 ## Tầng 0: UCD build.rs — Nguồn gốc của mọi thứ
 
-### E0.1 — GROUPS chỉ có 29 ranges, v2 yêu cầu 58 blocks
+### E0.1 — GROUPS chỉ có 29 ranges, v2 yêu cầu 59 blocks
 
 **File:** `crates/ucd/build.rs:45-99`
 
@@ -41,7 +41,7 @@ Hiện tại:
   MUSICAL:   3 ranges (thiếu: 4 blocks Znamenny/Byzantine/Ancient Greek/Supp)
   ─────────
   Tổng: 29 ranges → ~5,400 entries
-  v2:   58 blocks → 9,584 entries
+  v2:   59 blocks → 8,846 entries
 
 Hậu quả: 4,184 codepoints L0 KHÔNG TỒN TẠI trong bảng
 → lookup() trả None → fallback defaults
@@ -335,7 +335,7 @@ pub struct KnowTree {
 v2: `KnowTree[codepoint] = P_weight` — O(1) array, 128KB fixed.
 Code: hash-based, dynamic, ~11-15B/node.
 
-### E5.2 — L0 seed = 35 nodes thay vì 9,584
+### E5.2 — L0 seed = 35 nodes thay vì 8,846
 
 **File:** `crates/olang/src/storage/knowtree.rs:11`
 
@@ -343,7 +343,7 @@ Code: hash-based, dynamic, ~11-15B/node.
 //! L0: UCD base (35 seeded nodes) — always in RAM
 ```
 
-v2: L0 = 9,584 anchor points (toàn bộ 58 blocks).
+v2: L0 = 8,846 anchor points (toàn bộ 59 blocks).
 Code: chỉ 35 seeded nodes.
 → KnowTree thiếu 9,549 L0 anchors.
 
@@ -407,7 +407,7 @@ v2: KnowTree[codepoint] = O(1). Registry dùng hash 8B → BTreeMap O(log n).
 Alphabet = 0,
 ```
 
-Comment "35 seeded nodes" → phải là 9,584.
+Comment "35 seeded nodes" → phải là 8,846.
 Registry chưa hỗ trợ full L0 seeding.
 
 ---
@@ -417,7 +417,7 @@ Registry chưa hỗ trợ full L0 seeding.
 ```
 E0.1 (thiếu 4,184 codepoints)
   → E1.3 (fallback Sphere/neutral cho 44% L0)
-    → E5.2 (chỉ 35 L0 seeds thay vì 9,584)
+    → E5.2 (chỉ 35 L0 seeds thay vì 8,846)
       → Toàn bộ distance comparison thiếu anchors → vô nghĩa
 
 E0.2 (8 shapes thay vì 18)
@@ -442,7 +442,7 @@ E2.1 (Molecule 11B thay vì 2B)
 ## Ưu tiên sửa (theo thứ tự dependency)
 
 ```
-1. UCD build.rs → đọc json/udc.json thay vì heuristic → đủ 9,584 entries
+1. UCD build.rs → đọc json/udc.json thay vì heuristic → đủ 8,846 entries
 2. Molecule → thiết kế packing 5D → 2B (hoặc dùng udc_p_table.bin)
 3. MolecularChain → Vec<u16> thay vì Vec<Molecule>
 4. LCA → implement amplify/Union/max/dominant

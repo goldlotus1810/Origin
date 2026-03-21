@@ -15,7 +15,7 @@ v2.7 thay đổi CẤU TRÚC DỮ LIỆU GỐC:
   KnowTree: hash-based → array 65,536 × 2B = 128KB
   SDF: 8 types → 18 primitives
   LCA: weighted avg → amplify/Union/max/dominant
-  L0 anchors: 5,400 → 9,584
+  L0 anchors: 5,400 → 8,846
 
 PLAN_REWRITE Phase 0-11 ALL "DONE" — nhưng xây trên cấu trúc CŨ.
 → Toàn bộ output cần REBUILD theo v2.
@@ -54,7 +54,7 @@ PLAN_REWRITE Phase 0-11 ALL "DONE" — nhưng xây trên cấu trúc CŨ.
 | C2 | Chain link type | u16 (2B) = codepoint address | Molecule (11B) = inline value | Mang value thay vì address |
 | C3 | LCA Valence | amplify(Va,Vb,w) — KHÔNG trung bình | mode_or_wavg = weighted avg | CẢM XÚC SAI — vi phạm QT cốt lõi |
 | C4 | LCA Arousal | max(A,B) | mode_or_wavg | Cường độ giảm thay vì giữ cao |
-| C5 | L0 coverage | 9,584 anchors (58 blocks) | ~5,400 (29 ranges) | 44% anchors thiếu → distance vô nghĩa |
+| C5 | L0 coverage | 8,846 anchors (59 blocks) | ~5,400 (29 ranges) | 44% anchors thiếu → distance vô nghĩa |
 | C6 | Phase 0-11 nền tảng | Xây trên v2 data model | Xây trên cấu trúc cũ | TOÀN BỘ output cần rebuild |
 
 ### B. HIGH — Sai thiết kế (7 lỗi)
@@ -67,7 +67,7 @@ PLAN_REWRITE Phase 0-11 ALL "DONE" — nhưng xây trên cấu trúc CŨ.
 | H4 | LCA Relation | fixed = Compose | mode_or_wavg_base | Có thể ra bất kỳ relation |
 | H5 | LCA Time | dominant(A,B) | mode_or_wavg_base | Thời gian compose sai |
 | H6 | Valence source | udc.json (323K dòng) | Heuristic tên (~38 rules) | False positives ("CROSS" match nhiều thứ) |
-| H7 | L0 seed count | 9,584 | 35 nodes | Registry chỉ biết 35/9,584 nodes |
+| H7 | L0 seed count | 8,846 | 35 nodes | Registry chỉ biết 35/8,846 nodes |
 
 ### C. MEDIUM — Sai format/API (8 lỗi)
 
@@ -98,7 +98,7 @@ PLAN_REWRITE Phase 0-11 ALL "DONE" — nhưng xây trên cấu trúc CŨ.
 ## IV. CHUỖI ẢNH HƯỞNG
 
 ```
-┌─ UCD build.rs (29/58 blocks, heuristic, 8/18 SDF)
+┌─ UCD build.rs (29/59 blocks, heuristic, 8/18 SDF)
 │    ↓
 ├─ UCD lib.rs (lookup fallback → 44% = Sphere/neutral)
 │    ↓
@@ -108,7 +108,7 @@ PLAN_REWRITE Phase 0-11 ALL "DONE" — nhưng xây trên cấu trúc CŨ.
 │    ↓
 ├─ LCA (5/5 chiều compose SAI)
 │    ↓
-├─ KnowTree (hash-based, 35 seeds thay vì 9,584)
+├─ KnowTree (hash-based, 35 seeds thay vì 8,846)
 │    ↓
 ├─ Registry (hash index thay vì codepoint array)
 │    ↓
@@ -134,7 +134,7 @@ KHÔNG fix từng cái một — cấu trúc thay đổi từ gốc.
 Đợi team kiểm toán xong → lên 1 PLAN duy nhất:
 
   1. Thiết kế packing 5D → 2B (tham khảo json/udc_p_table.bin 248KB)
-  2. UCD build.rs → đọc udc.json, 58 blocks, 18 SDF, 9,584 entries
+  2. UCD build.rs → đọc udc.json, 59 blocks, 18 SDF, 8,846 entries
   3. Molecule → 2B struct mới
   4. Chain → Vec<u16>
   5. KnowTree → [u16; 65536]
@@ -167,7 +167,7 @@ UPDATE 2026-03-21: main merge thêm:
   - plans/PLAN_PWEIGHT_MIGRATION.md — Plan 3 phase cho P_weight 5B→2B
   - tools/check_logic/ — Tool kiểm tra logic tự động
   → PLAN_PWEIGHT_MIGRATION chỉ cover P_weight packing.
-    CHƯA cover: LCA rules, KnowTree array, Chain Vec<u16>, 18 SDF, 9584 L0.
+    CHƯA cover: LCA rules, KnowTree array, Chain Vec<u16>, 18 SDF, 8846 L0.
     Cần tổng hợp với audit này để ra PLAN fix toàn diện.
 ```
 
@@ -209,8 +209,8 @@ UPDATE 2026-03-21: main merge thêm:
 | # | Plan file | Vấn đề | v2 yêu cầu |
 |---|-----------|--------|------------|
 | P17 | PLAN_5_3 (Origin Spec) | Hardcode: "Molecule = 5 bytes" | Molecule = 2 bytes |
-| P18 | SPEC_ORIGIN | "5,400 công thức" L0 | 9,584 L0 anchors |
-| P19 | PLAN_UDC_REBUILD | Mâu thuẫn nội bộ: nói 9,584 nhưng design vẫn 5B | Phải 9,584 VÀ 2B |
+| P18 | SPEC_ORIGIN | "5,400 công thức" L0 | 8,846 L0 anchors |
+| P19 | PLAN_UDC_REBUILD | Mâu thuẫn nội bộ: nói 8,846 nhưng design vẫn 5B | Phải 8,846 VÀ 2B |
 | P20 | PLAN_UDC_REBUILD | UCD schema vẫn dùng heuristic name matching | Đọc udc.json trực tiếp |
 | P21 | PLAN_7_1 (ISL) | ISL payload mang Molecule 5B | ISL payload mang u16 codepoint hoặc 2B packed |
 | P22 | PLAN_8_1 (Security) | SecurityGate check trên Molecule fields | Check trên 2B packed |

@@ -1,6 +1,6 @@
 # HomeOS — SINH HỌC PHÂN TỬ CỦA TRI THỨC
 **Phiên bản:** 3.1 — 2026-03-21
-**Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (integrate input). Đọc bằng ĐẠO HÀM (derive output). UDC 9,584 = L0 gốc. Emoji/UTF-32 = alias L1 trỏ về L0.
+**Nguyên tắc:** Mỗi ký tự là 1 SDF. Chuỗi sinh chuỗi. Lưu TRỌNG SỐ (integrate input). Đọc bằng ĐẠO HÀM (derive output). UDC 8,846 = L0 gốc. Emoji/UTF-32 = alias L1 trỏ về L0.
 
 > Công thức toán học/vật lý chi tiết cho từng chiều → xem `docs/UDC_DOC/UDC_*_tree.md`
 
@@ -12,14 +12,14 @@ HomeOS mã hóa tri thức theo đúng cách DNA mã hóa sự sống:
 
 ```
 DNA:     4 công thức phân tử → chuỗi 3.2 tỷ → toàn bộ sự sống
-HomeOS:  9,584 công thức SDF → chuỗi tỷ links → toàn bộ tri thức
+HomeOS:  8,846 công thức SDF → chuỗi tỷ links → toàn bộ tri thức
 ```
 
 Đây không phải ẩn dụ. Cùng toán học, cùng cấu trúc, khác vật liệu.
 
 | | DNA | HomeOS |
 |---|---|---|
-| Alphabet | 4 nucleotides (A,T,G,C) | 9,584 UDC (SDF functions) |
+| Alphabet | 4 nucleotides (A,T,G,C) | 8,846 UDC (SDF functions) |
 | Mỗi ký tự là | 1 công thức phân tử | 1 hàm SDF (sub-variants trong block) |
 | Bits/ký tự | 2 | 14 (= 2 bytes) |
 | Chuỗi | Dài tỷ bases, đọc đầu → cuối | Dài tỷ links, đọc gốc → ngọn |
@@ -74,13 +74,13 @@ Chi phí lưu UDC: 0 bytes.
 ```
 P_weight [S:4bit][R:4bit][V:3bit][A:3bit][T:2bit] = 16 bits = 2 bytes (u16)
 
-  S = Shape      4 bits (0..15)  — 13 SDF blocks,   1,904 ký tự
-  R = Relation   4 bits (0..15)  — 21 MATH blocks,  3,088 ký tự
-  V = Valence    3 bits (0..7)   — 17 EMOTICON blk,  3,568 ký tự
-  A = Arousal    3 bits (0..7)   — 17 EMOTICON blk   (chia sẻ với V)
-  T = Time       2 bits (0..3)   —  7 MUSICAL blocks, 1,024 ký tự
+  S = Shape      4 bits (0..15)  — 14 SDF blocks,   1,838 ký tự
+  R = Relation   4 bits (0..15)  — 21 MATH blocks,  2,563 ký tự
+  V = Valence    3 bits (0..7)   — 17 EMOTICON blocks, 3,487 ký tự
+  A = Arousal    3 bits (0..7)   — 17 EMOTICON blocks  (chia sẻ với V)
+  T = Time       2 bits (0..3)   —  7 MUSICAL blocks,   958 ký tự
   ─────────────────────────────────────────────────────────
-  Tổng: 58 blocks = 9,584 điểm neo gốc (L0)
+  Tổng: 59 blocks = 8,846 điểm neo gốc (L0)
 
 Vòng đời của P:
   Encoder (∫): input → tích phân → weight (học, ghi vào node)
@@ -88,8 +88,8 @@ Vòng đời của P:
   Decoder (∂): weight → đạo hàm → output (render, trả lời)
 
   ⚠️ PHÂN BIỆT L0 vs L1:
-    L0 = 9,584 UDC chars (olang gốc) — P_weight SEALED, vĩnh viễn
-    L1 = emoji + UTF-32 (41,338 chars) = ALIAS → trỏ về L0 UDC
+    L0 = 8,846 UDC chars (olang gốc) — P_weight SEALED, vĩnh viễn
+    L1 = emoji + UTF-32 (32,492 chars) = ALIAS → trỏ về L0 UDC
 
     🔥 U+1F525 là L1 ALIAS → trỏ về UDC char trong block E.08
     😊 U+1F60A là L1 ALIAS → trỏ về UDC char trong block E.09
@@ -99,9 +99,9 @@ Vòng đời của P:
     Encoder chạy → weight tích lũy → CHÍN → ghi vĩnh viễn (QR)
 ```
 
-### 1.4 — 58 Unicode Blocks = Bảng tuần hoàn của tri thức
+### 1.4 — 59 Unicode Blocks = Bảng tuần hoàn của tri thức
 
-**SDF — 13 blocks, 1,904 ký tự (Shape)**
+**SDF — 14 blocks, 1,838 ký tự (Shape)**
 
 ```
 S.01  Arrows                 2190..21FF    112
@@ -117,9 +117,10 @@ S.10  Supp Arrows-C          1F800..1F8FF  256
 S.11  Ornamental Dingbats    1F650..1F67F   48
 S.12  Misc Technical         2300..23FF    256
 S.13  Braille Patterns       2800..28FF    256
+S.14  Control Pictures       2400..243F     64
 ```
 
-**MATH — 21 blocks, 3,088 ký tự (Relation)**
+**MATH — 21 blocks, 2,563 ký tự (Relation)**
 
 ```
 M.01  Superscripts+Subscripts   2070..209F     48
@@ -133,7 +134,7 @@ M.08  Math Alphanum Symbols     1D400..1D7FF 1024
 M.09–M.21  (Ancient numerics, Siyaq, Arab math...)  1,184
 ```
 
-**EMOTICON — 17 blocks, 3,568 ký tự (Valence + Arousal)**
+**EMOTICON — 17 blocks, 3,487 ký tự (Valence + Arousal)**
 
 ```
 E.01  Enclosed Alphanumerics    2460..24FF    160
@@ -145,7 +146,7 @@ E.09  Emoticons                 1F600..1F64F   80
 E.10–E.17  (Transport, Alchemical, Chess...)  1,536
 ```
 
-**MUSICAL — 7 blocks, 1,024 ký tự (Time)**
+**MUSICAL — 7 blocks, 958 ký tự (Time)**
 
 ```
 T.01  Yijing Hexagram           4DC0..4DFF     64
@@ -214,11 +215,11 @@ Sinh học: cortisol + adrenaline → stress MẠNH HƠN từng cái riêng lẻ
 KnowTree là CÂY PHÂN TẦNG (hierarchical tree), phản ánh cấu trúc Unicode:
 
   L0:  5 nhóm chính          (SDF, MATH, EMOTICON, MUSICAL, RELATION)
-  L1:  58 blocks              (S.01..S.13, M.01..M.21, E.01..E.17, T.01..T.07)
+  L1:  59 blocks              (S.01..S.14, M.01..M.21, E.01..E.17, T.01..T.07)
   L2:  ~200 sub-ranges        (Arrow/Geometric/BoxDrawing... trong mỗi block)
-  L3:  9,584 ký tự UDC        (char cụ thể — LÁ của cây)
+  L3:  8,846 ký tự UDC        (char cụ thể — LÁ của cây)
 
-  Emoji/UTF-32 (41,338 chars) = ALIAS layer → trỏ về L3 UDC chars
+  Emoji/UTF-32 (32,492 chars) = ALIAS layer → trỏ về L3 UDC chars
   Emoji KHÔNG NẰM TRONG KnowTree. Emoji là ALIAS.
 
 Vi tích phân không gian ∫ₛ đi TỪ DƯỚI LÊN (bootstrap):
@@ -232,12 +233,12 @@ Tra cứu: đi TỪ TRÊN XUỐNG (L0 → L1 → L2 → L3) = O(log n).
 
 Kích thước:
   L0:  5 × 2B     =    10 B
-  L1:  58 × 2B    =   116 B
+  L1:  59 × 2B    =   118 B
   L2:  ~200 × 2B  =   400 B
-  L3:  9,584 × 2B = 19,168 B ≈ 19 KB
+  L3:  8,846 × 2B = 17,692 B ≈ 18 KB
   ──────────────────────────────
-  Tổng KnowTree   ≈ 20 KB (KHÔNG phải 128 KB hay 256 KB)
-  Alias table      = 41,338 entries riêng biệt
+  Tổng KnowTree   ≈ 18 KB (KHÔNG phải 128 KB hay 256 KB)
+  Alias table      = 32,492 entries riêng biệt
 ```
 
 ### 1.8 — 3 loại storage (KHÔNG nhầm)
@@ -245,14 +246,14 @@ Kích thước:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ Loại 1 — KnowTree (in-memory, hierarchical tree)               │
-│   L0(5) → L1(58) → L2(~200) → L3(9,584) = CÂY PHÂN TẦNG     │
+│   L0(5) → L1(59) → L2(~200) → L3(8,846) = CÂY PHÂN TẦNG     │
 │   Mỗi node = P_weight: u16 (2 bytes)                           │
-│   → ~20 KB tổng (vừa L1 cache dư sức)                          │
+│   → ~18 KB tổng (vừa L1 cache dư sức)                          │
 │   Tra cứu: L0→L1→L2→L3 = O(4) = O(1) thực tế                 │
 │                                                                 │
 │   Alias table (riêng biệt):                                    │
 │   Emoji/UTF-32 → L3 UDC index                                  │
-│   41,338 entries × (cp:4B + L3_index:2B) ≈ 248 KB              │
+│   32,492 entries × 8B ≈ 254 KB                                 │
 ├─────────────────────────────────────────────────────────────────┤
 │ Loại 2 — Chain link (knowledge content)                         │
 │   Mỗi link = u16 (2 bytes) = UDC index trỏ vào KnowTree L3    │
@@ -308,7 +309,7 @@ Hebbian Silk (explicit, learned):
   Chi phí: stored trong SilkGraph (~43KB).
 
 Silk ngang: 75 kênh × 31 mẫu = 2,325 kiểu quan hệ (implicit, 0 bytes)
-Silk dọc: parent_map 9,584 pointers = ~76 KB (CHƯA implement)
+Silk dọc: parent_map 8,846 pointers = ~71 KB (CHƯA implement)
 ```
 
 Khi CẦN so sánh 2 chuỗi:
@@ -595,7 +596,7 @@ Cân bằng Learning ↔ Acting:
 
 ```
 Sinh học:  Vỏ não → vùng → cột → neuron. Tìm kiếm O(log n).
-HomeOS:    L1(5 nhóm) → L2(58 blocks) → L3(~200 sub) → L4(9,584 UDC)
+HomeOS:    L1(5 nhóm) → L2(59 blocks) → L3(~200 sub) → L4(8,846 UDC)
            = HNSW tự nhiên. Không cần xây thêm.
 
 search(query_P, k): O(log n) — 7.42 tỷ links: ~33 bước
@@ -630,8 +631,8 @@ self_correct(input, max_iter=3):
 Molecule (P_weight)   = 2 bytes  (u16)
   [S:4bit][R:4bit][V:3bit][A:3bit][T:2bit] = 16 bits
 
-KnowTree (cây)        = ~20 KB   (L0:5 + L1:58 + L2:~200 + L3:9,584) × 2B
-Alias table           = ~248 KB  (41,338 emoji/UTF-32 → L3 UDC index)
+KnowTree (cây)        = ~18 KB   (L0:5 + L1:59 + L2:~200 + L3:8,846) × 2B
+Alias table           = ~254 KB  (32,492 emoji/UTF-32 → L3 UDC index)
 Chain link             = 2 bytes  (u16 = UDC index trỏ vào KnowTree L3)
 Structural Silk        = 0 bytes  (thứ tự trên chuỗi, implicit)
 Hebbian Silk           = ~43 KB   (SilkGraph, stored per pair)
@@ -668,7 +669,7 @@ cow_splice(chain_A, position, new_link):
 ### D. Generational QR
 
 ```
-QR_gen0: 9,584 UDC gốc — bất tử | gen1: nền (read-mostly)
+QR_gen0: 8,846 UDC gốc — bất tử | gen1: nền (read-mostly)
 gen2: chuyên môn (thỉnh thoảng update) | gen3: mới (write-optimized, hot zone)
 Dream promote: gen3 → gen2 → gen1 theo thời gian.
 ```
@@ -778,7 +779,7 @@ Toàn bộ HomeOS = **1 hàm gốc + 2 phép toán + 1 hằng số φ⁻¹**.
 ║                     φ⁻¹                                       ║
 ║                   )                                           ║
 ║                                                               ║
-║   f(pᵢ) = SDF — 1 trong 9,584 hàm gốc                       ║
+║   f(pᵢ) = SDF — 1 trong 8,846 hàm gốc                       ║
 ║   chain = xâu chuỗi → 2 bytes/link (u16)                     ║
 ║   splice = cắt/ghép chuỗi                                    ║
 ║   self_correct = lặp đến quality ≥ φ⁻¹                       ║
