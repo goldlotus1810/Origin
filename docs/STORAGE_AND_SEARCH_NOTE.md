@@ -7,7 +7,7 @@
 
 ## 1. Bài toán Lưu trữ
 
-### P_weight = 5 bytes cố định
+### P_weight = 2 bytes cố định
 
 ```
 [S: u8][R: u8][V: u8][A: u8][T: u8]
@@ -22,7 +22,7 @@ T ∈ {Static, Slow, Medium, Fast, Instant}  → 3 bits đủ, dùng u8
 ### KnowTree root branch
 
 ```
-65,536 × 5B = 328 KB   ← toàn bộ nằm trong L1 cache của CPU modern
+65,536 × 2B = 128 KB   ← toàn bộ nằm trong L1 cache của CPU modern
 
 index: u16  →  P_weight: [u8; 5]
 
@@ -61,7 +61,7 @@ Kết quả: V và A tự đo từ bản chất emoji — không phải con số
 **Alias node:**
 ```
 "lửa" → canonical = U+1F525
-P["lửa"] = P[U+1F525]   ← copy đầy đủ 5 bytes, SEAL ngay
+P["lửa"] = P[U+1F525]   ← copy đầy đủ 2 bytes, SEAL ngay
 
 Không phải pointer lúc runtime.
 Không có "lazy resolve".
@@ -138,9 +138,9 @@ Bucket (S, R) → danh sách codepoints
 
 **Khi cần full similarity (ít dùng hơn):**
 ```
-SIMD scan 328KB = ~80μs trên CPU thường
+SIMD scan 128KB = ~80μs trên CPU thường
 Không cần index phức tạp — brute force O(n) đủ nhanh
-vì n = 65,536 và mỗi entry = 5 bytes
+vì n = 65,536 và mỗi entry = 2 bytes
 ```
 
 **Walk theo Silk (cho pipeline cảm xúc):**
@@ -210,6 +210,6 @@ Phần dư dùng cho:
 ## Tóm tắt một dòng
 
 ```
-KnowTree = 328KB array; P = đo 1 lần từ emoji visual; alias = copy P của canonical;
+KnowTree = 128KB array; P = đo 1 lần từ emoji visual; alias = copy P của canonical;
 search = bucket(S,R) rồi sort(|ΔV|+|ΔA|); emotion = Silk walk, không search.
 ```
