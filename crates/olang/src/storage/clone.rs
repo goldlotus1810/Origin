@@ -157,12 +157,12 @@ fn is_relevant(chain: &MolecularChain, profile: &DeviceProfile) -> bool {
 
     // Lấy molecule đầu tiên để check shape/emotion
     let mol = &chain.0[0];
-    let v = mol.emotion.valence;
-    let a = mol.emotion.arousal;
+    let v = mol.valence_u8();
+    let a = mol.arousal_u8();
 
     // Tất cả thiết bị đều cần: origin, emotion cơ bản
     // Shape Sphere (0x01) = phổ biến nhất → luôn giữ
-    if mol.shape == 0x01 {
+    if mol.shape_u8() == 0x01 {
         return true;
     }
 

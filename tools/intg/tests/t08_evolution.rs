@@ -20,13 +20,13 @@ fn evolve_valence_creates_new_molecule() {
 
     assert!(result.valid, "evolve(Valence, 0x40) must be valid (consistency ≥ 3)");
     assert_ne!(
-        result.molecule.emotion.valence,
-        mol.emotion.valence,
+        result.molecule.valence(),
+        mol.valence(),
         "evolved molecule must have different valence"
     );
-    assert_eq!(result.molecule.emotion.valence, 0x40);
-    assert_eq!(result.molecule.shape, mol.shape, "shape must be unchanged");
-    assert_eq!(result.molecule.relation, mol.relation, "relation must be unchanged");
+    assert_eq!(result.molecule.valence(), olang::molecular::Molecule::pack(0, 0, 0x40, 0, 0).valence());
+    assert_eq!(result.molecule.shape(), mol.shape(), "shape must be unchanged");
+    assert_eq!(result.molecule.relation(), mol.relation(), "relation must be unchanged");
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn evolve_shape_creates_new_molecule() {
 
     // Evolve shape to Cone (0x04)
     let result = mol.evolve(Dimension::Shape, 0x04);
-    assert_eq!(result.molecule.shape, 0x04);
+    assert_eq!(result.molecule.shape(), olang::molecular::Molecule::pack(0x04, 0, 0, 0, 0).shape());
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn evolve_time_creates_new_molecule() {
 
     // Evolve time to Static (0x01)
     let result = mol.evolve(Dimension::Time, 0x01);
-    assert_eq!(result.molecule.time, 0x01);
+    assert_eq!(result.molecule.time(), olang::molecular::Molecule::pack(0, 0, 0, 0, 0x01).time());
 }
 
 // ── dimension_delta detects correct change ───────────────────────────────────

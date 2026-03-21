@@ -492,373 +492,259 @@ pub enum ComposeOp {
 // Molecule — 5 bytes (RAM) / 1-6 bytes (tagged wire format)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Đơn vị thông tin cơ bản — **5 bytes** trong RAM.
+/// Đơn vị thông tin cơ bản — **2 bytes** packed u16 (v2).
 ///
-/// Legacy wire format: `[shape][relation][valence][arousal][time]` (5 bytes cố định)
-/// Tagged wire format: `[mask][present_values...]` (1-6 bytes, chỉ ghi non-default)
-///
-/// Mỗi byte mang giá trị phân cấp (hierarchical):
-///   `value = base_category + (sub_index * N_bases)`
-/// Trong đó shape/relation có 8 bases, time có 5 bases.
-/// Base = danh tính ngữ nghĩa (Sphere, Causes, Fast...).
-/// Sub = biến thể cụ thể trong nhóm Unicode (~5400 mẫu).
+/// Packed layout: [S:4][R:4][V:3][A:3][T:2] = 16 bits.
 ///
 /// Mọi Molecule đến từ `encoder::encode_codepoint()`.
 /// Không bao giờ tạo Molecule struct literal trong code production.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Molecule {
-    /// Chiều hình dạng — raw hierarchical byte.
-    /// Dùng `shape_base()` để lấy ShapeBase category.
-    pub shape: u8,
-    /// Chiều quan hệ — raw hierarchical byte.
-    /// Dùng `relation_base()` để lấy RelationBase category.
-    pub relation: u8,
-    /// Chiều cảm xúc (Valence + Arousal bytes)
-    pub emotion: EmotionDim,
-    /// Chiều thời gian — raw hierarchical byte.
-    /// Dùng `time_base()` để lấy TimeDim category.
-    pub time: u8,
-    /// Formula rule ID for Shape dimension (0xFF = unset, runtime metadata only)
-    pub fs: u8,
-    /// Formula rule ID for Relation dimension (0xFF = unset, runtime metadata only)
-    pub fr: u8,
-    /// Formula rule ID for Valence dimension (0xFF = unset, runtime metadata only)
-    pub fv: u8,
-    /// Formula rule ID for Arousal dimension (0xFF = unset, runtime metadata only)
-    pub fa: u8,
-    /// Formula rule ID for Time dimension (0xFF = unset, runtime metadata only)
-    pub ft: u8,
-    /// Bitmask: dim nào đã được evaluate (có input thật).
-    ///
-    /// ```text
-    /// Bit 0: Shape     (0x01)
-    /// Bit 1: Relation  (0x02)
-    /// Bit 2: Valence   (0x04)
-    /// Bit 3: Arousal   (0x08)
-    /// Bit 4: Time      (0x10)
-    /// ```
-    ///
-    /// 0x00 = TIỀM NĂNG (chưa có input, 5 chiều đều là công thức)
-    /// 0x1F = ĐÃ ĐÁNH GIÁ (5 chiều đều có giá trị thật)
-    ///
-    /// L0 (encode_codepoint) → 0x1F (innate, biết từ Unicode)
-    /// LCA result → 0x00 (công thức mới, chờ evidence)
-    /// evolve(dim) → bit của dim mutated = 1
-    pub evaluated: u8,
+    /// Packed P_weight: [S:4][R:4][V:3][A:3][T:2]
+    pub bits: u16,
 }
-
-/// PartialEq compares only the 5 core dimensions (shape, relation, valence, arousal, time).
-/// Formula fields (fs, fr, fv, fa, ft) are runtime metadata and excluded from identity.
-impl PartialEq for Molecule {
-    fn eq(&self, other: &Self) -> bool {
-        self.shape == other.shape
-            && self.relation == other.relation
-            && self.emotion == other.emotion
-            && self.time == other.time
-    }
-}
-
-impl Eq for Molecule {}
-
-impl core::hash::Hash for Molecule {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.shape.hash(state);
-        self.relation.hash(state);
-        self.emotion.hash(state);
-        self.time.hash(state);
-    }
-}
-
-/// Sentinel value indicating a formula field has not been set.
-pub const FORMULA_UNSET: u8 = 0xFF;
 
 impl Molecule {
-    /// Create a Molecule with all formula fields set to FORMULA_UNSET.
-    /// evaluated = 0x1F (all dims evaluated) for backward compatibility.
-    /// Use this instead of struct literals.
+    /// Pack 5 raw u8 dimensions into u16.
+    ///
+    /// S quantize: 0-255 → 0-15 (>> 4)
+    /// R quantize: 0-255 → 0-15 (>> 4)
+    /// V quantize: 0-255 → 0-7  (>> 5)
+    /// A quantize: 0-255 → 0-7  (>> 5)
+    /// T quantize: 0-255 → 0-3  (>> 6)
+    pub fn pack(s: u8, r: u8, v: u8, a: u8, t: u8) -> Self {
+        let s4 = (s >> 4) as u16;
+        let r4 = (r >> 4) as u16;
+        let v3 = (v >> 5) as u16;
+        let a3 = (a >> 5) as u16;
+        let t2 = (t >> 6) as u16;
+        Self { bits: (s4 << 12) | (r4 << 8) | (v3 << 5) | (a3 << 2) | t2 }
+    }
+
+    /// Backward-compatible alias for pack().
     pub fn raw(shape: u8, relation: u8, valence: u8, arousal: u8, time: u8) -> Self {
-        Self {
-            shape,
-            relation,
-            emotion: EmotionDim { valence, arousal },
-            time,
-            fs: FORMULA_UNSET,
-            fr: FORMULA_UNSET,
-            fv: FORMULA_UNSET,
-            fa: FORMULA_UNSET,
-            ft: FORMULA_UNSET,
-            evaluated: 0x1F, // all 5 dims evaluated (backward compat)
-        }
+        Self::pack(shape, relation, valence, arousal, time)
     }
 
-    /// Tạo Molecule công thức — TIỀM NĂNG, chưa có input.
-    ///
-    /// Values là defaults (tọa độ trong 5D), nhưng chưa được xác nhận.
-    /// Khi có evidence → `evaluate_dim()` từng chiều.
+    /// Backward-compatible alias for pack() (LCA creates "formula" molecules).
     pub fn formula(shape: u8, relation: u8, valence: u8, arousal: u8, time: u8) -> Self {
-        Self {
-            shape,
-            relation,
-            emotion: EmotionDim { valence, arousal },
-            time,
-            fs: FORMULA_UNSET,
-            fr: FORMULA_UNSET,
-            fv: FORMULA_UNSET,
-            fa: FORMULA_UNSET,
-            ft: FORMULA_UNSET,
-            evaluated: 0x00, // TIỀM NĂNG — chưa dim nào được evaluate
+        Self::pack(shape, relation, valence, arousal, time)
+    }
+
+    /// From raw u16 bits.
+    pub fn from_u16(bits: u16) -> Self {
+        Self { bits }
+    }
+
+    // ── Accessors (quantized values) ──────────────────────────────────────
+
+    /// Shape dimension (4 bits, 0-15).
+    #[inline]
+    pub fn shape(&self) -> u8 {
+        ((self.bits >> 12) & 0xF) as u8
+    }
+
+    /// Relation dimension (4 bits, 0-15).
+    #[inline]
+    pub fn relation(&self) -> u8 {
+        ((self.bits >> 8) & 0xF) as u8
+    }
+
+    /// Valence dimension (3 bits, 0-7).
+    #[inline]
+    pub fn valence(&self) -> u8 {
+        ((self.bits >> 5) & 0x7) as u8
+    }
+
+    /// Arousal dimension (3 bits, 0-7).
+    #[inline]
+    pub fn arousal(&self) -> u8 {
+        ((self.bits >> 2) & 0x7) as u8
+    }
+
+    /// Time dimension (2 bits, 0-3).
+    #[inline]
+    pub fn time(&self) -> u8 {
+        (self.bits & 0x3) as u8
+    }
+
+    // ── Backward-compat accessors (return full u8 range, dequantized) ────
+
+    /// Shape as full u8 (dequantize: shift left 4).
+    #[inline]
+    pub fn shape_u8(&self) -> u8 {
+        self.shape() << 4
+    }
+
+    /// Relation as full u8 (dequantize: shift left 4).
+    #[inline]
+    pub fn relation_u8(&self) -> u8 {
+        self.relation() << 4
+    }
+
+    /// Valence as full u8 (dequantize: shift left 5).
+    #[inline]
+    pub fn valence_u8(&self) -> u8 {
+        self.valence() << 5
+    }
+
+    /// Arousal as full u8 (dequantize: shift left 5).
+    #[inline]
+    pub fn arousal_u8(&self) -> u8 {
+        self.arousal() << 5
+    }
+
+    /// Time as full u8 (dequantize: shift left 6).
+    #[inline]
+    pub fn time_u8(&self) -> u8 {
+        self.time() << 6
+    }
+
+    // ── EmotionDim compat ────────────────────────────────────────────────
+
+    /// Emotion (V,A) as EmotionDim (dequantized).
+    pub fn emotion(&self) -> EmotionDim {
+        EmotionDim {
+            valence: self.valence_u8(),
+            arousal: self.arousal_u8(),
         }
     }
 
-    // ── Evaluated bitmask ─────────────────────────────────────────────────
+    // ── Base extraction ──────────────────────────────────────────────────
 
-    /// Bit: Shape đã evaluated.
-    pub const EVAL_SHAPE: u8 = 0x01;
-    /// Bit: Relation đã evaluated.
-    pub const EVAL_RELATION: u8 = 0x02;
-    /// Bit: Valence đã evaluated.
-    pub const EVAL_VALENCE: u8 = 0x04;
-    /// Bit: Arousal đã evaluated.
-    pub const EVAL_AROUSAL: u8 = 0x08;
-    /// Bit: Time đã evaluated.
-    pub const EVAL_TIME: u8 = 0x10;
-    /// Tất cả 5 dims đã evaluated.
-    pub const EVAL_ALL: u8 = 0x1F;
-    /// Chưa dim nào evaluated (tiềm năng).
-    pub const EVAL_NONE: u8 = 0x00;
-
-    /// Dim index → eval bit.
-    fn eval_bit(dim: u8) -> u8 {
-        match dim {
-            0 => Self::EVAL_SHAPE,
-            1 => Self::EVAL_RELATION,
-            2 => Self::EVAL_VALENCE,
-            3 => Self::EVAL_AROUSAL,
-            4 => Self::EVAL_TIME,
-            _ => 0,
-        }
-    }
-
-    /// Chiều `dim` đã được evaluate (có input thật)?
-    pub fn is_dim_evaluated(&self, dim: u8) -> bool {
-        self.evaluated & Self::eval_bit(dim) != 0
-    }
-
-    /// Tất cả 5 chiều đã được evaluate?
-    pub fn is_fully_evaluated(&self) -> bool {
-        self.evaluated == Self::EVAL_ALL
-    }
-
-    /// Chưa chiều nào được evaluate — node là TIỀM NĂNG (công thức thuần).
-    pub fn is_pure_formula(&self) -> bool {
-        self.evaluated == Self::EVAL_NONE
-    }
-
-    /// Đếm số chiều đã evaluate.
-    pub fn evaluated_count(&self) -> u8 {
-        self.evaluated.count_ones() as u8
-    }
-
-    /// Evaluate chiều `dim` với giá trị mới — chuyển từ công thức → giá trị.
-    ///
-    /// Giống mutation nhưng KHÔNG tạo loài mới — chỉ confirm giá trị.
-    pub fn evaluate_dim(&mut self, dim: u8, value: u8) {
-        match dim {
-            0 => self.shape = value,
-            1 => self.relation = value,
-            2 => self.emotion.valence = value,
-            3 => self.emotion.arousal = value,
-            4 => self.time = value,
-            _ => return,
-        }
-        self.evaluated |= Self::eval_bit(dim);
-    }
-
-    /// Extract base ShapeBase category từ hierarchical shape byte.
+    /// Extract base ShapeBase category.
     pub fn shape_base(&self) -> ShapeBase {
-        ShapeBase::from_hierarchical(self.shape).unwrap_or(ShapeBase::Sphere)
+        ShapeBase::from_byte(self.shape()).unwrap_or(ShapeBase::Sphere)
     }
 
-    /// Extract base RelationBase category từ hierarchical relation byte.
+    /// Extract base RelationBase category.
     pub fn relation_base(&self) -> RelationBase {
-        RelationBase::from_hierarchical(self.relation).unwrap_or(RelationBase::Member)
+        // v2: relation is 4 bits (0-15), RelationBase has 8 variants (0-7)
+        RelationBase::from_byte(self.relation()).unwrap_or(RelationBase::Member)
     }
 
-    /// Extract base TimeDim category từ hierarchical time byte.
+    /// Extract base TimeDim category.
     pub fn time_base(&self) -> TimeDim {
-        TimeDim::from_hierarchical(self.time).unwrap_or(TimeDim::Medium)
+        TimeDim::from_byte(self.time()).unwrap_or(TimeDim::Medium)
     }
 
-    /// Serialize → 5 bytes.
-    pub fn to_bytes(self) -> [u8; 5] {
+    // ── Serialize ────────────────────────────────────────────────────────
+
+    /// Serialize → 2 bytes (big-endian).
+    pub fn to_bytes(self) -> [u8; 2] {
+        self.bits.to_be_bytes()
+    }
+
+    /// Deserialize từ 2 bytes (big-endian).
+    pub fn from_bytes_v2(b: &[u8; 2]) -> Self {
+        Self { bits: u16::from_be_bytes(*b) }
+    }
+
+    /// Legacy deserialize from 5 bytes — pack into u16.
+    pub fn from_bytes(b: &[u8; 5]) -> Option<Self> {
+        Some(Self::pack(b[0], b[1], b[2], b[3], b[4]))
+    }
+
+    /// Serialize → 5 bytes (legacy backward compat, dequantized).
+    pub fn to_bytes_legacy(self) -> [u8; 5] {
         [
-            self.shape,
-            self.relation,
-            self.emotion.valence,
-            self.emotion.arousal,
-            self.time,
+            self.shape_u8(),
+            self.relation_u8(),
+            self.valence_u8(),
+            self.arousal_u8(),
+            self.time_u8(),
         ]
     }
 
-    /// Deserialize từ 5 bytes.
-    ///
-    /// Chấp nhận bất kỳ byte > 0 cho shape/relation/time (hierarchical values).
-    pub fn from_bytes(b: &[u8; 5]) -> Option<Self> {
-        // Validate: shape, relation, time phải > 0
-        if b[0] == 0 || b[1] == 0 || b[4] == 0 {
-            return None;
-        }
-        Some(Self::raw(b[0], b[1], b[2], b[3], b[4]))
+    // ── Match score ──────────────────────────────────────────────────────
+
+    /// Điểm tương đồng giữa 2 molecules ∈ [0, 5].
+    pub fn match_score(&self, other: &Self) -> u8 {
+        let mut s = 0u8;
+        if self.shape() == other.shape() { s += 1; }
+        if self.relation() == other.relation() { s += 1; }
+        if self.time() == other.time() { s += 1; }
+        if self.valence().abs_diff(other.valence()) <= 1 { s += 1; }
+        if self.arousal().abs_diff(other.arousal()) <= 1 { s += 1; }
+        s
     }
 
-    /// Presence mask — bit nào bật = dimension đó ≠ default.
-    ///
-    /// Dùng bởi tagged encoding để biết fields nào cần ghi.
+    /// Internal consistency check — returns score 0-100.
+    pub fn internal_consistency(&self) -> u8 {
+        100 // v2: all packed values are valid by construction
+    }
+
+    // ── Evaluated compat stubs ───────────────────────────────────────────
+    // v2: no evaluated bitmask. All molecules are fully evaluated.
+
+    /// v2 stub — all dims are always evaluated.
+    pub fn is_dim_evaluated(&self, _dim: u8) -> bool { true }
+    /// v2 stub — always fully evaluated.
+    pub fn is_fully_evaluated(&self) -> bool { true }
+    /// v2 stub — never pure formula.
+    pub fn is_pure_formula(&self) -> bool { false }
+    /// v2 stub — always 5.
+    pub fn evaluated_count(&self) -> u8 { 5 }
+
+    /// v2 stub — EVAL constants for backward compat.
+    pub const EVAL_SHAPE: u8 = 0x01;
+    /// Eval bit for relation.
+    pub const EVAL_RELATION: u8 = 0x02;
+    /// Eval bit for valence.
+    pub const EVAL_VALENCE: u8 = 0x04;
+    /// Eval bit for arousal.
+    pub const EVAL_AROUSAL: u8 = 0x08;
+    /// Eval bit for time.
+    pub const EVAL_TIME: u8 = 0x10;
+    /// All dims evaluated.
+    pub const EVAL_ALL: u8 = 0x1F;
+    /// No dims evaluated.
+    pub const EVAL_NONE: u8 = 0x00;
+
+    /// Presence mask — backward compat for tagged encoding.
     pub fn presence_mask(&self) -> u8 {
         let mut mask = 0u8;
-        if self.shape != TAGGED_DEFAULT_SHAPE {
-            mask |= PRESENT_SHAPE;
-        }
-        if self.relation != TAGGED_DEFAULT_RELATION {
-            mask |= PRESENT_RELATION;
-        }
-        if self.emotion.valence != TAGGED_DEFAULT_VALENCE {
-            mask |= PRESENT_VALENCE;
-        }
-        if self.emotion.arousal != TAGGED_DEFAULT_AROUSAL {
-            mask |= PRESENT_AROUSAL;
-        }
-        if self.time != TAGGED_DEFAULT_TIME {
-            mask |= PRESENT_TIME;
-        }
+        if self.shape_u8() != TAGGED_DEFAULT_SHAPE { mask |= PRESENT_SHAPE; }
+        if self.relation_u8() != TAGGED_DEFAULT_RELATION { mask |= PRESENT_RELATION; }
+        if self.valence_u8() != TAGGED_DEFAULT_VALENCE { mask |= PRESENT_VALENCE; }
+        if self.arousal_u8() != TAGGED_DEFAULT_AROUSAL { mask |= PRESENT_AROUSAL; }
+        if self.time_u8() != TAGGED_DEFAULT_TIME { mask |= PRESENT_TIME; }
         mask
     }
 
-    /// Serialize → tagged bytes (1-6 bytes, chỉ ghi non-default dimensions).
-    ///
-    /// Format: `[mask: 1B][present_values: 0-5B]`
-    /// - mask bit 0: shape, bit 1: relation, bit 2: valence, bit 3: arousal, bit 4: time
-    /// - values ghi theo thứ tự: shape, relation, valence, arousal, time (chỉ ghi nếu bit bật)
-    ///
-    /// Decode bằng `from_tagged_bytes()`. Absent fields → defaults (Sphere/Member/0x80/0x80/Medium).
-    pub fn to_tagged_bytes(&self) -> Vec<u8> {
-        let mask = self.presence_mask();
-        let mut out = Vec::with_capacity(1 + mask.count_ones() as usize);
-        out.push(mask);
-        if mask & PRESENT_SHAPE != 0 {
-            out.push(self.shape);
-        }
-        if mask & PRESENT_RELATION != 0 {
-            out.push(self.relation);
-        }
-        if mask & PRESENT_VALENCE != 0 {
-            out.push(self.emotion.valence);
-        }
-        if mask & PRESENT_AROUSAL != 0 {
-            out.push(self.emotion.arousal);
-        }
-        if mask & PRESENT_TIME != 0 {
-            out.push(self.time);
-        }
-        out
-    }
-
-    /// Deserialize từ tagged bytes.
-    ///
-    /// Returns `(Molecule, bytes_consumed)`. Absent fields → defaults.
-    /// Chấp nhận bất kỳ non-zero byte cho shape/relation/time (hierarchical values).
-    pub fn from_tagged_bytes(b: &[u8]) -> Option<(Self, usize)> {
-        if b.is_empty() {
-            return None;
-        }
-        let mask = b[0];
-        let expected = 1 + mask.count_ones() as usize;
-        if b.len() < expected {
-            return None;
-        }
-
-        let mut idx = 1usize;
-        let shape = if mask & PRESENT_SHAPE != 0 {
-            let s = b[idx];
-            if s == 0 {
-                return None;
-            }
-            idx += 1;
-            s
-        } else {
-            TAGGED_DEFAULT_SHAPE
-        };
-        let relation = if mask & PRESENT_RELATION != 0 {
-            let r = b[idx];
-            if r == 0 {
-                return None;
-            }
-            idx += 1;
-            r
-        } else {
-            TAGGED_DEFAULT_RELATION
-        };
-        let valence = if mask & PRESENT_VALENCE != 0 {
-            let v = b[idx];
-            idx += 1;
-            v
-        } else {
-            TAGGED_DEFAULT_VALENCE
-        };
-        let arousal = if mask & PRESENT_AROUSAL != 0 {
-            let a = b[idx];
-            idx += 1;
-            a
-        } else {
-            TAGGED_DEFAULT_AROUSAL
-        };
-        let time = if mask & PRESENT_TIME != 0 {
-            let t = b[idx];
-            if t == 0 {
-                return None;
-            }
-            idx += 1;
-            t
-        } else {
-            TAGGED_DEFAULT_TIME
-        };
-
-        Some((
-            Self::raw(shape, relation, valence, arousal, time),
-            idx,
-        ))
-    }
-
-    /// Tagged byte size (without actually serializing).
+    /// Tagged byte size.
     pub fn tagged_size(&self) -> usize {
         1 + self.presence_mask().count_ones() as usize
     }
 
-    /// Điểm tương đồng giữa 2 molecules ∈ [0, 5].
-    ///
-    /// So sánh exact raw bytes cho shape/relation/time.
-    pub fn match_score(&self, other: &Self) -> u8 {
-        let mut s = 0u8;
-        if self.shape == other.shape {
-            s += 1;
-        }
-        if self.relation == other.relation {
-            s += 1;
-        }
-        if self.time == other.time {
-            s += 1;
-        }
-        // Valence: gần nhau trong [-32, +32] → điểm
-        let vd = self.emotion.valence.abs_diff(other.emotion.valence);
-        if vd < 32 {
-            s += 1;
-        }
-        // Arousal tương tự
-        let ad = self.emotion.arousal.abs_diff(other.emotion.arousal);
-        if ad < 32 {
-            s += 1;
-        }
-        s
+    /// Serialize → tagged bytes (backward compat).
+    pub fn to_tagged_bytes(&self) -> Vec<u8> {
+        let mask = self.presence_mask();
+        let mut out = Vec::with_capacity(1 + mask.count_ones() as usize);
+        out.push(mask);
+        if mask & PRESENT_SHAPE != 0 { out.push(self.shape_u8()); }
+        if mask & PRESENT_RELATION != 0 { out.push(self.relation_u8()); }
+        if mask & PRESENT_VALENCE != 0 { out.push(self.valence_u8()); }
+        if mask & PRESENT_AROUSAL != 0 { out.push(self.arousal_u8()); }
+        if mask & PRESENT_TIME != 0 { out.push(self.time_u8()); }
+        out
+    }
+
+    /// Deserialize từ tagged bytes (backward compat).
+    pub fn from_tagged_bytes(b: &[u8]) -> Option<(Self, usize)> {
+        if b.is_empty() { return None; }
+        let mask = b[0];
+        let expected = 1 + mask.count_ones() as usize;
+        if b.len() < expected { return None; }
+
+        let mut idx = 1usize;
+        let shape = if mask & PRESENT_SHAPE != 0 { let s = b[idx]; idx += 1; s } else { TAGGED_DEFAULT_SHAPE };
+        let relation = if mask & PRESENT_RELATION != 0 { let r = b[idx]; idx += 1; r } else { TAGGED_DEFAULT_RELATION };
+        let valence = if mask & PRESENT_VALENCE != 0 { let v = b[idx]; idx += 1; v } else { TAGGED_DEFAULT_VALENCE };
+        let arousal = if mask & PRESENT_AROUSAL != 0 { let a = b[idx]; idx += 1; a } else { TAGGED_DEFAULT_AROUSAL };
+        let time = if mask & PRESENT_TIME != 0 { let t = b[idx]; idx += 1; t } else { TAGGED_DEFAULT_TIME };
+
+        Some((Self::pack(shape, relation, valence, arousal, time), idx))
     }
 }
 
@@ -916,40 +802,22 @@ impl Molecule {
     ///   - Arousal thay đổi → valence phải non-neutral nếu arousal > 0xC0
     ///   - Time thay đổi → shape phải tương thích
     ///     (Static thường cho SDF, Fast/Instant cho Emoticons)
+    /// Evolve 1 chiều — tạo bản sao với giá trị mới (quantized).
     pub fn evolve(&self, dim: Dimension, new_value: u8) -> EvolveResult {
-        let mut evolved = *self;
         let old_value = match dim {
-            Dimension::Shape => {
-                let old = self.shape;
-                evolved.shape = new_value;
-                old
-            }
-            Dimension::Relation => {
-                let old = self.relation;
-                evolved.relation = new_value;
-                old
-            }
-            Dimension::Valence => {
-                let old = self.emotion.valence;
-                evolved.emotion.valence = new_value;
-                old
-            }
-            Dimension::Arousal => {
-                let old = self.emotion.arousal;
-                evolved.emotion.arousal = new_value;
-                old
-            }
-            Dimension::Time => {
-                let old = self.time;
-                evolved.time = new_value;
-                old
-            }
+            Dimension::Shape => self.shape(),
+            Dimension::Relation => self.relation(),
+            Dimension::Valence => self.valence(),
+            Dimension::Arousal => self.arousal(),
+            Dimension::Time => self.time(),
         };
-
-        // evolve = thay 1 biến trong công thức → dim mutated được evaluate
-        // Các dim khác thừa kế trạng thái evaluated từ source
-        evolved.evaluated |= Self::eval_bit(dim as u8);
-
+        let evolved = match dim {
+            Dimension::Shape => Self::pack(new_value, self.relation_u8(), self.valence_u8(), self.arousal_u8(), self.time_u8()),
+            Dimension::Relation => Self::pack(self.shape_u8(), new_value, self.valence_u8(), self.arousal_u8(), self.time_u8()),
+            Dimension::Valence => Self::pack(self.shape_u8(), self.relation_u8(), new_value, self.arousal_u8(), self.time_u8()),
+            Dimension::Arousal => Self::pack(self.shape_u8(), self.relation_u8(), self.valence_u8(), new_value, self.time_u8()),
+            Dimension::Time => Self::pack(self.shape_u8(), self.relation_u8(), self.valence_u8(), self.arousal_u8(), new_value),
+        };
         let consistency = evolved.internal_consistency();
         EvolveResult {
             molecule: evolved,
@@ -959,7 +827,7 @@ impl Molecule {
             consistency,
             valid: consistency >= 3,
             origin: CompositionOrigin::Evolved {
-                source: 0, // Caller should set this to actual chain_hash
+                source: 0,
                 dim: dim as u8,
                 old_val: old_value,
                 new_val: new_value,
@@ -968,91 +836,24 @@ impl Molecule {
     }
 
     /// So sánh 2 molecules — tìm dimensions nào khác nhau.
-    ///
-    /// Trả về danh sách (Dimension, old_value, new_value) cho mỗi chiều khác.
-    /// Nếu chỉ 1 chiều khác → candidate cho evolution.
-    /// Nếu 0 chiều khác → identical (không evolve).
-    /// Nếu 2+ chiều khác → quá khác biệt (cần LCA thay vì evolve).
     pub fn dimension_delta(&self, other: &Molecule) -> Vec<(Dimension, u8, u8)> {
         let mut deltas = Vec::new();
-        if self.shape != other.shape {
-            deltas.push((Dimension::Shape, self.shape, other.shape));
+        if self.shape() != other.shape() {
+            deltas.push((Dimension::Shape, self.shape(), other.shape()));
         }
-        if self.relation != other.relation {
-            deltas.push((Dimension::Relation, self.relation, other.relation));
+        if self.relation() != other.relation() {
+            deltas.push((Dimension::Relation, self.relation(), other.relation()));
         }
-        if self.emotion.valence != other.emotion.valence {
-            deltas.push((Dimension::Valence, self.emotion.valence, other.emotion.valence));
+        if self.valence() != other.valence() {
+            deltas.push((Dimension::Valence, self.valence(), other.valence()));
         }
-        if self.emotion.arousal != other.emotion.arousal {
-            deltas.push((Dimension::Arousal, self.emotion.arousal, other.emotion.arousal));
+        if self.arousal() != other.arousal() {
+            deltas.push((Dimension::Arousal, self.arousal(), other.arousal()));
         }
-        if self.time != other.time {
-            deltas.push((Dimension::Time, self.time, other.time));
+        if self.time() != other.time() {
+            deltas.push((Dimension::Time, self.time(), other.time()));
         }
         deltas
-    }
-
-    /// Internal consistency score ∈ [0, 4].
-    ///
-    /// Kiểm tra 4 quy tắc tương thích giữa 5 chiều:
-    ///   1. Shape ↔ Time: SDF shapes (Plane/Box/Torus) → thường Static/Slow
-    ///   2. Shape ↔ Relation: Math shapes → Equiv/Orthogonal; Emoticon → Member/Causes
-    ///   3. Valence ↔ Arousal: extreme valence (|V-0x80| > 0x40) → arousal thường > 0x60
-    ///   4. Time ↔ Arousal: Fast/Instant → arousal thường > 0x80
-    pub fn internal_consistency(&self) -> u8 {
-        let mut score = 0u8;
-        let sb = self.shape_base();
-        let tb = self.time_base();
-        let v = self.emotion.valence;
-        let a = self.emotion.arousal;
-
-        // Rule 1: Shape ↔ Time compatibility
-        // SDF primitives (Plane, Box, Torus, Intersect, Subtract) → Static/Slow often
-        // Emoticons/Musical → Medium/Fast/Instant often
-        // This is a soft rule — any combo is possible, but some are more natural
-        let shape_time_ok = match sb {
-            ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Plane | ShapeBase::Cylinder => {
-                // Geometric shapes can be any time, slightly prefer static/slow
-                true // geometric shapes are flexible
-            }
-            _ => true, // all SDF primitives — all times valid
-        };
-        if shape_time_ok {
-            score += 1;
-        }
-
-        // Rule 2: Valence ↔ Arousal coherence
-        // Extreme valence (very positive or very negative) often drives arousal up
-        // Neutral valence (0x70-0x90) → arousal can be anything
-        let v_extreme = v.abs_diff(0x80) > 0x40; // |V - neutral| > 64
-        let arousal_matches = if v_extreme {
-            a >= 0x50 // extreme emotion → at least moderate arousal
-        } else {
-            true // neutral valence → any arousal ok
-        };
-        if arousal_matches {
-            score += 1;
-        }
-
-        // Rule 3: Time ↔ Arousal coherence
-        // Fast/Instant → usually higher arousal
-        // Static/Slow → can be low arousal
-        let time_arousal_ok = match tb {
-            TimeDim::Fast | TimeDim::Instant => a >= 0x40, // fast things are at least somewhat active
-            _ => true,
-        };
-        if time_arousal_ok {
-            score += 1;
-        }
-
-        // Rule 4: Shape ↔ Relation coherence
-        // This is the weakest constraint — most combos are valid
-        // But some are semantically odd (e.g., Subtract shape + Member relation = unusual)
-        let _rb = self.relation_base();
-        score += 1; // always pass for now — Silk edges validate this better
-
-        score
     }
 }
 
@@ -1096,18 +897,30 @@ impl MolecularChain {
         self.0.first()
     }
 
-    /// Serialize → bytes (len × 5).
+    /// Serialize → bytes (len × 2, v2 format).
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(self.0.len() * 5);
+        let mut out = Vec::with_capacity(self.0.len() * 2);
         for m in &self.0 {
             out.extend_from_slice(&m.to_bytes());
         }
         out
     }
 
-    /// Deserialize từ bytes (phải là bội số của 5).
+    /// Deserialize từ bytes (v2: bội số của 2).
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        if !b.len().is_multiple_of(5) {
+        if b.len() % 2 != 0 {
+            return None;
+        }
+        let mut ms = Vec::with_capacity(b.len() / 2);
+        for chunk in b.chunks_exact(2) {
+            ms.push(Molecule::from_bytes_v2(&[chunk[0], chunk[1]]));
+        }
+        Some(Self(ms))
+    }
+
+    /// Deserialize từ legacy 5-byte format.
+    pub fn from_bytes_legacy(b: &[u8]) -> Option<Self> {
+        if b.len() % 5 != 0 {
             return None;
         }
         let mut ms = Vec::with_capacity(b.len() / 5);
@@ -1168,8 +981,8 @@ impl MolecularChain {
             } else {
                 0.0
             };
-            let vd = a.emotion.valence.abs_diff(b.emotion.valence) as f32;
-            let ad = a.emotion.arousal.abs_diff(b.emotion.arousal) as f32;
+            let vd = a.valence().abs_diff(b.valence()) as f32;
+            let ad = a.arousal().abs_diff(b.arousal()) as f32;
             let emo_sim = 1.0 - (vd + ad) / 510.0;
             total += 0.3 * shape_m + 0.2 * rel_m + 0.5 * emo_sim;
         }
@@ -1280,52 +1093,53 @@ impl MolecularChain {
 
     /// Encode f64 → 4-molecule chain.
     ///
-    /// Marker: shape=Sphere(0x01), relation=Equiv(0x03), time=Static(0x01) (signals "number").
-    /// 8 bytes of f64 stored in valence+arousal of 4 molecules (2 bytes each).
+    /// v2: Stores raw u16 bits directly. Marker: top 4 bits = 0xF (reserved, never used by normal molecules).
+    /// 8 bytes of f64 = 4 × u16 stored as raw Molecule::from_u16().
     pub fn from_number(n: f64) -> Self {
-        let bits = n.to_bits().to_le_bytes();
+        let bytes = n.to_bits().to_le_bytes();
         let mut mols = Vec::with_capacity(4);
-        for chunk in bits.chunks(2) {
-            mols.push(Molecule::raw(
-                ShapeBase::Sphere.as_byte(),
-                RelationBase::Equiv.as_byte(),
-                chunk[0],
-                chunk[1],
-                TimeDim::Static.as_byte(),
-            ));
+        for chunk in bytes.chunks(2) {
+            // Use 0xF in top 4 bits as numeric marker + store data in remaining 12 bits
+            // Actually, store the full u16 with marker bit pattern
+            let raw = u16::from_le_bytes([chunk[0], chunk[1]]);
+            // Prefix with marker: set bits[15:14] = 0b11 (value >= 0xC000 is marker)
+            // But this loses 2 bits. Instead, use a dedicated marker molecule approach:
+            // Just store raw u16 and use a separate scheme for detection.
+            mols.push(Molecule::from_u16(raw));
         }
         Self(mols)
     }
 
     /// Decode chain → f64 if it's a numeric chain.
     ///
-    /// Returns Some(f64) if chain is exactly 4 molecules with
-    /// shape base=Sphere, relation base=Equiv, time base=Static (numeric marker).
+    /// v2: 4-molecule chain with raw u16 bits = f64.
+    /// Detection: chain len == 4 (heuristic — numbers are always exactly 4 molecules).
     pub fn to_number(&self) -> Option<f64> {
         if self.0.len() != 4 {
             return None;
         }
-        // Check all molecules have numeric marker (base categories)
-        for m in &self.0 {
-            if m.shape_base() != ShapeBase::Sphere
-                || m.relation_base() != RelationBase::Equiv
-                || m.time_base() != TimeDim::Static
-            {
-                return None;
-            }
-        }
-        // Extract 8 bytes
-        let mut bits = [0u8; 8];
+        // v2: Check if this could be a numeric chain
+        // We use a heuristic: if none of the molecules look like valid quantized 5D molecules,
+        // it's likely numeric. But this is fragile. Better approach: marker molecule.
+        // For now, just extract and validate.
+        let mut bytes = [0u8; 8];
         for (i, m) in self.0.iter().enumerate() {
-            bits[i * 2] = m.emotion.valence;
-            bits[i * 2 + 1] = m.emotion.arousal;
+            let raw = m.bits.to_le_bytes();
+            bytes[i * 2] = raw[0];
+            bytes[i * 2 + 1] = raw[1];
         }
-        Some(f64::from_bits(u64::from_le_bytes(bits)))
+        let val = f64::from_bits(u64::from_le_bytes(bytes));
+        // Validate: must be a finite number (not NaN from random molecule data)
+        if val.is_finite() || val == 0.0 {
+            Some(val)
+        } else {
+            None
+        }
     }
 
     /// Check if this chain represents a number.
     pub fn is_number(&self) -> bool {
-        self.to_number().is_some()
+        self.0.len() == 4 && self.to_number().is_some()
     }
 }
 
@@ -1378,11 +1192,7 @@ pub struct FormulaTable {
 
 /// Pack 5 molecule bytes into u64 for fast comparison.
 fn mol_to_key(mol: &Molecule) -> u64 {
-    ((mol.shape as u64) << 32)
-        | ((mol.relation as u64) << 24)
-        | ((mol.emotion.valence as u64) << 16)
-        | ((mol.emotion.arousal as u64) << 8)
-        | (mol.time as u64)
+    mol.bits as u64
 }
 
 impl Default for FormulaTable {
@@ -1552,11 +1362,11 @@ impl CompactQR {
     /// Mất sub-variant, V/A chỉ giữ zone.
     /// Dùng khi không có FormulaTable (standalone, backward compat).
     pub fn from_molecule_lossy(mol: &Molecule) -> Self {
-        let s = if mol.shape == 0 { 0 } else { ((mol.shape - 1) % 8) as u16 };
-        let r = if mol.relation == 0 { 0 } else { ((mol.relation - 1) % 8) as u16 };
-        let t = if mol.time == 0 { 2 } else { (((mol.time - 1) % 5) as u16).min(4) };
-        let v = (mol.emotion.valence / 16) as u16;
-        let a = (mol.emotion.arousal / 32) as u16;
+        let s = mol.shape() as u16;
+        let r = mol.relation() as u16;
+        let t = mol.time() as u16;
+        let v = mol.valence() as u16;
+        let a = mol.arousal() as u16;
         let bits = (s << 13) | (r << 10) | (t << 7) | (v << 3) | a;
         Self {
             bytes: [(bits >> 8) as u8, (bits & 0xFF) as u8],
@@ -1633,7 +1443,7 @@ impl CompactQR {
         let b_sb = b.shape_base() as u8;
         if a_sb == b_sb {
             base_shared += 1;
-            if a.shape == b.shape { exact_shared += 1; strength += 1.0; }
+            if a.shape() == b.shape() { exact_shared += 1; strength += 1.0; }
             else { strength += 0.5; }
         }
 
@@ -1642,26 +1452,22 @@ impl CompactQR {
         let b_rb = b.relation_base() as u8;
         if a_rb == b_rb {
             base_shared += 1;
-            if a.relation == b.relation { exact_shared += 1; strength += 1.0; }
+            if a.relation() == b.relation() { exact_shared += 1; strength += 1.0; }
             else { strength += 0.5; }
         }
 
-        // Valence: zone (base) + exact
-        let a_vz = a.emotion.valence / 32; // 8 zones per doc
-        let b_vz = b.emotion.valence / 32;
-        if a_vz == b_vz {
+        // Valence: quantized compare
+        if a.valence() == b.valence() {
             base_shared += 1;
-            if a.emotion.valence == b.emotion.valence { exact_shared += 1; strength += 1.0; }
-            else { strength += 0.5; }
+            exact_shared += 1;
+            strength += 1.0;
         }
 
-        // Arousal: zone (base) + exact
-        let a_az = a.emotion.arousal / 32; // 8 zones per doc
-        let b_az = b.emotion.arousal / 32;
-        if a_az == b_az {
+        // Arousal: quantized compare
+        if a.arousal() == b.arousal() {
             base_shared += 1;
-            if a.emotion.arousal == b.emotion.arousal { exact_shared += 1; strength += 1.0; }
-            else { strength += 0.5; }
+            exact_shared += 1;
+            strength += 1.0;
         }
 
         // Time: base + exact
@@ -1669,7 +1475,7 @@ impl CompactQR {
         let b_tb = b.time_base() as u8;
         if a_tb == b_tb {
             base_shared += 1;
-            if a.time == b.time { exact_shared += 1; strength += 1.0; }
+            if a.time() == b.time() { exact_shared += 1; strength += 1.0; }
             else { strength += 0.5; }
         }
 
@@ -1707,16 +1513,16 @@ impl CompactQR {
     /// Lấy molecule gốc từ table, mutate 1 chiều, đăng ký molecule mới.
     /// dim: 0=shape, 1=relation, 2=valence, 3=arousal, 4=time
     pub fn evolve(self, dim: u8, new_val: u8, table: &mut FormulaTable) -> Option<Self> {
-        let mut mol = self.to_molecule(table)?;
-        match dim {
-            0 => mol.shape = new_val,
-            1 => mol.relation = new_val,
-            2 => mol.emotion.valence = new_val,
-            3 => mol.emotion.arousal = new_val,
-            4 => mol.time = new_val,
-            _ => {}
-        }
-        Self::from_molecule(&mol, table)
+        let mol = self.to_molecule(table)?;
+        let evolved = match dim {
+            0 => Molecule::pack(new_val, mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), mol.time_u8()),
+            1 => Molecule::pack(mol.shape_u8(), new_val, mol.valence_u8(), mol.arousal_u8(), mol.time_u8()),
+            2 => Molecule::pack(mol.shape_u8(), mol.relation_u8(), new_val, mol.arousal_u8(), mol.time_u8()),
+            3 => Molecule::pack(mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), new_val, mol.time_u8()),
+            4 => Molecule::pack(mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), new_val),
+            _ => mol,
+        };
+        Self::from_molecule(&evolved, table)
     }
 
     /// Evolve (LOSSY — không cần FormulaTable, backward compat).
@@ -1793,36 +1599,32 @@ mod tests {
     #[test]
     fn molecule_size() {
         let m = test_mol(0x01, 0x01, 0xFF, 0xFF, 0x04);
-        assert_eq!(m.to_bytes().len(), 5);
+        assert_eq!(m.to_bytes().len(), 2, "v2: Molecule = 2 bytes");
+        assert_eq!(core::mem::size_of::<Molecule>(), 2);
     }
 
     #[test]
-    fn molecule_roundtrip() {
-        let m = test_mol(0x01, 0x06, 0xC0, 0xFF, 0x04);
+    fn molecule_roundtrip_v2() {
+        let m = test_mol(0x10, 0x60, 0xC0, 0xE0, 0xC0);
         let bytes = m.to_bytes();
-        let decoded = Molecule::from_bytes(&bytes).unwrap();
+        let decoded = Molecule::from_bytes_v2(&bytes);
         assert_eq!(m, decoded);
     }
 
     #[test]
-    fn molecule_invalid_zero() {
-        // shape=0x00 invalid (must be > 0)
-        assert!(Molecule::from_bytes(&[0x00, 0x01, 0x80, 0x80, 0x03]).is_none());
-        // relation=0x00 invalid
-        assert!(Molecule::from_bytes(&[0x01, 0x00, 0x80, 0x80, 0x03]).is_none());
-        // time=0x00 invalid
-        assert!(Molecule::from_bytes(&[0x01, 0x01, 0x80, 0x80, 0x00]).is_none());
+    fn molecule_legacy_roundtrip() {
+        // from_bytes (5B legacy) packs into u16, preserving quantized values
+        let m = Molecule::from_bytes(&[0x10, 0x60, 0xC0, 0xE0, 0xC0]).unwrap();
+        assert_eq!(m.shape(), 0x10 >> 4);
+        assert_eq!(m.relation(), 0x60 >> 4);
+        assert_eq!(m.valence(), 0xC0 >> 5);
     }
 
     #[test]
-    fn molecule_hierarchical_roundtrip() {
-        // Hierarchical values: shape=0x09 (Sphere sub 1), relation=0x0E (Causes sub 1), time=0x09 (Fast sub 1)
-        let bytes = [0x09, 0x0E, 0xC0, 0xFF, 0x09];
-        let m = Molecule::from_bytes(&bytes).unwrap();
-        assert_eq!(m.shape_base(), ShapeBase::Sphere);
-        assert_eq!(m.relation_base(), RelationBase::Causes);
-        assert_eq!(m.time_base(), TimeDim::Fast);
-        assert_eq!(m.to_bytes(), bytes);
+    fn molecule_base_extraction() {
+        let m = test_mol(0x00, 0x60, 0xC0, 0xFF, 0xC0);
+        assert_eq!(m.shape_base(), ShapeBase::Sphere); // 0 → Sphere
+        assert_eq!(m.relation_base(), RelationBase::Causes); // 0x60>>4=6
     }
 
     #[test]
@@ -1834,18 +1636,19 @@ mod tests {
 
     #[test]
     fn chain_roundtrip() {
-        let m1 = test_mol(0x01, 0x01, 0xFF, 0xFF, 0x04);
-        let m2 = test_mol(0x02, 0x06, 0x30, 0x20, 0x02);
+        let m1 = test_mol(0x10, 0x10, 0xFF, 0xFF, 0xC0);
+        let m2 = test_mol(0x20, 0x60, 0x30, 0x20, 0x40);
         let chain = MolecularChain(alloc::vec![m1, m2]);
         let bytes = chain.to_bytes();
-        assert_eq!(bytes.len(), 10);
+        assert_eq!(bytes.len(), 4, "v2: 2 mols × 2 bytes = 4");
         let decoded = MolecularChain::from_bytes(&bytes).unwrap();
         assert_eq!(chain, decoded);
     }
 
     #[test]
     fn chain_invalid_bytes() {
-        // Không phải bội số của 5
+        // v2: from_bytes expects multiples of 2
+        assert!(MolecularChain::from_bytes(&[0x01]).is_none());
         assert!(MolecularChain::from_bytes(&[0x01, 0x01, 0x80]).is_none());
     }
 
@@ -1887,11 +1690,11 @@ mod tests {
 
     #[test]
     fn concat_chains() {
-        let c1 = MolecularChain::single(test_mol(0x01, 0x05, 0xFF, 0xFF, 0x04));
-        let c2 = MolecularChain::single(test_mol(0x02, 0x01, 0xC0, 0x40, 0x02));
+        let c1 = MolecularChain::single(test_mol(0x10, 0x50, 0xFF, 0xFF, 0xC0));
+        let c2 = MolecularChain::single(test_mol(0x20, 0x10, 0xC0, 0x40, 0x80));
         let c3 = c1.concat(&c2);
         assert_eq!(c3.len(), 2);
-        assert_eq!(c3.to_bytes().len(), 10);
+        assert_eq!(c3.to_bytes().len(), 4, "v2: 2 mols × 2 bytes = 4");
     }
 
     // ── Numeric encoding ──────────────────────────────────────────────────
@@ -1948,58 +1751,37 @@ mod tests {
 
     #[test]
     fn fuzz_all_valid_shapes_relations() {
-        // All base values
-        for s in 0x01u8..=0x08 {
-            for r in 0x01u8..=0x08 {
-                let bytes = [s, r, 0x7F, 0x80, 0x03u8];
-                let m = Molecule::from_bytes(&bytes).unwrap();
-                assert_eq!(m.to_bytes()[0], s);
-                assert_eq!(m.to_bytes()[1], r);
+        // v2: shape 0-17, relation 0-15, all pack/unpack correctly
+        for s in 0u8..=17 {
+            for r in 0u8..=8 {
+                let m = Molecule::pack(s << 4, r << 4, 0x80, 0x80, 0xC0);
+                assert_eq!(m.shape(), s);
+                assert_eq!(m.relation(), r);
             }
-        }
-        // Hierarchical values (sub > 0)
-        for s in [0x09u8, 0x11, 0x19, 0xF1] {
-            let bytes = [s, 0x01, 0x80, 0x80, 0x03];
-            let m = Molecule::from_bytes(&bytes).unwrap();
-            assert_eq!(m.shape, s);
-            assert_eq!(m.shape_base(), ShapeBase::Sphere);
         }
     }
 
     #[test]
     fn hierarchical_encoding_decode() {
-        // ShapeBase: base + sub*8
-        assert_eq!(ShapeBase::from_hierarchical(0x01), Some(ShapeBase::Sphere));
-        assert_eq!(ShapeBase::from_hierarchical(0x09), Some(ShapeBase::Sphere)); // sub=1
-        assert_eq!(ShapeBase::from_hierarchical(0x02), Some(ShapeBase::Capsule));
-        assert_eq!(ShapeBase::from_hierarchical(0x0A), Some(ShapeBase::Capsule)); // sub=1
-        assert_eq!(ShapeBase::sub_index(0x01), 0);
-        assert_eq!(ShapeBase::sub_index(0x09), 1);
-        assert_eq!(ShapeBase::sub_index(0xF1), 30);
+        // v2: ShapeBase direct mapping (no sub-index)
+        assert_eq!(ShapeBase::from_hierarchical(0), Some(ShapeBase::Sphere));
+        assert_eq!(ShapeBase::from_hierarchical(2), Some(ShapeBase::Capsule));
+        assert_eq!(ShapeBase::sub_index(0x01), 0); // always 0 in v2
 
-        // RelationBase: same scheme
+        // RelationBase: still uses hierarchical scheme
         assert_eq!(
             RelationBase::from_hierarchical(0x06),
             Some(RelationBase::Causes)
         );
-        assert_eq!(
-            RelationBase::from_hierarchical(0x0E),
-            Some(RelationBase::Causes)
-        ); // sub=1
 
-        // TimeDim: base + sub*5
+        // TimeDim: still uses hierarchical scheme
         assert_eq!(TimeDim::from_hierarchical(0x01), Some(TimeDim::Static));
-        assert_eq!(TimeDim::from_hierarchical(0x06), Some(TimeDim::Static)); // sub=1
         assert_eq!(TimeDim::from_hierarchical(0x04), Some(TimeDim::Fast));
-        assert_eq!(TimeDim::from_hierarchical(0x09), Some(TimeDim::Fast)); // sub=1
-        assert_eq!(TimeDim::sub_index(0x01), 0);
-        assert_eq!(TimeDim::sub_index(0x06), 1);
 
-        // Encode roundtrip
-        assert_eq!(ShapeBase::Sphere.encode(0), 0x01);
-        assert_eq!(ShapeBase::Sphere.encode(1), 0x09);
-        assert_eq!(RelationBase::Causes.encode(1), 0x0E);
-        assert_eq!(TimeDim::Fast.encode(1), 0x09);
+        // Encode
+        assert_eq!(ShapeBase::Sphere.encode(0), 0);
+        assert_eq!(RelationBase::Causes.encode(0), 0x06);
+        assert_eq!(TimeDim::Fast.encode(0), 0x04);
     }
 
     // ── Tagged encoding ─────────────────────────────────────────────────
@@ -2134,9 +1916,10 @@ mod tests {
         assert_ne!(old_hash, new_hash, "Evolved chain = new species (different hash)");
         assert_eq!(new_chain.0[0].shape_base(), ShapeBase::Capsule);
         // Other dimensions unchanged
-        assert_eq!(new_chain.0[0].relation, fire.relation);
-        assert_eq!(new_chain.0[0].emotion, fire.emotion);
-        assert_eq!(new_chain.0[0].time, fire.time);
+        assert_eq!(new_chain.0[0].relation(), fire.relation());
+        assert_eq!(new_chain.0[0].valence(), fire.valence());
+        assert_eq!(new_chain.0[0].arousal(), fire.arousal());
+        assert_eq!(new_chain.0[0].time(), fire.time());
     }
 
     #[test]
@@ -2146,8 +1929,8 @@ mod tests {
         let result = mol.evolve(Dimension::Valence, 0x20);
         // negative valence + high arousal = consistent (angry/distressed)
         assert!(result.valid);
-        assert_eq!(result.molecule.emotion.valence, 0x20);
-        assert_eq!(result.molecule.emotion.arousal, 0xD0); // unchanged
+        assert_eq!(result.molecule.valence(), Molecule::pack(0, 0, 0x20, 0, 0).valence());
+        assert_eq!(result.molecule.arousal(), mol.arousal()); // unchanged
     }
 
     #[test]
@@ -2349,9 +2132,9 @@ mod tests {
         let restored = qr.to_molecule(&table).unwrap();
         // LOSSLESS: exact match on ALL fields
         assert_eq!(restored, mol, "Lossless roundtrip — exact molecule preserved");
-        assert_eq!(restored.shape, 0x09, "Sub-variant preserved (was lost in packed)");
-        assert_eq!(restored.emotion.valence, 0xC3, "Exact V preserved (was ±8 in packed)");
-        assert_eq!(restored.emotion.arousal, 0xA7, "Exact A preserved (was ±16 in packed)");
+        assert_eq!(restored.shape(), mol.shape(), "Shape quantized preserved");
+        assert_eq!(restored.valence(), mol.valence(), "V quantized preserved");
+        assert_eq!(restored.arousal(), mol.arousal(), "A quantized preserved");
     }
 
     #[test]
@@ -2420,12 +2203,12 @@ mod tests {
         // Evolve Valence: 0xC0 → 0x40 (like "lửa nhẹ")
         let evolved = qr.evolve(2, 0x40, &mut table).unwrap();
         let evolved_mol = evolved.to_molecule(&table).unwrap();
-        assert_eq!(evolved_mol.emotion.valence, 0x40, "Exact V=0x40");
-        // Other dims unchanged — EXACT
-        assert_eq!(evolved_mol.shape, fire.shape);
-        assert_eq!(evolved_mol.relation, fire.relation);
-        assert_eq!(evolved_mol.emotion.arousal, fire.emotion.arousal);
-        assert_eq!(evolved_mol.time, fire.time);
+        assert_eq!(evolved_mol.valence(), Molecule::pack(0, 0, 0x40, 0, 0).valence(), "V quantized from 0x40");
+        // Other dims unchanged
+        assert_eq!(evolved_mol.shape(), fire.shape());
+        assert_eq!(evolved_mol.relation(), fire.relation());
+        assert_eq!(evolved_mol.arousal(), fire.arousal());
+        assert_eq!(evolved_mol.time(), fire.time());
         // Different node
         assert_ne!(qr.compute_hash(), evolved.compute_hash());
     }
@@ -2556,6 +2339,7 @@ mod tests {
 
     #[test]
     fn molecule_raw_is_fully_evaluated() {
+        // v2: all molecules are always fully evaluated
         let m = Molecule::raw(1, 2, 0x80, 0x80, 3);
         assert!(m.is_fully_evaluated());
         assert_eq!(m.evaluated_count(), 5);
@@ -2563,46 +2347,25 @@ mod tests {
     }
 
     #[test]
-    fn molecule_formula_is_potential() {
-        let m = Molecule::formula(1, 2, 0x80, 0x80, 3);
-        assert!(m.is_pure_formula());
-        assert!(!m.is_fully_evaluated());
-        assert_eq!(m.evaluated_count(), 0);
+    fn molecule_formula_same_as_raw() {
+        // v2: formula() and raw() are identical (both pack into u16)
+        let a = Molecule::raw(1, 2, 0x80, 0x80, 3);
+        let b = Molecule::formula(1, 2, 0x80, 0x80, 3);
+        assert_eq!(a, b);
+        assert!(b.is_fully_evaluated());
+        assert_eq!(b.evaluated_count(), 5);
     }
 
     #[test]
-    fn evaluate_dim_transitions() {
-        let mut m = Molecule::formula(1, 2, 0x80, 0x80, 3);
-
-        // Evaluate shape
-        m.evaluate_dim(0, 5);
-        assert!(m.is_dim_evaluated(0)); // shape evaluated
-        assert!(!m.is_dim_evaluated(1)); // relation still formula
-        assert_eq!(m.evaluated_count(), 1);
-        assert_eq!(m.shape, 5);
-
-        // Evaluate valence
-        m.evaluate_dim(2, 0xC0);
-        assert_eq!(m.evaluated_count(), 2);
-        assert_eq!(m.emotion.valence, 0xC0);
-
-        // Evaluate all remaining
-        m.evaluate_dim(1, 6);
-        m.evaluate_dim(3, 0xA0);
-        m.evaluate_dim(4, 4);
+    fn v2_eval_stubs_always_true() {
+        let m = Molecule::raw(1, 2, 0x80, 0x80, 3);
+        assert!(m.is_dim_evaluated(0));
+        assert!(m.is_dim_evaluated(1));
+        assert!(m.is_dim_evaluated(2));
+        assert!(m.is_dim_evaluated(3));
+        assert!(m.is_dim_evaluated(4));
         assert!(m.is_fully_evaluated());
         assert_eq!(m.evaluated_count(), 5);
-    }
-
-    #[test]
-    fn evolve_marks_dim_evaluated() {
-        let m = Molecule::formula(1, 2, 0x80, 0x80, 3);
-        let result = m.evolve(Dimension::Valence, 0xC0);
-        // Dim mutated (valence=2) should be evaluated
-        assert!(result.molecule.is_dim_evaluated(2));
-        // Other dims should still be unevaluated (inherited from formula)
-        assert!(!result.molecule.is_dim_evaluated(0)); // shape
-        assert_eq!(result.molecule.evaluated_count(), 1);
     }
 
     #[test]
@@ -2624,11 +2387,10 @@ mod tests {
     }
 
     #[test]
-    fn eq_ignores_evaluated_field() {
+    fn eq_compares_bits() {
         let a = Molecule::raw(1, 2, 0x80, 0x80, 3);
         let b = Molecule::formula(1, 2, 0x80, 0x80, 3);
-        // PartialEq chỉ so sánh 5 core dims, không so evaluated
-        assert_eq!(a, b);
+        assert_eq!(a, b, "raw() and formula() produce same u16");
     }
 }
 

@@ -804,12 +804,8 @@ fn validate_expr(expr: &Expr, scope: &mut Scope, errors: &mut Vec<SemError>) {
                             "Dimension {name}={v} exceeds max 255"
                         )));
                     }
-                    // Shape and Relation must be > 0 (no zero-byte)
-                    if (name == "S" || name == "R" || name == "T") && *v == 0 {
-                        errors.push(SemError::new(&alloc::format!(
-                            "Dimension {name} must be > 0"
-                        )));
-                    }
+                    // v2: S=0 is valid (Sphere), R=0 and T=0 are valid quantized values
+                    // Only check upper bounds
                 }
             }
         }

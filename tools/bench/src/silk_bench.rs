@@ -815,7 +815,7 @@ fn bench_projection() {
         // Roundtrip fidelity (LOSSLESS)
         let back = fire_cqr.to_molecule(&table).unwrap();
         println!("    Roundtrip: {:?} (shape={}, rel={}, V={}, A={}, T={}) [LOSSLESS]",
-            back, back.shape, back.relation, back.emotion.valence, back.emotion.arousal, back.time);
+            back, back.shape_u8(), back.relation_u8(), back.valence_u8(), back.arousal_u8(), back.time_u8());
         assert_eq!(back, fire_mol, "Lossless roundtrip");
 
         // Silk compare: fire vs water (LOSSLESS — full precision)
