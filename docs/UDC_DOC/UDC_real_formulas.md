@@ -118,3 +118,127 @@ Arrow(θ, k, type, fill) = {
   direction: d⃗ = (cos θ, sin θ)
 }
 ```
+
+---
+
+## S.1 — HÌNH HỌC (Geometric) — SDF
+
+### Tròn (Circle)
+
+```
+SDF_circle(p⃗, r) = |p⃗| - r
+
+  |p⃗| = √(x² + y²)
+  SDF < 0  → bên trong
+  SDF = 0  → trên viền
+  SDF > 0  → bên ngoài
+```
+
+### Vuông (Square)
+
+```
+SDF_square(p⃗, a) = max(|x| - a, |y| - a)
+```
+
+### Chữ nhật (Rectangle)
+
+```
+SDF_rect(p⃗, w, h) = max(|x| - w, |y| - h)
+```
+
+### Tam giác đều (Equilateral Triangle)
+
+```
+SDF_tri(p⃗, r) = max( |x| - r/2,  -y - r/(2√3),  y - r/√3 )
+```
+
+### Hình thoi / Kim cương (Diamond)
+
+```
+SDF_diamond(p⃗, a, b) = |x|/a + |y|/b - 1
+
+  a = bán trục ngang,  b = bán trục dọc
+```
+
+### Elip (Ellipse)
+
+```
+SDF_ellipse(p⃗, a, b) ≈ (x²/a² + y²/b² - 1) · min(a,b)
+```
+
+### Sao n cánh (n-pointed Star)
+
+```
+Star(p⃗, n, r₁, r₂):
+
+  θ = atan2(y, x)
+  k = round(θ·n/(2π))
+  α = 2πk/n
+
+  Mỗi cánh = tam giác giữa:
+    gốc (0,0),  đỉnh ngoài r₁·(cos α, sin α),
+    đỉnh trong r₂·(cos(α ± π/n), sin(α ± π/n))
+
+  r₁ = bán kính đỉnh cánh
+  r₂ = bán kính kẽ cánh
+  n = số cánh:  { 4:FOUR POINTED, 5:FIVE, 6:SIX, 8:EIGHT, 12:TWELVE }
+```
+
+### Đa giác đều n cạnh (Regular Polygon)
+
+```
+SDF_polygon(p⃗, n, r):
+
+  θ = atan2(y, x)
+  α = 2π/n
+  θ_sector = mod(θ, α) - α/2
+
+  SDF = |p⃗| · cos(θ_sector) - r · cos(α/2)
+
+  n = 5: PENTAGON
+  n = 6: HEXAGON
+  n = 8: OCTAGON
+```
+
+### Chữ thập (Cross)
+
+```
+SDF_cross(p⃗, a, b) = min( SDF_rect(p⃗, a, b),  SDF_rect(p⃗, b, a) )
+
+  Saltire (chéo):  SDF_cross( R(π/4)·p⃗, a, b )
+```
+
+### Hoa (Florette) — n cánh hoa
+
+```
+Florette(p⃗, n, r):
+
+  θ = atan2(y, x)
+  ρ = |p⃗|
+  petal = r · |cos(nθ/2)|
+
+  SDF = ρ - petal
+
+  n cánh: { 4:FOUR PETALLED, 6:SIX PETALLED, 8:EIGHT PETALLED }
+```
+
+### Fill — Áp dụng cho MỌI hình
+
+```
+BLACK/FILLED:   Ω = { p⃗ : SDF(p⃗) ≤ 0 }
+WHITE/OPEN:     Ω = { p⃗ : |SDF(p⃗)| ≤ w/2 }         (viền dày w)
+HALF BLACK:     Ω = { p⃗ : SDF(p⃗) ≤ 0 ∧ n⃗·p⃗ ≥ 0 }  (n⃗ = mặt phẳng cắt)
+DOTTED:         Ω = { p⃗ : |SDF(p⃗)| ≤ w/2 ∧ ⌊s/δ⌋ mod 2 = 0 }  (s = arc length)
+```
+
+### Kích cỡ — Fibonacci scaling (giống Arrow weight)
+
+```
+r(k) = r₀ · φᵏ       φ = (1+√5)/2
+
+  k = -2  → VERY SMALL   r = r₀/φ²
+  k = -1  → SMALL        r = r₀/φ
+  k =  0  → NORMAL       r = r₀
+  k =  1  → MEDIUM       r = r₀·φ
+  k =  2  → LARGE        r = r₀·φ²
+```
