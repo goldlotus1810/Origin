@@ -45,6 +45,11 @@ fn main() {
         checks::check_worker_sends_chain(&root),
         // ── Data Integrity ──
         checks::check_udc_utf32_data(&root),
+        // ── DEEP: P_weight v2 Compliance ──
+        checks::check_pweight_molecule_struct(&root),
+        checks::check_pweight_compactqr_layout(&root),
+        checks::check_pweight_ucd_build(&root),
+        checks::check_pweight_knowtree_size(&root),
     ];
 
     // ── Report ──

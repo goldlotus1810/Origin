@@ -712,3 +712,217 @@ pub fn check_udc_utf32_data(root: &Path) -> CheckResult {
             .with_details(details)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: P_weight — Molecule struct phải dùng packed u16
+// v2 spec: [S:4][R:4][V:3][A:3][T:2] = 16 bits = 2 bytes
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_molecule_struct(root: &Path) -> CheckResult {
+    println!("[15/18] DEEP — Molecule struct P_weight layout...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("P_weight Molecule", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("P_weight Molecule", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check 1: Molecule struct still uses 5 separate u8 fields?
+    let has_shape_u8 = content.contains("pub shape: u8");
+    let has_relation_u8 = content.contains("pub relation: u8");
+    let has_time_u8 = content.contains("pub time: u8");
+
+    // Check 2: to_bytes returns [u8; 5]?
+    let has_5byte_serialize = content.contains("[u8; 5]");
+
+    // Check 3: Has packed u16 p_packed field?
+    let has_p_packed = content.contains("p_packed: u16") || content.contains("p: u16");
+
+    // Check 4: chain_hash uses 5 bytes?
+    let has_5byte_hash = content.contains("chain_hash(&self.to_bytes())");
+
+    if has_p_packed && !has_5byte_serialize {
+        details.push("Molecule has packed u16 P_weight: ✅".into());
+        details.push("No [u8;5] serialization: ✅".into());
+        CheckResult::pass("P_weight Molecule", "OK — Molecule uses packed u16 (v2)")
+            .with_details(details)
+    } else {
+        if has_shape_u8 && has_relation_u8 && has_time_u8 {
+            details.push("Molecule uses 5 × u8 fields (shape, relation, V, A, time): ❌ LEGACY".into());
+        }
+        if has_5byte_serialize {
+            details.push("to_bytes() → [u8; 5]: ❌ should be u16".into());
+        }
+        if has_5byte_hash {
+            details.push("chain_hash uses fnv1a([u8;5]): ❌ should use u16".into());
+        }
+        if !has_p_packed {
+            details.push("No p_packed: u16 field: ❌ need packed P_weight".into());
+        }
+        details.push("Ref: plans/PLAN_PWEIGHT_MIGRATION.md".into());
+        CheckResult::fail("P_weight Molecule", "Molecule still uses 5B layout — v2 requires 2B packed u16")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: CompactQR bit layout phải = [S:4][R:4][V:3][A:3][T:2]
+// Code hiện tại: [S:3][R:3][T:3][V:4][A:3] — SAI
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_compactqr_layout(root: &Path) -> CheckResult {
+    println!("[16/18] DEEP — CompactQR bit layout vs v2...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("P_weight CompactQR", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("P_weight CompactQR", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // v2 layout: (s << 12) | (r << 8) | (v << 5) | (a << 2) | t
+    let has_v2_layout = content.contains("s << 12")
+        && content.contains("r << 8")
+        && content.contains("v << 5")
+        && content.contains("a << 2");
+
+    // Current wrong layout: (s << 13) | (r << 10) | (t << 7) | (v << 3) | a
+    let has_wrong_layout = content.contains("s << 13")
+        || content.contains("r << 10")
+        || content.contains("t << 7");
+
+    if has_v2_layout && !has_wrong_layout {
+        details.push("Bit layout: [S:4][R:4][V:3][A:3][T:2] ✅".into());
+        CheckResult::pass("P_weight CompactQR", "OK — bit layout matches v2 spec")
+            .with_details(details)
+    } else if has_wrong_layout {
+        details.push("Current: [S:3][R:3][T:3][V:4][A:3] — WRONG ❌".into());
+        details.push("Expected: [S:4][R:4][V:3][A:3][T:2] — v2 spec".into());
+        details.push("s << 13 → should be s << 12".into());
+        details.push("r << 10 → should be r << 8".into());
+        details.push("t << 7 → T should be last 2 bits, not middle".into());
+        details.push("Ref: plans/PLAN_PWEIGHT_MIGRATION.md Phase 1".into());
+        CheckResult::fail("P_weight CompactQR", "Bit layout WRONG — [S:3][R:3][T:3][V:4][A:3] vs v2 [S:4][R:4][V:3][A:3][T:2]")
+            .with_details(details)
+    } else {
+        details.push("Cannot determine bit layout — verify manually".into());
+        CheckResult::warn("P_weight CompactQR", "Cannot detect bit layout pattern")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: UCD build.rs sinh UcdEntry — phải có packed u16
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_ucd_build(root: &Path) -> CheckResult {
+    println!("[17/18] DEEP — UCD build.rs P_weight format...");
+    let build_path = root.join("crates/ucd/build.rs");
+
+    if !build_path.exists() {
+        return CheckResult::fail("P_weight UCD", "build.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&build_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("P_weight UCD", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check if build.rs generates u16 packed P
+    let has_u16_p = content.contains("p_packed: u16") || content.contains("p: u16");
+
+    // Check if it still uses 5 separate fields
+    let has_5_fields = content.contains("shape: u8")
+        && content.contains("relation: u8")
+        && content.contains("valence: u8")
+        && content.contains("arousal: u8")
+        && content.contains("time: u8");
+
+    // Check if it reads from udc_p_table.bin
+    let reads_p_table = content.contains("udc_p_table.bin") || content.contains("p_table");
+
+    // Check chain_hash uses 5 bytes
+    let hash_5b = content.contains("fn chain_hash(shape: u8, relation: u8, valence: u8, arousal: u8, time: u8)");
+
+    if has_u16_p && !has_5_fields {
+        details.push("UcdEntry has packed u16 P: ✅".into());
+        CheckResult::pass("P_weight UCD", "OK — build.rs generates packed u16")
+            .with_details(details)
+    } else {
+        if has_5_fields {
+            details.push("UcdEntry still uses 5 × u8 (shape, relation, V, A, T): ❌".into());
+        }
+        if !reads_p_table {
+            details.push("Does not read udc_p_table.bin: ❌ (should use pre-packed P)".into());
+        }
+        if hash_5b {
+            details.push("chain_hash(shape, relation, valence, arousal, time) uses 5B: ❌".into());
+        }
+        if !has_u16_p {
+            details.push("No u16 packed P field: ❌".into());
+        }
+        details.push("Ref: plans/PLAN_PWEIGHT_MIGRATION.md Phase 2-3".into());
+        CheckResult::fail("P_weight UCD", "build.rs still generates 5B UcdEntry — v2 requires packed u16")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DEEP CHECK: KnowTree size = 65,536 × 2B = 128 KB (v2)
+// Current: 65,536 × 5B = 320 KB
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_pweight_knowtree_size(root: &Path) -> CheckResult {
+    println!("[18/18] DEEP — KnowTree node size...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check KnowTree stores Molecule (5B+metadata) or u16 (2B)
+    let knowtree_molecule = grep_pattern(&files, "Vec<Molecule>");
+    let knowtree_u16 = grep_pattern(&files, "Vec<u16>");
+
+    // Check FormulaTable size constant
+    let _formula_65536 = grep_pattern(&files, "65_536");
+    let _formula_64k = grep_pattern(&files, "65536");
+
+    // Check Molecule in FormulaTable (it holds Vec<Molecule>)
+    let formula_table_mol: Vec<_> = knowtree_molecule.iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            ps.contains("molecular") && l.contains("FormulaTable")
+                || l.contains("formula") || l.contains("table")
+        })
+        .collect();
+
+    if !formula_table_mol.is_empty() {
+        details.push("FormulaTable stores Vec<Molecule> (5B+ each): ❌".into());
+        details.push("v2 spec: KnowTree node = 2B (P_weight packed u16)".into());
+        details.push("Current: 65,536 × ~11B = ~704 KB (Molecule is 11 bytes in struct)".into());
+        details.push("Expected: 65,536 × 2B = 128 KB".into());
+        CheckResult::fail("P_weight KnowTree", "FormulaTable uses Molecule (5B+) — v2 requires u16 (2B) per node")
+            .with_details(details)
+    } else if !knowtree_u16.is_empty() {
+        details.push("KnowTree stores u16 entries: ✅".into());
+        CheckResult::pass("P_weight KnowTree", "OK — KnowTree uses u16 (2B per node)")
+            .with_details(details)
+    } else {
+        details.push("Cannot determine KnowTree node type".into());
+        CheckResult::warn("P_weight KnowTree", "Cannot verify KnowTree node size — check manually")
+            .with_details(details)
+    }
+}
