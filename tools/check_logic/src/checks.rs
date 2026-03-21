@@ -1423,3 +1423,245 @@ pub fn check_ucd_block_count(root: &Path) -> CheckResult {
             .with_details(details)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #1: IR/Compiler — features parsed but NOT compiled
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_compile_gap(root: &Path) -> CheckResult {
+    println!("[28/32] OLANG — Parsed-but-not-compiled features...");
+    let ir_path = root.join("crates/olang/src/exec/ir.rs");
+
+    if !ir_path.exists() {
+        return CheckResult::fail("OLANG Compile Gap", "ir.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&ir_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("OLANG Compile Gap", &format!("Cannot read: {}", e)),
+    };
+
+    let syntax_path = root.join("crates/olang/src/lang/syntax.rs");
+    let syntax = std::fs::read_to_string(&syntax_path).unwrap_or_default();
+
+    let mut details = Vec::new();
+    let mut gap_count = 0;
+
+    let checks = [
+        ("Break", "Break", "break statement"),
+        ("Continue", "Continue", "continue statement"),
+        ("StructDef", "StructDef", "struct definition"),
+        ("EnumDef", "EnumDef", "enum definition"),
+        ("TraitDef", "TraitDef", "trait definition"),
+        ("ImplBlock", "ImplBlock", "impl block"),
+        ("TryPropagate", "TryPropagate", "? try propagation"),
+        ("UnwrapOr", "UnwrapOr", "?? unwrap"),
+        ("FStr", "FStr", "f-string interpolation"),
+        ("Tuple", "Tuple", "tuple expression"),
+        ("Slice", "Slice", "array slicing"),
+        ("FieldAssign", "FieldAssign", "struct field assignment"),
+        ("IndexAssign", "IndexAssign", "array index assignment"),
+        ("MethodCall", "MethodCall", "method call dispatch"),
+    ];
+
+    for (name, ast_pattern, desc) in &checks {
+        let in_syntax = syntax.contains(ast_pattern);
+        let in_ir = content.contains(&format!("{}(", name))
+            || content.contains(&format!("{} {{", name))
+            || content.contains(&format!("{} =>", name));
+
+        if in_syntax && !in_ir {
+            gap_count += 1;
+            details.push(format!("❌ {} — parsed but NOT compiled: {}", name, desc));
+        }
+    }
+
+    if gap_count == 0 {
+        CheckResult::pass("OLANG Compile Gap", "OK — all parsed features compiled")
+            .with_details(details)
+    } else {
+        details.push(format!("{} features parse OK then SILENTLY DROP — no error, no code", gap_count));
+        CheckResult::fail("OLANG Compile Gap", &format!(
+            "{} features parsed but NOT compiled — silent code loss", gap_count
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #2: Stdlib missing builtins
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_stdlib_builtins(root: &Path) -> CheckResult {
+    println!("[29/32] OLANG — Stdlib builtin availability...");
+    let stdlib_dir = root.join("stdlib");
+    let vm_path = root.join("crates/olang/src/exec/vm.rs");
+
+    if !stdlib_dir.exists() {
+        return CheckResult::fail("OLANG Stdlib", "stdlib/ not found");
+    }
+    if !vm_path.exists() {
+        return CheckResult::fail("OLANG Stdlib", "vm.rs not found");
+    }
+
+    let vm_content = match std::fs::read_to_string(&vm_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("OLANG Stdlib", &format!("Cannot read vm.rs: {}", e)),
+    };
+
+    fn scan_ol_builtins(dir: &std::path::Path, results: &mut Vec<(String, String)>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan_ol_builtins(&path, results);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("ol") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let fname = path.file_name().unwrap_or_default().to_str().unwrap_or("?").to_string();
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("//") { continue; }
+                        for word in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                            if word.starts_with("__") && word.len() > 3 {
+                                results.push((fname.clone(), word.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut ol_builtins: Vec<(String, String)> = Vec::new();
+    scan_ol_builtins(&stdlib_dir, &mut ol_builtins);
+
+    let mut unique: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for (file, name) in &ol_builtins {
+        unique.entry(name.clone()).or_default().push(file.clone());
+    }
+
+    let mut details = Vec::new();
+    let mut missing = 0;
+    let mut found = 0;
+
+    for (builtin, files) in &unique {
+        let in_vm = vm_content.contains(&format!("\"{}\"", builtin)) || vm_content.contains(builtin);
+        if in_vm {
+            found += 1;
+        } else {
+            missing += 1;
+            let dedup: std::collections::HashSet<_> = files.iter().collect();
+            let file_list: Vec<_> = dedup.into_iter().collect();
+            details.push(format!("❌ {} — used by {:?} but NOT in VM", builtin, file_list));
+        }
+    }
+
+    details.insert(0, format!("Builtins in VM: {}, MISSING: {}", found, missing));
+
+    if missing == 0 {
+        CheckResult::pass("OLANG Stdlib", &format!("OK — all {} builtins in VM", found))
+            .with_details(details)
+    } else {
+        CheckResult::fail("OLANG Stdlib", &format!(
+            "{} builtins NOT in VM — stdlib will crash at runtime", missing
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #3: Handbook says 5B Molecule, v2 says 2B
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_handbook_vs_v2(root: &Path) -> CheckResult {
+    println!("[30/32] OLANG — Handbook 5B vs v2 2B conflict...");
+
+    let handbook = root.join("docs/olang_handbook.md");
+    let handbook_content = std::fs::read_to_string(&handbook).unwrap_or_default();
+
+    let mut details = Vec::new();
+
+    let handbook_5b = handbook_content.contains("5 bytes");
+    let handbook_2b = handbook_content.contains("2 bytes");
+
+    if handbook_5b && !handbook_2b {
+        details.push("Handbook: Molecule = 5 bytes [S][R][V][A][T]".into());
+        details.push("v2 spec: P_weight = 2 bytes packed u16".into());
+        details.push("Handbook NOT updated for v2 — will mislead contributors".into());
+        CheckResult::fail("OLANG Handbook", "Handbook says 5B Molecule — conflicts with v2 (2B)")
+            .with_details(details)
+    } else if handbook_2b {
+        CheckResult::pass("OLANG Handbook", "OK — handbook aligned with v2")
+            .with_details(details)
+    } else {
+        CheckResult::warn("OLANG Handbook", "Cannot determine — check manually")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #4: PushMol opcode = 5 params, v2 = 2B
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_pushmol(root: &Path) -> CheckResult {
+    println!("[31/32] OLANG — PushMol opcode size...");
+    let ir_path = root.join("crates/olang/src/exec/ir.rs");
+
+    if !ir_path.exists() {
+        return CheckResult::fail("OLANG PushMol", "ir.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&ir_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("OLANG PushMol", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+    let has_5param = content.contains("PushMol(u8, u8, u8, u8, u8)");
+
+    if has_5param {
+        details.push("PushMol(u8, u8, u8, u8, u8) = 5 params: ❌".into());
+        details.push("v2: should be PushMol(u16) = 1 packed param".into());
+        details.push("Bytecode: [0x19][S][R][V][A][T]=6B → [0x19][P_hi][P_lo]=3B".into());
+        CheckResult::fail("OLANG PushMol", "PushMol = 5 params — v2 requires packed u16")
+            .with_details(details)
+    } else {
+        CheckResult::pass("OLANG PushMol", "OK — PushMol uses packed format")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #5: Bootstrap compiler files exist
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_bootstrap(root: &Path) -> CheckResult {
+    println!("[32/32] OLANG — Bootstrap compiler...");
+    let bootstrap_dir = root.join("stdlib/bootstrap");
+
+    let mut details = Vec::new();
+    let expected = ["lexer.ol", "parser.ol", "semantic.ol", "codegen.ol"];
+    let mut found = 0;
+
+    for file in &expected {
+        let path = bootstrap_dir.join(file);
+        if path.exists() {
+            found += 1;
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            details.push(format!("✅ {} — {} bytes", file, size));
+        } else {
+            details.push(format!("❌ {} — NOT FOUND", file));
+        }
+    }
+
+    if found == 4 {
+        CheckResult::pass("OLANG Bootstrap", &format!("{}/4 bootstrap files", found))
+            .with_details(details)
+    } else {
+        CheckResult::fail("OLANG Bootstrap", &format!("Only {}/4 bootstrap files", found))
+            .with_details(details)
+    }
+}
