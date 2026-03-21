@@ -354,12 +354,9 @@ fn split_iter_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     }
     let mut result = Vec::new();
     let mut current = Vec::new();
+    let sep_bits = iter_sep().bits;
     for &bits in &chain.0 {
-        let mol = Molecule::from_u16(bits);
-        if mol.shape_u8() == 0xFE && mol.relation_u8() == 0
-            && mol.valence_u8() == 0 && mol.arousal_u8() == 0
-            && mol.time_u8() == 0
-        {
+        if bits == sep_bits {
             result.push(MolecularChain(core::mem::take(&mut current)));
         } else {
             current.push(bits);
@@ -414,7 +411,7 @@ fn materialize_heap_value(
 ) -> MolecularChain {
     if let Some(arr_idx) = as_array_ref(chain) {
         if arr_idx < array_heap.len() {
-            let sep = Molecule::raw(0, 0, 0, 0, 0);
+            let sep = array_sep();
             let mut result = MolecularChain(Vec::new());
             for (i, elem) in array_heap[arr_idx].iter().enumerate() {
                 if i > 0 { result.0.push(sep.bits); }
@@ -450,12 +447,19 @@ fn is_null_separator(bits: &u16) -> bool {
         && mol.time_u8() == 0
 }
 
-/// Check if a molecule is an array element separator (0xFE tag).
+/// Array-element separator molecule (shape_u8 = 0xF0 after quantization of 0xFE).
+/// Distinct from null separator (all zeros) and iter separator (same bits, but used
+/// at a different level). We match on the quantized value that `Molecule::raw(0xFE, 0, 0, 0, 0)`
+/// actually produces.
+fn array_sep() -> Molecule {
+    Molecule::raw(0xFE, 0, 0, 0, 0)
+}
+
+/// Check if a molecule is an array element separator.
+/// `Molecule::raw(0xFE, 0, 0, 0, 0)` quantizes shape 0xFE → 0x0F (4 bits),
+/// so `shape_u8()` = 0xF0.  We check the raw bits directly for speed.
 fn is_array_separator(bits: &u16) -> bool {
-    let mol = Molecule::from_u16(*bits);
-    mol.shape_u8() == 0xFE && mol.relation_u8() == 0
-        && mol.valence_u8() == 0 && mol.arousal_u8() == 0
-        && mol.time_u8() == 0
+    *bits == array_sep().bits
 }
 
 /// Split a chain by null separators (used for dicts AND legacy arrays without 0xFE separators).
@@ -568,6 +572,34 @@ fn classify_chain(chain: &MolecularChain) -> String {
         s.push(')');
         s
     }
+}
+
+/// Create a closure marker MolecularChain that stores `body_pc` losslessly.
+///
+/// Layout: `[tag_molecule, pc_low_u16, pc_high_u16]`
+/// - tag_molecule has shape=0xFF (quantized to 0x0F via `shape()`)
+/// - body_pc is split into two raw u16 words so it survives round-trip
+///   without the lossy 3-bit quantization of valence/arousal fields.
+fn make_closure_marker(param_count: u8, body_pc: usize) -> MolecularChain {
+    let tag = Molecule::raw(0xFF, param_count, 0, 0, 1);
+    let mut chain = MolecularChain::single(tag);
+    chain.push_raw(body_pc as u16);
+    chain.push_raw((body_pc >> 16) as u16);
+    chain
+}
+
+/// Extract body_pc from a closure marker created by [`make_closure_marker`].
+/// Returns `None` if the chain is not a valid closure marker.
+fn closure_body_pc(chain: &MolecularChain) -> Option<usize> {
+    if chain.0.len() >= 3 {
+        let mol = Molecule::from_u16(chain.0[0]);
+        if mol.shape() == (0xFF >> 4) {
+            let lo = chain.0[1] as usize;
+            let hi = chain.0[2] as usize;
+            return Some(lo | (hi << 16));
+        }
+    }
+    None
 }
 
 /// Execute a closure inline with given arguments.
@@ -2081,10 +2113,8 @@ impl OlangVM {
                                 if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
                             } else { split_array_chain(&arr) };
                             let mut mapped_elems: Vec<MolecularChain> = Vec::new();
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         let mapped = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2121,10 +2151,8 @@ impl OlangVM {
                                 if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
                             } else { split_array_chain(&arr) };
                             let mut filtered: Vec<MolecularChain> = Vec::new();
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         let keep = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2151,10 +2179,8 @@ impl OlangVM {
                                 if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
                             } else { split_array_chain(&arr) };
                             let mut acc = init;
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         acc = call_closure_inline(
                                             prog, body_pc, &[acc, elem.clone()],
@@ -2174,10 +2200,8 @@ impl OlangVM {
                                 if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
                             } else { split_array_chain(&arr) };
                             let mut found = false;
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2202,10 +2226,8 @@ impl OlangVM {
                                 if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
                             } else { split_array_chain(&arr) };
                             let mut all_pass = true;
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2230,10 +2252,8 @@ impl OlangVM {
                                 if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
                             } else { split_array_chain(&arr) };
                             let mut found = MolecularChain::empty();
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2276,10 +2296,8 @@ impl OlangVM {
                                 if arr_idx < array_heap.len() { array_heap[arr_idx].clone() } else { Vec::new() }
                             } else { split_array_chain(&arr) };
                             let mut count = 0usize;
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2688,10 +2706,8 @@ impl OlangVM {
                                         let closure_marker = &parts[i + 1];
                                         i += 2;
 
-                                        if let Some(mol) = closure_marker.first() {
-                                            if mol.shape() == (0xFF >> 4) {
-                                                let body_pc = mol.valence_u8() as usize
-                                                    | ((mol.arousal_u8() as usize) << 8);
+                                        if let Some(body_pc) = closure_body_pc(closure_marker) {
+                                            {
                                                 match xform.as_str() {
                                                     "F" => {
                                                         // Filter: keep elements where closure returns non-empty
@@ -2944,10 +2960,8 @@ impl OlangVM {
                             let sep = Molecule::raw(0, 0, 0, 0, 0);
                             let mut result = MolecularChain(Vec::new());
                             let mut count = 0usize;
-                            if let Some(mol) = closure_marker.first() {
-                                if mol.shape() == (0xFF >> 4) {
-                                    let body_pc = mol.valence_u8() as usize
-                                        | ((mol.arousal_u8() as usize) << 8);
+                            if let Some(body_pc) = closure_body_pc(&closure_marker) {
+                                {
                                     for elem in &elements {
                                         let mapped = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -3296,9 +3310,7 @@ impl OlangVM {
                                 let _ = stack.push(string_to_chain("Option::None"));
                             } else {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { val.clone() };
-                                if let Some(mol) = closure_marker.first() {
-                                    if mol.shape() == (0xFF >> 4) {
-                                        let body_pc = mol.valence_u8() as usize | ((mol.arousal_u8() as usize) << 8);
+                                if let Some(body_pc) = closure_body_pc(&closure_marker) {
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let some_tag = string_to_chain("Option::Some");
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
@@ -3307,7 +3319,6 @@ impl OlangVM {
                                         result.0.push(sep.bits);
                                         result.0.extend(mapped.0.iter().cloned());
                                         let _ = stack.push(result);
-                                    } else { let _ = stack.push(val); }
                                 } else { let _ = stack.push(val); }
                             }
                         }
@@ -3319,9 +3330,7 @@ impl OlangVM {
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { String::new() };
                             if tag.ends_with("::Ok") || tag == "Ok" {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
-                                if let Some(mol) = closure_marker.first() {
-                                    if mol.shape() == (0xFF >> 4) {
-                                        let body_pc = mol.valence_u8() as usize | ((mol.arousal_u8() as usize) << 8);
+                                if let Some(body_pc) = closure_body_pc(&closure_marker) {
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let ok_tag = string_to_chain("Result::Ok");
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
@@ -3330,7 +3339,6 @@ impl OlangVM {
                                         result.0.push(sep.bits);
                                         result.0.extend(mapped.0.iter().cloned());
                                         let _ = stack.push(result);
-                                    } else { let _ = stack.push(val); }
                                 } else { let _ = stack.push(val); }
                             } else {
                                 let _ = stack.push(val); // Err passthrough
@@ -3481,9 +3489,7 @@ impl OlangVM {
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { String::new() };
                             if tag.ends_with("::Err") || tag == "Err" {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
-                                if let Some(mol) = closure_marker.first() {
-                                    if mol.shape() == (0xFF >> 4) {
-                                        let body_pc = mol.valence_u8() as usize | ((mol.arousal_u8() as usize) << 8);
+                                if let Some(body_pc) = closure_body_pc(&closure_marker) {
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let err_tag = string_to_chain("Result::Err");
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
@@ -3492,7 +3498,6 @@ impl OlangVM {
                                         result.0.push(sep.bits);
                                         result.0.extend(mapped.0.iter().cloned());
                                         let _ = stack.push(result);
-                                    } else { let _ = stack.push(val); }
                                 } else { let _ = stack.push(val); }
                             } else {
                                 let _ = stack.push(val); // Ok passthrough
@@ -4476,14 +4481,10 @@ impl OlangVM {
 
                 Op::Closure(_param_count, body_len) => {
                     // Create closure: jump over body, push closure marker.
-                    // Closure marker = chain with special encoding:
-                    //   molecule.shape = 0xFF (closure tag)
-                    //   molecule.relation = param_count
-                    //   molecule.emotion.valence/arousal = body PC as 2 bytes (low/high)
+                    // Closure marker uses make_closure_marker() which stores body_pc
+                    // losslessly in raw u16 slots (not quantized molecule fields).
                     let body_pc = pc;
-                    let pc_low = (body_pc & 0xFF) as u8;
-                    let pc_high = ((body_pc >> 8) & 0xFF) as u8;
-                    let marker = MolecularChain::single(Molecule::raw(0xFF, *_param_count, pc_low, pc_high , 1));
+                    let marker = make_closure_marker(*_param_count, body_pc);
                     let _ = stack.push(marker);
                     // Jump past the body
                     pc += body_len;
@@ -4500,11 +4501,8 @@ impl OlangVM {
                     closure_args.reverse();
                     // Pop closure marker
                     let closure = vm_pop!(stack, events);
-                    // Check if it's a closure marker (shape == 0xFF)
-                    if let Some(mol) = closure.first() {
-                        if mol.shape() == (0xFF >> 4) {
-                            let body_pc = mol.valence_u8() as usize
-                                | ((mol.arousal_u8() as usize) << 8);
+                    // Extract body_pc from closure marker (lossless encoding)
+                    if let Some(body_pc) = closure_body_pc(&closure) {
                             // Save stack depth BEFORE pushing args back — this is the caller's
                             // clean stack depth. Ret will restore to this depth.
                             let caller_stack_depth = stack.data.len();
@@ -4521,9 +4519,6 @@ impl OlangVM {
                             // then jump to body.
                             closure_call_stack.push((pc, scopes.len(), caller_stack_depth, arity_val));
                             pc = body_pc;
-                        } else {
-                            let _ = stack.push(MolecularChain::empty());
-                        }
                     } else {
                         let _ = stack.push(MolecularChain::empty());
                     }
