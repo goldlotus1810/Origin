@@ -12,15 +12,19 @@ P = [S:4][R:4][V:3][A:3][T:2] = 16 bits
 
 Output: json/udc_utf32.json — the final ○{} tree
 
+KEY PRINCIPLE:
+  Name IS the codepoint (UTF-32 address). English name is just an alias.
+  ○(x) == x → the codepoint IS the node.
+  "SPACE" is alias. "0020" is name.
+
 Structure:
   ○{plane{block{char}}}
+  JSON key = codepoint hex = THE NAME (e.g., "1F525")
   where each char has:
-    - cp: codepoint (hex)
-    - name: Unicode name (= codepoint, EN name is alias)
     - P: packed 16-bit P_weight
     - S, R, V, A, T: individual axis values
     - cat: Unicode General Category
-    - cldr: {en: {tts, keywords}, vi: {tts, keywords}}
+    - aliases: {en: {name, tts, keywords}, vi: {tts, keywords}}
     - flags: property flags
     - emoji_group/subgroup: emoji classification
 """
@@ -65,7 +69,12 @@ def unpack_p(p16):
 
 
 def build_compact_char(char_data, cp):
-    """Build compact char entry for final JSON."""
+    """Build compact char entry for final JSON.
+
+    KEY: The JSON key (codepoint hex) IS the name.
+    English Unicode name → aliases.en.name (it's just an alias).
+    ○(x) == x → codepoint IS the node identity.
+    """
     V_float = char_data.get("V", 0.5)
     A_float = char_data.get("A", 0.4)
     S = char_data.get("S", 0)
@@ -86,15 +95,43 @@ def build_compact_char(char_data, cp):
         "cat": char_data.get("cat", ""),
     }
 
-    # Unicode name
-    name = char_data.get("name", "")
-    if name:
-        entry["name"] = name
+    # ── Aliases ──
+    # Name = codepoint (the JSON key). Everything else is alias.
+    # Unicode English name, CLDR tts/keywords → all go into aliases.
+    aliases = {}
 
-    # CLDR aliases (L0: en + vi only)
-    cldr = char_data.get("cldr")
-    if cldr:
-        entry["cldr"] = cldr
+    # EN aliases: Unicode name + CLDR
+    unicode_name = char_data.get("name", "")
+    cldr = char_data.get("cldr", {})
+    en_cldr = cldr.get("en", {})
+
+    en_alias = {}
+    if unicode_name:
+        en_alias["name"] = unicode_name  # "FIRE", "SPACE", etc. = alias
+    if en_cldr.get("tts"):
+        en_alias["tts"] = en_cldr["tts"]
+    if en_cldr.get("keywords"):
+        en_alias["keywords"] = en_cldr["keywords"]
+    if en_alias:
+        aliases["en"] = en_alias
+
+    # VI aliases: CLDR
+    vi_cldr = cldr.get("vi", {})
+    vi_alias = {}
+    if vi_cldr.get("tts"):
+        vi_alias["tts"] = vi_cldr["tts"]
+    if vi_cldr.get("keywords"):
+        vi_alias["keywords"] = vi_cldr["keywords"]
+    if vi_alias:
+        aliases["vi"] = vi_alias
+
+    # Name aliases from NameAliases.txt
+    name_aliases = char_data.get("name_aliases")
+    if name_aliases:
+        aliases["unicode_aliases"] = name_aliases
+
+    if aliases:
+        entry["aliases"] = aliases
 
     # Emoji info
     eg = char_data.get("emoji_group")
@@ -257,9 +294,11 @@ def main():
                     S, R, V, A, T = unpack_p(P)
                     v_str = f"V={cd['V']:.2f}→{V}"
                     a_str = f"A={cd['A']:.2f}→{A}"
-                    en_tts = cd.get("cldr", {}).get("en", {}).get("tts", "")
-                    vi_tts = cd.get("cldr", {}).get("vi", {}).get("tts", "")
-                    print(f"    {ch} U+{cp:04X} P=0x{P:04X}: S={S} R={R} {v_str} {a_str} T={T} | {en_tts} | {vi_tts}")
+                    en_name = cd.get("aliases", {}).get("en", {}).get("name", "")
+                    en_tts = cd.get("aliases", {}).get("en", {}).get("tts", "")
+                    vi_tts = cd.get("aliases", {}).get("vi", {}).get("tts", "")
+                    print(f"    {ch} name={cp_hex} P=0x{P:04X}: S={S} R={R} {v_str} {a_str} T={T}")
+                    print(f"       aliases: en.name=\"{en_name}\" en.tts=\"{en_tts}\" vi.tts=\"{vi_tts}\"")
                     break
 
     # Verification: unpack and repack should match
