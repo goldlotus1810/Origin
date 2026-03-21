@@ -20,15 +20,9 @@ pub fn encode_codepoint(cp: u32) -> MolecularChain {
     let arousal = ucd::arousal_of(cp);
     let time = ucd::time_of(cp);
 
-    let mut mol = Molecule::raw(shape, relation, valence, arousal, time);
-    // Set real formula from UCD — nếu có entry thì dùng công thức, không thì giữ UNSET
-    if let Some(entry) = ucd::lookup(cp) {
-        mol.fs = entry.fs;
-        mol.fr = entry.fr;
-        mol.fv = entry.fv;
-        mol.fa = entry.fa;
-        mol.ft = entry.ft;
-    }
+    let mol = Molecule::raw(shape, relation, valence, arousal, time);
+    // v2: P_weight trực tiếp từ udc.json, không cần formula rule IDs.
+    // Molecule.fs/fr/fv/fa/ft giữ 0xFF (UNSET) — metadata runtime only.
 
     MolecularChain::single(mol)
 }

@@ -11,6 +11,10 @@ default = ["reverse-index"]
 ## Thêm ~40KB static data. Tắt trên embedded (ESP32/MCU) để tiết kiệm SRAM.
 reverse-index = []
 
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 [lib]
 name = "ucd"
 path = "src/lib.rs"
