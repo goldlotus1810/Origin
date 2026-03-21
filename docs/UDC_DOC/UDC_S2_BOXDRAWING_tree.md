@@ -5,6 +5,37 @@
 
 ---
 
+## Mô hình vật lý tổng quát
+
+> **Vẽ hộp = Topology kết nối trên lưới rời rạc**
+
+Mỗi ô trên màn hình = 1 node trong đồ thị `G = (V, E)`.
+Mỗi ký tự box drawing = **mẫu kết nối** (adjacency pattern) tại 1 node.
+
+```
+4 hướng kết nối có thể: {Up, Down, Left, Right}
+Connectivity mask: C = (c_U, c_D, c_L, c_R) ∈ {0,1}⁴
+
+Ví dụ:
+  ─  = (0, 0, 1, 1)   ngang: kết nối trái-phải
+  │  = (1, 1, 0, 0)   dọc: kết nối trên-dưới
+  ┌  = (0, 1, 0, 1)   góc: kết nối xuống-phải
+  ┼  = (1, 1, 1, 1)   giao: kết nối tất cả 4 hướng
+  ├  = (1, 1, 0, 1)   T-junction: trên-dưới-phải
+
+Tổng: 2⁴ = 16 patterns cơ bản (bao gồm ∅ = không kết nối)
+
+Mỗi kết nối có trọng số w ∈ {light, heavy, double}:
+  Adjacency matrix: A[i][j] = w(edge(i,j))
+```
+
+Đồ thị lưới hoàn chỉnh với `n × m` ô có:
+- `|V| = n·m` đỉnh
+- `|E| ≤ 2·n·m − n − m` cạnh (lưới 4-connected đầy đủ)
+- Degree tối đa: `deg(v) ≤ 4` cho mọi `v ∈ V`
+
+---
+
 ## Tầng 1: "Nét đi hướng nào?"
 
 ```
@@ -17,6 +48,54 @@ VẼ HỘP
 └── CUNG         "arc" — bo góc ╭ ╮ ╰ ╯
 ```
 
+### Công thức topology từng kiểu nét
+
+**NGANG (horizontal):**
+```
+C = (0, 0, 1, 1)     degree = 2, tuyến tính (path graph P₂)
+SDF: f(x,y) = |y| − t/2  (đường ngang, độ dày t)
+  f < 0 → bên trong nét, f > 0 → bên ngoài, f = 0 → biên
+```
+
+**DỌC (vertical):**
+```
+C = (1, 1, 0, 0)     degree = 2, tuyến tính (path graph P₂, xoay 90°)
+SDF: f(x,y) = |x| − t/2  (đường dọc)
+  Phép quay: R(90°)·[ngang] = [dọc], hay (c_L,c_R) ↔ (c_U,c_D)
+```
+
+**GÓC (corner):**
+```
+C = (0, 1, 0, 1) cho ┌     degree = 2, hình chữ L
+SDF: f(p⃗) = min(f_horizontal(p⃗), f_vertical(p⃗))  (hợp 2 nửa đường thẳng)
+Độ cong κ = 0 mọi nơi, ngoại trừ tại góc: κ → ∞ (gián đoạn C⁰)
+  4 góc = 4 phép quay: ┌ ┐ └ ┘ ↔ R(0°), R(90°), R(270°), R(180°)
+```
+
+**GIAO (cross):**
+```
+C = (1, 1, 1, 1)     degree = 4, đồ thị lưỡng phân đầy đủ K₂,₂
+Đặc trưng Euler: χ = V − E + F  (cho vùng kín bao quanh)
+  Tại giao cắt ┼: 4 cạnh tạo 4 vùng → χ phản ánh topology mặt phẳng
+```
+
+**NỬA — T-junction:**
+```
+C = (1, 1, 0, 1) cho ├     degree = 3
+Lý thuyết đồ thị: T-junction = đỉnh bậc 3
+Định luật Kirchhoff (bảo toàn dòng): Σ Iᵢ = 0 tại nút rẽ nhánh
+  Ứng dụng: dòng thông tin qua layout tuân thủ bảo toàn flow
+```
+
+**CUNG (arc):**
+```
+C = (0, 1, 0, 1) cho ╭     cùng connectivity như góc, NHƯNG:
+Độ cong κ = 1/r (cong đều, liên tục C¹ — mượt hơn góc vuông)
+Tham số hóa: p⃗(t) = center + r·(cos(t), sin(t))  với t ∈ [θ₁, θ₂]
+  ╭: t ∈ [π, 3π/2]    ╮: t ∈ [3π/2, 2π]
+  ╰: t ∈ [π/2, π]     ╯: t ∈ [0, π/2]
+```
+
 ---
 
 ## Tầng 2: "Nét dày mỏng ra sao?"
@@ -27,6 +106,37 @@ VẼ HỘP
 ├── DÀY         "heavy" — nét đậm
 ├── ĐÔI         "double" — nét kép ═ ║
 └── PHA          "heavy and light" / "light and heavy" — pha trộn dày mỏng
+```
+
+### Công thức trọng số (weight)
+
+**MỎNG (light):**
+```
+w = 1, độ rộng nét = 1px
+SDF thickness: t = t_light (đơn vị cơ sở)
+```
+
+**DÀY (heavy):**
+```
+w = 2, độ rộng nét = 2px (gấp đôi mỏng)
+SDF thickness: t = t_heavy = 2·t_light
+```
+
+**ĐÔI (double):**
+```
+Hai đường song song, khoảng cách g:
+SDF: f(p) = min(|d − g/2|, |d + g/2|) − t/2
+  với d = khoảng cách có dấu từ p đến trục chính
+  Mỗi nét con có độ dày t = t_light
+```
+
+**PHA (anisotropic):**
+```
+Trọng số khác nhau theo hướng = đồ thị bất đẳng hướng (anisotropic graph)
+  Ví dụ ├ (dọc dày + ngang mỏng):
+    w_vertical = 2, w_horizontal = 1
+    Adjacency matrix: A[i][j] = w_direction(edge(i,j))
+  Ma trận trọng số không đối xứng theo hướng: W_U ≠ W_L có thể xảy ra
 ```
 
 ---
@@ -220,4 +330,25 @@ BOX DRAWINGS LIGHT DOWN                                 → nửa dọc dưới
 Mọi cụm đều theo pattern:
   BOX DRAWINGS {weight} {direction}
   BOX DRAWINGS {dir1} {weight1} AND {dir2} {weight2}
+```
+
+### Tổng kết công thức
+
+```
+Mô hình:  G = (V, E) trên lưới rời rạc n × m
+Node:     Mỗi ô → connectivity mask C = (c_U, c_D, c_L, c_R) ∈ {0,1}⁴
+Edge:     Trọng số w ∈ {1=light, 2=heavy, double=2×parallel}
+Hình học: SDF f(p⃗) xác định biên nét — f<0 trong, f>0 ngoài, f=0 biên
+
+6 kiểu nét → 6 dạng topology:
+  NGANG/DỌC:  deg=2, path graph P₂, SDF = |coord| − t/2
+  GÓC:        deg=2, L-shape, κ=0 (gián đoạn C⁰ tại góc)
+  GIAO:       deg=4, K₂,₂, χ = V−E+F
+  T-junction: deg=3, bảo toàn flow Σ Iᵢ = 0
+  CUNG:       deg=2, κ=1/r (liên tục C¹), p⃗(t) = center + r·(cos t, sin t)
+
+3+1 trọng số:
+  light: t = t₀          heavy: t = 2·t₀
+  double: f = min(|d−g/2|, |d+g/2|) − t/2
+  pha: W bất đẳng hướng theo direction
 ```
