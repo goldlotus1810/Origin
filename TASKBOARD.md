@@ -57,15 +57,16 @@ Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Mi
 
 | ID | Task | Plan | Effort | Depends | Status | Notes |
 |----|------|------|--------|---------|--------|-------|
-| P2.0 | Fix 135 VM builtin test failures | PLAN_PHASE2 | ~200 LOC | — | FREE | Array/Dict/String builtins. BLOCKER cho Phase 2. |
-| 8.1 | Parser: hex literals (0xFF) | PLAN_8 | ~80 LOC | — | FREE | 13 .ol files fail vì hex. |
-| 8.2 | Parser: == trong match/struct | PLAN_8 | ~200 LOC | — | FREE | 9 .ol files fail vì ==. |
-| 8.3 | Parser: keywords as ident + struct colon | PLAN_8 | ~100 LOC | — | FREE | intent.ol "learn", silk_ops.ol struct. |
-| 12.1 | Wire walk_emotion() vào response | PLAN_12 | ~100 LOC | — | FREE | Trả None hiện tại → implement Silk walk. |
-| 12.2 | Context recall trong response | PLAN_12 | ~80 LOC | 12.1 | FREE | ResponseContext struct. |
-| 12.3 | Intent estimation dùng context | PLAN_12 | ~120 LOC | 12.2 | FREE | Thay keyword-only bằng context-aware. |
-| 12.4 | Response composer thay template | PLAN_12 | ~200 LOC | 12.3 | FREE | 4-part response. |
-| 12.5 | Language detection + instinct wire | PLAN_12 | ~60 LOC | 12.4 | FREE | "xin chào" → Việt. |
+| P2.0 | Fix VM builtin test failures | PLAN_PHASE2 | ~200 LOC | — | DONE ✅ | VM 90/90 pass. Heap refs + string encoding bypass quantization. PR #228 #229. |
+| P2.0b | Fix 37 remaining olang test failures | — | ~300 LOC | P2.0 | CLAIMED | Closure dispatch, bytes builtins, self-compile, iter. Session lupin-pc 2026-03-22. |
+| 8.1 | Parser: hex literals (0xFF) | PLAN_8 | ~80 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
+| 8.2 | Parser: == trong match/struct | PLAN_8 | ~200 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
+| 8.3 | Parser: keywords as ident + struct colon | PLAN_8 | ~100 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
+| 12.1 | Wire walk_emotion() vào response | PLAN_12 | ~100 LOC | — | DONE ✅ | compose_response() wired (session 2pN6F). |
+| 12.2 | Context recall trong response | PLAN_12 | ~80 LOC | 12.1 | DONE ✅ | ResponseContext + context-aware intent (session 2pN6F). |
+| 12.3 | Intent estimation dùng context | PLAN_12 | ~120 LOC | 12.2 | DONE ✅ | Causality→skip AddClarify, repetition→EmpathizeFirst. |
+| 12.4 | Response composer thay template | PLAN_12 | ~200 LOC | 12.3 | DONE ✅ | compose_response() thay render(). |
+| 12.5 | Language detection + instinct wire | PLAN_12 | ~60 LOC | 12.4 | DONE ✅ | detect_language tiếng Việt không dấu. |
 | 11.3 | Server --eval mode | PLAN_11 | ~80 LOC | — | FREE | stdin → process → output → exit. |
 | 11.2 | Rust E2E test suite | PLAN_11 | ~300 LOC | 11.3 | FREE | t16_e2e_demo.rs. |
 | 11.5 | Makefile targets (demo/verify) | PLAN_11 | ~50 LOC | 11.2 | FREE | make demo, make verify. |
