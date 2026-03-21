@@ -18,16 +18,18 @@
 //!   0x04 = AmendRecord
 //!   0x05 = NodeKindRecord
 //!
-//! NodeRecord (v0.05 — tagged molecule encoding):
+//! NodeRecord (v0.06 — u16 chain links):
+//!   [0x01][link_count: u16_le][u16_le × N][layer: u8]
+//!   [is_qr: u8][timestamp: 8 bytes i64]
+//!   Total: 1 + 2 + N×2 + 1 + 1 + 8 bytes
+//!
+//! NodeRecord (v0.05 legacy — tagged molecule encoding):
 //!   [0x01][mol_count: u8][tagged_chain_bytes...][layer: u8]
 //!   [is_qr: u8][timestamp: 8 bytes i64]
-//!   Mỗi molecule: [mask: u8][present_values: 0-5B]
-//!   Total: 1 + 1 + Σ(1 + popcount(mask)) + 1 + 1 + 8 bytes
 //!
 //! NodeRecord (v0.03-v0.04 legacy — fixed 5-byte molecules):
 //!   [0x01][chain_len: u8][chain: N×5 bytes][layer: u8]
 //!   [is_qr: u8][timestamp: 8 bytes i64]
-//!   Total: 1 + 1 + N×5 + 1 + 1 + 8 = 12 + N×5 bytes
 //!
 //! EdgeRecord:
 //!   [0x02][from_hash: 8 bytes][to_hash: 8 bytes][edge_type: u8]
@@ -52,8 +54,10 @@ use crate::molecular::MolecularChain;
 /// Magic bytes: "○LNG" = 0xE2 0x97 0x8B 0x4C (○ = U+25CB)
 pub const MAGIC: [u8; 4] = [0xE2, 0x97, 0x8B, 0x4C];
 
-/// Version hiện tại — v0.05 (tagged molecule encoding)
-pub const VERSION: u8 = 0x05;
+/// Version hiện tại — v0.06 (u16 chain links)
+pub const VERSION: u8 = 0x06;
+/// Version trước — v0.05 (tagged molecule encoding, vẫn đọc được)
+pub const VERSION_V05: u8 = 0x05;
 /// Version trước — v0.04 (thêm RT_AMEND, vẫn đọc được)
 pub const VERSION_V04: u8 = 0x04;
 /// Version trước — v0.03 (vẫn đọc được)
@@ -182,9 +186,10 @@ impl OlangWriter {
         self.buf.extend_from_slice(&created_at.to_le_bytes());
     }
 
-    /// Ghi NodeRecord (v0.05 tagged format).
+    /// Ghi NodeRecord (v0.06 u16 chain links).
     ///
-    /// Mỗi molecule ghi `[mask][present_values]` thay vì cố định 5 bytes.
+    /// Format: `[0x01][link_count: u16_le][u16_le × N][layer][is_qr][ts:8]`
+    /// Mỗi link = 2 bytes (u16 little-endian).
     /// Returns offset của record trong file.
     pub fn append_node(
         &mut self,
@@ -193,16 +198,19 @@ impl OlangWriter {
         is_qr: bool,
         timestamp: i64,
     ) -> Result<u64, WriteError> {
-        if chain.len() > 255 {
+        if chain.len() > 65535 {
             return Err(WriteError::ChainTooLong);
         }
 
         let offset = self.buf.len() as u64;
 
         self.buf.push(RT_NODE);
-        // Ghi tagged chain: [mol_count][mol_1_tagged]...[mol_N_tagged]
-        let tagged = chain.to_tagged_bytes();
-        self.buf.extend_from_slice(&tagged);
+        // v0.06: [link_count: u16_le][u16_le × N]
+        let count = chain.len() as u16;
+        self.buf.extend_from_slice(&count.to_le_bytes());
+        for &bits in &chain.0 {
+            self.buf.extend_from_slice(&bits.to_le_bytes());
+        }
         self.buf.push(layer);
         self.buf.push(if is_qr { 0x01 } else { 0x00 });
         self.buf.extend_from_slice(&timestamp.to_le_bytes());

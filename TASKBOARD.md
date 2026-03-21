@@ -564,7 +564,7 @@ INTG (song song với tất cả):
 | T4 | Chain Vec\<Mol\>→Vec\<u16\> | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | MolecularChain(Vec<u16>), 21 files, mol_at/mols/first helpers, chain_hash 2B/link |
 | T5 | LCA v2 compose rules | `PLAN_V2_MIGRATION` | T3 | FREE | | | amplify/Union/max/dominant, KILL avg |
 | T6 | KnowTree array 65536×2B | `PLAN_V2_MIGRATION` | T3 | FREE | | | O(1) lookup, 128KB, 9584 L0 seeds |
-| T7 | Writer/Reader v2 format | `PLAN_V2_MIGRATION` | T4 | FREE | | | Serialize Vec<u16>, add Curve 0x09 |
+| T7 | Writer/Reader v2 format | `PLAN_V2_MIGRATION` | T4 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | v0.06: NodeRecord [len:2][u16×N], Curve 0x09 already existed, backward compat v0.03-v0.05 |
 | T8 | Registry codepoint-based | `PLAN_V2_MIGRATION` | T4,T6 | FREE | | | Index by u16, not hash |
 | T9 | VM PushMol 2B | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | PushMol(u16), 3B bytecode [0x19][lo][hi], 7 files updated |
 | T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | FREE | | | silk/agents/memory/vsdf/runtime/context |
