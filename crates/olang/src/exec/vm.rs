@@ -51,12 +51,34 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
 /// String molecule marker: shape=2, relation=1 (quantized 4-bit values).
 /// Valence holds the byte value (quantized 3-bit, so only 0-7 range for marker check).
 /// The actual byte is stored in the full V+A+T bits (11 bits = 0-2047, enough for u8 0-255).
+/// Encode a single byte as a string molecule u16.
+///
+/// Format: `[S=2:4bit][R=1:4bit][V:3bit][A:3bit][T:2bit]` where lower 8 bits = byte value.
+/// Used by all string builtins for consistent encoding (bypass Molecule::raw quantization).
+#[inline]
+fn str_byte_mol(b: u8) -> u16 {
+    let v3 = ((b >> 5) & 0x7) as u16;
+    let a3 = ((b >> 2) & 0x7) as u16;
+    let t2 = (b & 0x3) as u16;
+    (2u16 << 12) | (1u16 << 8) | (v3 << 5) | (a3 << 2) | t2
+}
+
+/// Encode a string as a MolecularChain (each byte → 1 molecule).
+/// Inverse of chain_to_string.
+///
+/// String molecule marker: shape=2, relation=1 (quantized 4-bit values).
+/// The actual byte is stored in the lower 8 bits `[V:3][A:3][T:2]`.
 pub fn string_to_chain(s: &str) -> MolecularChain {
-    // Use direct bit packing: S=2 (4bit), R=1 (4bit), byte value in lower 8 bits (V+A+T)
+    let mols: Vec<u16> = s.bytes().map(|b| str_byte_mol(b)).collect();
+    MolecularChain(mols)
+}
+
+// Keep original implementation as reference (unused):
+#[cfg(any())]
+fn _string_to_chain_original(s: &str) -> MolecularChain {
     let mols: Vec<u16> = s.bytes().map(|b| {
-        let s4: u16 = 2;   // string marker shape (quantized)
-        let r4: u16 = 1;   // string marker relation (quantized)
-        // Store byte in lower 8 bits: [V:3][A:3][T:2] = 8 bits = 0..255
+        let s4: u16 = 2;
+        let r4: u16 = 1;
         let v3 = ((b >> 5) & 0x7) as u16;
         let a3 = ((b >> 2) & 0x7) as u16;
         let t2 = (b & 0x3) as u16;
@@ -350,34 +372,35 @@ fn split_iter_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
 /// Maps ShapeBase to Unicode group categories:
 /// Split an array-encoded MolecularChain by separator molecules (shape=0, relation=0).
 /// Split array chain by separator molecules (shape=0, relation=0, v=0, a=0, t=0).
-/// Create a heap-reference chain for a dict. Shape=0xFC marks dict refs.
+// Heap reference markers — direct u16 bit packing (bypass Molecule::raw quantization)
+// Format: [marker:4bit][unused:4bit][index:8bit] = 16 bits
+const HEAP_DICT_MARKER: u16 = 0xFC00;   // shape nibble = 0xF, relation nibble = 0xC
+const HEAP_ARRAY_MARKER: u16 = 0xFD00;  // shape nibble = 0xF, relation nibble = 0xD
+const HEAP_MARKER_MASK: u16 = 0xFF00;   // top 8 bits = marker
+const HEAP_INDEX_MASK: u16 = 0x00FF;    // bottom 8 bits = index (0..255)
+
+/// Create a heap-reference chain for a dict.
 fn make_dict_ref(idx: usize) -> MolecularChain {
-    MolecularChain::single(Molecule::raw(0xFC, 0x01, (idx & 0xFF) as u8, ((idx >> 8) & 0xFF) as u8, 0))
+    MolecularChain::single(Molecule::from_u16(HEAP_DICT_MARKER | (idx as u16 & HEAP_INDEX_MASK)))
 }
 
-/// Create a heap-reference chain for an array. Shape=0xFD, relation=0x01 marks array refs.
+/// Create a heap-reference chain for an array.
 fn make_array_ref(idx: usize) -> MolecularChain {
-    MolecularChain::single(Molecule::raw(0xFD, 0x01, (idx & 0xFF) as u8, ((idx >> 8) & 0xFF) as u8, 0))
+    MolecularChain::single(Molecule::from_u16(HEAP_ARRAY_MARKER | (idx as u16 & HEAP_INDEX_MASK)))
 }
 
 /// Check if chain is a dict heap reference.
 fn as_dict_ref(chain: &MolecularChain) -> Option<usize> {
-    if chain.0.len() == 1 {
-        let m = Molecule::from_u16(chain.0[0]);
-        if m.shape_u8() == 0xFC && m.relation_u8() == 0x01 {
-            return Some(m.valence_u8() as usize | ((m.arousal_u8() as usize) << 8));
-        }
+    if chain.0.len() == 1 && (chain.0[0] & HEAP_MARKER_MASK) == HEAP_DICT_MARKER {
+        return Some((chain.0[0] & HEAP_INDEX_MASK) as usize);
     }
     None
 }
 
 /// Check if chain is an array heap reference.
 fn as_array_ref(chain: &MolecularChain) -> Option<usize> {
-    if chain.0.len() == 1 {
-        let m = Molecule::from_u16(chain.0[0]);
-        if m.shape_u8() == 0xFD && m.relation_u8() == 0x01 {
-            return Some(m.valence_u8() as usize | ((m.arousal_u8() as usize) << 8));
-        }
+    if chain.0.len() == 1 && (chain.0[0] & HEAP_MARKER_MASK) == HEAP_ARRAY_MARKER {
+        return Some((chain.0[0] & HEAP_INDEX_MASK) as usize);
     }
     None
 }
@@ -1527,7 +1550,7 @@ impl OlangVM {
                             } else {
                                 // Decode string bytes from valence
                                 let s: String = val.0.iter()
-                                    .map(|&bits| Molecule::from_u16(bits).valence_u8() as char)
+                                    .map(|&bits| (bits & 0xFF) as u8 as char)
                                     .collect();
                                 if let Ok(n) = s.parse::<f64>() {
                                     let _ = stack.push(MolecularChain::from_number(n));
@@ -1649,8 +1672,8 @@ impl OlangVM {
                             let delim = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
                             // Decode both to byte strings via valence
-                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
-                            let d_bytes: Vec<u8> = delim.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
+                            let d_bytes: Vec<u8> = delim.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
                             if d_bytes.is_empty() {
                                 let _ = stack.push(s); // no split on empty delim
                             } else {
@@ -1673,7 +1696,7 @@ impl OlangVM {
                                     };
                                     if elem_idx > 0 { result.0.push(sep.bits); }
                                     for &b in &s_bytes[start..end] {
-                                        result.0.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
+                                        result.0.push(str_byte_mol(b));
                                     }
                                     elem_idx += 1;
                                     if found.is_some() {
@@ -1689,8 +1712,8 @@ impl OlangVM {
                             // Stack: [haystack, needle] → 1.0 if contains, empty if not
                             let needle = vm_pop!(stack, events);
                             let haystack = vm_pop!(stack, events);
-                            let h_bytes: Vec<u8> = haystack.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
-                            let n_bytes: Vec<u8> = needle.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
                             let found = if n_bytes.is_empty() {
                                 true
                             } else {
@@ -1707,9 +1730,9 @@ impl OlangVM {
                             let new_pat = vm_pop!(stack, events);
                             let old_pat = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
-                            let old_bytes: Vec<u8> = old_pat.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
-                            let new_bytes: Vec<u8> = new_pat.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
+                            let old_bytes: Vec<u8> = old_pat.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
+                            let new_bytes: Vec<u8> = new_pat.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
                             let mut result_bytes = Vec::new();
                             let mut i = 0;
                             if old_bytes.is_empty() {
@@ -1729,7 +1752,7 @@ impl OlangVM {
                             }
                             let mut mols = Vec::new();
                             for b in result_bytes {
-                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
+                                mols.push(str_byte_mol(b));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1737,8 +1760,8 @@ impl OlangVM {
                             // Stack: [string, prefix] → 1.0 if starts with, empty if not
                             let prefix = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
-                            let p_bytes: Vec<u8> = prefix.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
+                            let p_bytes: Vec<u8> = prefix.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
                             let starts = s_bytes.starts_with(&p_bytes);
                             if starts {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
@@ -1749,8 +1772,8 @@ impl OlangVM {
                         "__str_ends_with" => {
                             let suffix = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
-                            let x_bytes: Vec<u8> = suffix.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
+                            let x_bytes: Vec<u8> = suffix.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
                             let ends = s_bytes.ends_with(&x_bytes);
                             if ends {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
@@ -1762,8 +1785,8 @@ impl OlangVM {
                             // Stack: [haystack, needle] → index (number) or -1
                             let needle = vm_pop!(stack, events);
                             let haystack = vm_pop!(stack, events);
-                            let h_bytes: Vec<u8> = haystack.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
-                            let n_bytes: Vec<u8> = needle.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
                             let idx = if n_bytes.is_empty() {
                                 0i64
                             } else {
@@ -1777,7 +1800,7 @@ impl OlangVM {
                         "__str_trim" => {
                             let s = vm_pop!(stack, events);
                             // Trim leading/trailing whitespace (space=0x20, tab=0x09, etc)
-                            let bytes: Vec<u8> = s.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+                            let bytes: Vec<u8> = s.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
                             let trimmed: &[u8] = {
                                 let start = bytes.iter().position(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').unwrap_or(bytes.len());
                                 let end = bytes.iter().rposition(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').map(|i| i + 1).unwrap_or(start);
@@ -1785,7 +1808,7 @@ impl OlangVM {
                             };
                             let mut mols = Vec::new();
                             for &b in trimmed {
-                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
+                                mols.push(str_byte_mol(b));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1793,9 +1816,9 @@ impl OlangVM {
                             let s = vm_pop!(stack, events);
                             let mut mols = Vec::new();
                             for &bits in &s.0 {
-                                let b = Molecule::from_u16(bits).valence_u8();
+                                let b = (bits & 0xFF) as u8;
                                 let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
-                                mols.push(Molecule::raw(0x02, 0x01, upper, 0 , 0x01).bits);
+                                mols.push(str_byte_mol(upper));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -1803,9 +1826,9 @@ impl OlangVM {
                             let s = vm_pop!(stack, events);
                             let mut mols = Vec::new();
                             for &bits in &s.0 {
-                                let b = Molecule::from_u16(bits).valence_u8();
+                                let b = (bits & 0xFF) as u8;
                                 let lower = if b.is_ascii_uppercase() { b + 32 } else { b };
-                                mols.push(Molecule::raw(0x02, 0x01, lower, 0 , 0x01).bits);
+                                mols.push(str_byte_mol(lower));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -2297,7 +2320,7 @@ impl OlangVM {
                             // Encode type name as string chain
                             let mut mols: Vec<u16> = Vec::new();
                             for b in type_name.bytes() {
-                                mols.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
+                                mols.push(str_byte_mol(b));
                             }
                             let _ = stack.push(MolecularChain(mols));
                         }
@@ -5869,11 +5892,7 @@ pub mod tests {
     // ── Dict builtins ────────────────────────────────────────────────────────
 
     fn key_chain(s: &str) -> MolecularChain {
-        let mut bits = alloc::vec::Vec::new();
-        for b in s.bytes() {
-            bits.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
-        }
-        MolecularChain(bits)
+        string_to_chain(s)
     }
 
     #[test]
@@ -5929,11 +5948,7 @@ pub mod tests {
     // ── Phase 5: String Builtins ────────────────────────────────────────────
 
     fn str_chain(s: &str) -> MolecularChain {
-        let mut bits = Vec::new();
-        for b in s.bytes() {
-            bits.push(Molecule::raw(0x02, 0x01, b, 0 , 0x01).bits);
-        }
-        MolecularChain(bits)
+        string_to_chain(s)
     }
 
     #[test]
@@ -6000,7 +6015,7 @@ pub mod tests {
         assert!(!result.has_error());
         let out = &result.outputs()[0];
         // Result should be "hello olang" encoded as molecules
-        let decoded: Vec<u8> = out.0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+        let decoded: Vec<u8> = out.0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
         assert_eq!(&decoded, b"hello olang");
     }
 
@@ -6026,7 +6041,7 @@ pub mod tests {
             .push_op(Op::Emit)
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
-        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
         assert_eq!(&decoded, b"hello");
     }
 
@@ -6038,7 +6053,7 @@ pub mod tests {
             .push_op(Op::Emit)
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
-        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|&bits| Molecule::from_u16(bits).valence_u8()).collect();
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|&bits| (bits & 0xFF) as u8).collect();
         assert_eq!(&decoded, b"HELLO");
     }
 
