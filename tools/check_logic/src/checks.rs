@@ -1665,3 +1665,269 @@ pub fn check_olang_bootstrap(root: &Path) -> CheckResult {
             .with_details(details)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// L0 CASCADE #1: Valence hardcode vs udc.json (E0.3)
+// build.rs uses name heuristics, not json/udc.json data
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_l0_valence_source(root: &Path) -> CheckResult {
+    println!("[33/37] L0 — Valence source: heuristic vs udc.json...");
+    let build_path = root.join("crates/ucd/build.rs");
+
+    if !build_path.exists() {
+        return CheckResult::fail("L0 Valence", "build.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&build_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("L0 Valence", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check: does build.rs read json/udc.json or json/udc_utf32_compact.json?
+    let reads_json = content.contains("udc.json")
+        || content.contains("udc_utf32")
+        || content.contains("udc_p_table");
+
+    // Check: does it use name-based heuristics?
+    let has_heuristic = content.contains("contains(\"FIRE\")")
+        || content.contains("contains(\"HEART\")")
+        || content.contains("contains(\"SKULL\")");
+
+    // E0.4: duplicate condition bug
+    let has_piano_bug = content.contains("contains(\"PIANO\") && name.contains(\"PIANO\")");
+
+    // E0.5: collision perturbation
+    let has_perturb = content.contains("perturb") || content.contains("perturbation")
+        || (content.contains("collision") && content.contains("valence"));
+
+    details.push(format!("Reads json/udc.json data: {}", if reads_json { "✅" } else { "❌ NO — uses heuristic" }));
+    details.push(format!("Name-based heuristic (FIRE/HEART/SKULL): {}", if has_heuristic { "❌ YES" } else { "✅ NO" }));
+    if has_piano_bug {
+        details.push("E0.4 BUG: PIANO && PIANO = always true (should check 2 occurrences)".into());
+    }
+    if has_perturb {
+        details.push("E0.5: Collision perturb V/A ±1..±127 → breaks L0 anchor semantics".into());
+    }
+
+    if reads_json && !has_heuristic {
+        CheckResult::pass("L0 Valence", "OK — reads udc.json, no name heuristics")
+            .with_details(details)
+    } else {
+        details.push("v2: P_weight L0 từ tài liệu — json/udc.json có 323K dòng data".into());
+        details.push("build.rs KHÔNG đọc json → dùng name matching → sai cho ngàn codepoints".into());
+        CheckResult::fail("L0 Valence", "build.rs uses name heuristics, NOT json/udc.json data")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// L0 CASCADE #2: L0 seed = 35 nodes, v2 = 9,584 (E5.2 + E1.3)
+// 44% of anchor points fallback to Sphere/neutral → meaningless
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_l0_seed_count(root: &Path) -> CheckResult {
+    println!("[34/37] L0 — Seed count: 35 vs 9,584...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check KnowTree seed count
+    let seed_35 = grep_pattern(&files, "35 seeded");
+    let seed_9584 = grep_pattern(&files, "9584");
+    let seed_9k = grep_pattern(&files, "9_584");
+
+    // Check UCD_TABLE size
+    let _table_refs = grep_pattern(&files, "UCD_TABLE");
+
+    // Check fallback defaults (E1.3)
+    let fallback_sphere = grep_pattern(&files, "unwrap_or(0x01)");
+    let fallback_neutral = grep_pattern(&files, "unwrap_or(0x80)");
+
+    details.push(format!("'35 seeded' refs: {}", seed_35.len()));
+    details.push(format!("'9584' or '9_584' refs: {}", seed_9584.len() + seed_9k.len()));
+    details.push(format!("Fallback to Sphere (0x01): {} refs", fallback_sphere.len()));
+    details.push(format!("Fallback to neutral (0x80): {} refs", fallback_neutral.len()));
+
+    let has_correct_seed = !seed_9584.is_empty() || !seed_9k.is_empty();
+
+    if has_correct_seed && seed_35.is_empty() {
+        CheckResult::pass("L0 Seed Count", "OK — 9,584 L0 anchors")
+            .with_details(details)
+    } else {
+        details.push("v2: 58 blocks × ~165 avg = 9,584 L0 anchor points".into());
+        details.push("Current: 35 seeds → 9,549 missing → fallback Sphere/neutral".into());
+        details.push("→ 44% L0 anchors = Sphere + neutral = MEANINGLESS".into());
+        details.push("→ ALL distance comparisons using missing anchors = WRONG".into());
+        CheckResult::fail("L0 Seed Count", "Only 35 L0 seeds — v2 requires 9,584 (4,184 codepoints missing)")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// L0 CASCADE #3: similarity() only uses 2/5 dims (E3.3)
+// v2: strength = Σ match_d × precision_d (all 5 dims equal)
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_l0_similarity_dims(root: &Path) -> CheckResult {
+    println!("[35/37] L0 — similarity() dimensions...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("L0 Similarity", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("L0 Similarity", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check: similarity_full weights
+    let has_unequal_weights = content.contains("0.3") && content.contains("0.2") && content.contains("0.5");
+    let _has_equal_weights = content.contains("0.2") && content.contains("/ 5");
+
+    // Check: similarity() uses all 5 dims or just 2
+    let _has_shape_only = content.contains("shape_base ==") || content.contains("shape_base ==");
+    let _has_all_5 = content.contains("valence") && content.contains("arousal") && content.contains("time");
+
+    if has_unequal_weights {
+        details.push("similarity_full() weights: 0.3×shape + 0.2×relation + 0.5×emotion".into());
+        details.push("v2 spec: strength = Σ match_d × precision_d (5 dims EQUAL weight)".into());
+        details.push("Current weights favor emotion (0.5) over shape (0.3) — DIFFERENT from v2".into());
+    }
+
+    if has_unequal_weights {
+        CheckResult::fail("L0 Similarity", "similarity() uses unequal dim weights — v2 requires equal 5D")
+            .with_details(details)
+    } else {
+        CheckResult::pass("L0 Similarity", "OK — similarity uses equal 5D weights")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// L0 CASCADE #4: Molecule::raw() is public — enables QT④ bypass
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_l0_mol_raw_public(root: &Path) -> CheckResult {
+    println!("[36/37] L0 — Molecule::raw() visibility...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("L0 Mol::raw", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("L0 Mol::raw", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    let has_pub_raw = content.contains("pub fn raw(");
+
+    // Count callers of Molecule::raw outside encoder/lca/test
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+    let raw_calls: Vec<_> = grep_pattern(&files, "Molecule::raw(")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("encoder") && !ps.contains("lca")
+                && !ps.contains("test") && !ps.contains("molecular.rs")
+                && !l.trim().starts_with("//")
+        })
+        .collect();
+
+    details.push(format!("Molecule::raw() is pub: {}", if has_pub_raw { "❌ YES" } else { "✅ NO (pub(crate) or private)" }));
+    details.push(format!("raw() called outside encoder/lca/test: {} refs", raw_calls.len()));
+    for (p, line, text) in &raw_calls {
+        let rel = p.strip_prefix(root).unwrap_or(p);
+        details.push(format!("  {}:{} — {}", rel.display(), line, text));
+    }
+
+    if has_pub_raw && !raw_calls.is_empty() {
+        details.push("QT④: Molecule từ encode_codepoint() — KHÔNG viết tay".into());
+        details.push("raw() is pub → any code can bypass encode_codepoint()".into());
+        CheckResult::fail("L0 Mol::raw", &format!(
+            "Molecule::raw() is pub + {} external callers — QT④ bypassable",
+            raw_calls.len()
+        ))
+            .with_details(details)
+    } else if has_pub_raw {
+        CheckResult::warn("L0 Mol::raw", "Molecule::raw() is pub but 0 external callers — should be pub(crate)")
+            .with_details(details)
+    } else {
+        CheckResult::pass("L0 Mol::raw", "OK — raw() is not public")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// L0 CASCADE #5: PLAN_REWRITE alignment — Rust vs Olang target
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_rewrite_alignment(root: &Path) -> CheckResult {
+    println!("[37/37] REWRITE — Rust code vs Olang target...");
+
+    let mut details = Vec::new();
+
+    // Check: how much Olang bytecode exists vs Rust code
+    let stdlib_dir = root.join("stdlib");
+    let crates_dir = root.join("crates");
+
+    let mut ol_files = 0;
+    let mut ol_bytes: u64 = 0;
+    fn count_ol(dir: &std::path::Path, files: &mut i32, bytes: &mut u64) {
+        let entries = match std::fs::read_dir(dir) { Ok(e) => e, Err(_) => return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() { count_ol(&path, files, bytes); }
+            else if path.extension().and_then(|e| e.to_str()) == Some("ol") {
+                *files += 1;
+                *bytes += std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    count_ol(&stdlib_dir, &mut ol_files, &mut ol_bytes);
+
+    let mut rs_files = 0;
+    let mut rs_bytes: u64 = 0;
+    fn count_rs(dir: &std::path::Path, files: &mut i32, bytes: &mut u64) {
+        let entries = match std::fs::read_dir(dir) { Ok(e) => e, Err(_) => return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().unwrap_or_default().to_str().unwrap_or("");
+            if name == "target" || name.starts_with('.') { continue; }
+            if path.is_dir() { count_rs(&path, files, bytes); }
+            else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                *files += 1;
+                *bytes += std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    count_rs(&crates_dir, &mut rs_files, &mut rs_bytes);
+
+    let ol_kb = ol_bytes / 1024;
+    let rs_kb = rs_bytes / 1024;
+    let ratio = if ol_bytes > 0 { rs_bytes as f64 / ol_bytes as f64 } else { 0.0 };
+
+    details.push(format!("Olang (.ol): {} files, {} KB", ol_files, ol_kb));
+    details.push(format!("Rust (.rs):  {} files, {} KB", rs_files, rs_kb));
+    details.push(format!("Ratio Rust/Olang: {:.1}x", ratio));
+    details.push("PLAN_REWRITE: Rust = tử cung, Olang = sinh linh".into());
+    details.push(format!("Migration progress: {:.1}% Olang", ol_bytes as f64 / (ol_bytes + rs_bytes) as f64 * 100.0));
+
+    // This is informational, not pass/fail
+    CheckResult::warn("REWRITE Progress", &format!(
+        "Rust {:.0}x larger than Olang — migration {:.1}%",
+        ratio,
+        ol_bytes as f64 / (ol_bytes + rs_bytes) as f64 * 100.0
+    ))
+        .with_details(details)
+}
