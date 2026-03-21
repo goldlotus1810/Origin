@@ -206,9 +206,9 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::TypeOf => "{ Chain c = pop(&s); fprintf(stderr, \"[TYPEOF] 0x%016llX\\n\", (unsigned long long)c); push(&s, c); }".into(),
         Op::Why => "{ Chain b = pop(&s); Chain a = peek(&s); fprintf(stderr, \"[WHY] 0x%llX <-> 0x%llX\\n\", (unsigned long long)a, (unsigned long long)b); }".into(),
         Op::Explain => "{ Chain c = peek(&s); fprintf(stderr, \"[EXPLAIN] 0x%016llX\\n\", (unsigned long long)c); }".into(),
-        Op::PushMol(s, r, v, a, t) => format!(
-            "push(&s, olang_mol(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}));",
-            s, r, v, a, t
+        Op::PushMol(bits) => format!(
+            "push(&s, olang_mol_u16(0x{:04X}));",
+            bits
         ),
         Op::TryBegin(target) => format!("_err = 0; /* try: on error goto label_{} */", target),
         Op::CatchEnd => "_err = 0; /* catch end */".into(),
@@ -364,9 +364,9 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::TypeOf => "{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[TYPEOF] 0x{:016X}\", c); }".into(),
         Op::Why => "{ let b = stack.pop().unwrap_or(0); let a = *stack.last().unwrap_or(&0); eprintln!(\"[WHY] 0x{:X} <-> 0x{:X}\", a, b); }".into(),
         Op::Explain => "{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[EXPLAIN] 0x{:016X}\", c); }".into(),
-        Op::PushMol(s, r, v, a, t) => format!(
-            "stack.push(Molecule::new(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}).into());",
-            s, r, v, a, t
+        Op::PushMol(bits) => format!(
+            "stack.push(olang_mol_u16(0x{:04X}));",
+            bits
         ),
         Op::TryBegin(_) => "// try block begin".into(),
         Op::CatchEnd => "// catch block end".into(),
@@ -459,9 +459,9 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
         Op::TypeOf => format!("{{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[TYPEOF] 0x{{:016X}}\", c); }} _pc = {};", next),
         Op::Why => format!("{{ let b = stack.pop().unwrap_or(0); let a = *stack.last().unwrap_or(&0); eprintln!(\"[WHY] 0x{{:X}} <-> 0x{{:X}}\", a, b); }} _pc = {};", next),
         Op::Explain => format!("{{ let c = *stack.last().unwrap_or(&0); eprintln!(\"[EXPLAIN] 0x{{:016X}}\", c); }} _pc = {};", next),
-        Op::PushMol(s, r, v, a, t) => format!(
-            "stack.push(Molecule::new(0x{:02X},0x{:02X},0x{:02X},0x{:02X},0x{:02X}).into()); _pc = {};",
-            s, r, v, a, t, next
+        Op::PushMol(bits) => format!(
+            "stack.push(olang_mol_u16(0x{:04X})); _pc = {};",
+            bits, next
         ),
         Op::TryBegin(target) => {
             if has_try {
@@ -668,9 +668,9 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         Op::TypeOf => ";; [TYPEOF] — debug hook".into(),
         Op::Why => ";; [WHY] — pop second, keep first".into(),
         Op::Explain => ";; [EXPLAIN] — debug hook".into(),
-        Op::PushMol(s, r, v, a, t) => format!(
-            "i32.const 0x{:02X}{:02X}{:02X}{:02X}{:02X} ;; mol S={} R={} V={} A={} T={}",
-            s, r, v, a, t, s, r, v, a, t
+        Op::PushMol(bits) => format!(
+            "i32.const 0x{:04X} ;; mol(u16)",
+            bits
         ),
         Op::TryBegin(_) => ";; try block begin".into(),
         Op::CatchEnd => ";; catch block end".into(),
@@ -761,8 +761,8 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!(";; [ASSERT] trap if zero\n    (local.get $local) (i64.eqz) (if (then (unreachable)))\n    (local.set $pc (i32.const {})) (br $dispatch)", next),
         Op::TypeOf | Op::Why | Op::Explain =>
             format!(";; debug primitive\n    (local.set $pc (i32.const {})) (br $dispatch)", next),
-        Op::PushMol(s, r, v, a, t) =>
-            format!("(i32.const 0x{:02X}{:02X}{:02X}{:02X}{:02X}) (local.set $pc (i32.const {})) (br $dispatch) ;; mol", s, r, v, a, t, next),
+        Op::PushMol(bits) =>
+            format!("(i32.const 0x{:04X}) (local.set $pc (i32.const {})) (br $dispatch) ;; mol(u16)", bits, next),
         Op::TryBegin(_target) =>
             format!("(local.set $pc (i32.const {})) (br $dispatch) ;; try begin", next),
         Op::CatchEnd =>

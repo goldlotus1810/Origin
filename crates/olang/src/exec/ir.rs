@@ -109,10 +109,10 @@ pub enum Op {
     /// Explain: pop 1 chain, truy ngược nguồn gốc (tại sao chain này tồn tại)
     Explain,
 
-    /// Push 1-molecule chain from explicit dimension values.
-    /// `{ S=1 R=2 V=128 A=128 T=3 }` → MolecularChain with 1 Molecule.
-    /// Used by LeoAI to express knowledge as Olang code.
-    PushMol(u8, u8, u8, u8, u8),
+    /// Push 1-molecule chain from packed u16.
+    /// v2: `{ S=1 R=2 V=4 A=4 T=2 }` → Molecule::pack() → u16 → MolecularChain.
+    /// Bytecode: [0x19][lo][hi] = 3 bytes.
+    PushMol(u16),
     /// Try: begin error-catching block. If any VmError occurs before
     /// the matching CatchEnd, jump to the catch handler instead of halting.
     TryBegin(usize),
@@ -320,7 +320,10 @@ impl Op {
             Self::TypeOf => alloc::vec![0x0E],
             Self::Why => alloc::vec![0x0F],
             Self::Explain => alloc::vec![0x12],
-            Self::PushMol(s, r, v, a, t) => alloc::vec![0x36, *s, *r, *v, *a, *t],
+            Self::PushMol(bits) => {
+                let b = bits.to_le_bytes();
+                alloc::vec![0x36, b[0], b[1]]
+            }
             Self::TryBegin(target) => {
                 let mut b = alloc::vec![0x37];
                 b.extend_from_slice(&(*target as u32).to_le_bytes());
@@ -456,7 +459,7 @@ pub enum OlangIrExpr {
         builtin: String,
         rhs: f64,
     },
-    /// { S=1 R=6 V=200 A=180 T=4 } — molecular literal → PushMol opcode
+    /// { S=1 R=6 V=200 A=180 T=4 } — molecular literal → PushMol(u16) opcode
     MolecularLiteral {
         shape: u8,
         relation: u8,
@@ -614,7 +617,8 @@ fn emit_expr(expr: &OlangIrExpr, prog: &mut OlangProgram) {
             arousal,
             time,
         } => {
-            prog.push_op(Op::PushMol(*shape, *relation, *valence, *arousal, *time));
+            let packed = crate::molecular::Molecule::pack(*shape, *relation, *valence, *arousal, *time).bits;
+            prog.push_op(Op::PushMol(packed));
         }
 
         OlangIrExpr::LetBinding { name, value } => {
@@ -1167,6 +1171,6 @@ mod tests {
             time: 4,
         };
         let prog = compile_expr(&expr);
-        assert!(prog.ops.contains(&Op::PushMol(1, 6, 200, 180, 4)));
+        assert!(prog.ops.contains(&Op::PushMol(crate::molecular::Molecule::pack(1, 6, 200, 180, 4).bits)));
     }
 }
