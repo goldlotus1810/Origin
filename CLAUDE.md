@@ -2,6 +2,9 @@
 
 > **Giao tiếp với user bằng TIẾNG VIỆT. User là người Việt.**
 > **⚠️ REWRITE đang diễn ra.** Đọc `TASKBOARD.md` → claim task → rồi mới code.
+> **Chia OUTAUDIT/TODOS thật nhỏ, làm từng phần tránh TIMED OUT**
+> **TẢI CẬP NHẬT MAIN MỚI NHẤT TRƯỚC KHI UP GIT.**
+> **CHECK XÁC NHẬN 2 LẦN TRƯỚC KHI THỰC HIỆN NHIỆM VỤ**
 
 ---
 
