@@ -17,7 +17,7 @@ HIỆN TẠI:
 SAU PLAN 5.3:
   Arena per-turn: allocate tự do trong turn, FREE HẾT cuối turn
   Zero-copy: string slice thay vì copy
-  Molecule pool: reuse 5-byte slots thay vì allocate mới
+  Molecule pool: reuse 2-byte slots thay vì allocate mới (⚠️ v2: Molecule = u16)
   → Memory stable, không tăng vô hạn
 ```
 
