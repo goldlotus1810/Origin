@@ -17,7 +17,8 @@ KHI BẮT ĐẦU SESSION MỚI:
   6. Bắt đầu code
 
 KHI HOÀN THÀNH:
-  1. Cập nhật TASKBOARD.md         ← đổi status → DONE, ghi notes
+  1. Tải cập nhật main.            ← cập nhật thay đổi mới nhất.
+  2. Cập nhật TASKBOARD.md         ← đổi status → DONE, ghi notes
   2. git commit + push
 
 KHI BỊ BLOCKED:
