@@ -194,13 +194,10 @@ pub fn decode_bytecode(bytes: &[u8]) -> Result<Vec<Op>, DecodeError> {
             0x17 => Op::ScopeBegin,
             0x18 => Op::ScopeEnd,
             0x19 => {
-                // PushMol: [s:1][r:1][v:1][a:1][t:1]
-                let s = dec.read_u8()?;
-                let r = dec.read_u8()?;
-                let v = dec.read_u8()?;
-                let a = dec.read_u8()?;
-                let t = dec.read_u8()?;
-                Op::PushMol(s, r, v, a, t)
+                // PushMol: [lo:1][hi:1] = packed u16
+                let lo = dec.read_u8()?;
+                let hi = dec.read_u8()?;
+                Op::PushMol(u16::from_le_bytes([lo, hi]))
             }
             0x1A => {
                 // TryBegin: [catch_pc:4]
@@ -287,7 +284,7 @@ fn op_byte_size(op: &Op) -> usize {
         Op::StoreUpdate(name) => 1 + 1 + name.len(),
         Op::Jmp(_) | Op::Jz(_) | Op::TryBegin(_) | Op::Loop(_) => 1 + 4, // tag + u32
         Op::PushNum(_) => 1 + 8,        // tag + f64
-        Op::PushMol(..) => 1 + 5,        // tag + 5 bytes
+        Op::PushMol(..) => 1 + 2,        // tag + u16 (2 bytes)
         Op::Edge(_) | Op::Query(_) => 1 + 1, // tag + u8 rel
         Op::Closure(_, _) => 1 + 1 + 4,  // tag + u8_param_count + u32_body_len
         Op::CallClosure(_) => 1 + 1 + 1, // tag + empty_name_len(0x00) + u8_arity
@@ -418,9 +415,9 @@ fn encode_op(out: &mut Vec<u8>, op: &Op) {
         Op::Fuse => emit_byte(out, 0x16),
         Op::ScopeBegin => emit_byte(out, 0x17),
         Op::ScopeEnd => emit_byte(out, 0x18),
-        Op::PushMol(s, r, v, a, t) => {
+        Op::PushMol(bits) => {
             emit_byte(out, 0x19);
-            out.extend_from_slice(&[*s, *r, *v, *a, *t]);
+            out.extend_from_slice(&bits.to_le_bytes());
         }
         Op::TryBegin(target) => {
             emit_byte(out, 0x1A);
@@ -530,9 +527,12 @@ mod tests {
 
     #[test]
     fn decode_push_mol() {
-        let bytes = [0x19, 1, 6, 200, 180, 4];
+        // v2: [0x19][lo][hi] = 3 bytes
+        let packed = crate::molecular::Molecule::pack(1, 6, 200, 180, 4).bits;
+        let le = packed.to_le_bytes();
+        let bytes = [0x19, le[0], le[1]];
         let ops = decode_bytecode(&bytes).unwrap();
-        assert_eq!(ops, alloc::vec![Op::PushMol(1, 6, 200, 180, 4)]);
+        assert_eq!(ops, alloc::vec![Op::PushMol(packed)]);
     }
 
     #[test]
@@ -598,7 +598,7 @@ mod tests {
             Op::LoadLocal("pi".into()),
             Op::Emit,
             Op::ScopeEnd,
-            Op::PushMol(1, 2, 128, 128, 3),
+            Op::PushMol(crate::molecular::Molecule::pack(1, 2, 128, 128, 3).bits),
             Op::Edge(5),
             Op::Query(2),
             Op::Lca,

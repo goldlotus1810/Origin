@@ -566,7 +566,7 @@ INTG (song song với tất cả):
 | T6 | KnowTree array 65536×2B | `PLAN_V2_MIGRATION` | T3 | FREE | | | O(1) lookup, 128KB, 9584 L0 seeds |
 | T7 | Writer/Reader v2 format | `PLAN_V2_MIGRATION` | T4 | FREE | | | Serialize Vec<u16>, add Curve 0x09 |
 | T8 | Registry codepoint-based | `PLAN_V2_MIGRATION` | T4,T6 | FREE | | | Index by u16, not hash |
-| T9 | VM PushMol 2B | `PLAN_V2_MIGRATION` | T3 | FREE | | | PushMol(u16), 3B bytecode |
+| T9 | VM PushMol 2B | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | PushMol(u16), 3B bytecode [0x19][lo][hi], 7 files updated |
 | T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | FREE | | | silk/agents/memory/vsdf/runtime/context |
 | T11 | .ol files update (15 files) | `PLAN_V2_MIGRATION` | T9 | FREE | | | mol.ol/chain.ol/hash.ol + HomeOS + bootstrap |
 | T12 | Tests rebuild | `PLAN_V2_MIGRATION` | T10,T11 | FREE | | | 1198 tests = false positive, rewrite all |

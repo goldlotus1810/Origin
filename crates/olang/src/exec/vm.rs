@@ -772,12 +772,10 @@ impl OlangVM {
                     }
                 }
 
-                Op::PushMol(s, r, v, a, t) => {
-                    // Construct 1-molecule chain from explicit dimension values.
-                    // Used by LeoAI to express knowledge as Olang code:
-                    //   { S=1 R=2 V=128 A=128 T=3 } → Molecule → Chain
-                    let mol = Molecule::raw(*s, *r, *v, *a, *t);
-                    let chain = MolecularChain(alloc::vec![mol.bits]);
+                Op::PushMol(bits) => {
+                    // v2: push packed u16 as 1-link chain.
+                    // Bytecode: [0x19][lo][hi] = 3 bytes.
+                    let chain = MolecularChain(alloc::vec![*bits]);
                     if let Err(e) = stack.push(chain) {
                         events.push(VmEvent::Error(e));
                         break;
@@ -4579,9 +4577,8 @@ impl OlangVM {
                             Op::Push(chain) => {
                                 let _ = stack.push(chain.clone());
                             }
-                            Op::PushMol(s, r, v, a, t) => {
-                                let mol = Molecule::raw(*s, *r, *v, *a , *t);
-                                let chain = MolecularChain(alloc::vec![mol.bits]);
+                            Op::PushMol(bits) => {
+                                let chain = MolecularChain(alloc::vec![*bits]);
                                 let _ = stack.push(chain);
                             }
                             Op::Dup => {
@@ -5450,10 +5447,15 @@ pub mod tests {
 
     // ── PushMol — molecular literal execution ──────────────────────────────
 
+    /// Helper: pack 5 dimensions into u16 for PushMol in tests.
+    fn pm(s: u8, r: u8, v: u8, a: u8, t: u8) -> u16 {
+        Molecule::pack(s, r, v, a, t).bits
+    }
+
     #[test]
     fn push_mol_creates_chain() {
         let mut prog = OlangProgram::new("test");
-        prog.push_op(Op::PushMol(1, 6, 200, 180, 4));
+        prog.push_op(Op::PushMol(pm(1, 6, 200, 180, 4)));
         prog.push_op(Op::Emit);
         prog.push_op(Op::Halt);
         let result = vm().execute(&prog);
@@ -5474,7 +5476,7 @@ pub mod tests {
     fn push_mol_default_values() {
         // Defaults from semantic: S=1, R=1, V=128, A=128, T=3
         let mut prog = OlangProgram::new("test");
-        prog.push_op(Op::PushMol(1, 1, 128, 128, 3));
+        prog.push_op(Op::PushMol(pm(1, 1, 128, 128, 3)));
         prog.push_op(Op::Emit);
         prog.push_op(Op::Halt);
         let result = vm().execute(&prog);
@@ -5491,8 +5493,8 @@ pub mod tests {
     fn push_mol_then_lca() {
         // Two molecular literals → LCA → single output
         let mut prog = OlangProgram::new("test");
-        prog.push_op(Op::PushMol(1, 6, 200, 180, 4));
-        prog.push_op(Op::PushMol(2, 3, 100, 90, 2));
+        prog.push_op(Op::PushMol(pm(1, 6, 200, 180, 4)));
+        prog.push_op(Op::PushMol(pm(2, 3, 100, 90, 2)));
         prog.push_op(Op::Lca);
         prog.push_op(Op::Emit);
         prog.push_op(Op::Halt);
@@ -5506,7 +5508,7 @@ pub mod tests {
     fn push_mol_dup_and_truth() {
         // PushMol → Dup → Truth (==) → should produce 1 output
         let mut prog = OlangProgram::new("test");
-        prog.push_op(Op::PushMol(1, 6, 200, 180, 4));
+        prog.push_op(Op::PushMol(pm(1, 6, 200, 180, 4)));
         prog.push_op(Op::Dup);
         prog.push_op(Op::Call("__assert_truth".into()));
         prog.push_op(Op::Emit);
@@ -5522,8 +5524,8 @@ pub mod tests {
     fn match_mol_same() {
         // __match_mol: compare two identical PushMol chains → truthy
         let mut prog = OlangProgram::new("test");
-        prog.push_op(Op::PushMol(1, 6, 200, 180, 4))
-            .push_op(Op::PushMol(1, 6, 200, 180, 4))
+        prog.push_op(Op::PushMol(pm(1, 6, 200, 180, 4)))
+            .push_op(Op::PushMol(pm(1, 6, 200, 180, 4)))
             .push_op(Op::Call("__match_mol".into()))
             .push_op(Op::Emit)
             .push_op(Op::Halt);
@@ -5536,8 +5538,8 @@ pub mod tests {
     fn match_mol_different() {
         // __match_mol: different mols → falsy (empty)
         let mut prog = OlangProgram::new("test");
-        prog.push_op(Op::PushMol(1, 6, 200, 180, 4))
-            .push_op(Op::PushMol(2, 3, 100, 50, 1))
+        prog.push_op(Op::PushMol(pm(1, 6, 200, 180, 4)))
+            .push_op(Op::PushMol(pm(2, 3, 100, 50, 1)))
             .push_op(Op::Call("__match_mol".into()))
             .push_op(Op::Emit)
             .push_op(Op::Halt);

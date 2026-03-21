@@ -1873,7 +1873,8 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         let v = valence.unwrap_or(128) as u8;
                         let a = arousal.unwrap_or(128) as u8;
                         let t = time.unwrap_or(3) as u8;
-                        ctx.emit(Op::PushMol(s, r, v, a, t));
+                        let packed = crate::molecular::Molecule::pack(s, r, v, a, t).bits;
+                        ctx.emit(Op::PushMol(packed));
                         ctx.emit(Op::Call("__match_mol".into()));
                         let jz_pos = ctx.current_pos();
                         ctx.emit(Op::Jz(0));
@@ -1908,7 +1909,8 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                                 crate::syntax::MolCmpOp::Le => 4,
                                 crate::syntax::MolCmpOp::Any => 5,
                             };
-                            ctx.emit(Op::PushMol(dim_byte, op_byte, dc.value as u8, 0, 0));
+                            let packed = crate::molecular::Molecule::pack(dim_byte, op_byte, dc.value as u8, 0, 0).bits;
+                            ctx.emit(Op::PushMol(packed));
                         }
                         ctx.emit(Op::PushNum(count as f64));
                         ctx.emit(Op::Call("__match_mol_constraint".into()));
@@ -2433,7 +2435,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                                 crate::syntax::MolCmpOp::Any => 5,
                             };
                             let val = dc.value as u8;
-                            ctx.emit(Op::PushMol(dim_byte, op_byte, val, 0, 0));
+                            let packed = crate::molecular::Molecule::pack(dim_byte, op_byte, val, 0, 0).bits;
+                            ctx.emit(Op::PushMol(packed));
                         }
                         // Push constraint count
                         ctx.emit(Op::PushNum(constraint.dims.len() as f64));
@@ -2824,13 +2827,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::MolLiteral { shape, relation, valence, arousal, time } => {
-            // Molecular literal → PushMol with defaults for unspecified dimensions
+            // Molecular literal → PushMol(u16) with defaults for unspecified dimensions
             let s = shape.unwrap_or(1) as u8;     // Sphere
             let r = relation.unwrap_or(1) as u8;   // Member
             let v = valence.unwrap_or(128) as u8;   // neutral
             let a = arousal.unwrap_or(128) as u8;   // moderate
             let t = time.unwrap_or(3) as u8;       // Medium
-            ctx.emit(Op::PushMol(s, r, v, a, t));
+            let packed = crate::molecular::Molecule::pack(s, r, v, a, t).bits;
+            ctx.emit(Op::PushMol(packed));
         }
 
         // ── Type system expressions ────────────────────────────────────────
@@ -3613,13 +3617,18 @@ mod tests {
         );
     }
 
+    /// Helper: pack dimensions into u16 for PushMol test assertions.
+    fn pm(s: u8, r: u8, v: u8, a: u8, t: u8) -> u16 {
+        crate::molecular::Molecule::pack(s, r, v, a, t).bits
+    }
+
     #[test]
     fn lower_mol_literal_all_dims() {
         let stmts = parse("{ S=1 R=6 V=200 A=180 T=4 }").unwrap();
         let prog = lower(&stmts);
         assert!(
-            prog.ops.contains(&Op::PushMol(1, 6, 200, 180, 4)),
-            "Should lower to PushMol(1,6,200,180,4): {:?}", prog.ops
+            prog.ops.contains(&Op::PushMol(pm(1, 6, 200, 180, 4))),
+            "Should lower to PushMol(u16): {:?}", prog.ops
         );
     }
 
@@ -3629,7 +3638,7 @@ mod tests {
         let stmts = parse("{ S=5 }").unwrap();
         let prog = lower(&stmts);
         assert!(
-            prog.ops.contains(&Op::PushMol(5, 1, 128, 128, 3)),
+            prog.ops.contains(&Op::PushMol(pm(5, 1, 128, 128, 3))),
             "Unspecified dims should get defaults: {:?}", prog.ops
         );
     }
@@ -3638,7 +3647,7 @@ mod tests {
     fn lower_mol_literal_in_emit() {
         let stmts = parse("emit { S=2 R=3 V=100 A=50 T=1 };").unwrap();
         let prog = lower(&stmts);
-        assert!(prog.ops.contains(&Op::PushMol(2, 3, 100, 50, 1)));
+        assert!(prog.ops.contains(&Op::PushMol(pm(2, 3, 100, 50, 1))));
         assert!(prog.ops.contains(&Op::Emit));
     }
 

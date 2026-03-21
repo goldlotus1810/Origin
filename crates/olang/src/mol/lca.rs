@@ -647,8 +647,8 @@ mod tests {
         );
 
         // v2 arousal = max of the two
-        let max_a = f.0[0].arousal_u8().max(c.0[0].arousal_u8());
-        assert_eq!(result.0[0].arousal_u8(), max_a, "v2 max arousal");
+        let max_a = Molecule::from_u16(f.0[0]).arousal_u8().max(Molecule::from_u16(c.0[0]).arousal_u8());
+        assert_eq!(Molecule::from_u16(result.0[0]).arousal_u8(), max_a, "v2 max arousal");
     }
 
     // ── LCA Variance ──────────────────────────────────────────────────────
