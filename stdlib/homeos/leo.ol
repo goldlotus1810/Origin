@@ -31,9 +31,9 @@ pub fn leo_express(hash, stm) {
   while i < len(stm.entries) {
     if stm.entries[i].hash == hash {
       let mol = stm.entries[i].mol;
-      return "{ S=" + to_string(mol.s) + " R=" + to_string(mol.r) +
-             " V=" + to_string(mol.v) + " A=" + to_string(mol.a) +
-             " T=" + to_string(mol.t) + " }";
+      return "{ S=" + to_string(mol_shape(mol)) + " R=" + to_string(mol_relation(mol)) +
+             " V=" + to_string(mol_valence(mol)) + " A=" + to_string(mol_arousal(mol)) +
+             " T=" + to_string(mol_time(mol)) + " }";
     }
     i = i + 1;
   }

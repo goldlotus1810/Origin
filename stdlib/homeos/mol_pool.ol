@@ -1,12 +1,12 @@
 // stdlib/homeos/mol_pool.ol — Molecule slab allocator
-// PLAN 5.3.3: Fixed-size pool for 5-byte Molecule objects.
-// Molecule = 5 bytes + 3 bytes padding = 8 bytes per slot.
-// Slab = 4096 slots = 32 KB.
+// PLAN 5.3.3: Fixed-size pool for u16 packed Molecule objects.
+// Molecule = 2 bytes (u16) + 2 bytes metadata = 4 bytes per slot.
+// Slab = 4096 slots = 16 KB.
 // Alloc/Free = O(1) via free list.
 
-let SLOT_SIZE = 8;      // 5 bytes molecule + 3 bytes metadata
+let SLOT_SIZE = 4;      // 2 bytes u16 packed molecule + 2 bytes metadata
 let SLAB_SLOTS = 4096;  // slots per slab
-let SLAB_SIZE = 32768;  // SLOT_SIZE * SLAB_SLOTS
+let SLAB_SIZE = 16384;  // SLOT_SIZE * SLAB_SLOTS
 
 pub fn pool_new() {
   // Initialize pool with one slab

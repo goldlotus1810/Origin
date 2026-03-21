@@ -1,6 +1,7 @@
 // homeos/silk_ops.ol — Implicit Silk operations
 // Silk = implicit relationships from 5D molecular distance
 // Hebbian learning: fire together → wire together
+// v2: mol is packed u16 [S:4][R:4][V:3][A:3][T:2]. distance_5d() takes u16 args.
 
 // ── Silk Graph (in-memory adjacency list) ──
 

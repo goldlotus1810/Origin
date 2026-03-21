@@ -18,16 +18,11 @@ use olang.bootstrap.parser;
 type Op {
     tag: Str,       // opcode name: "Push", "PushNum", "Store", etc.
     name: Str,      // variable/function name (for Store, Load, Call, etc.)
-    value: Num,     // numeric value (for PushNum, Jmp target, etc.)
-    value2: Num,    // second numeric (for PushMol: r)
-    value3: Num,    // third numeric (for PushMol: v)
-    value4: Num,    // fourth numeric (for PushMol: a)
-    value5: Num,    // fifth numeric (for PushMol: t)
+    value: Num,     // numeric value (for PushNum, Jmp target, PushMol packed u16, etc.)
 }
 
 fn make_op(tag, name, value) {
-    return Op { tag: tag, name: name, value: value,
-                value2: 0, value3: 0, value4: 0, value5: 0 };
+    return Op { tag: tag, name: name, value: value };
 }
 
 fn make_op_num(tag, value) {
@@ -95,9 +90,7 @@ fn current_pos(state) {
 fn patch_jump(state, pos, target) {
     // Patch a Jmp/Jz at position pos to jump to target
     let old_op = state.ops[pos];
-    let new_op = Op { tag: old_op.tag, name: old_op.name, value: target,
-                      value2: old_op.value2, value3: old_op.value3,
-                      value4: old_op.value4, value5: old_op.value5 };
+    let new_op = Op { tag: old_op.tag, name: old_op.name, value: target };
     set_at(state.ops, pos, new_op);
 }
 
@@ -407,9 +400,9 @@ fn compile_expr(state, expr) {
             compile_expr(state, else_expr);
             patch_jump(state, jmp_pos, current_pos(state));
         },
-        Expr::MolLiteral { s, r, v, a, t } => {
-            let op = Op { tag: "PushMol", name: "", value: s,
-                          value2: r, value3: v, value4: a, value5: t };
+        Expr::MolLiteral { packed } => {
+            // packed u16 [S:4][R:4][V:3][A:3][T:2] — already packed by parser
+            let op = Op { tag: "PushMol", name: "", value: packed };
             emit_op(state, op);
         },
         Expr::MatchExpr { subject, arms } => {
