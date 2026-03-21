@@ -384,4 +384,139 @@ PushMol(u16)  // 1 param = packed molecule
 
 ---
 
-_(T10-T12 tiếp theo)_
+## T10 — Downstream Rust Crates
+
+**Depends:** T3, T4, T5, T6, T7, T8
+**Audit refs:** L1, L4, L5, L6
+
+Mỗi crate dưới đây cần update API calls theo Molecule(u16) + Chain(Vec<u16>):
+
+### T10a — silk crate (~2 files)
+- `graph.rs`: EmotionTag dùng u16 thay vì 5B summary
+- `edge.rs`: Hebbian weight trên u16 pairs
+
+### T10b — agents crate (~5 files)
+- `encoder.rs`: SdfPrimitive 18 loại (xem T2b), EncodedContent.chain = Vec<u16>
+- `learning.rs`: Observation.chain = Vec<u16>, `.first()` trả u16
+- `instinct.rs`: Molecule::from_bytes() → Molecule(u16)
+- `skill.rs`: ExecContext chains = Vec<u16>
+- `domain_skills.rs`: IngestSkill trả Vec<u16>
+
+### T10c — memory crate (~3 files)
+- `dream.rs`: chain_hash trên 2B/link, EmotionDim → extract từ u16
+- `proposal.rs`: NewNode.chain = Vec<u16>
+- `build.rs`: Hypothesis.chain = Vec<u16>
+
+### T10d — vsdf crate (~2 files)
+- `ffr.rs`: FfrPoint.to_molecule() trả u16, molecule_similarity trên u16
+- `body.rs`: ShapeBase mapping 18 SDF
+
+### T10e — runtime crate (~1 file)
+- `origin.rs`: ShapeBase matching 18 variants, classify_chain_type trên Vec<u16>
+
+### T10f — context crate — dead code cleanup
+- `infer_and_apply`, `crisis_text_for`, `target_affect`, `select_words`, `affect_components`, `fuse_all` → KHÔNG AI GỌI → xóa hoặc wire lại
+
+**DoD:**
+```
+□ Tất cả crates compile với Molecule(u16) + Chain(Vec<u16>)
+□ context dead code xử lý
+□ cargo build --workspace pass
+```
+
+---
+
+## T11 — .ol Files Update
+
+**Depends:** T9
+**15 files cần sửa:**
+
+### T11a — stdlib core (3 files)
+- `mol.ol`: accessors dùng bit ops thay field access, 18 shape constants
+- `chain.ol`: chain = list of u16 codepoints, chain_lca dùng v2 rules
+- `hash.ol`: distance_5d trên packed u16, hash trên 2B
+
+### T11b — HomeOS pipeline (5 files)
+- `learning.ol`: text_to_mol trả u16, pipeline dùng amplify
+- `instinct.ol`: instincts operate trên u16 dimensions
+- `dream.ol`: STM mol = u16, fire/cluster logic
+- `silk_ops.ol`: implicit_strength trên u16, walk_emotion amplify
+- `mol_pool.ol`: slot = 2B mol + metadata (không còn 5B+3B=8B)
+
+### T11c — bootstrap compiler (3 files)
+- `semantic.ol`: MolLiteral parse → u16
+- `codegen.ol`: PushMol emit 3B `[tag][lo][hi]`
+- `parser.ol`: expression parsing cho 2B mol literals
+
+### T11d — agents + output (4 files)
+- `worker.ol`: sensor_read → u16 mol
+- `leo.ol`: express u16 mol literal format
+- `gate.ol`, `response.ol`: chain = Vec<u16>
+
+**DoD:**
+```
+□ Tất cả .ol files dùng u16 molecule
+□ mol.ol 18 shape constants
+□ chain.ol = u16 list
+□ bootstrap compiler emit 3B PushMol
+```
+
+---
+
+## T12 — Tests Rebuild
+
+**Depends:** T10, T11
+**~12 test files**
+
+**Vấn đề:** 1198 tests hiện PASS nhưng test logic CŨ = false positive.
+
+**Việc cần làm:**
+1. Unit tests: assertions verify u16 packed values
+2. LCA tests: verify amplify/Union/max/dominant (không avg)
+3. Chain tests: verify Vec<u16> operations
+4. KnowTree tests: verify [u16; 65536] lookup
+5. Integration tests: end-to-end với v2 data model
+6. `check-logic` tool: ALL checks PASS
+
+**DoD:**
+```
+□ cargo test --workspace PASS
+□ cargo clippy --workspace 0 warnings
+□ make smoke-binary PASS
+□ check-logic ALL PASS
+□ Không còn false positive tests
+```
+
+---
+
+## Checklist Tổng
+
+```
+Layer 0 (song song):
+  □ T1 UCD build.rs rebuild
+  □ T2 ShapeBase 18 SDF
+
+Layer 1:
+  □ T3 Molecule 2B packed
+
+Layer 2 (song song):
+  □ T4 Chain Vec<u16>
+  □ T5 LCA v2 rules
+  □ T6 KnowTree array
+
+Layer 3 (song song):
+  □ T7 Writer/Reader
+  □ T8 Registry
+  □ T9 VM PushMol
+
+Layer 4 (song song):
+  □ T10a-f Downstream crates
+  □ T11a-d .ol files
+
+Layer 5:
+  □ T12 Tests rebuild
+
+FINAL:
+  □ cargo test + clippy + make smoke-binary
+  □ check-logic ALL PASS
+```
