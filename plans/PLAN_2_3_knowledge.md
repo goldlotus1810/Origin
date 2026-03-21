@@ -81,6 +81,8 @@ fn cluster_5d(entries) {
 }
 
 fn dream_score(cluster, graph) {
+  // ⚠️ v2: avg cho scoring OK (đây là scoring, KHÔNG phải emotion compose)
+  // Emotion compose (LCA) mới TUYỆT ĐỐI KHÔNG avg — xem T5 trong PLAN_V2_MIGRATION
   let cohesion = avg_pairwise_similarity(cluster);
   let fire = avg_fire_count(cluster);
   let connectivity = avg_silk_degree(cluster, graph);

@@ -100,11 +100,12 @@ Thay đổi cần thiết:
 ### 5.3.3 — Molecule pool (~80 LOC)
 
 ```
-Molecule = 5 bytes. Allocation overhead > data size nếu malloc mỗi cái.
+⚠️ v2: Molecule = 2 bytes (u16 packed). Was 5 bytes.
+Pool cần update: slot size = 2B (hoặc 4B aligned).
 
 Pool:
-  - Pre-allocate slab: 4096 Molecule slots = 4096 × 8 bytes = 32 KB
-    (8 bytes per slot: 5 bytes Molecule + 3 bytes padding/metadata)
+  - Pre-allocate slab: 4096 Molecule slots = 4096 × 4 bytes = 16 KB
+    (4 bytes per slot: 2 bytes Molecule u16 + 2 bytes metadata)
   - Free list: linked list of available slots
   - Alloc: pop free list → O(1)
   - Free: push free list → O(1)
@@ -148,7 +149,7 @@ Compaction strategy:
    → STM.push() calls promote() internally
 
 3. Pool fragmentation
-   → Fixed-size slots → NO fragmentation (Molecule = always 5 bytes)
+   → Fixed-size slots → NO fragmentation (⚠️ v2: Molecule = 2 bytes u16)
 
 4. ⚠️ [THỰC TẾ] VM heap layout hiện tại
    → r15 = bump allocator, 16 MB mmap (MAP_PRIVATE|MAP_ANONYMOUS)

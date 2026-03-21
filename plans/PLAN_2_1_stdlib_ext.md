@@ -92,15 +92,16 @@ fn json_set(obj, key, val) { ... }
 ### hash.ol
 ```
 fn fnv1a(data) { ... }           // bytes → u64 hash
-fn chain_hash(chain) { ... }     // MolecularChain → u64
+fn chain_hash(chain) { ... }     // MolecularChain(Vec<u16>) → u64  ⚠️ v2: hash on 2B/link
 fn similarity(a, b) { ... }      // 2 chains → 0.0-1.0 score
-fn distance_5d(mol_a, mol_b) { ... } // 5D Euclidean distance
+fn distance_5d(mol_a, mol_b) { ... } // 5D distance on packed u16 molecules
 ```
 
 ### mol.ol
 ```
-fn encode(shape, rel, val, aro, time) { ... }  // → Molecule
-fn decode(mol) { ... }                          // → {s, r, v, a, t}
+// ⚠️ v2: Molecule = u16 packed [S:4][R:4][V:3][A:3][T:2]
+fn pack(shape, rel, val, aro, time) { ... }     // → u16 packed Molecule
+fn unpack(mol) { ... }                           // u16 → {s, r, v, a, t} via bit ops
 fn evolve(mol, dim, new_val) { ... }           // mutate 1 dimension
 fn dimension_delta(a, b) { ... }                // which dim differs most
 fn mol_to_str(mol) { ... }                      // debug display
