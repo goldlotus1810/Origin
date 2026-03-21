@@ -6,9 +6,12 @@
 //!   CP_BUCKET          — bucket index (shape,relation → [cp]), top-n decode
 //!   SDF_PRIMITIVES    — 18 SDF primitive mappings (v2)
 //!   RELATION_PRIMITIVES — 8 Relation primitive mappings
+//!   UTF32_ALIAS_TABLE — alias table: cp:u32 → p_weight:u16 (41,338 entries, T15)
 //!
-//! Source of truth: json/udc.json (8,284 characters, 53 blocks, 4 groups)
-//! KHÔNG heuristic — P_weight trực tiếp từ udc.json.
+//! Source of truth:
+//!   json/udc.json              (8,284 characters, 53 blocks, 4 groups)
+//!   json/udc_utf32_compact.json (41,338 UTF-32 alias entries)
+//! KHÔNG heuristic — P_weight trực tiếp từ JSON.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -169,8 +172,10 @@ fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let workspace = manifest.parent().unwrap().parent().unwrap();
     let udc_json_path = workspace.join("json/udc.json");
+    let utf32_json_path = workspace.join("json/udc_utf32_compact.json");
 
     println!("cargo:rerun-if-changed={}", udc_json_path.display());
+    println!("cargo:rerun-if-changed={}", utf32_json_path.display());
 
     if !udc_json_path.exists() {
         eprintln!("cargo:warning=json/udc.json not found — generating empty tables");
@@ -342,12 +347,17 @@ fn main() {
     // Build block→char mapping from udc.json blocks + character block fields
     generate_knowtree_topology(&mut src, &udc, &entries);
 
+    // ── UTF32 Alias Table (T15) ──────────────────────────────────────────
+    // Separate table: cp:u32 → p_weight:u16 for 41,338 emoji/UTF-32 aliases
+    let alias_count = generate_utf32_alias_table(&mut src, &utf32_json_path, &entries);
+
     fs::write(&out_file, &src).expect("write ucd_generated.rs");
     eprintln!(
-        "cargo:warning=Generated: {} entries, {} hash entries, {} buckets, 18 SDF prims",
+        "cargo:warning=Generated: {} entries, {} hash entries, {} buckets, 18 SDF prims, {} aliases",
         entries.len(),
         hash_to_cp.len(),
-        bucket_list.len()
+        bucket_list.len(),
+        alias_count,
     );
 }
 
@@ -552,6 +562,131 @@ fn generate_knowtree_topology(src: &mut String, udc: &UdcJson, entries: &[Entry]
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// UTF-32 Alias Table generation (T15)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// JSON schema for udc_utf32_compact.json
+#[derive(Deserialize)]
+struct Utf32Json {
+    #[serde(default)]
+    planes: HashMap<String, Utf32Plane>,
+}
+
+#[derive(Deserialize)]
+struct Utf32Plane {
+    #[serde(default)]
+    blocks: HashMap<String, Utf32Block>,
+}
+
+#[derive(Deserialize)]
+struct Utf32Block {
+    #[serde(default)]
+    chars: HashMap<String, Utf32Char>,
+}
+
+#[derive(Deserialize)]
+struct Utf32Char {
+    /// Packed P_weight u16: [S:4][R:4][V:3][A:3][T:2]
+    #[serde(rename = "P")]
+    p_weight: u16,
+}
+
+/// Generate UTF32_ALIAS_TABLE from udc_utf32_compact.json.
+///
+/// Only includes codepoints NOT already in UCD_TABLE (L0).
+/// Sorted by codepoint for O(log n) binary search.
+/// Returns the number of alias entries generated.
+fn generate_utf32_alias_table(
+    src: &mut String,
+    utf32_json_path: &std::path::Path,
+    l0_entries: &[Entry],
+) -> usize {
+    if !utf32_json_path.exists() {
+        eprintln!("cargo:warning=json/udc_utf32_compact.json not found — empty alias table");
+        writeln!(src, "/// UTF-32 alias table (T15): empty (json not found)").unwrap();
+        writeln!(src, "pub static UTF32_ALIAS_TABLE: &[(u32, u16)] = &[];").unwrap();
+        writeln!(src, "/// Number of entries in UTF32_ALIAS_TABLE.").unwrap();
+        writeln!(src, "pub const UTF32_ALIAS_COUNT: usize = 0;").unwrap();
+        writeln!(src).unwrap();
+        return 0;
+    }
+
+    let content = fs::read_to_string(utf32_json_path).expect("read udc_utf32_compact.json");
+    let utf32: Utf32Json = serde_json::from_str(&content).expect("parse udc_utf32_compact.json");
+
+    // Collect all (cp, p_weight) pairs
+    let mut alias_entries: Vec<(u32, u16)> = Vec::new();
+
+    for plane in utf32.planes.values() {
+        for block in plane.blocks.values() {
+            for (cp_hex, ch) in &block.chars {
+                if let Ok(cp) = u32::from_str_radix(cp_hex, 16) {
+                    alias_entries.push((cp, ch.p_weight));
+                }
+            }
+        }
+    }
+
+    // Sort by codepoint
+    alias_entries.sort_by_key(|&(cp, _)| cp);
+    // Dedup by codepoint (keep first)
+    alias_entries.dedup_by_key(|e| e.0);
+
+    // Exclude codepoints already in L0 UCD_TABLE
+    let l0_cps: std::collections::HashSet<u32> = l0_entries.iter().map(|e| e.cp).collect();
+    alias_entries.retain(|&(cp, _)| !l0_cps.contains(&cp));
+
+    let count = alias_entries.len();
+
+    eprintln!(
+        "cargo:warning=UTF32 alias table: {} entries (excluding {} L0 codepoints)",
+        count,
+        l0_cps.len(),
+    );
+
+    // Generate Rust array
+    writeln!(
+        src,
+        "/// UTF-32 alias table (T15): cp → packed P_weight u16"
+    )
+    .unwrap();
+    writeln!(
+        src,
+        "/// {} entries from udc_utf32_compact.json, sorted by cp. Excludes L0.",
+        count
+    )
+    .unwrap();
+    writeln!(
+        src,
+        "/// Format per entry: (codepoint: u32, p_weight: u16)"
+    )
+    .unwrap();
+    writeln!(
+        src,
+        "/// Total size: {} entries × 6B = {} KB",
+        count,
+        (count * 6) / 1024
+    )
+    .unwrap();
+    writeln!(src, "pub static UTF32_ALIAS_TABLE: &[(u32, u16)] = &[").unwrap();
+    for &(cp, pw) in &alias_entries {
+        writeln!(src, "    (0x{:05X}, 0x{:04X}),", cp, pw).unwrap();
+    }
+    writeln!(src, "];").unwrap();
+    writeln!(src).unwrap();
+
+    writeln!(
+        src,
+        "/// Number of entries in UTF32_ALIAS_TABLE."
+    )
+    .unwrap();
+    writeln!(src, "pub const UTF32_ALIAS_COUNT: usize = {};", count).unwrap();
+    writeln!(src).unwrap();
+
+    count
+}
+
 fn write_empty() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let out_file = out_dir.join("ucd_generated.rs");
@@ -578,6 +713,8 @@ pub static KNOWTREE_GROUPS: &[(&str, u16, &[u16])] = &[];
 pub static KNOWTREE_BLOCKS: &[(&str, u16, u16, u16)] = &[];
 pub const KNOWTREE_GROUP_COUNT: usize = 0;
 pub const KNOWTREE_BLOCK_COUNT: usize = 0;
+pub static UTF32_ALIAS_TABLE: &[(u32, u16)] = &[];
+pub const UTF32_ALIAS_COUNT: usize = 0;
 "#,
     )
     .unwrap();

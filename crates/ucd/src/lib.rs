@@ -134,6 +134,55 @@ pub fn table_len() -> usize {
     UCD_TABLE.len()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// UTF-32 Alias Table (T15) — tách riêng khỏi KnowTree
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Alias P_weight lookup: codepoint → packed P_weight u16.
+///
+/// Searches UTF32_ALIAS_TABLE (33K+ entries, sorted by cp).
+/// O(log n). Returns 0 if codepoint not in alias table.
+///
+/// Use this for codepoints NOT in L0 UCD_TABLE (emoji, CJK, Latin, etc.).
+/// For L0 codepoints, use `p_weight_of()` instead.
+#[inline]
+pub fn alias_p_weight(cp: u32) -> u16 {
+    UTF32_ALIAS_TABLE
+        .binary_search_by_key(&cp, |&(c, _)| c)
+        .ok()
+        .map(|i| UTF32_ALIAS_TABLE[i].1)
+        .unwrap_or(0)
+}
+
+/// Full P_weight lookup: tries L0 first, then alias table.
+///
+/// Combined lookup across both UCD_TABLE and UTF32_ALIAS_TABLE.
+/// Returns 0 only if codepoint is in neither table.
+#[inline]
+pub fn p_weight_full(cp: u32) -> u16 {
+    let pw = p_weight_of(cp);
+    if pw != 0 {
+        pw
+    } else {
+        alias_p_weight(cp)
+    }
+}
+
+/// Number of entries in the alias table.
+#[inline]
+pub fn alias_table_len() -> usize {
+    UTF32_ALIAS_COUNT
+}
+
+/// Full alias table — sorted by codepoint.
+///
+/// Each entry: (codepoint: u32, p_weight: u16).
+/// ~33K entries, ~198 KB. Separated from KnowTree per T15 spec.
+#[inline]
+pub fn alias_table() -> &'static [(u32, u16)] {
+    UTF32_ALIAS_TABLE
+}
+
 /// Toàn bộ UCD_TABLE — dùng cho L0 full seeding.
 ///
 /// Trả về slice tĩnh chứa ~8,284 entries, sorted by codepoint.
@@ -437,6 +486,68 @@ mod tests {
         }
         // Out of range
         assert!(group_blocks(999).is_empty());
+    }
+
+    // ── UTF-32 Alias Table (T15) ──────────────────────────────────────────
+
+    #[test]
+    fn alias_table_not_empty() {
+        assert!(
+            alias_table_len() > 30_000,
+            "Alias table should have >30K entries, got {}",
+            alias_table_len()
+        );
+    }
+
+    #[test]
+    fn alias_table_sorted_by_cp() {
+        let t = alias_table();
+        for i in 1..t.len() {
+            assert!(
+                t[i - 1].0 < t[i].0,
+                "UTF32_ALIAS_TABLE must be sorted: 0x{:05X} >= 0x{:05X} at index {}",
+                t[i - 1].0,
+                t[i].0,
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn alias_table_excludes_l0() {
+        // L0 codepoints (e.g. FIRE 0x1F525) should NOT be in alias table
+        let t = alias_table();
+        let fire_in_alias = t.binary_search_by_key(&0x1F525u32, |&(cp, _)| cp);
+        assert!(
+            fire_in_alias.is_err(),
+            "L0 codepoint 0x1F525 should not be in alias table"
+        );
+    }
+
+    #[test]
+    fn alias_p_weight_known_cp() {
+        // Latin 'A' (0x0041) should be in alias table (it's not in L0 UDC)
+        let pw = alias_p_weight(0x0041);
+        assert!(pw != 0, "Latin 'A' should have nonzero alias P_weight");
+    }
+
+    #[test]
+    fn alias_p_weight_unknown_cp() {
+        // Very high codepoint unlikely to be mapped
+        assert_eq!(alias_p_weight(0xFFFFF), 0);
+    }
+
+    #[test]
+    fn p_weight_full_covers_both() {
+        // L0 codepoint
+        let pw_l0 = p_weight_full(0x1F525);
+        assert!(pw_l0 != 0, "FIRE via p_weight_full");
+        assert_eq!(pw_l0, p_weight_of(0x1F525));
+
+        // Alias codepoint (Latin A)
+        let pw_alias = p_weight_full(0x0041);
+        assert!(pw_alias != 0, "Latin A via p_weight_full");
+        assert_eq!(pw_alias, alias_p_weight(0x0041));
     }
 
     #[test]
