@@ -66,58 +66,6 @@ Chi phí lưu UDC: 0 bytes.
   Behavior hardcode trong engine — giống ribosome đọc codon.
 ```
 
-### 1.2b — PHÂN BIỆT UDC vs UTF-32 (BẮT BUỘC ĐỌC)
-
-```
-⚠️ UDC và UTF-32 là HAI HỆ THỐNG KHÁC NHAU. HAI TẦNG CẤP KHÁC NHAU.
-   AI contributors PHẢI phân biệt rõ — nhầm là sai kiến trúc.
-
-┌───────────────────────────────────────────────────────────────────┐
-│ UDC (Unicode Defined Characters) — HỆ THỐNG CỦA CHÚNG TA        │
-│                                                                   │
-│  • UDC ĐỊNH NGHĨA tọa độ, công thức, vị trí trong không gian 5D │
-│  • 18 SDF primitives = công thức CỦA UDC (Sphere, Box, Cone...)  │
-│  • P_weight = giá trị CỦA UDC tại vị trí CỦA UDC                │
-│  • Encoder/Decoder dùng CÔNG THỨC UDC để tính toán               │
-│  • UDC là CHỦ NHÂN — quyết định mọi giá trị                     │
-│                                                                   │
-│  UDC position 0  = SPHERE  → f(P) = |P| − r                     │
-│  UDC position 1  = BOX     → f(P) = ||max(|P|−b,0)||            │
-│  UDC position 8  = OCTAHEDRON → f(P) = |x|+|y|+|z| − s         │
-│  ... (18 vị trí, 18 công thức — của riêng UDC)                  │
-├───────────────────────────────────────────────────────────────────┤
-│ UTF-32 — CHỈ LÀ ALIAS MAPPING VÀO UDC                           │
-│                                                                   │
-│  • UTF-32 codepoints = TÊN GỌI để tham chiếu đến vị trí UDC    │
-│  • Chúng ta KHÔNG thay đổi vị trí UTF-32 (chúng là của Unicode) │
-│  • Chúng ta CHỈ MAP chúng vào tọa độ UDC của chúng ta           │
-│  • Khi nói chuyện: gọi bằng tọa độ UTF-32 (U+25CF, U+1F525...) │
-│  • Khi tính toán: dùng giá trị UDC (P_weight, SDF formula)      │
-│                                                                   │
-│  U+25CF (● BLACK CIRCLE) → alias cho UDC SPHERE (position 0)    │
-│  U+25A0 (■ BLACK SQUARE) → alias cho UDC BOX (position 1)       │
-│  U+25C6 (◆ BLACK DIAMOND) → alias cho UDC OCTAHEDRON (pos 8)    │
-│  ... (9,584 UTF-32 codepoints map vào 9,584 vị trí UDC)         │
-└───────────────────────────────────────────────────────────────────┘
-
-Luồng đúng:
-  json/udc.json  →  ĐỊNH NGHĨA vị trí UDC + công thức + P_weight
-  UTF-32 alias   →  chỉ để CON NGƯỜI đọc được ("● = SPHERE")
-  encode_codepoint(0x25CF) → tra UDC position → lấy CÔNG THỨC UDC → tính
-
-Luồng SAI (anti-pattern):
-  ❌ Hardcode SDF_PRIMS = [(0x25CF, 0, "SPHERE"), ...]  ← nhầm UTF-32 LÀ UDC
-  ❌ Dùng tên UTF-32 để xác định shape  ← shape DO UDC ĐỊNH NGHĨA
-  ❌ Thay đổi vị trí UTF-32             ← vị trí UTF-32 là CỦA UNICODE
-  ✅ Tra udc.json → lấy P_weight[0] (S) ← giá trị shape TỪ UDC
-  ✅ Gọi bằng U+25CF khi tham chiếu     ← UTF-32 là tên gọi
-
-Tóm lại:
-  UDC = HỆ QUY CHIẾU (tọa độ + công thức + giá trị)
-  UTF-32 = NHÃN (tên gọi để tham chiếu)
-  Giống GPS: tọa độ (12.34°N, 56.78°E) = UDC. "Sài Gòn" = UTF-32 alias.
-```
-
 ### 1.3 Năm chiều = 5 trọng số, lưu kết quả tích phân
 
 ```

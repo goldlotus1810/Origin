@@ -1,19 +1,14 @@
 //! build.rs — đọc json/udc.json lúc compile → sinh bảng tĩnh (v2)
 //!
 //! Output trong OUT_DIR/ucd_generated.rs:
-//!   UCD_TABLE             — forward lookup (cp → UcdEntry with packed u16 P_weight)
-//!   HASH_TO_CP            — reverse index (chain_hash → cp), O(log n) decode
-//!   CP_BUCKET             — bucket index (shape,relation → [cp]), top-n decode
-//!   SDF_PRIMITIVES        — derived from udc.json: characters with group=SDF
-//!   RELATION_PRIMITIVES   — derived from udc.json: characters with group=MATH
+//!   UCD_TABLE         — forward lookup (cp → UcdEntry with packed u16 P_weight)
+//!   HASH_TO_CP        — reverse index (chain_hash → cp), O(log n) decode
+//!   CP_BUCKET          — bucket index (shape,relation → [cp]), top-n decode
+//!   SDF_PRIMITIVES    — 18 SDF primitive mappings (v2)
+//!   RELATION_PRIMITIVES — 8 Relation primitive mappings
 //!
 //! Source of truth: json/udc.json (8,284 characters, 53 blocks, 4 groups)
 //! KHÔNG heuristic — P_weight trực tiếp từ udc.json.
-//!
-//! ⚠️ UDC vs UTF-32:
-//!   UDC = hệ tọa độ CỦA CHÚNG TA (vị trí, công thức, P_weight)
-//!   UTF-32 = CHỈ LÀ ALIAS mapping vào UDC positions
-//!   SDF/REL primitives PHẢI derive từ udc.json — KHÔNG hardcode.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -49,16 +44,44 @@ struct PhysicsLogic {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ⚠️ SDF/REL Primitives: KHÔNG hardcode ở đây.
-// Chúng được derive từ udc.json trong main().
-//
-// UDC = hệ tọa độ của chúng ta (vị trí + công thức + P_weight)
-// UTF-32 codepoints = alias (ngôn ngữ con người mapping vào UDC)
-//
-// SDF primitives = các ký tự có group="SDF", mỗi ký tự mang
-// P_weight[0] (S) = UDC shape position DO udc.json ĐỊNH NGHĨA.
-// RELATION primitives = tương tự cho group="MATH", P_weight[1] (R).
+// 18 SDF Primitives (v2 spec)
 // ─────────────────────────────────────────────────────────────────────────────
+
+static SDF_PRIMS: &[(u32, u8, &str)] = &[
+    (0x25CF, 0, "BLACK CIRCLE"),               // ● Sphere
+    (0x25A0, 1, "BLACK SQUARE"),               // ■ Box
+    (0x25AC, 2, "BLACK RECTANGLE"),            // ▬ Capsule
+    (0x25BD, 3, "WHITE DOWN-POINTING TRIANGLE"), // ▽ Plane
+    (0x25CB, 4, "WHITE CIRCLE"),               // ○ Torus
+    (0x2B2E, 5, "BLACK VERTICAL ELLIPSE"),     // ⬮ Ellipsoid
+    (0x25B2, 6, "BLACK UP-POINTING TRIANGLE"), // ▲ Cone
+    (0x25AD, 7, "WHITE RECTANGLE"),            // ▭ Cylinder
+    (0x25C6, 8, "BLACK DIAMOND"),              // ◆ Octahedron
+    (0x25B3, 9, "WHITE UP-POINTING TRIANGLE"), // △ Pyramid
+    (0x2B21, 10, "WHITE HEXAGON"),             // ⬡ HexPrism
+    (0x25B1, 11, "WHITE PARALLELOGRAM"),       // ▱ Prism
+    (0x25A2, 12, "WHITE SQUARE WITH ROUNDED CORNERS"), // ▢ RoundBox
+    (0x221E, 13, "INFINITY"),                  // ∞ Link
+    (0x21BB, 14, "CLOCKWISE OPEN CIRCLE ARROW"), // ↻ Revolve
+    (0x21E7, 15, "UPWARDS WHITE ARROW"),       // ⇧ Extrude
+    (0x25D0, 16, "CIRCLE WITH LEFT HALF BLACK"), // ◐ CutSphere
+    (0x2606, 17, "WHITE STAR"),                // ☆ DeathStar
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8 RELATION Primitives — từ Mathematical Operators 2200..22FF
+// ─────────────────────────────────────────────────────────────────────────────
+
+static REL_PRIMS: &[(u32, u8, &str)] = &[
+    (0x2208, 0x01, "ELEMENT OF"),       // ∈ Member
+    (0x2282, 0x02, "SUBSET OF"),        // ⊂ Subset
+    (0x2261, 0x03, "IDENTICAL TO"),     // ≡ Equiv
+    (0x22A5, 0x04, "UP TACK"),          // ⊥ Orthogonal
+    (0x2218, 0x05, "RING OPERATOR"),    // ∘ Compose
+    (0x2192, 0x06, "RIGHTWARDS ARROW"), // → Causes
+    (0x2248, 0x07, "ALMOST EQUAL TO"),  // ≈ Similar
+    (0x2190, 0x08, "LEFTWARDS ARROW"),  // ← DerivedFrom
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Group → byte mapping
@@ -280,43 +303,29 @@ fn main() {
     writeln!(src, "];").unwrap();
     writeln!(src).unwrap();
 
-    // SDF_PRIMITIVES — derived from udc.json (group=SDF)
-    // UDC defines positions; UTF-32 codepoints are just aliases mapping into UDC.
-    // Each SDF character's P_weight[0] (shape) = its UDC shape position.
-    let sdf_entries: Vec<(u32, u8)> = entries.iter()
-        .filter(|e| e.group == 0x01) // SDF group
-        .map(|e| (e.cp, e.shape))
-        .collect();
-    writeln!(src, "/// SDF primitives derived from udc.json (group=SDF): (codepoint_alias, udc_shape)").unwrap();
-    writeln!(src, "/// UTF-32 codepoints are aliases; shape values are UDC positions.").unwrap();
+    // SDF_PRIMITIVES — 18 SDF (v2)
+    writeln!(src, "/// 18 SDF primitives (v2): (codepoint, shape_index)").unwrap();
     writeln!(src, "pub static SDF_PRIMITIVES: &[(u32, u8)] = &[").unwrap();
-    for (cp, shape) in &sdf_entries {
-        writeln!(src, "    (0x{:04X}, 0x{:02X}),", cp, shape).unwrap();
+    for &(cp, byte, _name) in SDF_PRIMS {
+        writeln!(src, "    (0x{:04X}, 0x{:02X}),", cp, byte).unwrap();
     }
     writeln!(src, "];").unwrap();
     writeln!(src).unwrap();
 
-    // RELATION_PRIMITIVES — derived from udc.json (group=MATH)
-    let rel_entries: Vec<(u32, u8)> = entries.iter()
-        .filter(|e| e.group == 0x02) // MATH group
-        .map(|e| (e.cp, e.relation))
-        .collect();
-    writeln!(src, "/// RELATION primitives derived from udc.json (group=MATH): (codepoint_alias, udc_relation)").unwrap();
-    writeln!(src, "/// UTF-32 codepoints are aliases; relation values are UDC positions.").unwrap();
+    // RELATION_PRIMITIVES
+    writeln!(src, "/// 8 RELATION primitives: (codepoint, relation_byte)").unwrap();
     writeln!(src, "pub static RELATION_PRIMITIVES: &[(u32, u8)] = &[").unwrap();
-    for (cp, rel) in &rel_entries {
-        writeln!(src, "    (0x{:04X}, 0x{:02X}),", cp, rel).unwrap();
+    for &(cp, byte, _name) in REL_PRIMS {
+        writeln!(src, "    (0x{:04X}, 0x{:02X}),", cp, byte).unwrap();
     }
     writeln!(src, "];").unwrap();
 
     fs::write(&out_file, &src).expect("write ucd_generated.rs");
     eprintln!(
-        "cargo:warning=Generated: {} entries, {} hash entries, {} buckets, {} SDF prims (derived), {} REL prims (derived)",
+        "cargo:warning=Generated: {} entries, {} hash entries, {} buckets, 18 SDF prims",
         entries.len(),
         hash_to_cp.len(),
-        bucket_list.len(),
-        sdf_entries.len(),
-        rel_entries.len()
+        bucket_list.len()
     );
 }
 
