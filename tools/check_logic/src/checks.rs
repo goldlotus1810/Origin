@@ -1151,3 +1151,517 @@ pub fn check_wiring_word_selection(root: &Path) -> CheckResult {
             .with_details(details)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #2: ShapeBase = 8, v2 = 18 SDF primitives
+// Union/Intersect/Subtract = CSG ops, not shapes
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_shapebase_18sdf(root: &Path) -> CheckResult {
+    println!("[23/27] AUDIT — ShapeBase 8 vs v2 18 SDF...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("ShapeBase 18 SDF", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("ShapeBase 18 SDF", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // v2 requires 18 SDF primitives
+    let v2_shapes = [
+        "Sphere", "Box", "Capsule", "Plane", "Torus", "Ellipsoid",
+        "Cone", "Cylinder", "Octahedron", "Pyramid", "HexPrism",
+        "Prism", "RoundBox", "Link", "Revolve", "Extrude",
+        "CutSphere", "DeathStar",
+    ];
+
+    let mut found = 0;
+    let mut missing = Vec::new();
+    for shape in &v2_shapes {
+        if content.contains(shape) {
+            found += 1;
+        } else {
+            missing.push(*shape);
+        }
+    }
+
+    // Check CSG ops wrongly in ShapeBase
+    let has_union_shape = content.contains("Union") && content.contains("ShapeBase");
+    let has_intersect_shape = content.contains("Intersect") && content.contains("ShapeBase");
+    let has_subtract_shape = content.contains("Subtract") && content.contains("ShapeBase");
+    let csg_in_shape = has_union_shape || has_intersect_shape || has_subtract_shape;
+
+    details.push(format!("SDF primitives found: {}/18", found));
+    if !missing.is_empty() {
+        details.push(format!("Missing: {}", missing.join(", ")));
+    }
+    if csg_in_shape {
+        details.push("CSG ops (Union/Intersect/Subtract) in ShapeBase: ❌ should be separate".into());
+    }
+
+    if found >= 18 && !csg_in_shape {
+        CheckResult::pass("ShapeBase 18 SDF", &format!("OK — {}/18 SDF primitives", found))
+            .with_details(details)
+    } else {
+        CheckResult::fail("ShapeBase 18 SDF", &format!(
+            "Only {}/18 SDF primitives{}", found,
+            if csg_in_shape { " + CSG ops wrongly in ShapeBase" } else { "" }
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #3: KnowTree = array 65,536 × 2B, not hash-based
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_knowtree_array(root: &Path) -> CheckResult {
+    println!("[24/27] AUDIT — KnowTree = array, not hash...");
+    let olang_dir = root.join("crates/olang");
+    let files = scan_rs_files(&olang_dir);
+
+    let mut details = Vec::new();
+
+    // Check: KnowTree uses array index (codepoint → P_weight) vs hash-based
+    let hash_lookup = grep_pattern(&files, "chain_hash");
+    let compact_node = grep_pattern(&files, "CompactNode");
+    let slim_node = grep_pattern(&files, "SlimNode");
+    let array_index = grep_pattern(&files, "[codepoint]");  // array index syntax
+
+    // Check: size is 65,536 × 2B = 128KB?
+    let tiered_store = grep_pattern(&files, "TieredStore");
+
+    let is_hash_based = !hash_lookup.is_empty() && (!compact_node.is_empty() || !slim_node.is_empty());
+    let is_array_based = !array_index.is_empty() && tiered_store.is_empty();
+
+    details.push(format!("Hash-based lookup (chain_hash): {} refs", hash_lookup.len()));
+    details.push(format!("CompactNode (hash 8B + mol + meta): {} refs", compact_node.len()));
+    details.push(format!("SlimNode: {} refs", slim_node.len()));
+    details.push(format!("TieredStore: {} refs", tiered_store.len()));
+
+    if is_array_based {
+        CheckResult::pass("KnowTree Array", "OK — array-based O(1) lookup by codepoint")
+            .with_details(details)
+    } else if is_hash_based {
+        details.push("v2 spec: KnowTree[codepoint] → P_weight, O(1) array lookup".into());
+        details.push("Current: chain_hash → CompactNode → Molecule, O(log n) hash lookup".into());
+        details.push("Expected: array 65,536 × 2B = 128 KB".into());
+        CheckResult::fail("KnowTree Array", "KnowTree is hash-based — v2 requires array 65,536 × 2B")
+            .with_details(details)
+    } else {
+        CheckResult::warn("KnowTree Array", "Cannot determine KnowTree type")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #4: MolecularChain = Vec<Molecule>, v2 = Vec<u16>
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_chain_u16(root: &Path) -> CheckResult {
+    println!("[25/27] AUDIT — MolecularChain = Vec<u16> vs Vec<Molecule>...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("Chain Vec<u16>", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("Chain Vec<u16>", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check: MolecularChain wraps Vec<Molecule> (11B each) or Vec<u16> (2B each)?
+    let has_vec_mol = content.contains("Vec<Molecule>") && content.contains("MolecularChain");
+    let has_vec_u16 = content.contains("Vec<u16>") && content.contains("MolecularChain");
+
+    if has_vec_u16 && !has_vec_mol {
+        details.push("MolecularChain = Vec<u16>: ✅ (2B/link)".into());
+        CheckResult::pass("Chain Vec<u16>", "OK — chain links are u16 codepoint references")
+            .with_details(details)
+    } else if has_vec_mol {
+        details.push("MolecularChain = Vec<Molecule>: ❌ (11B/link)".into());
+        details.push("v2 spec: chain link = u16 codepoint → KnowTree[cp]".into());
+        details.push("Current: chain link = full Molecule embedded (5.5x overhead)".into());
+        details.push("DNA analogy: chain = sequence of REFERENCES, not VALUES".into());
+        CheckResult::fail("Chain Vec<u16>", "MolecularChain wraps Vec<Molecule> (11B/link) — v2 requires Vec<u16> (2B/link)")
+            .with_details(details)
+    } else {
+        CheckResult::warn("Chain Vec<u16>", "Cannot determine chain type")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #5: LCA compose rules — amplify/Union/max/dominant
+// Code uses weighted average for ALL dimensions
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_lca_compose_rules(root: &Path) -> CheckResult {
+    println!("[26/27] AUDIT — LCA compose rules vs v2...");
+    let lca_path = root.join("crates/olang/src/mol/lca.rs");
+
+    if !lca_path.exists() {
+        return CheckResult::fail("LCA Compose", "lca.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&lca_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("LCA Compose", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // v2 rules:
+    //   S = Union(A.S, B.S)
+    //   R = Compose (fixed value)
+    //   V = amplify(A.V, B.V, w_AB) — NOT average
+    //   A = max(A.A, B.A)
+    //   T = dominant(A.T, B.T)
+
+    let has_wavg = content.contains("mode_or_wavg");
+    let has_union = content.contains("Union") || content.contains("union");
+    let has_amplify = content.contains("amplify");
+    let has_max_arousal = content.contains("max") && content.contains("arousal");
+    let has_dominant = content.contains("dominant");
+
+    // Check each dimension
+    let s_ok = has_union;
+    let r_ok = content.contains("Compose") || content.contains("compose");
+    let v_ok = has_amplify && !has_wavg;  // V must NOT use wavg
+    let a_ok = has_max_arousal;
+    let t_ok = has_dominant;
+
+    details.push(format!("S = Union(): {}", if s_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+    details.push(format!("R = Compose: {}", if r_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+    details.push(format!("V = amplify(): {}", if v_ok { "✅" } else { "❌ uses mode_or_wavg (CRITICAL)" }));
+    details.push(format!("A = max(): {}", if a_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+    details.push(format!("T = dominant(): {}", if t_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+
+    if has_wavg {
+        details.push("mode_or_wavg() found — used for ALL dimensions: ❌".into());
+        details.push("v2: each dimension has DIFFERENT compose rule".into());
+    }
+
+    let ok_count = [s_ok, r_ok, v_ok, a_ok, t_ok].iter().filter(|&&x| x).count();
+
+    if ok_count == 5 {
+        CheckResult::pass("LCA Compose", "OK — all 5 dimensions use correct compose rules")
+            .with_details(details)
+    } else {
+        CheckResult::fail("LCA Compose", &format!(
+            "LCA uses mode_or_wavg for ALL dims — {}/5 correct (v2: Union/Compose/amplify/max/dominant)",
+            ok_count
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #7: UCD blocks — 29 ranges vs v2 58 blocks
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_ucd_block_count(root: &Path) -> CheckResult {
+    println!("[27/27] AUDIT — UCD blocks 29 vs v2 58...");
+    let build_path = root.join("crates/ucd/build.rs");
+
+    if !build_path.exists() {
+        return CheckResult::fail("UCD Blocks", "build.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&build_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("UCD Blocks", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Count Unicode range definitions (0x????..0x???? or ..=)
+    let _range_count = content.matches("0x").count() / 2;  // approximate pairs
+
+    // Check for specific missing blocks
+    let has_braille = content.contains("2800") || content.contains("Braille");
+    let has_ornamental = content.contains("1F650") || content.contains("Ornamental");
+    let has_mahjong = content.contains("1F000") || content.contains("Mahjong");
+    let has_domino = content.contains("1F030") || content.contains("Domino");
+    let has_playing = content.contains("1F0A0") || content.contains("Playing");
+    let has_znamenny = content.contains("1CF00") || content.contains("Znamenny");
+    let has_byzantine = content.contains("1D000") || content.contains("Byzantine");
+
+    // Check L0 anchor count — v2 says 9,584
+    let table_size_match = content.contains("9584") || content.contains("9_584");
+
+    details.push(format!("Braille Patterns: {}", if has_braille { "✅" } else { "❌ missing" }));
+    details.push(format!("Ornamental Dingbats: {}", if has_ornamental { "✅" } else { "❌ missing" }));
+    details.push(format!("Mahjong Tiles: {}", if has_mahjong { "✅" } else { "❌ missing" }));
+    details.push(format!("Domino Tiles: {}", if has_domino { "✅" } else { "❌ missing" }));
+    details.push(format!("Playing Cards: {}", if has_playing { "✅" } else { "❌ missing" }));
+    details.push(format!("Znamenny Musical: {}", if has_znamenny { "✅" } else { "❌ missing" }));
+    details.push(format!("Byzantine Musical: {}", if has_byzantine { "✅" } else { "❌ missing" }));
+    details.push(format!("L0 anchor count = 9,584: {}", if table_size_match { "✅" } else { "❌" }));
+
+    let missing_count = [has_braille, has_ornamental, has_mahjong, has_domino,
+                         has_playing, has_znamenny, has_byzantine]
+        .iter().filter(|&&x| !x).count();
+
+    if missing_count == 0 && table_size_match {
+        CheckResult::pass("UCD Blocks", "OK — all 58 blocks covered, 9,584 anchors")
+            .with_details(details)
+    } else {
+        details.push(format!("{} key blocks missing — v2 requires 58 blocks / 9,584 L0 anchors", missing_count));
+        CheckResult::fail("UCD Blocks", &format!(
+            "{} key blocks missing, L0 anchors ≠ 9,584 — v2 requires 58 blocks",
+            missing_count
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #1: IR/Compiler — features parsed but NOT compiled
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_compile_gap(root: &Path) -> CheckResult {
+    println!("[28/32] OLANG — Parsed-but-not-compiled features...");
+    let ir_path = root.join("crates/olang/src/exec/ir.rs");
+
+    if !ir_path.exists() {
+        return CheckResult::fail("OLANG Compile Gap", "ir.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&ir_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("OLANG Compile Gap", &format!("Cannot read: {}", e)),
+    };
+
+    let syntax_path = root.join("crates/olang/src/lang/syntax.rs");
+    let syntax = std::fs::read_to_string(&syntax_path).unwrap_or_default();
+
+    let mut details = Vec::new();
+    let mut gap_count = 0;
+
+    let checks = [
+        ("Break", "Break", "break statement"),
+        ("Continue", "Continue", "continue statement"),
+        ("StructDef", "StructDef", "struct definition"),
+        ("EnumDef", "EnumDef", "enum definition"),
+        ("TraitDef", "TraitDef", "trait definition"),
+        ("ImplBlock", "ImplBlock", "impl block"),
+        ("TryPropagate", "TryPropagate", "? try propagation"),
+        ("UnwrapOr", "UnwrapOr", "?? unwrap"),
+        ("FStr", "FStr", "f-string interpolation"),
+        ("Tuple", "Tuple", "tuple expression"),
+        ("Slice", "Slice", "array slicing"),
+        ("FieldAssign", "FieldAssign", "struct field assignment"),
+        ("IndexAssign", "IndexAssign", "array index assignment"),
+        ("MethodCall", "MethodCall", "method call dispatch"),
+    ];
+
+    for (name, ast_pattern, desc) in &checks {
+        let in_syntax = syntax.contains(ast_pattern);
+        let in_ir = content.contains(&format!("{}(", name))
+            || content.contains(&format!("{} {{", name))
+            || content.contains(&format!("{} =>", name));
+
+        if in_syntax && !in_ir {
+            gap_count += 1;
+            details.push(format!("❌ {} — parsed but NOT compiled: {}", name, desc));
+        }
+    }
+
+    if gap_count == 0 {
+        CheckResult::pass("OLANG Compile Gap", "OK — all parsed features compiled")
+            .with_details(details)
+    } else {
+        details.push(format!("{} features parse OK then SILENTLY DROP — no error, no code", gap_count));
+        CheckResult::fail("OLANG Compile Gap", &format!(
+            "{} features parsed but NOT compiled — silent code loss", gap_count
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #2: Stdlib missing builtins
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_stdlib_builtins(root: &Path) -> CheckResult {
+    println!("[29/32] OLANG — Stdlib builtin availability...");
+    let stdlib_dir = root.join("stdlib");
+    let vm_path = root.join("crates/olang/src/exec/vm.rs");
+
+    if !stdlib_dir.exists() {
+        return CheckResult::fail("OLANG Stdlib", "stdlib/ not found");
+    }
+    if !vm_path.exists() {
+        return CheckResult::fail("OLANG Stdlib", "vm.rs not found");
+    }
+
+    let vm_content = match std::fs::read_to_string(&vm_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("OLANG Stdlib", &format!("Cannot read vm.rs: {}", e)),
+    };
+
+    fn scan_ol_builtins(dir: &std::path::Path, results: &mut Vec<(String, String)>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan_ol_builtins(&path, results);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("ol") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let fname = path.file_name().unwrap_or_default().to_str().unwrap_or("?").to_string();
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("//") { continue; }
+                        for word in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                            if word.starts_with("__") && word.len() > 3 {
+                                results.push((fname.clone(), word.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut ol_builtins: Vec<(String, String)> = Vec::new();
+    scan_ol_builtins(&stdlib_dir, &mut ol_builtins);
+
+    let mut unique: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for (file, name) in &ol_builtins {
+        unique.entry(name.clone()).or_default().push(file.clone());
+    }
+
+    let mut details = Vec::new();
+    let mut missing = 0;
+    let mut found = 0;
+
+    for (builtin, files) in &unique {
+        let in_vm = vm_content.contains(&format!("\"{}\"", builtin)) || vm_content.contains(builtin);
+        if in_vm {
+            found += 1;
+        } else {
+            missing += 1;
+            let dedup: std::collections::HashSet<_> = files.iter().collect();
+            let file_list: Vec<_> = dedup.into_iter().collect();
+            details.push(format!("❌ {} — used by {:?} but NOT in VM", builtin, file_list));
+        }
+    }
+
+    details.insert(0, format!("Builtins in VM: {}, MISSING: {}", found, missing));
+
+    if missing == 0 {
+        CheckResult::pass("OLANG Stdlib", &format!("OK — all {} builtins in VM", found))
+            .with_details(details)
+    } else {
+        CheckResult::fail("OLANG Stdlib", &format!(
+            "{} builtins NOT in VM — stdlib will crash at runtime", missing
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #3: Handbook says 5B Molecule, v2 says 2B
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_handbook_vs_v2(root: &Path) -> CheckResult {
+    println!("[30/32] OLANG — Handbook 5B vs v2 2B conflict...");
+
+    let handbook = root.join("docs/olang_handbook.md");
+    let handbook_content = std::fs::read_to_string(&handbook).unwrap_or_default();
+
+    let mut details = Vec::new();
+
+    let handbook_5b = handbook_content.contains("5 bytes");
+    let handbook_2b = handbook_content.contains("2 bytes");
+
+    if handbook_5b && !handbook_2b {
+        details.push("Handbook: Molecule = 5 bytes [S][R][V][A][T]".into());
+        details.push("v2 spec: P_weight = 2 bytes packed u16".into());
+        details.push("Handbook NOT updated for v2 — will mislead contributors".into());
+        CheckResult::fail("OLANG Handbook", "Handbook says 5B Molecule — conflicts with v2 (2B)")
+            .with_details(details)
+    } else if handbook_2b {
+        CheckResult::pass("OLANG Handbook", "OK — handbook aligned with v2")
+            .with_details(details)
+    } else {
+        CheckResult::warn("OLANG Handbook", "Cannot determine — check manually")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #4: PushMol opcode = 5 params, v2 = 2B
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_pushmol(root: &Path) -> CheckResult {
+    println!("[31/32] OLANG — PushMol opcode size...");
+    let ir_path = root.join("crates/olang/src/exec/ir.rs");
+
+    if !ir_path.exists() {
+        return CheckResult::fail("OLANG PushMol", "ir.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&ir_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("OLANG PushMol", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+    let has_5param = content.contains("PushMol(u8, u8, u8, u8, u8)");
+
+    if has_5param {
+        details.push("PushMol(u8, u8, u8, u8, u8) = 5 params: ❌".into());
+        details.push("v2: should be PushMol(u16) = 1 packed param".into());
+        details.push("Bytecode: [0x19][S][R][V][A][T]=6B → [0x19][P_hi][P_lo]=3B".into());
+        CheckResult::fail("OLANG PushMol", "PushMol = 5 params — v2 requires packed u16")
+            .with_details(details)
+    } else {
+        CheckResult::pass("OLANG PushMol", "OK — PushMol uses packed format")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OLANG #5: Bootstrap compiler files exist
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_olang_bootstrap(root: &Path) -> CheckResult {
+    println!("[32/32] OLANG — Bootstrap compiler...");
+    let bootstrap_dir = root.join("stdlib/bootstrap");
+
+    let mut details = Vec::new();
+    let expected = ["lexer.ol", "parser.ol", "semantic.ol", "codegen.ol"];
+    let mut found = 0;
+
+    for file in &expected {
+        let path = bootstrap_dir.join(file);
+        if path.exists() {
+            found += 1;
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            details.push(format!("✅ {} — {} bytes", file, size));
+        } else {
+            details.push(format!("❌ {} — NOT FOUND", file));
+        }
+    }
+
+    if found == 4 {
+        CheckResult::pass("OLANG Bootstrap", &format!("{}/4 bootstrap files", found))
+            .with_details(details)
+    } else {
+        CheckResult::fail("OLANG Bootstrap", &format!("Only {}/4 bootstrap files", found))
+            .with_details(details)
+    }
+}

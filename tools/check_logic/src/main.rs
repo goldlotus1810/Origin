@@ -55,6 +55,18 @@ fn main() {
         checks::check_wiring_epistemic(&root),
         checks::check_wiring_unified_affect(&root),
         checks::check_wiring_word_selection(&root),
+        // ── AUDIT: Structural v2 compliance ──
+        checks::check_shapebase_18sdf(&root),
+        checks::check_knowtree_array(&root),
+        checks::check_chain_u16(&root),
+        checks::check_lca_compose_rules(&root),
+        checks::check_ucd_block_count(&root),
+        // ── OLANG: Kernel checks ──
+        checks::check_olang_compile_gap(&root),
+        checks::check_olang_stdlib_builtins(&root),
+        checks::check_olang_handbook_vs_v2(&root),
+        checks::check_olang_pushmol(&root),
+        checks::check_olang_bootstrap(&root),
     ];
 
     // ── Report ──
