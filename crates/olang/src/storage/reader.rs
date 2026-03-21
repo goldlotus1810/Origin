@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use crate::molecular::MolecularChain;
 use crate::writer::{
     HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_AUTH, RT_CURVE, RT_EDGE, RT_HEBBIAN, RT_KNOWTREE,
-    RT_NODE, RT_NODE_KIND, RT_SLIM_KNOWTREE, RT_STM, VERSION, VERSION_V03, VERSION_V04,
+    RT_NODE, RT_NODE_KIND, RT_SLIM_KNOWTREE, RT_STM, VERSION, VERSION_V03, VERSION_V04, VERSION_V05,
 };
 
 /// Read a little-endian u64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
@@ -214,8 +214,8 @@ impl<'a> OlangReader<'a> {
             return Err(ParseError::BadMagic);
         }
         let version = data[4];
-        // Accept v0.03, v0.04, and v0.05 (backward compatible)
-        if version != VERSION && version != VERSION_V04 && version != VERSION_V03 {
+        // Accept v0.03, v0.04, v0.05, and v0.06 (backward compatible)
+        if version != VERSION && version != VERSION_V05 && version != VERSION_V04 && version != VERSION_V03 {
             return Err(ParseError::UnsupportedVersion);
         }
 
@@ -255,18 +255,33 @@ impl<'a> OlangReader<'a> {
 
             match rt {
                 RT_NODE => {
-                    if pos + 1 > self.data.len() {
+                    if pos + 2 > self.data.len() {
                         return Err(ParseError::Truncated);
                     }
 
                     let chain = if self.version >= VERSION {
+                        // v0.06: u16 links [link_count: u16_le][u16_le × N]
+                        let count = u16::from_le_bytes([self.data[pos], self.data[pos + 1]]) as usize;
+                        pos += 2;
+                        let chain_bytes_len = count * 2;
+                        if pos + chain_bytes_len + 1 + 1 + 8 > self.data.len() {
+                            return Err(ParseError::Truncated);
+                        }
+                        let mut links = Vec::with_capacity(count);
+                        for i in 0..count {
+                            let lo = self.data[pos + i * 2];
+                            let hi = self.data[pos + i * 2 + 1];
+                            links.push(u16::from_le_bytes([lo, hi]));
+                        }
+                        pos += chain_bytes_len;
+                        MolecularChain(links)
+                    } else if self.version >= VERSION_V05 {
                         // v0.05: tagged format [mol_count][mol_1_tagged]...
                         let tagged_start = pos;
                         let chain = MolecularChain::from_tagged_bytes(&self.data[pos..])
                             .ok_or(ParseError::InvalidChain)?;
-                        // Advance past: 1 (mol_count) + sum of tagged molecule sizes
                         pos = tagged_start + chain.tagged_byte_size();
-                    chain
+                        chain
                     } else {
                         // v0.03-v0.04: legacy fixed [chain_len: u8][chain: N×5]
                         let chain_len = self.data[pos] as usize;
