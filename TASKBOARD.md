@@ -70,6 +70,153 @@ Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Mi
 | 11.2 | Rust E2E test suite | PLAN_11 | ~300 LOC | 11.3 | FREE | t16_e2e_demo.rs. |
 | 11.5 | Makefile targets (demo/verify) | PLAN_11 | ~50 LOC | 11.2 | FREE | make demo, make verify. |
 
+### Tier 1 — Chi tiết kỹ thuật (để CLI tự thực hiện)
+
+#### P2.0 — Fix 135 VM builtin test failures
+```
+File:    crates/olang/src/exec/vm.rs
+Chạy:    cargo test -p olang -- vm::tests 2>&1 | grep FAILED
+Lỗi:     array_new_and_get, array_len, array_contains, array_reverse,
+         dict_new_and_get, dict_set, dict_has_key,
+         str_contains, str_index_of, str_replace, str_split,
+         file_read_write_roundtrip, list_files_in_directory,
+         builder_compile_write_roundtrip
+Nguyên nhân: VM builtins (push/pop/len/get/set/contains/reverse/keys/values
+         index_of/replace/split/substr) chưa implement hoặc bị lỗi.
+Cách fix: Tìm match arm cho từng builtin fn name trong vm.rs,
+         implement logic đúng cho Array/Dict/String operations.
+DoD:     cargo test -p olang -- vm::tests → 0 FAILED (hoặc giảm tối đa)
+```
+
+#### 8.1 — Parser: hex literals (0xFF)
+```
+File:    crates/olang/src/exec/compiler.rs (hoặc lexer module)
+Vấn đề:  "0xFF" tokenize thành Int(0) + Ident("xFF") thay vì Int(255)
+Cách fix: Trong lex_number(), sau khi gặp '0', check next char:
+         'x'|'X' → parse hex digits (0-9, a-f, A-F) → u64
+         'b'|'B' → parse binary digits
+         'o'|'O' → parse octal digits
+Test:    cargo test -p olang -- hex
+         Tạo test: assert lex("0xFF") == [Int(255)]
+         Tạo test: assert lex("0b1010") == [Int(10)]
+DoD:     13 .ol files that failed on hex → now parse OK
+```
+
+#### 8.2 — Parser: == trong match/struct
+```
+File:    crates/olang/src/exec/compiler.rs (parser module)
+Vấn đề:  9 .ol files fail khi dùng == trong:
+         - match patterns: case x == 0 =>
+         - field comparisons: if a.type == "crisis"
+         - struct equality: if result == expected
+Cách fix: Parser cần handle == as BinOp(Eq) trong đúng context.
+         Check parse_expr() và parse_match_arm().
+Test:    cargo test -p olang -- parse
+DoD:     9 .ol files that failed on == → now parse OK
+```
+
+#### 8.3 — Parser: keywords as ident + struct colon
+```
+File:    crates/olang/src/exec/compiler.rs
+Vấn đề:  (1) "learn" in intent.ol is both keyword and identifier
+         (2) struct literal { from: x, to: y } — colon syntax
+Cách fix: (1) Contextual keywords — only treat as keyword in statement position
+         (2) Parse { ident: expr, ... } as struct/dict literal
+Test:    Parse intent.ol + silk_ops.ol thành công
+DoD:     Tổng 30/54 → 54/54 .ol files parse OK (hoặc gần đó)
+```
+
+#### 12.1 — Wire walk_emotion() vào response
+```
+File:    crates/context/src/emotion.rs (hoặc tương đương)
+         crates/runtime/src/core/origin.rs (pipeline)
+Vấn đề:  walk_emotion() hiện return None → response không có emotion context
+Cách fix: Implement walk_emotion(graph, words):
+         1. Cho mỗi word, tìm node trong SilkGraph
+         2. Walk Silk edges, collect emotion tags
+         3. Amplify (KHÔNG average!) — cortisol+adrenaline = mạnh hơn
+         4. Return composite EmotionState
+         Wire vào T2 (sentence_affect) trong pipeline
+DoD:     walk_emotion("buồn vì mất việc") → V < -0.7 (amplified)
+```
+
+#### 12.2 — Context recall trong response
+```
+File:    crates/context/src/ (new struct hoặc existing)
+Vấn đề:  STM recall tính nhưng KHÔNG dùng trong response
+Cách fix: Tạo ResponseContext { topics, repetition_count,
+         related_concepts, causality, contradiction, novelty }
+         Populate từ STM entries trước khi render response
+DoD:     ResponseContext available trong response pipeline
+```
+
+#### 12.3 — Intent estimation dùng context
+```
+File:    crates/context/src/intent.rs
+Vấn đề:  90% input → AddClarify (keyword-only, quá thô)
+Cách fix: Dùng ResponseContext:
+         - lặp topic 3+ lần → Heal intent
+         - đã nêu nguyên nhân → không hỏi "tìm hiểu gì"
+         - emotion V < -0.8 → prioritize Comfort over Clarify
+DoD:     "Tôi buồn vì mất việc" (lần 3) → Heal, không AddClarify
+```
+
+#### 12.4 — Response composer thay template
+```
+File:    crates/agents/src/encoder/ hoặc response module
+Vấn đề:  Template cứng, chỉ nhìn valence number
+Cách fix: Tạo compose_response(emotion, context, intent, language):
+         Part 1: Acknowledgment (dựa trên emotion)
+         Part 2: Context-specific (dựa trên recall + topic)
+         Part 3: Follow-up (dựa trên intent)
+         Part 4: Topic reflection (dựa trên instincts)
+DoD:     Response thay đổi theo context, không lặp template
+```
+
+#### 12.5 — Language detection + instinct wire
+```
+File:    crates/agents/src/encoder/ + crates/context/
+Vấn đề:  "xin chào" → tiếng Anh response (sai)
+         7 instincts chạy nhưng không đến response
+Cách fix: (1) Detect: chứa dấu/từ Việt → vi, else en
+         (2) Wire: honesty/causality/contradiction flags → ResponseContext
+DoD:     "xin chào" → tiếng Việt response
+```
+
+#### 11.3 — Server --eval mode
+```
+File:    tools/server/src/main.rs
+Vấn đề:  Server chỉ có REPL interactive mode
+Cách fix: Thêm --eval flag: đọc stdin, process, output, exit
+         cargo run -p server -- --eval "2 + 3" → "5"
+         cargo run -p server -- --eval < input.txt → output
+DoD:     cargo run -p server -- --eval "xin chào" → response
+```
+
+#### 11.2 — Rust E2E test suite
+```
+File:    tools/intg/src/ (hoặc tests/)
+Cách:    Tạo t16_e2e_demo.rs — 10 test cases gọi server --eval:
+         1. Arithmetic: "2 + 3" → "5"
+         2. Variable: "let x = 42; x" → "42"
+         3. Function: "fn f(x) { x * 2 } f(5)" → "10"
+         4. String: "\"hello\" + \" world\"" → "hello world"
+         5. Crisis: "tự tử" → crisis response (gate blocks)
+         6-10. Thêm theo PLAN_11
+DoD:     cargo test -p intg -- e2e → 10/10 PASS
+```
+
+#### 11.5 — Makefile targets
+```
+File:    Makefile
+Cách:    Thêm targets:
+         make demo    → chạy 10 demo scenarios, in kết quả
+         make verify  → cargo test + clippy + demo + smoke-binary
+DoD:     make verify → ALL PASS
+```
+
+---
+
 ### Tier 2 — Cần Tier 1 xong trước
 
 | ID | Task | Plan | Effort | Depends | Status | Notes |
