@@ -27,6 +27,7 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════╝");
     println!();
     println!("Root: {}", root.display());
+    println!("Checks: 37 static + 6 functional + 7 structural = 50 total");
     println!();
 
     let results = vec![
