@@ -226,6 +226,92 @@ BYZANTINE MUSICAL SYMBOL PETASTI          → neume + petasti (lên 1)
   Diesis/Yfesis = vi chỉnh cung: Δf = ±ε (nhiễu loạn tần số)
 ```
 
+### Công thức chi tiết theo loại ký hiệu
+
+**Neume — Hàm bước giai điệu (melodic step function):**
+```
+  Mỗi neume n = toán tử trên cao độ hiện tại p(t):
+    p(tₖ₊₁) = p(tₖ) + Δp(n)
+
+  Bảng Δp(n) theo neume:
+    oligon       = +1    (lên 1 bậc)
+    petasti      = +1    (lên 1 bậc, variant khác)
+    ison         =  0    (giữ nguyên — drone note)
+    apostrofos   = -1    (xuống 1 bậc)
+    elafron      = -1    (xuống nhẹ)
+    kentemata    = +1    (nhấn lên)
+    hypsili      = +2    (lên 2 bậc)
+    chamili      = -2    (xuống 2 bậc)
+
+  Giai điệu toàn bộ = tích lũy:
+    p(tₙ) = p₀ + Σᵢ₌₁ⁿ Δpᵢ
+
+  Biểu diễn liên tục (interpolation giữa các bước):
+    p(t) = p₀ + Σᵢ Δpᵢ · σ((t − tᵢ)/τ)
+    σ(x) = 1/(1+e⁻ˣ)  sigmoid (smooth step)
+    τ = thời gian chuyển tiếp giữa 2 nốt
+```
+
+**Fthora — Biến đổi điệu thức (mode transformation):**
+```
+  Không gian cao độ P = span{d₁, d₂, ..., d₈} (octoechos — 8 điệu thức)
+
+  Fthora = ma trận chuyển cơ sở: M: P_mode₁ → P_mode₂
+    M_skliron  = chuyển sang điệu thức cứng (chromatic intervals lớn hơn)
+    M_enharmonic = chuyển sang điệu thức vi phân (micro-intervals)
+
+  Quãng giữa các bậc trong mỗi điệu thức (đơn vị: moria, 1 octave = 72 moria):
+    Diatonic:    12, 10, 8, 12, 12, 10, 8   (tổng = 72)
+    Chromatic:   6, 20, 4, 12, 6, 20, 4     (tổng = 72)
+    Enharmonic:  12, 12, 6, 12, 12, 12, 6   (tổng = 72)
+
+  Fthora F tại vị trí k: thay đổi chuỗi quãng từ bậc k trở đi
+    intervals[k:] = F(intervals[k:])
+```
+
+**Diesis / Yfesis — Vi chỉnh cao độ (microtonal adjustment):**
+```
+  Diesis:  p → p + δ     (nâng lên δ moria, δ ∈ {2, 4, 6})
+  Yfesis:  p → p − δ     (hạ xuống δ moria)
+
+  Trong hệ 72 moria/octave:
+    1 moria ≈ 16.67 cent (so với 100 cent/bán cung phương Tây)
+    Diesis nhỏ nhất (δ=2) ≈ 33 cent ≈ 1/3 bán cung
+    Diesis lớn nhất (δ=6) ≈ 100 cent = 1 bán cung
+
+  Tần số sau vi chỉnh:
+    f' = f × 2^(δ/72)    (với δ tính bằng moria)
+```
+
+**Chronon — Đơn vị thời gian (temporal unit):**
+```
+  Chronos protos χ = đơn vị thời gian nguyên tử (atomic beat)
+
+  Trường độ nốt = bội số của χ:
+    chronon đơn    = 1χ
+    chronon đôi    = 2χ
+    chronon ba     = 3χ (triplet)
+
+  Thời gian thực: T_note = n × χ × (1/α)
+    n = số chronon, α = hệ số agogi (tempo)
+
+  Tỷ lệ trường độ Byzantine (khác Western 2ⁿ):
+    Dựa trên tổ hợp {1, 2, 3} × χ
+    Nhóm nhịp: 2χ (binary), 3χ (ternary), 2χ+3χ (mixed)
+```
+
+**Ison — Nốt giữ (drone/pedal point):**
+```
+  Ison I(t) = p_drone = const    ∀ t ∈ [t_start, t_end]
+
+  Biểu diễn sóng: ψ_ison(t) = A · sin(2πf_drone · t)
+    f_drone = tần số cố định (thường là bậc I hoặc V của điệu thức)
+
+  Ison + melody = texture hai lớp:
+    Ψ(t) = ψ_ison(t) + ψ_melody(t)
+    ψ_melody(t) = A_m · sin(2πf_m(t) · t)    f_m(t) biến thiên theo neume
+```
+
 ---
 
 ## T.3 — ZNAMENNY (Neume Slavonic) · 185 cụm
@@ -275,6 +361,84 @@ ZNAMENNY COMBINING LOWER TONAL RANGE INDICATOR → chỉ quãng thấp
     borzaya (nhanh) = dp/dt tăng (gia tốc)
     lomka (gãy) = d²p/dt² có gián đoạn (góc gãy trong giai điệu)
     kachka (lắc) = p(t) + A·sin(ωt) (vibrato/tremolo)
+```
+
+### Công thức chi tiết theo loại dấu
+
+**Dấu độ cao (Pitch modifiers) — Toán tử dịch chuyển:**
+```
+  Toán tử T_pitch: p(t) → p(t) + Δ
+
+  Bảng dịch chuyển Δ (đơn vị: bậc trong thang âm Znamenny):
+    gorazdo vysoko   = +3Δ₀   (rất rất cao)
+    vysoko           = +2Δ₀   (rất cao)
+    malo povyshe     = +Δ₀    (hơi cao)
+    (không dấu)     =  0      (bình thường)
+    malo ponizhe     = -Δ₀    (hơi thấp)
+    nizko            = -2Δ₀   (rất thấp)
+    gorazdo nizko    = -3Δ₀   (rất rất thấp)
+
+  Δ₀ = bậc cơ sở ≈ 1 bậc trong osmoglasie (hệ 8 điệu thức)
+  Chuỗi dịch: {..., -3, -2, -1, 0, +1, +2, +3} × Δ₀  (đối xứng quanh 0)
+```
+
+**Dấu tốc độ (Tempo modifiers) — Toán tử co giãn thời gian:**
+```
+  Toán tử T_tempo: dt → dt/β    (β > 1 = nhanh hơn, β < 1 = chậm hơn)
+
+  borzaya (nhanh):
+    β = 2   → dt' = dt/2  (thời gian nốt giảm một nửa)
+    Gia tốc: a = d²p/dt² > 0 (melodic acceleration)
+
+  borzy (rất nhanh):
+    β = 3   → dt' = dt/3  (nốt chạy 3 lần nhanh hơn)
+
+  Không có dấu chậm tương ứng — chậm = mặc định (β = 1)
+```
+
+**Dấu kiểu nét (Contour modifiers) — Hình dạng giai điệu:**
+```
+  kupnaya (tròn):
+    p(t) = p₀ + R·sin(πt/T)     (cung tròn lên rồi về)
+    Hình dạng: arc, smooth peak
+
+  lomka (gãy):
+    p(t) = { p₀ + v₁t           nếu t < t_break
+           { p_break + v₂(t-t_break)  nếu t ≥ t_break
+    v₁ ≠ v₂ → gián đoạn đạo hàm tại t_break (angular point)
+    d²p/dt² = (v₂-v₁)·δ(t-t_break)  (xung Dirac tại điểm gãy)
+
+  curved (cong):
+    p(t) = p₀ + at + bt²    (parabol — cong đều)
+    Curvature κ = 2b/(1+(a+2bt)²)^(3/2)
+```
+
+**Dấu đặc biệt (Special modifiers):**
+```
+  kachka (lắc — vibrato):
+    p(t) = p_base + A_vib·sin(2πf_vib·t)
+    A_vib = biên độ lắc ≈ ±Δ₀/4 (nhỏ hơn 1 bậc)
+    f_vib ≈ 5-7 Hz (tần số vibrato tự nhiên)
+
+  kryzh (thập — nhấn mạnh):
+    A(t) = A₀ · (1 + k·rect(t/τ))    k > 0
+    Tăng biên độ tạm thời trong khoảng τ (accent)
+
+  dvoetochie (hai chấm — lặp):
+    p(t) = p_note ∀ t ∈ [t₁, t₁+d] ∪ [t₂, t₂+d]
+    Nốt được lặp 2 lần, cách nhau khoảng nghỉ ngắn
+```
+
+**Tonal Range Indicator — Chỉ quãng:**
+```
+  Xác định vùng cao độ hoạt động (tessitura):
+    lower range:  p ∈ [p_min, p_mid]           (quãng thấp)
+    upper range:  p ∈ [p_mid, p_max]           (quãng cao)
+
+  Transfer function (chuyển vùng):
+    T_range: p → p + n·octave    (n ∈ ℤ, chuyển quãng tám)
+    lower indicator: n = -1  (xuống 1 octave)
+    upper indicator: n = +1  (lên 1 octave)
 ```
 
 ---
@@ -382,6 +546,154 @@ MUSICAL SYMBOL SEGNO                     → dấu hiệu nhảy
     Glissando: f(t) = f₁ + (f₂−f₁)·t/T  (quét tần số tuyến tính)
 ```
 
+### Công thức chi tiết theo loại ký hiệu
+
+**Nốt nhạc — Hàm sóng với envelope ADSR:**
+```
+  Mỗi nốt = sóng × envelope:
+    s(t) = A(t) · sin(2πf·t + φ)
+
+  Envelope ADSR (Attack-Decay-Sustain-Release):
+                 ⎧  t/t_A                          0 ≤ t < t_A        (attack)
+                 ⎪  1 − (1−S)(t−t_A)/t_D           t_A ≤ t < t_A+t_D  (decay)
+    A(t)/A_max = ⎨  S                               t_A+t_D ≤ t < t_R  (sustain)
+                 ⎪  S · (1 − (t−t_R)/(t_end−t_R))  t_R ≤ t ≤ t_end    (release)
+                 ⎩  0                               t > t_end
+
+  Trường độ xác định t_end:
+    maxima:    t_end = 8T    (8 phách, trung cổ)
+    longa:     t_end = 4T    (4 phách, trung cổ)
+    breve:     t_end = 2T
+    whole:     t_end = T      (= 1 ô nhịp trong 4/4)
+    half:      t_end = T/2
+    quarter:   t_end = T/4
+    eighth:    t_end = T/8
+    sixteenth: t_end = T/16
+
+  Quy luật: t_end(n) = T · 2^(2−n)    n ∈ {-2, -1, 0, 1, 2, 3, 4, 5}
+    n = -2 → maxima, n = 0 → whole, n = 3 → eighth, ...
+```
+
+**Dấu lặng (Rest) — Khoảng im (silence interval):**
+```
+  s(t) = 0    ∀ t ∈ [t_start, t_start + t_rest]
+
+  t_rest tuân cùng chuỗi 2⁻ⁿ:
+    whole rest = T, half rest = T/2, quarter rest = T/4, ...
+
+  Ý nghĩa tín hiệu: silence = zero-energy window
+    E_rest = ∫ |s(t)|² dt = 0
+```
+
+**Khóa nhạc (Clef) — Hàm ánh xạ vị trí → tần số:**
+```
+  Clef = hàm cơ sở C: line_position → pitch_class
+
+  G clef (khóa Sol):  C_G(line_2) = G4 → f₀ = 392 Hz
+    f(pos) = 392 · 2^((pos − 2) / 7)    (pos = vị trí trên khuông)
+
+  F clef (khóa Fa):   C_F(line_4) = F3 → f₀ = 174.6 Hz
+    f(pos) = 174.6 · 2^((pos − 4) / 7)
+
+  C clef (khóa Đô):   C_C(line_k) = C4 → f₀ = 261.6 Hz
+    f(pos) = 261.6 · 2^((pos − k) / 7)   (k = vị trí của clef)
+
+  Tổng quát: f(pos) = f_ref · 2^((pos − pos_ref) / 7)
+    7 vị trí = 1 octave (diatonic, không chromatic)
+```
+
+**Thăng / Giáng / Bình — Toán tử chuyển cung (pitch operators):**
+```
+  Sharp (#):   f → f · 2^(1/12)     (tăng 1 bán cung = +100 cent)
+  Flat (♭):    f → f · 2^(-1/12)    (giảm 1 bán cung = -100 cent)
+  Natural (♮): f → f_diatonic        (hủy sharp/flat, về bậc tự nhiên)
+
+  Double sharp (𝄪):  f → f · 2^(2/12)   (+200 cent)
+  Double flat (𝄫):   f → f · 2^(-2/12)  (-200 cent)
+
+  Đại số: Sharp ∘ Flat = Identity, Sharp⁻¹ = Flat
+  Nhóm: ({♯, ♭, ♮, 𝄪, 𝄫}, ∘) ≅ (ℤ, +) mod 12
+```
+
+**Dynamics — Hàm biên độ (amplitude function):**
+```
+  Mức dynamics = biên độ rời rạc:
+    ppp:  A = A₀ · 10^(-30/20) ≈ 0.032 A₀   (pianississimo)
+    pp:   A = A₀ · 10^(-20/20) ≈ 0.1 A₀      (pianissimo)
+    p:    A = A₀ · 10^(-10/20) ≈ 0.316 A₀     (piano)
+    mp:   A = A₀ · 10^(-5/20)  ≈ 0.562 A₀     (mezzo piano)
+    mf:   A = A₀ · 10^(0/20)   = A₀            (mezzo forte, reference)
+    f:    A = A₀ · 10^(5/20)   ≈ 1.778 A₀     (forte)
+    ff:   A = A₀ · 10^(10/20)  ≈ 3.162 A₀     (fortissimo)
+    fff:  A = A₀ · 10^(15/20)  ≈ 5.623 A₀     (fortississimo)
+
+  Crescendo (to dần):   A(t) = A_start + (A_end − A_start) · t/T_cresc
+    dA/dt = (A_end − A_start) / T_cresc > 0
+
+  Decrescendo (nhỏ dần): A(t) = A_start − (A_start − A_end) · t/T_decresc
+    dA/dt < 0
+
+  Rinforzando: A(t) = A₀ + A_peak · δ_smooth(t − t_rf)
+    Nhấn đột ngột rồi về, δ_smooth = xung Gaussian hẹp
+```
+
+**Cấu trúc — Toán tử trên chuỗi nốt:**
+```
+  Beam:     nhóm nốt ngắn → quantize vào nhịp con
+    beam(n₁, n₂, ..., nₖ) = group{nᵢ : Σt(nᵢ) = T_beat}
+
+  Slur/Tie: nối legato → bỏ attack giữa các nốt
+    slur(n₁, n₂) = { s₁(t) concat s₂(t) without re-attack }
+    tie(n₁, n₂):  f(n₁) = f(n₂) → duration = t(n₁) + t(n₂)
+
+  Barline:  chia dòng nhạc thành ô nhịp
+    measure_k = {notes ∈ [kT_measure, (k+1)T_measure]}
+
+  Repeat:   lặp đoạn
+    repeat(section, n) = section ∘ section ∘ ... (n lần)
+    |: ... :| = repeat(section, 2)
+```
+
+**Ornament — Điều biến tần số (frequency modulation):**
+```
+  Trill:      f(t) = f_main + Δf · sgn(sin(2πf_trill·t))
+    Luân phiên giữa f_main và f_main+Δf
+    f_trill ≈ 4-8 Hz, Δf = 1 hoặc 2 bán cung
+
+  Mordent:    f(t) = f_main + Δf · rect(t/τ_mordent)
+    Một lần lên-về nhanh, τ_mordent << T_note
+
+  Turn:       f(t) = f_main + Δf · sin(2πt/τ_turn)    t ∈ [0, τ_turn]
+    Đi lên - về - xuống - về (1 chu kỳ sin)
+
+  Arpeggiato: rải hợp âm theo thời gian
+    f(t) = fₖ   ∀ t ∈ [t₀ + k·δ, t₀ + k·δ + d]    k = 0,1,...,n
+    δ = khoảng cách rải, fₖ = nốt thứ k trong hợp âm
+
+  Glissando:  quét tần số liên tục
+    f(t) = f₁ · (f₂/f₁)^(t/T)    (exponential sweep, giữ đều trên thang log)
+```
+
+**Neume phương Tây (cổ nhạc) — Đường viền giai điệu:**
+```
+  Neume Tây = nhóm nốt liền nhau, mã hóa hướng đi giai điệu:
+
+  climacus:   Δp = [0, -1, -1, ...]   (đi xuống dần)
+    p(k) = p₀ − k·step    k = 0, 1, 2, ...
+
+  clivis:     Δp = [0, -1]             (lên rồi xuống)
+    p = [p₀, p₀ − step]
+
+  podatus:    Δp = [0, +1]             (xuống rồi lên)
+    p = [p₀, p₀ + step]
+
+  scandicus:  Δp = [0, +1, +1, ...]    (đi lên dần)
+    p(k) = p₀ + k·step
+
+  torculus:   Δp = [0, +1, -1]         (lên - đỉnh - xuống)
+    p = [p₀, p₀ + step, p₀]
+```
+
 ---
 
 ## T.5 — KHÁC (Greek notation, supplement) · 70 cụm
@@ -418,6 +730,50 @@ COMBINING GREEK MUSICAL PENTASEME        → nhịp 5 (5 mora)
     mora = đơn vị thời gian nguyên tử μ
     triseme = 3μ, tetraseme = 4μ, pentaseme = 5μ
     Tỷ lệ: tạo thành các tỷ số nhịp hữu tỉ 3:4:5
+```
+
+### Công thức chi tiết
+
+**Greek Instrumental Notation — Ánh xạ ký hiệu → cao độ:**
+```
+  Hệ điệu thức Hy Lạp: quãng dựa trên tetrachord (nhóm 4 nốt)
+
+  Tetrachord = 4 nốt bao trùm quãng 4 đúng (ratio 4:3)
+    Diatonic:    f₁, f₁·9/8, f₁·81/64, f₁·4/3    (quãng: 9:8, 9:8, 256:243)
+    Chromatic:   f₁, f₁·22/21, f₁·8/7, f₁·4/3     (quãng: 22:21, 12:11, 7:6)
+    Enharmonic:  f₁, f₁·28/27, f₁·16/15, f₁·4/3   (quãng: 28:27, 16:15, 5:4)
+
+  Symbol-N → vị trí trong chuỗi tetrachord:
+    N mod 4 = vị trí trong tetrachord hiện tại
+    N div 4 = tetrachord thứ mấy (từ thấp lên)
+
+  Tần số: f(N) = f_base × ∏ intervals[0..N]
+    intervals = chuỗi tỷ số tùy genus (diatonic/chromatic/enharmonic)
+
+  Instrumental vs Vocal: cùng hệ cao độ, khác ký hiệu
+    Bijection: φ: Instrumental_N → Vocal_M   (map 1-1 giữa 2 bộ ký hiệu)
+```
+
+**Combining Greek Musical — Nhóm nhịp (metrical grouping):**
+```
+  Mora μ = đơn vị thời gian nguyên tử (indivisible)
+    t_mora = T_beat / n    (n phụ thuộc nhịp điệu)
+
+  Triseme:    T = 3μ     (nhịp 3 — triple meter)
+  Tetraseme:  T = 4μ     (nhịp 4 — quadruple meter)
+  Pentaseme:  T = 5μ     (nhịp 5 — quintuple meter, asymmetric)
+
+  Nhịp phức = tổ hợp:
+    7μ = 3μ + 4μ  hoặc 4μ + 3μ   (nhịp 7, Hy Lạp cổ)
+    5μ = 2μ + 3μ  hoặc 3μ + 2μ   (nhịp 5)
+
+  Tỷ số nhịp (rhythmic ratio):
+    Triseme : Tetraseme = 3:4    (polyrhythm cơ bản)
+    Triseme : Pentaseme = 3:5    (golden-like ratio)
+
+  Ý nghĩa: mỗi combining mark = toán tử nhóm thời gian
+    apply(triseme, note) → note.duration = 3μ
+    Không thay đổi cao độ, chỉ thay đổi trường độ
 ```
 
 ---
