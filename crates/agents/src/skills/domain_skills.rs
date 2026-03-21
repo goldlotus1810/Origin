@@ -1238,7 +1238,8 @@ mod tests {
     fn ingest_encodes_text() {
         let skill = IngestSkill;
         let mut ctx = ctx();
-        ctx.set(String::from("text"), String::from("hello"));
+        // Use UDC codepoints (emoji/symbols) — Latin chars are not in UDC_TABLE
+        ctx.set(String::from("text"), String::from("\u{2190}\u{25CF}\u{2200}"));
         let r = skill.execute(&mut ctx);
         assert!(r.is_ok());
         assert!(!ctx.output_chains.is_empty());
@@ -1568,9 +1569,9 @@ mod tests {
         // Multiple calls with different contexts produce independent results
         let skill = IngestSkill;
         let mut ctx1 = ctx();
-        ctx1.set(String::from("text"), String::from("abc"));
+        ctx1.set(String::from("text"), String::from("\u{2190}\u{25CF}"));
         let mut ctx2 = ctx();
-        ctx2.set(String::from("text"), String::from("xyz"));
+        ctx2.set(String::from("text"), String::from("\u{2200}\u{2208}"));
         let r1 = skill.execute(&mut ctx1);
         let r2 = skill.execute(&mut ctx2);
         assert!(r1.is_ok());
