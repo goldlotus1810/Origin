@@ -560,7 +560,7 @@ INTG (song song với tất cả):
 |----|------|------|---------|--------|--------|---------|-------|
 | T1 | UCD build.rs rebuild (53 blocks, 8284 entries) | `PLAN_V2_MIGRATION` | — | DONE | `claude/project-audit-review-2pN6F` | 2026-03-21 | Đọc udc.json, UcdEntry+p_weight:u16, bỏ heuristic+formula |
 | T2 | ShapeBase 8→18 SDF primitives | `PLAN_V2_MIGRATION` | — | DONE | `claude/project-audit-review-2pN6F` | 2026-03-21 | 18 SDF + CsgOp tách, encoder/vm/origin updated |
-| T3 | Molecule 5B→2B packed u16 | `PLAN_V2_MIGRATION` | T1,T2 | FREE | | | [S:4][R:4][V:3][A:3][T:2], xóa CompactQR |
+| T3 | Molecule 5B→2B packed u16 | `PLAN_V2_MIGRATION` | T1,T2 | DONE | `claude/project-audit-review-2pN6F` | 2026-03-21 | Molecule{bits:u16}, 19 files, 304 tests pass |
 | T4 | Chain Vec\<Mol\>→Vec\<u16\> | `PLAN_V2_MIGRATION` | T3 | FREE | | | Codepoint refs, not inline values |
 | T5 | LCA v2 compose rules | `PLAN_V2_MIGRATION` | T3 | FREE | | | amplify/Union/max/dominant, KILL avg |
 | T6 | KnowTree array 65536×2B | `PLAN_V2_MIGRATION` | T3 | FREE | | | O(1) lookup, 128KB, 9584 L0 seeds |
