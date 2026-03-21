@@ -163,3 +163,63 @@ Phát hiện sơ bộ từ screenshot:
 
 → Đợi report đầy đủ từ branch đó rồi tổng hợp chung vào PLAN fix.
 ```
+
+---
+
+## VII. AUDIT CÁC PLAN FILES (47 files trong plans/)
+
+> Kiểm tra toàn bộ PLAN Phase 0-12 xem có thống nhất với v2 không.
+> **Kết luận: KHÔNG — tất cả plans xây trên cấu trúc cũ (Molecule 5B, LCA avg, 5400 L0).**
+
+### A. Phase 0 Plans — Nền tảng sai từ đầu (10 vấn đề)
+
+| # | Plan file | Vấn đề | v2 yêu cầu |
+|---|-----------|--------|------------|
+| P1 | PLAN_0_1 (Olang Spec) | MolLiteral = 5 Num `{1,6,60,180,4}` | Molecule = 2B packed, không phải 5 số riêng lẻ |
+| P2 | PLAN_0_1 | PushMol = 5 params `PushMol(s,r,v,a,t)` | PushMol cần 2B, không phải 5 args |
+| P3 | PLAN_0_2 (Bytecode) | PushMol bytecode = `[0x19][S][R][V][A][T]` = 6B | Cần 3B: [opcode][byte0][byte1] |
+| P4 | PLAN_0_2 | Dispatch table dùng 5 field Molecule | Dispatch cần match 2B packed format |
+| P5 | PLAN_0_3 (Stdlib) | mol.ol dùng `mol_shape()`, `mol_valence()` riêng | 2B packed → extract qua bit ops, không phải field access |
+| P6 | PLAN_0_3 | chain.ol dùng `chain_push(mol)` với Molecule object | Chain = Vec<u16>, push codepoint u16 |
+| P7 | PLAN_0_3 | hash.ol dùng `fnv1a` trên 5B mol | Hash trên 2B, không phải 5B |
+| P8 | PLAN_0_4 (FFI) | FFI MolecularChain args = Vec<Molecule> | FFI cần Vec<u16> |
+| P9 | PLAN_0_5 (Builder) | Builder pack 5B per molecule | Builder pack 2B per molecule |
+| P10 | PLAN_0_6 (Tests) | Test assertions dựa trên 5D field access | Test cần verify 2B packed values |
+
+### B. Phase 1-3 Plans — Logic sai (6 vấn đề)
+
+| # | Plan file | Vấn đề | v2 yêu cầu |
+|---|-----------|--------|------------|
+| P11 | PLAN_1_4 (VM LCA) | LCA = `(A+B)/2` weighted average | amplify/Union/max/dominant — KHÔNG trung bình |
+| P12 | PLAN_1_4 | PushMol = 5B bytecode inline | 2B bytecode inline |
+| P13 | PLAN_2_1 (Emotion) | Emotion pipeline dùng Molecule 5B fields | Emotion extract từ 2B packed |
+| P14 | PLAN_2_2 (Dream) | dream_score dùng averages | v2: amplify, không average |
+| P15 | PLAN_3_1 (STM) | STM chain_hash = hash(5B×n) | hash(2B×n) |
+| P16 | PLAN_3_2 (Hebbian) | Hebbian weight trên Molecule pairs | Weight trên u16 codepoint pairs |
+
+### C. Phase 4-12 Plans — Hardcode sai (8 vấn đề)
+
+| # | Plan file | Vấn đề | v2 yêu cầu |
+|---|-----------|--------|------------|
+| P17 | PLAN_5_3 (Origin Spec) | Hardcode: "Molecule = 5 bytes" | Molecule = 2 bytes |
+| P18 | SPEC_ORIGIN | "5,400 công thức" L0 | 9,584 L0 anchors |
+| P19 | PLAN_UDC_REBUILD | Mâu thuẫn nội bộ: nói 9,584 nhưng design vẫn 5B | Phải 9,584 VÀ 2B |
+| P20 | PLAN_UDC_REBUILD | UCD schema vẫn dùng heuristic name matching | Đọc udc.json trực tiếp |
+| P21 | PLAN_7_1 (ISL) | ISL payload mang Molecule 5B | ISL payload mang u16 codepoint hoặc 2B packed |
+| P22 | PLAN_8_1 (Security) | SecurityGate check trên Molecule fields | Check trên 2B packed |
+| P23 | PLAN_10_1 (WASM) | WASM serialize Molecule 5B | Serialize 2B |
+| P24 | PLAN_12 (Integration) | Integration tests verify 5B logic | Verify 2B logic |
+
+### D. Tổng kết Plans
+
+```
+47 plan files kiểm tra → 24 vấn đề phát hiện
+  - Phase 0: 10 vấn đề (nền tảng bytecode/stdlib/builder)
+  - Phase 1-3: 6 vấn đề (LCA/emotion/dream/STM)
+  - Phase 4-12: 8 vấn đề (spec hardcode/ISL/WASM/tests)
+
+KẾT LUẬN:
+  TOÀN BỘ 47 plan files xây trên giả định Molecule = 5B.
+  Khi migration sang 2B, TẤT CẢ plans cần REWRITE.
+  Đây là lý do phải migration BIG BANG — không thể fix từng plan.
+```
