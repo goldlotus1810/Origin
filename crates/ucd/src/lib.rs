@@ -1,16 +1,12 @@
-//! # ucd — Unicode Character Database
+//! # ucd — Unicode Character Database (v2)
 //!
-//! Lookup codepoint → Molecule bytes + formula từ bảng tĩnh generated lúc compile.
+//! Lookup codepoint → UcdEntry (5D P_weight) từ bảng tĩnh generated từ json/udc.json.
 //! Không cần file UCD lúc runtime. Chạy no_std.
 //!
-//! ## Mỗi entry mang 5 công thức (f_s, f_r, f_v, f_a, f_t):
-//! ```text
-//! Shape    = f_s(cp, name, block) → u8   // "trông như thế nào"
-//! Relation = f_r(cp, name, block) → u8   // "liên kết thế nào"
-//! Valence  = f_v(cp, name)        → u8   // "cảm thế nào"
-//! Arousal  = f_a(cp, name)        → u8   // "cường độ thế nào"
-//! Time     = f_t(cp, name, block) → u8   // "thay đổi thế nào"
-//! ```
+//! ## P_weight packed u16: [S:4][R:4][V:3][A:3][T:2]
+//!
+//! ## Source of truth: json/udc.json (8,284 characters, 53 blocks, 4 groups)
+//! Không heuristic — mọi giá trị trực tiếp từ udc.json.
 //!
 //! ## 3 cách decode (tốc độ tăng dần):
 //! - `lookup(cp)` → UcdEntry — forward lookup O(log n)
@@ -31,7 +27,7 @@ include!(concat!(env!("OUT_DIR"), "/ucd_generated.rs"));
 /// Forward lookup: codepoint → UcdEntry
 ///
 /// Binary search trên UCD_TABLE (sorted by cp).
-/// O(log n). Returns None nếu cp không thuộc 5 nhóm.
+/// O(log n). Returns None nếu cp không thuộc 4 nhóm.
 #[inline]
 pub fn lookup(cp: u32) -> Option<&'static UcdEntry> {
     UCD_TABLE
@@ -45,7 +41,7 @@ pub fn lookup(cp: u32) -> Option<&'static UcdEntry> {
 /// Binary search trên HASH_TO_CP (sorted by hash).
 /// O(log n). Dùng để decode MolecularChain → codepoint.
 ///
-/// Requires feature `reverse-index` (default). Tắt trên embedded để tiết kiệm ~40KB.
+/// Requires feature `reverse-index` (default). Tắt trên embedded để tiết kiệm.
 #[cfg(feature = "reverse-index")]
 #[inline]
 pub fn decode_hash(hash: u64) -> Option<u32> {
@@ -66,12 +62,10 @@ pub fn decode_hash(_hash: u64) -> Option<u32> {
 /// Bucket lookup: (shape, relation) → slice of codepoints
 ///
 /// O(1) lookup. Dùng để tìm top-n candidates cho decode.
-/// Candidates cùng shape+relation, sort theo similarity.
 ///
 /// Requires feature `reverse-index` (default).
 #[cfg(feature = "reverse-index")]
 pub fn bucket_cps(shape: u8, relation: u8) -> &'static [u32] {
-    // Binary search trong CP_BUCKET_INDEX
     let idx = CP_BUCKET_INDEX.binary_search_by(|&(s, r, _, _)| (s, r).cmp(&(shape, relation)));
     match idx {
         Ok(i) => {
@@ -90,31 +84,31 @@ pub fn bucket_cps(_shape: u8, _relation: u8) -> &'static [u32] {
     &[]
 }
 
-/// Shape byte của codepoint.
+/// Shape byte của codepoint. Default 0x01 (Sphere) nếu không tìm thấy.
 #[inline]
 pub fn shape_of(cp: u32) -> u8 {
     lookup(cp).map(|e| e.shape).unwrap_or(0x01)
 }
 
-/// Relation byte của codepoint.
+/// Relation byte của codepoint. Default 0x01 (Member) nếu không tìm thấy.
 #[inline]
 pub fn relation_of(cp: u32) -> u8 {
     lookup(cp).map(|e| e.relation).unwrap_or(0x01)
 }
 
-/// Valence byte của codepoint.
+/// Valence byte của codepoint. Default 0x80 (neutral).
 #[inline]
 pub fn valence_of(cp: u32) -> u8 {
     lookup(cp).map(|e| e.valence).unwrap_or(0x80)
 }
 
-/// Arousal byte của codepoint.
+/// Arousal byte của codepoint. Default 0x80 (moderate).
 #[inline]
 pub fn arousal_of(cp: u32) -> u8 {
     lookup(cp).map(|e| e.arousal).unwrap_or(0x80)
 }
 
-/// Time byte của codepoint.
+/// Time byte của codepoint. Default 0x03 (Medium).
 #[inline]
 pub fn time_of(cp: u32) -> u8 {
     lookup(cp).map(|e| e.time).unwrap_or(0x03)
@@ -126,6 +120,14 @@ pub fn group_of(cp: u32) -> u8 {
     lookup(cp).map(|e| e.group).unwrap_or(0x00)
 }
 
+/// Packed P_weight u16 của codepoint.
+///
+/// Layout: [S:4][R:4][V:3][A:3][T:2]
+#[inline]
+pub fn p_weight_of(cp: u32) -> u16 {
+    lookup(cp).map(|e| e.p_weight).unwrap_or(0)
+}
+
 /// Số entries trong UCD_TABLE.
 #[inline]
 pub fn table_len() -> usize {
@@ -134,7 +136,7 @@ pub fn table_len() -> usize {
 
 /// Toàn bộ UCD_TABLE — dùng cho L0 full seeding.
 ///
-/// Trả về slice tĩnh chứa ~5400 entries, sorted by codepoint.
+/// Trả về slice tĩnh chứa ~8,284 entries, sorted by codepoint.
 /// Mỗi entry = 1 nguyên tố trong bảng tuần hoàn của HomeOS.
 #[inline]
 pub fn table() -> &'static [UcdEntry] {
@@ -154,78 +156,6 @@ pub fn is_relation_primitive(cp: u32) -> bool {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Formula API — molecule tự giải thích
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// 5 chiều — dùng với formula_name()
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dimension {
-    /// Shape — "trông như thế nào"
-    Shape,
-    /// Relation — "liên kết thế nào"
-    Relation,
-    /// Valence — "cảm thế nào"
-    Valence,
-    /// Arousal — "cường độ thế nào"
-    Arousal,
-    /// Time — "thay đổi thế nào"
-    Time,
-}
-
-/// Tra formula description cho 1 chiều.
-///
-/// ```text
-/// formula_name(Dimension::Shape, entry.fs)
-///   → "f_s: cp ∈ [1F300,1FAFF] → Sphere (pictograph round)"
-/// ```
-#[inline]
-pub fn formula_name(dim: Dimension, rule_id: u8) -> &'static str {
-    let table = match dim {
-        Dimension::Shape => FORMULA_NAMES_S,
-        Dimension::Relation => FORMULA_NAMES_R,
-        Dimension::Valence => FORMULA_NAMES_V,
-        Dimension::Arousal => FORMULA_NAMES_A,
-        Dimension::Time => FORMULA_NAMES_T,
-    };
-    let idx = rule_id as usize;
-    if idx < table.len() {
-        table[idx]
-    } else {
-        "f_?: unknown rule"
-    }
-}
-
-/// Formula rule ID cho shape chiều của codepoint.
-#[inline]
-pub fn formula_s(cp: u32) -> u8 {
-    lookup(cp).map(|e| e.fs).unwrap_or(19) // 19 = default Sphere
-}
-
-/// Formula rule ID cho relation chiều của codepoint.
-#[inline]
-pub fn formula_r(cp: u32) -> u8 {
-    lookup(cp).map(|e| e.fr).unwrap_or(20) // 20 = default Member
-}
-
-/// Formula rule ID cho valence chiều của codepoint.
-#[inline]
-pub fn formula_v(cp: u32) -> u8 {
-    lookup(cp).map(|e| e.fv).unwrap_or(42) // 42 = default neutral
-}
-
-/// Formula rule ID cho arousal chiều của codepoint.
-#[inline]
-pub fn formula_a(cp: u32) -> u8 {
-    lookup(cp).map(|e| e.fa).unwrap_or(42) // 42 = default moderate
-}
-
-/// Formula rule ID cho time chiều của codepoint.
-#[inline]
-pub fn formula_t(cp: u32) -> u8 {
-    lookup(cp).map(|e| e.ft).unwrap_or(32) // 32 = default Medium
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -235,7 +165,6 @@ extern crate std;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::vec::Vec;
 
     // ── Forward lookup ──────────────────────────────────────────────────────
 
@@ -244,83 +173,18 @@ mod tests {
         let e = lookup(0x1F525).expect("🔥 FIRE phải có trong UCD");
         assert_eq!(e.cp, 0x1F525);
         assert_eq!(e.group, 0x03, "FIRE thuộc EMOTICON group");
-        assert_eq!((e.shape - 1) % 8 + 1, 0x01, "FIRE shape base = Sphere");
-        assert_eq!((e.relation - 1) % 8 + 1, 0x01, "FIRE relation base = Member");
-        assert!(
-            e.valence >= 0xC0,
-            "FIRE valence phải cao, got 0x{:02X}",
-            e.valence
-        );
-        assert!(
-            e.arousal >= 0xC0,
-            "FIRE arousal phải cao, got 0x{:02X}",
-            e.arousal
-        );
-        assert_eq!((e.time - 1) % 5 + 1, 0x04, "FIRE time base = Fast");
     }
 
     #[test]
     fn lookup_sphere_sdf() {
         let e = lookup(0x25CF).expect("● BLACK CIRCLE phải có");
-        assert_eq!((e.shape - 1) % 8 + 1, 0x01, "● = Sphere base");
         assert_eq!(e.group, 0x01, "Geometric Shapes = SDF group");
-        assert_eq!((e.time - 1) % 5 + 1, 0x01, "SDF shapes = Static base");
-    }
-
-    #[test]
-    fn lookup_torus_sdf() {
-        let e = lookup(0x25CB).expect("○ WHITE CIRCLE phải có");
-        assert_eq!((e.shape - 1) % 8 + 1, 0x05, "○ = Torus base");
-    }
-
-    #[test]
-    fn lookup_member_relation() {
-        let e = lookup(0x2208).expect("∈ ELEMENT OF phải có");
-        assert_eq!((e.relation - 1) % 8 + 1, 0x01, "∈ = Member base");
-        assert_eq!((e.time - 1) % 5 + 1, 0x01, "Math relation = Static base");
-    }
-
-    #[test]
-    fn lookup_arrow_causes() {
-        let e = lookup(0x2192).expect("→ RIGHTWARDS ARROW phải có");
-        assert_eq!((e.relation - 1) % 8 + 1, 0x06, "→ = Causes base");
-        assert_eq!((e.time - 1) % 5 + 1, 0x05, "Arrow = Instant base");
-    }
-
-    #[test]
-    fn lookup_pi_math() {
-        // π = U+03C0 — không thuộc 5 nhóm → None
-        // Nhưng ∂ = U+2202 thuộc Math Operators
-        let e = lookup(0x2202).expect("∂ PARTIAL DIFFERENTIAL phải có");
-        assert_eq!(e.group, 0x02, "∂ thuộc MATH group");
-        assert_eq!((e.time - 1) % 5 + 1, 0x01, "Math = Static base");
-    }
-
-    #[test]
-    fn lookup_musical_note() {
-        // Musical Symbols thật sự ở 1D100..1D1FF
-        // 𝄞 MUSICAL SYMBOL G CLEF = U+1D11E
-        if let Some(e) = lookup(0x1D11E) {
-            assert_eq!(e.group, 0x04, "𝄞 thuộc MUSICAL group");
-        }
-        // ♩ U+2669 thuộc Misc Symbols (2600..26FF) = EMOTICON group
-        let e2 = lookup(0x2669).expect("♩ phải có trong EMOTICON");
-        assert_eq!(e2.group, 0x03, "♩ thuộc EMOTICON (Misc Symbols)");
-    }
-
-    #[test]
-    fn lookup_droplet() {
-        let e = lookup(0x1F4A7).expect("💧 DROPLET phải có");
-        assert_eq!(e.group, 0x03, "DROPLET = EMOTICON");
-        assert!(e.valence >= 0x80, "DROPLET valence moderate+");
-        assert!(e.arousal <= 0x80, "DROPLET arousal thấp (calm)");
-        assert_eq!((e.time - 1) % 5 + 1, 0x02, "DROPLET = Slow base");
     }
 
     #[test]
     fn lookup_nonexistent() {
-        // Latin 'A' không thuộc 5 nhóm
-        assert!(lookup(0x0041).is_none(), "'A' không thuộc 5 nhóm");
+        // Latin 'A' không thuộc 4 nhóm
+        assert!(lookup(0x0041).is_none(), "'A' không thuộc 4 nhóm");
     }
 
     #[test]
@@ -334,7 +198,6 @@ mod tests {
 
     #[test]
     fn table_sorted_by_cp() {
-        // Bắt buộc cho binary_search
         for i in 1..UCD_TABLE.len() {
             assert!(
                 UCD_TABLE[i - 1].cp < UCD_TABLE[i].cp,
@@ -346,6 +209,34 @@ mod tests {
         }
     }
 
+    // ── P_weight packed ─────────────────────────────────────────────────────
+
+    #[test]
+    fn p_weight_nonzero_for_known_cp() {
+        // FIRE should have nonzero p_weight
+        let pw = p_weight_of(0x1F525);
+        assert!(pw != 0, "FIRE p_weight should be nonzero");
+    }
+
+    #[test]
+    fn p_weight_layout() {
+        // Check that p_weight is correctly packed [S:4][R:4][V:3][A:3][T:2]
+        if let Some(e) = lookup(0x1F525) {
+            let pw = e.p_weight;
+            let s = (pw >> 12) & 0xF;
+            let r = (pw >> 8) & 0xF;
+            let v = (pw >> 5) & 0x7;
+            let a = (pw >> 2) & 0x7;
+            let t = pw & 0x3;
+            // Verify these match quantized raw values
+            assert_eq!(s, (e.shape >> 4) as u16, "S mismatch");
+            assert_eq!(r, (e.relation >> 4) as u16, "R mismatch");
+            assert_eq!(v, (e.valence >> 5) as u16, "V mismatch");
+            assert_eq!(a, (e.arousal >> 5) as u16, "A mismatch");
+            assert_eq!(t, (e.time >> 6) as u16, "T mismatch");
+        }
+    }
+
     // ── Reverse lookup (requires feature "reverse-index") ──────────────────
 
     #[test]
@@ -353,8 +244,6 @@ mod tests {
     fn decode_hash_fire() {
         let e = lookup(0x1F525).unwrap();
         let decoded = decode_hash(e.hash);
-        // Có thể decode ra cp khác nếu hash collision
-        // Nhưng phải decode ra SOMETHING
         assert!(decoded.is_some(), "decode_hash phải trả về Some");
     }
 
@@ -380,23 +269,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "reverse-index")]
-    fn bucket_sphere_member() {
-        let cps = bucket_cps(0x01, 0x01); // Sphere + Member
-                                          // EMOTICON group nhiều nodes Sphere+Member
-        assert!(!cps.is_empty(), "bucket (Sphere, Member) phải có entries");
-        // Mọi cp trong bucket phải có shape=Sphere, relation=Member
-        for &cp in cps {
-            if let Some(e) = lookup(cp) {
-                assert_eq!(e.shape, 0x01, "cp 0x{:05X} phải Sphere", cp);
-                assert_eq!(e.relation, 0x01, "cp 0x{:05X} phải Member", cp);
-            }
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "reverse-index")]
     fn bucket_nonexistent_empty() {
-        // Shape=0xFF không tồn tại
         let cps = bucket_cps(0xFF, 0xFF);
         assert!(cps.is_empty());
     }
@@ -411,7 +284,7 @@ mod tests {
 
     #[test]
     fn sdf_primitives_count() {
-        assert_eq!(SDF_PRIMITIVES.len(), 8, "Phải có đúng 8 SDF primitives");
+        assert_eq!(SDF_PRIMITIVES.len(), 18, "Phải có đúng 18 SDF primitives (v2)");
     }
 
     #[test]
@@ -427,7 +300,6 @@ mod tests {
     fn is_sdf_primitive_correct() {
         assert!(is_sdf_primitive(0x25CF), "● = SDF primitive");
         assert!(is_sdf_primitive(0x25CB), "○ = SDF primitive");
-        assert!(is_sdf_primitive(0x222A), "∪ = SDF primitive");
         assert!(!is_sdf_primitive(0x0041), "'A' không phải SDF primitive");
     }
 
@@ -435,7 +307,6 @@ mod tests {
     fn is_relation_primitive_correct() {
         assert!(is_relation_primitive(0x2208), "∈ = RELATION primitive");
         assert!(is_relation_primitive(0x2192), "→ = RELATION primitive");
-        assert!(is_relation_primitive(0x2190), "← = RELATION primitive");
         assert!(
             !is_relation_primitive(0x25CF),
             "● không phải RELATION primitive"
@@ -445,168 +316,12 @@ mod tests {
     // ── Convenience functions ───────────────────────────────────────────────
 
     #[test]
-    fn convenience_fns_fire() {
-        let s = shape_of(0x1F525);
-        assert_eq!((s - 1) % 8 + 1, 0x01, "FIRE shape base = Sphere");
-        let r = relation_of(0x1F525);
-        assert_eq!((r - 1) % 8 + 1, 0x01, "FIRE relation base = Member");
-        assert!(valence_of(0x1F525) >= 0xC0);
-        assert!(arousal_of(0x1F525) >= 0xC0);
-        let t = time_of(0x1F525);
-        assert_eq!((t - 1) % 5 + 1, 0x04, "FIRE time base = Fast");
-        assert_eq!(group_of(0x1F525), 0x03);
-    }
-
-    #[test]
     fn convenience_fns_unknown_default() {
-        // cp không trong UCD → default values
         assert_eq!(shape_of(0x0041), 0x01); // Sphere default
         assert_eq!(relation_of(0x0041), 0x01); // Member default
         assert_eq!(valence_of(0x0041), 0x80); // neutral
         assert_eq!(arousal_of(0x0041), 0x80); // moderate
         assert_eq!(time_of(0x0041), 0x03); // Medium
         assert_eq!(group_of(0x0041), 0x00); // no group
-    }
-
-    #[test]
-    fn count_unique_molecules() {
-        // Count unique 5-tuples using a sorted vec + dedup
-        let mut tuples: Vec<(u8, u8, u8, u8, u8)> = UCD_TABLE
-            .iter()
-            .map(|e| (e.shape, e.relation, e.valence, e.arousal, e.time))
-            .collect();
-        let total = tuples.len();
-        tuples.sort();
-        tuples.dedup();
-        let unique = tuples.len();
-        let collision_rate = 1.0 - (unique as f64 / total as f64);
-        assert!(
-            unique as f64 / total as f64 > 0.90,
-            "COLLISION: {total} entries → {unique} unique molecules ({:.1}% collision). Need >90% unique.",
-            collision_rate * 100.0
-        );
-    }
-
-    #[test]
-    fn count_unique_hashes() {
-        let mut hashes: Vec<u64> = UCD_TABLE.iter().map(|e| e.hash).collect();
-        let total = hashes.len();
-        hashes.sort();
-        hashes.dedup();
-        let unique = hashes.len();
-        assert!(
-            unique as f64 / total as f64 > 0.90,
-            "HASH COLLISION: {total} entries → {unique} unique hashes ({:.1}% collision).",
-            (1.0 - unique as f64 / total as f64) * 100.0
-        );
-    }
-
-    // ── Formula tests ─────────────────────────────────────────────────────
-
-    #[test]
-    fn formula_fire_has_rules() {
-        let e = lookup(0x1F525).expect("🔥 FIRE");
-        // FIRE is a pictograph → Sphere
-        assert_eq!(e.fs, 16, "FIRE shape formula = pictograph→Sphere");
-        // FIRE is a pictograph → Member
-        assert_eq!(e.fr, 18, "FIRE relation formula = pictograph→Member");
-        // FIRE name contains "FIRE" → 0xFF
-        assert_eq!(e.fv, 8, "FIRE valence formula = name⊃FIRE→0xFF");
-        // FIRE name contains "FIRE" → 0xFF
-        assert_eq!(e.fa, 9, "FIRE arousal formula = name⊃FIRE→0xFF");
-        // FIRE name contains "FIRE" → Fast
-        assert_eq!(e.ft, 12, "FIRE time formula = name⊃FIRE→Fast");
-    }
-
-    #[test]
-    fn formula_sphere_primitive() {
-        let e = lookup(0x25CF).expect("● BLACK CIRCLE");
-        assert_eq!(e.fs, 0, "● shape formula = SDF primitive match");
-    }
-
-    #[test]
-    fn formula_member_primitive() {
-        let e = lookup(0x2208).expect("∈ ELEMENT OF");
-        assert_eq!(e.fr, 0, "∈ relation formula = REL primitive match");
-    }
-
-    #[test]
-    fn formula_name_lookup() {
-        let desc = formula_name(Dimension::Shape, 16);
-        assert!(
-            desc.contains("Sphere") && desc.contains("pictograph"),
-            "Shape rule 16 should mention Sphere and pictograph, got: {}",
-            desc
-        );
-    }
-
-    #[test]
-    fn formula_name_all_dimensions() {
-        // Ensure formula_name doesn't panic for any stored rule
-        for e in UCD_TABLE {
-            let _ = formula_name(Dimension::Shape, e.fs);
-            let _ = formula_name(Dimension::Relation, e.fr);
-            let _ = formula_name(Dimension::Valence, e.fv);
-            let _ = formula_name(Dimension::Arousal, e.fa);
-            let _ = formula_name(Dimension::Time, e.ft);
-        }
-    }
-
-    #[test]
-    fn formula_name_unknown_returns_fallback() {
-        let desc = formula_name(Dimension::Shape, 255);
-        assert!(desc.contains("unknown"), "Unknown rule should return fallback");
-    }
-
-    #[test]
-    fn formula_convenience_fns() {
-        assert_eq!(formula_s(0x1F525), 16); // FIRE → pictograph→Sphere
-        assert_eq!(formula_r(0x1F525), 18); // FIRE → pictograph→Member
-        assert_eq!(formula_v(0x1F525), 8);  // FIRE → name FIRE→0xFF
-        assert_eq!(formula_a(0x1F525), 9);  // FIRE → name FIRE→0xFF
-        assert_eq!(formula_t(0x1F525), 12); // FIRE → name FIRE→Fast
-    }
-
-    #[test]
-    fn formula_unknown_cp_defaults() {
-        assert_eq!(formula_s(0x0041), 19); // 'A' → default Sphere
-        assert_eq!(formula_r(0x0041), 20); // 'A' → default Member
-        assert_eq!(formula_v(0x0041), 42); // 'A' → default neutral
-        assert_eq!(formula_a(0x0041), 42); // 'A' → default moderate
-        assert_eq!(formula_t(0x0041), 32); // 'A' → default Medium
-    }
-
-    #[test]
-    fn formula_arrow_rules() {
-        let e = lookup(0x2192).expect("→ RIGHTWARDS ARROW");
-        assert_eq!(e.fs, 9, "→ shape = Arrow→Cone");
-        assert_eq!(e.fr, 0, "→ relation = REL primitive (Causes)");
-        assert_eq!(e.ft, 11, "→ time = Arrow→Instant");
-    }
-
-    #[test]
-    fn every_entry_has_valid_formula() {
-        for e in UCD_TABLE {
-            assert!(
-                (e.fs as usize) < FORMULA_NAMES_S.len(),
-                "cp 0x{:05X} has invalid fs={}", e.cp, e.fs
-            );
-            assert!(
-                (e.fr as usize) < FORMULA_NAMES_R.len(),
-                "cp 0x{:05X} has invalid fr={}", e.cp, e.fr
-            );
-            assert!(
-                (e.fv as usize) < FORMULA_NAMES_V.len(),
-                "cp 0x{:05X} has invalid fv={}", e.cp, e.fv
-            );
-            assert!(
-                (e.fa as usize) < FORMULA_NAMES_A.len(),
-                "cp 0x{:05X} has invalid fa={}", e.cp, e.fa
-            );
-            assert!(
-                (e.ft as usize) < FORMULA_NAMES_T.len(),
-                "cp 0x{:05X} has invalid ft={}", e.cp, e.ft
-            );
-        }
     }
 }

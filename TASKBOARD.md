@@ -558,8 +558,8 @@ INTG (song song với tất cả):
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| T1 | UCD build.rs rebuild (58 blocks, 9584 entries) | `PLAN_V2_MIGRATION` | — | FREE | | | Đọc udc.json thay heuristic, UcdEntry=u16 |
-| T2 | ShapeBase 8→18 SDF primitives | `PLAN_V2_MIGRATION` | — | FREE | | | Tách CSG ops, sync agents SdfPrimitive |
+| T1 | UCD build.rs rebuild (53 blocks, 8284 entries) | `PLAN_V2_MIGRATION` | — | DONE | `claude/project-audit-review-2pN6F` | 2026-03-21 | Đọc udc.json, UcdEntry+p_weight:u16, bỏ heuristic+formula |
+| T2 | ShapeBase 8→18 SDF primitives | `PLAN_V2_MIGRATION` | — | DONE | `claude/project-audit-review-2pN6F` | 2026-03-21 | 18 SDF + CsgOp tách, encoder/vm/origin updated |
 | T3 | Molecule 5B→2B packed u16 | `PLAN_V2_MIGRATION` | T1,T2 | FREE | | | [S:4][R:4][V:3][A:3][T:2], xóa CompactQR |
 | T4 | Chain Vec\<Mol\>→Vec\<u16\> | `PLAN_V2_MIGRATION` | T3 | FREE | | | Codepoint refs, not inline values |
 | T5 | LCA v2 compose rules | `PLAN_V2_MIGRATION` | T3 | FREE | | | amplify/Union/max/dominant, KILL avg |
