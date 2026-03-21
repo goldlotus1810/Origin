@@ -226,6 +226,29 @@ BYZANTINE MUSICAL SYMBOL PETASTI          → neume + petasti (lên 1)
   Diesis/Yfesis = vi chỉnh cung: Δf = ±ε (nhiễu loạn tần số)
 ```
 
+### Ánh xạ từng loại → tham số sóng cụ thể
+
+```
+  Ánh xạ từng loại → tham số sóng ψ(x,t) = A·sin(kx − ωt + φ):
+
+  ┌─────────────┬──────────────────────────────────────────────────────────┐
+  │ Loại        │ Tham số sóng ψ(x,t) = A·sin(kx − ωt + φ)              │
+  ├─────────────┼──────────────────────────────────────────────────────────┤
+  │ AGOGI       │ ω_tempo: hệ số co giãn thời gian t' = t/α             │
+  │             │   poli argi α=0.25, argi α=0.5, metria α=1.0          │
+  │             │   gorgi α=2.0, poli gorgi α=4.0                       │
+  │ NEUME       │ Δp: bước cao độ rời rạc                                │
+  │             │   oligon Δp=+1, petasti Δp=+1, apostrofos Δp=−1       │
+  │             │   ison Δp=0, climacus Δp=−2, scandicus Δp=+2          │
+  │ FTHORA      │ M: ma trận chuyển điệu thức (mode transformation)     │
+  │             │   p'(t) = M · p(t),  M ∈ GL(n,ℤ)                     │
+  │ DIESIS      │ Δf = +ε (tăng vi cung), ε ≈ 1/4 tone                 │
+  │ YFESIS      │ Δf = −ε (giảm vi cung)                                │
+  │ ISON        │ p(t) = p₀ = const (drone, pedal point)               │
+  │ CHRONON     │ Δt = τ (đơn vị thời gian cơ bản, chronon)            │
+  └─────────────┴──────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## T.3 — ZNAMENNY (Neume Slavonic) · 185 cụm
@@ -275,6 +298,29 @@ ZNAMENNY COMBINING LOWER TONAL RANGE INDICATOR → chỉ quãng thấp
     borzaya (nhanh) = dp/dt tăng (gia tốc)
     lomka (gãy) = d²p/dt² có gián đoạn (góc gãy trong giai điệu)
     kachka (lắc) = p(t) + A·sin(ωt) (vibrato/tremolo)
+```
+
+### Ánh xạ từng dấu → toán tử vi phân cụ thể
+
+```
+  Ánh xạ từng dấu → toán tử vi phân cụ thể:
+
+  ┌─────────────────────┬──────────────────────────────────────────┐
+  │ Dấu                 │ Toán tử trên p(t)                       │
+  ├─────────────────────┼──────────────────────────────────────────┤
+  │ gorazdo vysoko      │ p(t) + 2Δ    (dịch rất cao)             │
+  │ vysoko              │ p(t) + Δ     (dịch cao)                 │
+  │ malo povyshe        │ p(t) + Δ/2   (dịch hơi cao)            │
+  │ nizko               │ p(t) − Δ     (dịch thấp)               │
+  │ gorazdo nizko       │ p(t) − 2Δ    (dịch rất thấp)           │
+  │ borzaya/borzy       │ dt → dt/2    (tăng tốc ×2)             │
+  │ kupnaya             │ dt → 2·dt    (giảm tốc ×2)             │
+  │ lomka               │ d²p/dt² = δ(t−t₀) (gián đoạn đạo hàm) │
+  │ kachka              │ p + A·sin(ω_vib·t) (vibrato)            │
+  │ kryzh               │ p(t) = p_final (kết thúc, fermata)      │
+  │ dvoetochie          │ repeat{p(t₁..t₂)} (nhắc lại đoạn)     │
+  │ on left / on right  │ position modifier (trái/phải neume)     │
+  └─────────────────────┴──────────────────────────────────────────┘
 ```
 
 ---
@@ -380,6 +426,31 @@ MUSICAL SYMBOL SEGNO                     → dấu hiệu nhảy
     Trill: f(t) = f₀ + Δf·square(2πf_trill·t)  (luân phiên nhanh)
     Mordent: một xung luân phiên đơn
     Glissando: f(t) = f₁ + (f₂−f₁)·t/T  (quét tần số tuyến tính)
+```
+
+### Ánh xạ từng loại → tham số sóng
+
+```
+  Ánh xạ từng loại → tham số sóng:
+
+  ┌─────────────────┬─────────────────────────────────────────────────┐
+  │ Loại            │ Tham số trong fₙ(t) = Aₙ·sin(2πfₙt+φₙ)·w(t)  │
+  ├─────────────────┼─────────────────────────────────────────────────┤
+  │ NỐT (note)      │ w(t): envelope, trường độ = 2⁻ⁿ·4T            │
+  │ DẤU LẶNG (rest) │ A = 0, w(t) = rect (silence envelope)         │
+  │ KHÓA (clef)     │ f₀: tần số tham chiếu                         │
+  │                 │   G clef: f₀ = 392 Hz (G4)                    │
+  │                 │   F clef: f₀ = 174 Hz (F3)                    │
+  │                 │   C clef: f₀ = 262 Hz (C4)                    │
+  │ THĂNG/GIÁNG     │ n → n±1 bán cung: f' = f·2^(±1/12)           │
+  │ DYNAMICS        │ A: biên độ theo thang dB                      │
+  │                 │   ppp≈−40dB, pp≈−30, p≈−20, mp≈−10           │
+  │                 │   mf≈0dB, f≈+5, ff≈+10, fff≈+15              │
+  │ CẤU TRÚC        │ Topology: beam=nhóm, slur=legato, tie=kéo dài│
+  │ NEUME TÂY       │ Δp multi-step: climacus=[−1,−1], podatus=[+1]│
+  │ ORNAMENT        │ Modulation: trill ω_mod, mordent δ(t), gliss  │
+  │ KHÁC            │ fermata α>1, segno/coda=goto, breath=silence  │
+  └─────────────────┴─────────────────────────────────────────────────┘
 ```
 
 ---

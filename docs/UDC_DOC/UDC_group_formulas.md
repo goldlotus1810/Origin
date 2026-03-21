@@ -1,3 +1,10 @@
+> ⚠️ **DEPRECATED** — Nội dung file này đã được tích hợp vào các file `_tree.md` tương ứng.
+> Xem: `UDC_A_AROUSAL_tree.md`, `UDC_V_VALENCE_tree.md`, `UDC_R_RELATION_tree.md`,
+> `UDC_S0_ARROW_tree.md`, `UDC_S1_GEOMETRIC_tree.md`, `UDC_S2_BOXDRAWING_tree.md`,
+> `UDC_S3_S7_tree.md`, `UDC_T_TIME_tree.md`
+>
+> File này giữ lại để tham khảo lịch sử. Không cập nhật thêm.
+
 # UDC Group Formulas — Tên gọi + Công thức toán học
 
 > Mỗi nhóm = 1 công thức. Chỉ toán, không giải thích.
