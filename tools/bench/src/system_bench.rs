@@ -540,10 +540,10 @@ fn bench_runtime_pipeline() {
 fn bench_knowtree() {
     println!("── 7. KnowTree Stress ────────────────────────────────────────");
 
-    use olang::knowtree::{KnowTree, text_to_word_hashes};
+    use olang::knowtree::{KnowTreeLegacy, text_to_word_hashes};
     use olang::molecular::Molecule;
 
-    let mut kt = KnowTree::for_pc();
+    let mut kt = KnowTreeLegacy::for_pc();
 
     // Store 100 sentences
     let sentences = [
