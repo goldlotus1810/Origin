@@ -926,3 +926,228 @@ pub fn check_pweight_knowtree_size(root: &Path) -> CheckResult {
             .with_details(details)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: Dream → AAM → QR Promotion chain
+// v2 spec: Dream sinh proposal → AAM review → approve → QR promote
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_dream_aam(root: &Path) -> CheckResult {
+    println!("[19/22] WIRING — Dream → AAM → QR promotion...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check 1: Dream::run() exists and is called
+    let dream_run = grep_pattern(&files, "run_dream");
+    let dream_exists = !dream_run.is_empty();
+
+    // Check 2: AAM::review() is called from somewhere (not just defined)
+    let aam_review_def = grep_pattern(&files, "fn review");
+    let aam_review_call: Vec<_> = grep_pattern(&files, ".review(")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.trim().starts_with("//") && !l.contains("fn review")
+        })
+        .collect();
+
+    // Check 3: Proposals are submitted to AAM
+    let submit_proposal = grep_pattern(&files, "submit_proposal");
+    let proposal_to_aam = grep_pattern(&files, "aam.review");
+
+    // Check 4: QR promotion after AAM approval
+    let from_approved = grep_pattern(&files, "from_approved");
+    let _promote_qr = grep_pattern(&files, "promote");
+
+    details.push(format!("Dream::run() called: {}", if dream_exists { "✅" } else { "❌" }));
+    details.push(format!("AAM::review() defined: {} refs", aam_review_def.len()));
+    details.push(format!("AAM::review() CALLED: {} refs", aam_review_call.len()));
+    details.push(format!("submit_proposal → AAM: {} refs", submit_proposal.len() + proposal_to_aam.len()));
+    details.push(format!("QRProposal::from_approved(): {} refs", from_approved.len()));
+
+    let chain_complete = dream_exists
+        && !aam_review_call.is_empty()
+        && (!submit_proposal.is_empty() || !proposal_to_aam.is_empty());
+
+    if chain_complete {
+        CheckResult::pass("WIRING Dream→AAM", "OK — Dream → AAM → QR promotion chain complete")
+            .with_details(details)
+    } else {
+        details.push("Dream sinh proposals nhưng KHÔNG submit vào AAM".into());
+        details.push("AAM::review() KHÔNG được gọi → QR KHÔNG promote".into());
+        details.push("→ KnowTree KHÔNG grow dài hạn".into());
+        CheckResult::fail("WIRING Dream→AAM", "Dream→AAM→QR chain BROKEN — long-term learning disconnected")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: EpistemicFirewall wired into response rendering
+// v2 spec: Response phải qua epistemic level (Fact/Opinion/Hypothesis/Unknown)
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_epistemic(root: &Path) -> CheckResult {
+    println!("[20/22] WIRING — EpistemicFirewall in response...");
+    let agents_dir = root.join("crates/agents");
+    let runtime_dir = root.join("crates/runtime");
+
+    let ag_files = scan_rs_files(&agents_dir);
+    let rt_files = scan_rs_files(&runtime_dir);
+    let all: Vec<_> = ag_files.iter().chain(rt_files.iter()).cloned().collect();
+
+    let mut details = Vec::new();
+
+    // Check: EpistemicFirewall::wrap() called outside test
+    let wrap_calls: Vec<_> = grep_pattern(&all, "wrap(")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test")
+                && l.contains("pistemic") || l.contains("firewall")
+                || l.contains("Firewall")
+        })
+        .collect();
+
+    // Check: EpistemicFirewall::should_answer() called outside test
+    let should_answer: Vec<_> = grep_pattern(&all, "should_answer")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn should_answer")
+        })
+        .collect();
+
+    // Check: epistemic level in response rendering
+    let epistemic_render = grep_pattern(&all, "epistemic");
+
+    details.push(format!("EpistemicFirewall::wrap() called: {} refs", wrap_calls.len()));
+    details.push(format!("EpistemicFirewall::should_answer() called: {} refs", should_answer.len()));
+    details.push(format!("Epistemic refs in pipeline: {} total", epistemic_render.len()));
+
+    if !wrap_calls.is_empty() && !should_answer.is_empty() {
+        CheckResult::pass("WIRING Epistemic", "OK — EpistemicFirewall wired into response")
+            .with_details(details)
+    } else {
+        details.push("EpistemicFirewall defined but NOT called from pipeline".into());
+        details.push("Response không có epistemic level (Fact/Opinion/Unknown)".into());
+        CheckResult::fail("WIRING Epistemic", "EpistemicFirewall NOT wired — response lacks epistemic grading")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: sentence_affect_unified() thay vì sentence_affect()
+// v2 spec: Emotion pipeline phải dùng unified (implicit 5D + Hebbian)
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_unified_affect(root: &Path) -> CheckResult {
+    println!("[21/22] WIRING — sentence_affect_unified() usage...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check: sentence_affect_unified exists
+    let unified_def = grep_pattern(&files, "fn sentence_affect_unified");
+
+    // Check: sentence_affect_unified called from runtime/agents (not test)
+    let unified_calls: Vec<_> = grep_pattern(&files, "sentence_affect_unified")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn sentence_affect_unified")
+        })
+        .collect();
+
+    // Check: old sentence_affect still used
+    let old_calls: Vec<_> = grep_pattern(&files, "sentence_affect(")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            (ps.contains("runtime") || ps.contains("agents"))
+                && !ps.contains("test")
+                && !l.contains("fn sentence_affect")
+                && !l.contains("unified")
+        })
+        .collect();
+
+    details.push(format!("sentence_affect_unified() defined: {}", if !unified_def.is_empty() { "✅" } else { "❌" }));
+    details.push(format!("sentence_affect_unified() called: {} refs", unified_calls.len()));
+    details.push(format!("OLD sentence_affect() still called: {} refs", old_calls.len()));
+    for (p, line, text) in &old_calls {
+        let rel = p.strip_prefix(root).unwrap_or(p);
+        details.push(format!("  OLD: {}:{} — {}", rel.display(), line, text));
+    }
+
+    if !unified_calls.is_empty() && old_calls.is_empty() {
+        CheckResult::pass("WIRING Unified Affect", "OK — using sentence_affect_unified()")
+            .with_details(details)
+    } else if !unified_def.is_empty() && unified_calls.is_empty() {
+        details.push("sentence_affect_unified() EXISTS but NEVER CALLED".into());
+        details.push("Pipeline still uses OLD sentence_affect() (Hebbian-only, no implicit 5D)".into());
+        CheckResult::fail("WIRING Unified Affect", "sentence_affect_unified() defined but NOT wired — pipeline uses OLD version")
+            .with_details(details)
+    } else {
+        CheckResult::warn("WIRING Unified Affect", "sentence_affect_unified() not found — may not be implemented yet")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WIRING CHECK: Word selection pipeline (target_affect → select_words)
+// v2 spec: Response rendering should use emotion-aware word selection
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_wiring_word_selection(root: &Path) -> CheckResult {
+    println!("[22/22] WIRING — Word selection pipeline...");
+    let crates = root.join("crates");
+    let files = scan_rs_files(&crates);
+
+    let mut details = Vec::new();
+
+    // Check: target_affect / select_words called from outside context/
+    let target_calls: Vec<_> = grep_pattern(&files, "target_affect")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn target_affect")
+                && (ps.contains("runtime") || ps.contains("agents"))
+        })
+        .collect();
+
+    let select_calls: Vec<_> = grep_pattern(&files, "select_words")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn select_words")
+                && (ps.contains("runtime") || ps.contains("agents"))
+        })
+        .collect();
+
+    let affect_comp: Vec<_> = grep_pattern(&files, "affect_components")
+        .into_iter()
+        .filter(|(p, _, l)| {
+            let ps = p.to_str().unwrap_or("");
+            !ps.contains("test") && !l.contains("fn affect_components")
+                && (ps.contains("runtime") || ps.contains("agents"))
+        })
+        .collect();
+
+    details.push(format!("target_affect() called from runtime/agents: {} refs", target_calls.len()));
+    details.push(format!("select_words() called from runtime/agents: {} refs", select_calls.len()));
+    details.push(format!("affect_components() called from runtime/agents: {} refs", affect_comp.len()));
+
+    let any_wired = !target_calls.is_empty() || !select_calls.is_empty() || !affect_comp.is_empty();
+
+    if any_wired {
+        CheckResult::pass("WIRING Word Select", "OK — emotion-aware word selection wired")
+            .with_details(details)
+    } else {
+        details.push("Word selection pipeline defined in context/ but NEVER called from runtime/agents".into());
+        details.push("Response rendering does NOT use emotion-aware word selection".into());
+        CheckResult::fail("WIRING Word Select", "Word selection pipeline NOT wired — response ignores emotion-aware words")
+            .with_details(details)
+    }
+}

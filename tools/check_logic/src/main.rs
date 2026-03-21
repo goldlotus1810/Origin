@@ -50,6 +50,11 @@ fn main() {
         checks::check_pweight_compactqr_layout(&root),
         checks::check_pweight_ucd_build(&root),
         checks::check_pweight_knowtree_size(&root),
+        // ── WIRING: Logic connections ──
+        checks::check_wiring_dream_aam(&root),
+        checks::check_wiring_epistemic(&root),
+        checks::check_wiring_unified_affect(&root),
+        checks::check_wiring_word_selection(&root),
     ];
 
     // ── Report ──
