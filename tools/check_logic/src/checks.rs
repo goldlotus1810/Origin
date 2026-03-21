@@ -1151,3 +1151,275 @@ pub fn check_wiring_word_selection(root: &Path) -> CheckResult {
             .with_details(details)
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #2: ShapeBase = 8, v2 = 18 SDF primitives
+// Union/Intersect/Subtract = CSG ops, not shapes
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_shapebase_18sdf(root: &Path) -> CheckResult {
+    println!("[23/27] AUDIT — ShapeBase 8 vs v2 18 SDF...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("ShapeBase 18 SDF", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("ShapeBase 18 SDF", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // v2 requires 18 SDF primitives
+    let v2_shapes = [
+        "Sphere", "Box", "Capsule", "Plane", "Torus", "Ellipsoid",
+        "Cone", "Cylinder", "Octahedron", "Pyramid", "HexPrism",
+        "Prism", "RoundBox", "Link", "Revolve", "Extrude",
+        "CutSphere", "DeathStar",
+    ];
+
+    let mut found = 0;
+    let mut missing = Vec::new();
+    for shape in &v2_shapes {
+        if content.contains(shape) {
+            found += 1;
+        } else {
+            missing.push(*shape);
+        }
+    }
+
+    // Check CSG ops wrongly in ShapeBase
+    let has_union_shape = content.contains("Union") && content.contains("ShapeBase");
+    let has_intersect_shape = content.contains("Intersect") && content.contains("ShapeBase");
+    let has_subtract_shape = content.contains("Subtract") && content.contains("ShapeBase");
+    let csg_in_shape = has_union_shape || has_intersect_shape || has_subtract_shape;
+
+    details.push(format!("SDF primitives found: {}/18", found));
+    if !missing.is_empty() {
+        details.push(format!("Missing: {}", missing.join(", ")));
+    }
+    if csg_in_shape {
+        details.push("CSG ops (Union/Intersect/Subtract) in ShapeBase: ❌ should be separate".into());
+    }
+
+    if found >= 18 && !csg_in_shape {
+        CheckResult::pass("ShapeBase 18 SDF", &format!("OK — {}/18 SDF primitives", found))
+            .with_details(details)
+    } else {
+        CheckResult::fail("ShapeBase 18 SDF", &format!(
+            "Only {}/18 SDF primitives{}", found,
+            if csg_in_shape { " + CSG ops wrongly in ShapeBase" } else { "" }
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #3: KnowTree = array 65,536 × 2B, not hash-based
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_knowtree_array(root: &Path) -> CheckResult {
+    println!("[24/27] AUDIT — KnowTree = array, not hash...");
+    let olang_dir = root.join("crates/olang");
+    let files = scan_rs_files(&olang_dir);
+
+    let mut details = Vec::new();
+
+    // Check: KnowTree uses array index (codepoint → P_weight) vs hash-based
+    let hash_lookup = grep_pattern(&files, "chain_hash");
+    let compact_node = grep_pattern(&files, "CompactNode");
+    let slim_node = grep_pattern(&files, "SlimNode");
+    let array_index = grep_pattern(&files, "[codepoint]");  // array index syntax
+
+    // Check: size is 65,536 × 2B = 128KB?
+    let tiered_store = grep_pattern(&files, "TieredStore");
+
+    let is_hash_based = !hash_lookup.is_empty() && (!compact_node.is_empty() || !slim_node.is_empty());
+    let is_array_based = !array_index.is_empty() && tiered_store.is_empty();
+
+    details.push(format!("Hash-based lookup (chain_hash): {} refs", hash_lookup.len()));
+    details.push(format!("CompactNode (hash 8B + mol + meta): {} refs", compact_node.len()));
+    details.push(format!("SlimNode: {} refs", slim_node.len()));
+    details.push(format!("TieredStore: {} refs", tiered_store.len()));
+
+    if is_array_based {
+        CheckResult::pass("KnowTree Array", "OK — array-based O(1) lookup by codepoint")
+            .with_details(details)
+    } else if is_hash_based {
+        details.push("v2 spec: KnowTree[codepoint] → P_weight, O(1) array lookup".into());
+        details.push("Current: chain_hash → CompactNode → Molecule, O(log n) hash lookup".into());
+        details.push("Expected: array 65,536 × 2B = 128 KB".into());
+        CheckResult::fail("KnowTree Array", "KnowTree is hash-based — v2 requires array 65,536 × 2B")
+            .with_details(details)
+    } else {
+        CheckResult::warn("KnowTree Array", "Cannot determine KnowTree type")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #4: MolecularChain = Vec<Molecule>, v2 = Vec<u16>
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_chain_u16(root: &Path) -> CheckResult {
+    println!("[25/27] AUDIT — MolecularChain = Vec<u16> vs Vec<Molecule>...");
+    let mol_path = root.join("crates/olang/src/mol/molecular.rs");
+
+    if !mol_path.exists() {
+        return CheckResult::fail("Chain Vec<u16>", "molecular.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&mol_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("Chain Vec<u16>", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Check: MolecularChain wraps Vec<Molecule> (11B each) or Vec<u16> (2B each)?
+    let has_vec_mol = content.contains("Vec<Molecule>") && content.contains("MolecularChain");
+    let has_vec_u16 = content.contains("Vec<u16>") && content.contains("MolecularChain");
+
+    if has_vec_u16 && !has_vec_mol {
+        details.push("MolecularChain = Vec<u16>: ✅ (2B/link)".into());
+        CheckResult::pass("Chain Vec<u16>", "OK — chain links are u16 codepoint references")
+            .with_details(details)
+    } else if has_vec_mol {
+        details.push("MolecularChain = Vec<Molecule>: ❌ (11B/link)".into());
+        details.push("v2 spec: chain link = u16 codepoint → KnowTree[cp]".into());
+        details.push("Current: chain link = full Molecule embedded (5.5x overhead)".into());
+        details.push("DNA analogy: chain = sequence of REFERENCES, not VALUES".into());
+        CheckResult::fail("Chain Vec<u16>", "MolecularChain wraps Vec<Molecule> (11B/link) — v2 requires Vec<u16> (2B/link)")
+            .with_details(details)
+    } else {
+        CheckResult::warn("Chain Vec<u16>", "Cannot determine chain type")
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #5: LCA compose rules — amplify/Union/max/dominant
+// Code uses weighted average for ALL dimensions
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_lca_compose_rules(root: &Path) -> CheckResult {
+    println!("[26/27] AUDIT — LCA compose rules vs v2...");
+    let lca_path = root.join("crates/olang/src/mol/lca.rs");
+
+    if !lca_path.exists() {
+        return CheckResult::fail("LCA Compose", "lca.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&lca_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("LCA Compose", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // v2 rules:
+    //   S = Union(A.S, B.S)
+    //   R = Compose (fixed value)
+    //   V = amplify(A.V, B.V, w_AB) — NOT average
+    //   A = max(A.A, B.A)
+    //   T = dominant(A.T, B.T)
+
+    let has_wavg = content.contains("mode_or_wavg");
+    let has_union = content.contains("Union") || content.contains("union");
+    let has_amplify = content.contains("amplify");
+    let has_max_arousal = content.contains("max") && content.contains("arousal");
+    let has_dominant = content.contains("dominant");
+
+    // Check each dimension
+    let s_ok = has_union;
+    let r_ok = content.contains("Compose") || content.contains("compose");
+    let v_ok = has_amplify && !has_wavg;  // V must NOT use wavg
+    let a_ok = has_max_arousal;
+    let t_ok = has_dominant;
+
+    details.push(format!("S = Union(): {}", if s_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+    details.push(format!("R = Compose: {}", if r_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+    details.push(format!("V = amplify(): {}", if v_ok { "✅" } else { "❌ uses mode_or_wavg (CRITICAL)" }));
+    details.push(format!("A = max(): {}", if a_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+    details.push(format!("T = dominant(): {}", if t_ok { "✅" } else { "❌ uses mode_or_wavg" }));
+
+    if has_wavg {
+        details.push("mode_or_wavg() found — used for ALL dimensions: ❌".into());
+        details.push("v2: each dimension has DIFFERENT compose rule".into());
+    }
+
+    let ok_count = [s_ok, r_ok, v_ok, a_ok, t_ok].iter().filter(|&&x| x).count();
+
+    if ok_count == 5 {
+        CheckResult::pass("LCA Compose", "OK — all 5 dimensions use correct compose rules")
+            .with_details(details)
+    } else {
+        CheckResult::fail("LCA Compose", &format!(
+            "LCA uses mode_or_wavg for ALL dims — {}/5 correct (v2: Union/Compose/amplify/max/dominant)",
+            ok_count
+        ))
+            .with_details(details)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT #7: UCD blocks — 29 ranges vs v2 58 blocks
+// ═══════════════════════════════════════════════════════════════════
+
+pub fn check_ucd_block_count(root: &Path) -> CheckResult {
+    println!("[27/27] AUDIT — UCD blocks 29 vs v2 58...");
+    let build_path = root.join("crates/ucd/build.rs");
+
+    if !build_path.exists() {
+        return CheckResult::fail("UCD Blocks", "build.rs not found");
+    }
+
+    let content = match std::fs::read_to_string(&build_path) {
+        Ok(c) => c,
+        Err(e) => return CheckResult::fail("UCD Blocks", &format!("Cannot read: {}", e)),
+    };
+
+    let mut details = Vec::new();
+
+    // Count Unicode range definitions (0x????..0x???? or ..=)
+    let _range_count = content.matches("0x").count() / 2;  // approximate pairs
+
+    // Check for specific missing blocks
+    let has_braille = content.contains("2800") || content.contains("Braille");
+    let has_ornamental = content.contains("1F650") || content.contains("Ornamental");
+    let has_mahjong = content.contains("1F000") || content.contains("Mahjong");
+    let has_domino = content.contains("1F030") || content.contains("Domino");
+    let has_playing = content.contains("1F0A0") || content.contains("Playing");
+    let has_znamenny = content.contains("1CF00") || content.contains("Znamenny");
+    let has_byzantine = content.contains("1D000") || content.contains("Byzantine");
+
+    // Check L0 anchor count — v2 says 9,584
+    let table_size_match = content.contains("9584") || content.contains("9_584");
+
+    details.push(format!("Braille Patterns: {}", if has_braille { "✅" } else { "❌ missing" }));
+    details.push(format!("Ornamental Dingbats: {}", if has_ornamental { "✅" } else { "❌ missing" }));
+    details.push(format!("Mahjong Tiles: {}", if has_mahjong { "✅" } else { "❌ missing" }));
+    details.push(format!("Domino Tiles: {}", if has_domino { "✅" } else { "❌ missing" }));
+    details.push(format!("Playing Cards: {}", if has_playing { "✅" } else { "❌ missing" }));
+    details.push(format!("Znamenny Musical: {}", if has_znamenny { "✅" } else { "❌ missing" }));
+    details.push(format!("Byzantine Musical: {}", if has_byzantine { "✅" } else { "❌ missing" }));
+    details.push(format!("L0 anchor count = 9,584: {}", if table_size_match { "✅" } else { "❌" }));
+
+    let missing_count = [has_braille, has_ornamental, has_mahjong, has_domino,
+                         has_playing, has_znamenny, has_byzantine]
+        .iter().filter(|&&x| !x).count();
+
+    if missing_count == 0 && table_size_match {
+        CheckResult::pass("UCD Blocks", "OK — all 58 blocks covered, 9,584 anchors")
+            .with_details(details)
+    } else {
+        details.push(format!("{} key blocks missing — v2 requires 58 blocks / 9,584 L0 anchors", missing_count));
+        CheckResult::fail("UCD Blocks", &format!(
+            "{} key blocks missing, L0 anchors ≠ 9,584 — v2 requires 58 blocks",
+            missing_count
+        ))
+            .with_details(details)
+    }
+}

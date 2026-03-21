@@ -55,6 +55,12 @@ fn main() {
         checks::check_wiring_epistemic(&root),
         checks::check_wiring_unified_affect(&root),
         checks::check_wiring_word_selection(&root),
+        // ── AUDIT: Structural v2 compliance ──
+        checks::check_shapebase_18sdf(&root),
+        checks::check_knowtree_array(&root),
+        checks::check_chain_u16(&root),
+        checks::check_lca_compose_rules(&root),
+        checks::check_ucd_block_count(&root),
     ];
 
     // ── Report ──
