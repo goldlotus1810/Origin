@@ -975,17 +975,9 @@ pub fn infer_stmt_kind(stmt: &Stmt) -> ChainKind {
 /// Encode a string as a MolecularChain key (each byte → 1 molecule).
 /// Used for dict field names — deterministic and comparable.
 fn string_to_key_chain(s: &str) -> crate::molecular::MolecularChain {
-    let mut mols = Vec::new();
-    for b in s.bytes() {
-        mols.push(crate::molecular::Molecule::raw(
-            0x02,  // shape: marker string key
-            0x01,  // relation: Member
-            b,     // valence: byte value
-            0,     // arousal
-            0x01,  // time: Static
-        ));
-    }
-    crate::molecular::MolecularChain(mols.iter().map(|m| m.bits).collect())
+    // Use vm::string_to_chain for consistent string encoding
+    // Shape=2 (quantized), Relation=1 (quantized), byte value in lower 8 bits
+    crate::vm::string_to_chain(s)
 }
 
 /// Lower (hạ) AST → OlangProgram (IR opcodes).
