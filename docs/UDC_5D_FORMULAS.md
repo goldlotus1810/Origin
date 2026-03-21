@@ -681,3 +681,192 @@ Alias UTF-32 = mapping text → UDC codepoint → 5 công thức → node
     └─────────┴───────────┴─────────┴──────────┴──────────┘
                     = 16 bits = 2 bytes = P_weight
 ```
+
+---
+
+## UCD Source Files → 5D Pipeline
+
+> Phần này mô tả cách từng nhóm tệp Unicode Character Database (UCD)
+> ánh xạ vào hệ tọa độ 5D [S, R, V, A, T] của HomeOS.
+>
+> **Tham chiếu chéo:** Mỗi tệp UCD phục vụ 1+ chiều trong 5D.
+> Dưới đây chia thành 8 nhóm cốt lõi + 5 nhóm chuyên biệt.
+
+---
+
+### Nhóm 1 — Core Data Files
+
+```
+Tệp:  UnicodeData.txt
+Vai trò: "Từ điển gốc" — mọi ký tự UTF-32 đều bắt đầu tra ở đây.
+
+Nội dung:
+  ┌──────────────────────────────────────────────────────────────────┐
+  │ Codepoint │ Name        │ General_Category │ Combining_Class    │
+  │ (UTF-32)  │ (tên chuẩn) │ (phân loại)      │ (trọng số kết hợp) │
+  │           │             │                  │ + Bảng chuẩn hóa   │
+  └──────────────────────────────────────────────────────────────────┘
+
+Ánh xạ 5D:
+  Name              → dùng cho alias lookup (Quy tắc ③: NL = alias → node)
+  General_Category  → heuristic để chọn block mặc định (S, R)
+  Combining_Class   → ảnh hưởng R (chars kết hợp = R=8 COMPOSE)
+  Normalization map → chuẩn hóa trước khi tra V/A từ NRC-VAD
+
+Pipeline:
+  [4-byte UTF-32] → tra UnicodeData.txt
+                   → lấy Name + Category
+                   → chuyển vào Bước 2 (alias) hoặc Bước 3 (block default)
+```
+
+---
+
+### Nhóm 2 — Alias & Properties
+
+```
+Tệp:
+  NameAliases.txt           — tên thay thế cho ký tự
+  PropertyAliases.txt       — tên viết tắt thuộc tính
+  PropertyValueAliases.txt  — giá trị thuộc tính dạng alias
+
+Ánh xạ 5D:
+  NameAliases → phục vụ Quy tắc ③ (Ngôn ngữ tự nhiên = alias → node)
+    VD: U+2118 tên gốc "SCRIPT CAPITAL P"
+        alias "WEIERSTRASS ELLIPTIC FUNCTION"
+        → cả 2 tên đều map về cùng 1 node 5D
+
+  PropertyAliases → phục vụ Regex lookup (\p{Space}, \p{GShp})
+    → xác định nhanh General_Category → heuristic cho S, R
+
+  PropertyValueAliases → giải mã viết tắt
+    VD: "Sm" = Symbol_math → block MATH → R dominant
+
+Ứng dụng:
+  Người dùng gõ "hình vuông" (tiếng Việt)
+    → alias lookup → "BLACK SQUARE" → U+25A0
+    → UDC: S=1(BOX), R=0, V=0.518, A=0.356, T=0
+```
+
+---
+
+### Nhóm 3 — Segmentation (Phân đoạn)
+
+```
+Tệp:
+  GraphemeBreakProperty.txt  — quy tắc ngắt grapheme
+  WordBreakProperty.txt      — quy tắc ngắt từ
+  SentenceBreakProperty.txt  — quy tắc ngắt câu
+
+Thuật toán: UAX #29 (Unicode Text Segmentation)
+
+Ánh xạ 5D:
+  Grapheme cluster → xác định 1 "đơn vị hình ảnh":
+    Chữ + Dấu  = 1 node (VD: 'e' + '́' = 'é' → 1 P_weight)
+    Emoji + ZWJ = 1 node (VD: 👨‍💻 = 3 codepoints → 1 node)
+
+  Word boundary → xác định ranh giới khi parse text:
+    "I love fire" → ["I", "love", "fire"]
+    Mỗi word → alias lookup → node → P_weight
+
+  Sentence boundary → xác định ranh giới khi tính Emotion Curve:
+    V(t) tích phân THEO câu, không theo ký tự
+
+Ảnh hưởng chiều:
+  S: cluster → quyết định shape nào đại diện cho cả grapheme
+  R: multi-codepoint → R=8 (COMPOSE) giữa thành phần
+  V,A: tích phân trên word, không trên codepoint đơn lẻ
+  T: sentence boundary → bước nhảy trong Emotion Curve
+```
+
+---
+
+### Nhóm 4 — Normalization (Chuẩn hóa)
+
+```
+Tệp:
+  DerivedNormalizationProps.txt  — thuộc tính chuẩn hóa
+  CompositionExclusions.txt      — loại trừ khi compose
+
+4 dạng chuẩn hóa Unicode:
+  NFC  — Composed (gộp)    : é = 1 codepoint
+  NFD  — Decomposed (tách) : é = e + ́  (2 codepoints)
+  NFKC — Compat Composed   : ① → 1 (gộp + compat)
+  NFKD — Compat Decomposed : ① → 1 (tách + compat)
+
+Ánh xạ 5D:
+  NFKC/NFKD → "hình dạng méo" → "hình dạng gốc"
+    VD: Ⓐ (U+24B6, CIRCLED LATIN CAPITAL A)
+        NFKC → A (U+0041)
+        Cả 2 share cùng P_weight cho V,A,T
+        Chỉ khác S: Ⓐ=TORUS (S=4), A=BOX (S=1)
+
+  Lookup pipeline:
+    Input text → NFC normalize TRƯỚC
+    → rồi mới tra UnicodeData.txt → tra UDC
+    → đảm bảo "é" (1 cp) và "é" (2 cp) cùng 1 node
+
+  Tìm kiếm text:
+    NFKD normalize → so sánh không phân biệt hình dạng
+    "①" match "1" → cùng node semantic
+```
+
+---
+
+### Nhóm 5 — Emoji Data (Cảm xúc & Biểu tượng)
+
+```
+Tệp:
+  emoji-data.txt       — ký tự nào là Emoji
+  emoji-sequences.txt  — chuỗi Emoji (ZWJ, flag, keycap)
+  emoji-test.txt       — test data cho renderer
+
+Ánh xạ 5D:
+  emoji-data.txt → FILTER bước đầu:
+    Is_Emoji=true → tra UDC EMOTICON blocks (V,A dominant)
+    Is_Emoji=false → tra theo General_Category (S,R dominant)
+
+  emoji-sequences.txt → COMPOSE multi-codepoint:
+    👨‍🔬 = 👨 + ZWJ + 🔬 (man scientist)
+    P_weight(👨‍🔬) = compose(P(👨), P(🔬)):
+      S = Union(S_man, S_microscope)
+      R = Compose(R_man, R_microscope)  = CAUSES (man → science)
+      V = amplify(V_man, V_microscope)
+      A = max(A_man, A_microscope)
+      T = dominant(T_man, T_microscope)
+
+  emoji-test.txt → validation data:
+    Dùng để verify renderer hiển thị đúng node
+
+Ảnh hưởng chiều:
+  V: Emoji là nguồn V mạnh nhất (0.135 - 0.879 range)
+  A: Emoji cũng là nguồn A mạnh (0.175 - 0.715 range)
+  S: Emoji đa dạng shape (face=SPHERE, vehicle=BOX...)
+  R: Emoji mang relation ngầm (💕=CAUSES, 🔗=COMPOSE)
+  T: Một số emoji có T≠0 (🎵=RHYTHMIC, ⏰=CYCLICAL)
+```
+
+---
+
+### Nhóm 6 — CLDR (Địa phương hóa)
+
+```
+Tệp:
+  cldr-json/main/{locale}/annotations.json  — mô tả theo ngôn ngữ
+  cldr-json/main/{locale}/labels.json       — nhãn phân loại
+
+Ánh xạ 5D:
+  annotations.json → ALIAS đa ngôn ngữ (Quy tắc ③):
+    locale=vi: "tức giận" → 😡 (U+1F621)
+    locale=en: "angry"    → 😡 (U+1F621)
+    → Cùng 1 node, cùng 1 P_weight: S=0, R=9, V=0.388, A=0.570, T=0
+
+  labels.json → phân nhóm hỗ trợ tìm kiếm:
+    category="face-negative" → V thấp, A cao
+    category="animal"        → V trung bình, A trung bình
+
+Pipeline tìm kiếm:
+  User gõ "tức giận" (tiếng Việt)
+    → CLDR annotations.vi → U+1F621
+    → UDC lookup → P_weight = [0, 9, V=0.388, A=0.570, 0]
+    → Node 😡 với 5 công thức đầy đủ
+```
