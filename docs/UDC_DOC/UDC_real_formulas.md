@@ -635,3 +635,257 @@ Greek Acrophonic:
 
   unit_weight: { stater=1, talent=6000, drachma=1/6, mina=100 }
 ```
+
+---
+
+## V — VALENCE — Mô hình cảm xúc Russell
+
+### Công thức cốt lõi
+
+```
+V: Word → [-1, +1]
+
+V(w) = Σᵢ αᵢ · vᵢ(w)     αᵢ = trọng số nguồn,  Σαᵢ = 1
+
+  v₁(w) = NRC_VAD_valence(w)          (tra bảng 54,801 từ)
+  v₂(w) = emoji_subgroup_valence(w)   (tra subgroup emoji)
+  v₃(w) = 0                           (fallback trung tính)
+```
+
+### Lượng tử hóa
+
+```
+Q_V: [-1, +1] → Z₈
+
+Q_V(x) = ⌊ (x + 1) / 2 · 7 + 0.5 ⌋
+
+  Q_V(-1.0) = 0     rất tiêu cực
+  Q_V(-0.5) = 1.75 → 2
+  Q_V( 0.0) = 3.5  → 4   trung tính
+  Q_V(+0.5) = 5.25 → 5
+  Q_V(+1.0) = 7     rất tích cực
+```
+
+### Quy tắc KHÔNG trung bình (Amplify, không Average)
+
+```
+❌  V_composite = (v₁ + v₂) / 2               (sai — trung bình)
+
+✅  V_composite = sign(Σvᵢ) · ‖v⃗‖             (amplify qua Silk walk)
+
+    ‖v⃗‖ = √(Σᵢ vᵢ²)                           (norm — bảo toàn năng lượng)
+
+Ví dụ: "hate" + "fear" = sign(-1-0.8) · √(1² + 0.8²)
+      = -1 · 1.28 = -1.28 → clamp → -1.0    (cực tiêu cực, không giảm)
+```
+
+---
+
+## A — AROUSAL — Trục kích hoạt
+
+### Công thức cốt lõi
+
+```
+A: Word → [-1, +1]
+
+A(w) = Σᵢ αᵢ · aᵢ(w)
+
+  a₁(w) = NRC_VAD_arousal(w)
+  a₂(w) = emoji_subgroup_arousal(w)
+  a₃(w) = 0
+```
+
+### Lượng tử hóa (cùng công thức V)
+
+```
+Q_A: [-1, +1] → Z₈
+
+Q_A(x) = ⌊ (x + 1) / 2 · 7 + 0.5 ⌋
+```
+
+### Không gian cảm xúc 2D (Russell's Circumplex)
+
+```
+E⃗(w) = ( V(w), A(w) ) ∈ [-1,1]²
+
+  |E⃗| = √(V² + A²)              cường độ cảm xúc tổng
+  θ_E = atan2(A, V)              góc cảm xúc
+
+  θ ≈ 0    → vui + bình tĩnh    (content, serene)
+  θ ≈ π/2  → trung tính + kích  (alert, tense)
+  θ ≈ π    → buồn + bình tĩnh   (sad, depressed)
+  θ ≈ 3π/2 → trung tính + tĩnh  (calm, sleepy... sai→ nên -π/2)
+
+Cortisol-Adrenaline analogy:
+  cortisol  ~ |V_negative|       (stress hormone)
+  adrenaline ~ A_positive        (activation hormone)
+  composite = √(cortisol² + adrenaline²)   (không trung bình!)
+```
+
+---
+
+## T.0 — QUẺ DỊCH (Hexagram) — Đại số nhị phân 6-bit
+
+```
+H = Σᵢ₌₁⁶ yᵢ · 2^(i-1)     yᵢ ∈ {0:âm ⚋, 1:dương ⚊}
+
+H ∈ Z₆₄ = {0, 1, ..., 63}
+
+Quẻ = (trigram_lower, trigram_upper) = (H mod 8, H div 8)
+
+  trigram ∈ Z₈ = { ☰:7, ☱:6, ☲:5, ☳:4, ☴:3, ☵:2, ☶:1, ☷:0 }
+
+Biến đổi:
+  complement(H) = 63 - H = ¬H                  (đảo mọi hào)
+  reverse(H) = Σᵢ y₍₇₋ᵢ₎ · 2^(i-1)             (lật ngược)
+  nuclear(H) = extract_inner_4_lines(H)          (quẻ hỗ)
+
+Chuỗi biến đổi (sequence):
+  H_{n+1} = transform(H_n, changing_lines)
+  changing_lines = { i : yᵢ is "old" (lão dương/lão âm) }
+```
+
+---
+
+## T.1 — TỨ QUÁI (Tetragram) — Hệ tam phân 4-trit
+
+```
+T = Σᵢ₌₁⁴ yᵢ · 3^(i-1)     yᵢ ∈ {0:âm, 1:trung, 2:dương}
+
+T ∈ Z₈₁ = {0, 1, ..., 80}
+
+  Monogram:  M = y₁ ∈ Z₃
+  Digram:    D = y₁ + y₂·3 ∈ Z₉
+  Tetragram: T = y₁ + y₂·3 + y₃·9 + y₄·27 ∈ Z₈₁
+```
+
+---
+
+## T.2 — BYZANTINE — Tempo trên thang logarit
+
+### Agogi (Tempo)
+
+```
+Tempo(k) = T₀ · 2^(k/4)     k ∈ [-4, +4]
+
+  k = -4  → POLI ARGI     T = T₀/4    (rất chậm)
+  k = -3  → ARGI           T = T₀/2√2
+  k = -2  → ARGOTERI       T = T₀/2    (hơi chậm)
+  k = -1  → METRIA         T = T₀/√2
+  k =  0  → MESI           T = T₀      (trung bình)
+  k = +1  → GORGI          T = T₀·√2
+  k = +2  → GORGOTERI      T = T₀·2    (hơi nhanh)
+  k = +4  → POLI GORGI     T = T₀·4    (rất nhanh)
+```
+
+### Neume — Interval
+
+```
+Neume(n) = Δpitch ∈ Z    (số bước đi lên/xuống)
+
+  ISON      → Δ = 0     (giữ nguyên)
+  OLIGON    → Δ = +1    (lên 1)
+  PETASTI   → Δ = +1    (lên 1, variant)
+  APOSTROFOS → Δ = -1   (xuống 1)
+  ELAFRON   → Δ = -2    (xuống 2)
+  CHAMILI   → Δ = +2    (lên 2)
+```
+
+### Fthora — Chuyển điệu thức (Mode shift)
+
+```
+Mode(f) = (scale, tonic)
+
+  fthora: Mode_current → Mode_target
+
+  scale ∈ { diatonic, chromatic, enharmonic }
+  tonic ∈ Z₇ = vị trí trong thang âm
+```
+
+---
+
+## T.4 — NHẠC PHƯƠNG TÂY — Trường độ & Tần số
+
+### Trường độ (Duration) — Lũy thừa 2
+
+```
+Duration(n) = whole · 2^(-n)     n ∈ Z
+
+  n = -3  → MAXIMA       = 8 × whole
+  n = -2  → LONGA        = 4 × whole
+  n = -1  → BREVE        = 2 × whole
+  n =  0  → WHOLE        = 1 whole
+  n =  1  → HALF         = 1/2
+  n =  2  → QUARTER      = 1/4
+  n =  3  → EIGHTH       = 1/8
+  n =  4  → SIXTEENTH    = 1/16
+```
+
+### Cao độ (Pitch) — Tần số
+
+```
+f(n) = 440 · 2^((n-69)/12)     Hz     (A4 = 440 Hz, MIDI note n)
+
+  SHARP:   n → n + 1     (lên nửa cung)
+  FLAT:    n → n - 1     (xuống nửa cung)
+  NATURAL: hủy sharp/flat trước đó
+```
+
+### Cường độ (Dynamics) — Decibel
+
+```
+Dynamics(k) = dB₀ + k · ΔdB     k ∈ Z
+
+  k = -3  → ppp (pianississimo)
+  k = -2  → pp  (pianissimo)
+  k = -1  → p   (piano)
+  k =  0  → mp  (mezzo piano)
+  k = +1  → mf  (mezzo forte)
+  k = +2  → f   (forte)
+  k = +3  → ff  (fortissimo)
+  k = +4  → fff (fortississimo)
+
+Biến thiên:
+  CRESCENDO:    dB(t) = dB₀ + α·t      (tăng tuyến tính)
+  DECRESCENDO:  dB(t) = dB₀ - α·t      (giảm tuyến tính)
+  RINFORZANDO:  dB(t) = dB₀ + A·δ(t-t₀)  (xung nhấn tại t₀)
+```
+
+### Ornament — Biến điệu
+
+```
+Trill:      f(t) = f₀ + Δf · square(2πf_trill·t)    (dao động nửa cung)
+Vibrato:    f(t) = f₀ + Δf · sin(2πf_vib·t)          (dao động liên tục)
+Glissando:  f(t) = f₀ + (f₁-f₀)·t/T                  (trượt tuyến tính)
+Arpeggio:   f(t) = f_chord[⌊t/δ⌋ mod N]              (rải hợp âm)
+Turn:       f(t) = f₀ + Δf · {+1, 0, -1, 0}[phase]   (4 giai đoạn)
+```
+
+---
+
+## Bảng tổng hợp: Tên — Công thức nổi bật
+
+```
+MŨI TÊN:       d⃗(θ) = (cos θ, sin θ)
+ĐỘ DÀY:        w(k) = w₀ · φᵏ                     φ = (1+√5)/2
+HÌNH TRÒN:      SDF(p⃗) = |p⃗| - r
+HÌNH VUÔNG:     SDF(p⃗) = max(|x|-a, |y|-a)
+SAO n CÁNH:     r(θ) = r₁·r₂ / √(r₂²cos²θ' + r₁²sin²θ')
+CHỮ NỔI:        B = Σ bᵢ · 2^(i-1) ∈ GF(2)⁸
+KHỐI:           C(p⃗) = (x < k/8)
+TÍCH PHÂN:      ∫ₐᵇ f dx = lim Σ f(xᵢ)·Δx
+BẰNG:           a = b ⟺ d(a,b) = 0
+XẤP XỈ:         a ≈ b ⟺ |a-b| < ε
+PHÂN SỐ:        p/q ∈ Q
+NGOẶC:          depth(s) = Σ δ(sᵢ),  Dyck language
+VALENCE:        Q_V(x) = ⌊(x+1)/2 · 7 + 0.5⌋
+AROUSAL:        Q_A(x) = ⌊(x+1)/2 · 7 + 0.5⌋
+CẢM XÚC 2D:    E⃗ = (V, A),  |E⃗| = √(V²+A²)
+QUẺ DỊCH:       H = Σ yᵢ · 2^(i-1) ∈ Z₆₄
+TỨ QUÁI:        T = Σ yᵢ · 3^(i-1) ∈ Z₈₁
+TEMPO:          Tempo(k) = T₀ · 2^(k/4)
+TRƯỜNG ĐỘ:     D(n) = whole · 2^(-n)
+CAO ĐỘ:         f(n) = 440 · 2^((n-69)/12) Hz
+CƯỜNG ĐỘ:       dB(k) = dB₀ + k·ΔdB
+EULER:           e^(iπ) + 1 = 0
+```
