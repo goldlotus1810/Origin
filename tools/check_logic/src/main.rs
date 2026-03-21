@@ -45,6 +45,28 @@ fn main() {
         checks::check_worker_sends_chain(&root),
         // ── Data Integrity ──
         checks::check_udc_utf32_data(&root),
+        // ── DEEP: P_weight v2 Compliance ──
+        checks::check_pweight_molecule_struct(&root),
+        checks::check_pweight_compactqr_layout(&root),
+        checks::check_pweight_ucd_build(&root),
+        checks::check_pweight_knowtree_size(&root),
+        // ── WIRING: Logic connections ──
+        checks::check_wiring_dream_aam(&root),
+        checks::check_wiring_epistemic(&root),
+        checks::check_wiring_unified_affect(&root),
+        checks::check_wiring_word_selection(&root),
+        // ── AUDIT: Structural v2 compliance ──
+        checks::check_shapebase_18sdf(&root),
+        checks::check_knowtree_array(&root),
+        checks::check_chain_u16(&root),
+        checks::check_lca_compose_rules(&root),
+        checks::check_ucd_block_count(&root),
+        // ── OLANG: Kernel checks ──
+        checks::check_olang_compile_gap(&root),
+        checks::check_olang_stdlib_builtins(&root),
+        checks::check_olang_handbook_vs_v2(&root),
+        checks::check_olang_pushmol(&root),
+        checks::check_olang_bootstrap(&root),
     ];
 
     // ── Report ──
