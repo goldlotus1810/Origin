@@ -477,15 +477,19 @@ fn print(msg) {
 
     #[test]
     fn test_bit_shifts() {
+        // v2 layout: [S:4][R:4][V:3][A:3][T:2] = 16 bits
+        // Note: extract_bit_shifts finds first << per line, so put each on own line
         let src = r#"
-pub fn from_molecule_lossy(mol: &Molecule) -> Self {
-    let s = 3u16;
-    let r = 2u16;
-    let bits = (s << 13) | (r << 10) | (t << 7);
+pub fn pack(s: u8, r: u8, v: u8, a: u8, t: u8) -> Self {
+    let s4 = (s >> 4) as u16;
+    let r4 = (r >> 4) as u16;
+    let part_s = s4 << 12;
+    let part_r = r4 << 8;
+    let bits = part_s | part_r;
 }
 "#;
-        let shifts = extract_bit_shifts(src, "from_molecule_lossy");
-        assert!(shifts.iter().any(|(v, n)| v == "s" && *n == 13));
-        assert!(shifts.iter().any(|(v, n)| v == "r" && *n == 10));
+        let shifts = extract_bit_shifts(src, "pack");
+        assert!(shifts.iter().any(|(v, n)| v == "s4" && *n == 12));
+        assert!(shifts.iter().any(|(v, n)| v == "r4" && *n == 8));
     }
 }

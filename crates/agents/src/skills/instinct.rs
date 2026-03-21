@@ -68,33 +68,35 @@ impl Skill for AnalogySkill {
             return SkillResult::Insufficient;
         };
 
-        let bytes_a = ma.to_bytes_legacy();
-        let bytes_b = mb.to_bytes_legacy();
-        let bytes_c = mc.to_bytes_legacy();
+        // v2: work in quantized domain — S:4bit R:4bit V:3bit A:3bit T:2bit
+        // Max values: S=15, R=15, V=7, A=7, T=3
+        let maxes: [i16; 5] = [15, 15, 7, 7, 3];
+        let dims_a = [ma.shape() as i16, ma.relation() as i16, ma.valence() as i16, ma.arousal() as i16, ma.time() as i16];
+        let dims_b = [mb.shape() as i16, mb.relation() as i16, mb.valence() as i16, mb.arousal() as i16, mb.time() as i16];
+        let dims_c = [mc.shape() as i16, mc.relation() as i16, mc.valence() as i16, mc.arousal() as i16, mc.time() as i16];
 
-        // D = C + (B - A) trong mỗi chiều
-        let mut d_bytes = [0u8; 5];
+        // D = C + (B - A) trong mỗi chiều (quantized)
+        let mut d_dims = [0i16; 5];
         for i in 0..5 {
-            let delta = bytes_b[i] as i16 - bytes_a[i] as i16;
-            let result = (bytes_c[i] as i16 + delta).clamp(0, 255) as u8;
-            d_bytes[i] = result;
+            let delta = dims_b[i] - dims_a[i];
+            d_dims[i] = (dims_c[i] + delta).clamp(0, maxes[i]);
         }
-        // Clamp enum dimensions to valid ranges
-        d_bytes[0] = d_bytes[0].clamp(1, 8); // ShapeBase: 1..=8
-        d_bytes[1] = d_bytes[1].clamp(1, 8); // RelationBase: 1..=8
-        d_bytes[4] = d_bytes[4].clamp(1, 5); // TimeDim: 1..=5
 
-        // Tạo chain D
-        let Some(mol_d) = olang::molecular::Molecule::from_bytes(&d_bytes) else {
-            return SkillResult::Insufficient;
-        };
+        // Tạo chain D — construct directly from quantized bits
+        let d_bits: u16 =
+            ((d_dims[0] as u16 & 0xF) << 12)   // S: 4 bits
+            | ((d_dims[1] as u16 & 0xF) << 8)   // R: 4 bits
+            | ((d_dims[2] as u16 & 0x7) << 5)   // V: 3 bits
+            | ((d_dims[3] as u16 & 0x7) << 2)   // A: 3 bits
+            | (d_dims[4] as u16 & 0x3);          // T: 2 bits
+        let mol_d = olang::molecular::Molecule::from_u16(d_bits);
         let chain_d = MolecularChain::single(mol_d);
 
         // Đánh giá confidence: delta càng rõ ràng → confidence càng cao
         let delta_magnitude: f32 = (0..5)
             .map(|i| {
-                let d = (bytes_b[i] as f32 - bytes_a[i] as f32).abs();
-                d / 255.0
+                let d = (dims_b[i] as f32 - dims_a[i] as f32).abs();
+                d / maxes[i] as f32
             })
             .sum::<f32>()
             / 5.0;
@@ -287,12 +289,11 @@ impl Skill for ContradictionSkill {
             return SkillResult::Insufficient;
         };
 
-        let ba = ma.to_bytes_legacy();
-        let bb = mb.to_bytes_legacy();
+        // v2: quantized accessors — V:3bit (0-7), A:3bit (0-7)
+        let v_a = ma.valence() as f32 / 7.0; // 0..1
+        let v_b = mb.valence() as f32 / 7.0;
 
         // Test 1: Valence opposition — cùng cực đoan nhưng ngược dấu
-        let v_a = ba[2] as f32 / 255.0; // 0..1
-        let v_b = bb[2] as f32 / 255.0;
         let valence_distance = (v_a - v_b).abs();
         let both_extreme = (v_a - 0.5).abs() > 0.3 && (v_b - 0.5).abs() > 0.3;
         let valence_contradiction = valence_distance > 0.6 && both_extreme;
@@ -302,7 +303,8 @@ impl Skill for ContradictionSkill {
             ma.relation_base() == RelationBase::Orthogonal || mb.relation_base() == RelationBase::Orthogonal;
 
         // Test 3: Emotional conflict — arousal cùng cao, valence ngược
-        let both_aroused = ba[3] > 0xA0 && bb[3] > 0xA0;
+        // v2: arousal 3-bit (0-7), threshold ~5/7 ≈ 0.71 (was 0xA0/0xFF ≈ 0.63)
+        let both_aroused = ma.arousal() >= 5 && mb.arousal() >= 5;
         let emotional_conflict = both_aroused && valence_distance > 0.5;
 
         // Tính contradiction score
