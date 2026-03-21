@@ -37,17 +37,17 @@ KHI BỊ BLOCKED:
 
 ## ALL DONE ✅
 
-Phase 0-11 | Task 12 | Phase 14.1 | Phase 14.2 (Alias table) | Phase 15 (6/6) | Phase 16 (4/4) | V2 Migration T1-T14, T16 | INTG
+Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Migration T1-T14, T16 | INTG
 → Chi tiết: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
 
 ---
 
-## Remaining FREE Tasks
+## Remaining FREE Tasks — ALL DONE ✅ (Phase 14 complete)
 
 | ID | Task | Spec ref | Depends | Status | Notes |
 |----|------|----------|---------|--------|-------|
 | 14.2 | Alias table tách riêng (= T15) | §1.7 | T14 ✅ | DONE ✅ | 33,054 entries, 6B/entry, ~198KB. ucd build.rs + AliasTable struct. |
-| 14.3 | Silk vertical: parent_map 8,846 pointers | §2.3 | T14 ✅ | FREE | Đi từ lá lên gốc. register_parent() hook đã có ở 7.1. ~71 KB. |
+| 14.3 | Silk vertical: parent_map persistence | §2.3 | T14 ✅ | DONE ✅ | RT_PARENT 0x0C (25B/record). Writer + Reader + ParsedParent. |
 
 ---
 
@@ -71,6 +71,7 @@ Cả 2 đều unblocked (T14 DONE).
 2026-03-21  Session 2pN6F: Task 12 + Phase 15 (6) + Phase 16 (4) + T13/T14/T16 DONE.
 2026-03-21  Chỉ còn 14.2 (Alias) + 14.3 (Silk vertical) FREE.
 2026-03-21  14.2 (Alias table) DONE. 33K entries tách riêng khỏi KnowTree. Dọn plans/done/.
-2026-03-21  Chỉ còn 14.3 (Silk vertical) FREE.
+2026-03-21  14.3 (Silk vertical parent_map persistence) DONE.
+2026-03-21  TẤT CẢ TASKS DONE. Bắt đầu lên kế hoạch Giai đoạn 2.
 ```
 → Full log: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
