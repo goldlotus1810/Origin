@@ -300,4 +300,88 @@ L0 = 9,584 pre-filled entries
 
 ---
 
-_(T7-T12 tiếp theo)_
+## T7 — Writer/Reader v2 Format
+
+**Depends:** T4
+**Files:** `crates/olang/src/storage/writer.rs`, `crates/olang/src/storage/reader.rs`
+**Audit refs:** C6, M1
+
+**Việc cần làm:**
+1. NodeRecord (0x01): serialize chain = `[len:2][u16×N]` thay vì tagged molecules
+2. KnowTree record (0x08): serialize `[u16; 65536]` compact
+3. Thêm CurveRecord (0x09): `[valence:4][fx_dn:4][ts:8]` — hiện thiếu
+4. STM record (0x06): giữ nguyên format (đã khớp spec)
+5. Reader: deserialize u16 links thay vì Molecule bytes
+
+**DoD:**
+```
+□ NodeRecord serialize Vec<u16> chain
+□ 0x09 Curve record có
+□ Reader roundtrip đúng
+```
+
+---
+
+## T8 — Registry Codepoint Array
+
+**Depends:** T4, T6
+**Files:** `crates/olang/src/storage/registry.rs:136`
+**Audit refs:** M7, H7
+
+**Hiện tại (sai):**
+- `BTreeMap<u64, u64>` hash-based index
+- NodeKind::Alphabet = 35 seeded nodes
+
+**v2 yêu cầu:**
+- Registry index by codepoint (u16), NOT by hash
+- 9,584 L0 nodes known at bootstrap
+
+**Việc cần làm:**
+1. Registry index: codepoint-based lookup (có thể dùng array hoặc HashMap<u16, _>)
+2. Bootstrap seed 9,584 nodes từ UCD table
+3. `registry.get(cp: u16)` thay vì `registry.get(hash: u64)`
+4. Giữ append-only semantics
+
+**DoD:**
+```
+□ Registry lookup by codepoint
+□ 9,584 L0 nodes seeded
+□ Append-only giữ nguyên
+```
+
+---
+
+## T9 — VM PushMol 2B
+
+**Depends:** T3
+**Files:** `crates/olang/src/exec/ir.rs:115`, `crates/olang/src/exec/vm.rs:774`, `crates/olang/src/exec/bytecode.rs`
+**Audit refs:** M2
+
+**Hiện tại (sai):**
+```rust
+PushMol(u8, u8, u8, u8, u8)  // 5 params
+// Bytecode: [0x19][S][R][V][A][T] = 6 bytes
+```
+
+**v2 yêu cầu:**
+```
+PushMol(u16)  // 1 param = packed molecule
+// Bytecode: [0x19][lo][hi] = 3 bytes
+```
+
+**Việc cần làm:**
+1. IR: `PushMol(u8,u8,u8,u8,u8)` → `PushMol(u16)`
+2. Bytecode emit: 3 bytes thay vì 6
+3. VM dispatch: push `Molecule(u16)` lên stack
+4. Compiler: MolLiteral `{S=x R=y V=z A=w T=v}` → pack thành u16
+
+**DoD:**
+```
+□ PushMol = u16 (3B bytecode)
+□ VM dispatch đúng
+□ Compiler emit đúng
+```
+
+---
+
+_(T10-T12 tiếp theo)_
