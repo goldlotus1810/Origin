@@ -183,4 +183,121 @@ Molecule = u16 packed [S:4][R:4][V:3][A:3][T:2] = 2 bytes
 
 ---
 
-_(T4-T12 tiếp theo)_
+## T4 — Chain Vec\<Molecule\>→Vec\<u16\>
+
+**Depends:** T3
+**Files:** `crates/olang/src/mol/molecular.rs:1035`, `crates/olang/src/mol/hash.rs`
+**Audit refs:** C2, M3
+
+**Hiện tại (sai):**
+```rust
+pub struct MolecularChain(pub Vec<Molecule>);  // 11B/link
+// chain_hash = fnv1a trên [u8;5] per molecule
+```
+
+**v2 yêu cầu:**
+```
+Chain link = u16 = codepoint address vào KnowTree
+Chain = Vec<u16>, mỗi link 2B
+chain_hash = fnv1a trên 2B per link
+```
+
+**Việc cần làm:**
+1. `MolecularChain(pub Vec<Molecule>)` → `MolecularChain(pub Vec<u16>)`
+2. Mỗi u16 = codepoint, KHÔNG phải inline value
+3. `chain_hash()` → hash trên `Vec<u16>` (2B/link thay vì 5B)
+4. API: `chain.first()` trả u16, `chain.len()` giữ nguyên
+5. Helper: `chain.resolve(kt: &KnowTree) -> Vec<Molecule>` để lấy value khi cần
+
+**DoD:**
+```
+□ MolecularChain = Vec<u16>
+□ chain_hash trên 2B/link
+□ resolve() helper cho downstream cần value
+□ cargo build compile
+```
+
+---
+
+## T5 — LCA v2 Compose Rules
+
+**Depends:** T3
+**Files:** `crates/olang/src/mol/lca.rs:78-168`
+**Audit refs:** C3, C4, H3, H4, H5
+
+**Hiện tại (sai):**
+```rust
+// ALL 5 dimensions dùng mode_or_wavg = weighted average
+let shape_byte = mode_or_wavg_base(&shapes, total_weight, 8);
+let relation_byte = mode_or_wavg_base(&relations, total_weight, 8);
+let valence = mode_or_wavg(&valences, total_weight);
+let arousal = mode_or_wavg(&arousals, total_weight);
+let time_byte = mode_or_wavg_base(&times, total_weight, 5);
+```
+
+**v2 yêu cầu:**
+```
+Cˢ = Union(Aˢ, Bˢ)           → CsgOp::Union, KHÔNG avg
+Cᴿ = Compose                  → fixed value, LUÔN = Compose
+Cⱽ = amplify(Aⱽ, Bⱽ, w_AB)   → AMPLIFY qua Silk, TUYỆT ĐỐI KHÔNG trung bình
+Cᴬ = max(Aᴬ, Bᴬ)             → max(), KHÔNG avg
+Cᵀ = dominant(Aᵀ, Bᵀ)        → lấy cái có weight cao hơn
+```
+
+**Việc cần làm:**
+1. Shape: `union_shape(a, b)` → chọn shape theo CSG Union logic
+2. Relation: hardcode = `RelationBase::Compose`
+3. Valence: `amplify(va, vb, w)` — KHÔNG trung bình, amplify theo Silk weight
+4. Arousal: `std::cmp::max(a_arousal, b_arousal)`
+5. Time: `dominant(a_time, b_time, a_weight, b_weight)` → lấy cái nặng hơn
+6. Xóa `mode_or_wavg` và `mode_or_wavg_base` (dead code sau khi sửa)
+
+**DoD:**
+```
+□ 5/5 chiều compose đúng v2
+□ KHÔNG còn weighted average cho emotion
+□ amplify function implement đúng
+□ check-logic BP#1 PASS
+```
+
+---
+
+## T6 — KnowTree Array 65536×2B
+
+**Depends:** T3
+**Files:** `crates/olang/src/storage/knowtree.rs:39`, `crates/olang/src/storage/compact.rs`
+**Audit refs:** H1, H7
+
+**Hiện tại (sai):**
+- KnowTree = TieredStore (hash-based), O(log n)
+- SlimKnowTree = BTreeMap index, 10-15B/node
+- L0 seed = 35 nodes
+
+**v2 yêu cầu:**
+```
+KnowTree = [u16; 65536]  // 128KB fixed
+KnowTree[codepoint] = P_weight (2B Molecule)
+O(1) lookup by codepoint index
+L0 = 9,584 pre-filled entries
+```
+
+**Việc cần làm:**
+1. `KnowTree` → `pub struct KnowTree([u16; 65536])`
+2. `get(cp: u16) -> u16` = O(1) array index
+3. `set(cp: u16, mol: u16)` = O(1) write
+4. Bootstrap: fill 9,584 entries từ UCD table (T1)
+5. Còn lại 55,952 slots = 0 (chưa learn)
+6. Xóa TieredStore, CompactNode, SlimKnowTree (dead code)
+
+**DoD:**
+```
+□ KnowTree = [u16; 65536] = 128KB
+□ O(1) lookup
+□ 9,584 L0 entries pre-filled
+□ TieredStore/SlimKnowTree xóa
+□ check-logic PASS
+```
+
+---
+
+_(T7-T12 tiếp theo)_
