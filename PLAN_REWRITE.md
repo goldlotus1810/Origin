@@ -385,56 +385,75 @@ Lợi ích:
 
 ---
 
-## Hiện trạng
+## Hiện trạng (cập nhật 2026-03-21)
 
 ### Đã có ✅
 
 ```
-Bootstrap (Olang):
+Giai đoạn 0 ✅ — Bootstrap Compiler
   lexer.ol        197 LOC   Tokenizer hoàn chỉnh
   parser.ol       399 LOC   Recursive descent + precedence climbing
+  semantic.ol     ~800 LOC  Type checker + IR lowering
+  codegen.ol      ~400 LOC  Bytecode generation
+  Self-compile test: bytecode A == bytecode B ✅
 
-Stdlib (10 modules, Olang):
+Giai đoạn 1 ✅ — Machine Code VM + Builder
+  vm_x86_64.S     ~3000 LOC  x86_64 assembly VM (Linux syscalls)
+  vm_arm64.S      ~2500 LOC  ARM64 assembly VM
+  vm_wasm.wat     ~1500 LOC  WASM VM (browser/edge)
+  builder (Rust)  ✅         Pack VM + bytecode + knowledge → ELF
+
+Stdlib (Olang, 18+ modules):
   math.ol, string.ol, vec.ol, set.ol, map.ol,
   deque.ol, bytes.ol, io.ol, test.ol, platform.ol
+  result.ol, iter.ol, sort.ol, format.ol, json.ol,
+  hash.ol, mol.ol, chain.ol
 
-VM (Rust — sẽ thay bằng ASM):
-  36+ opcodes, stack-based, side-effect events
-
-Compiler (Rust — sẽ thay bằng Olang):
-  3 targets: C, Rust, WASM
+VM (Rust — 40+ opcodes):
+  Push, PushNum, PushMol, Load, Store, Call, Ret, Jmp, Jz,
+  Loop, If, Lca, Edge, Query, Dream, Fuse, TryBegin, CatchEnd,
+  DeviceRead/Write, FileRead/Write, Ffi, Trace, Assert...
 
 Knowledge format:
-  origin.olang binary format (append-only, version 0x05)
+  origin.olang binary v0.06 — 13 record types (0x01-0x0C)
+  UCD: 8,284 L0 + 33,054 alias entries
+  KnowTree: L0→L1→L3 hierarchy (~18 KB)
+  AliasTable: 33K entries (~198 KB, tách riêng T15)
+  Silk parent_map: RT_PARENT 0x0C persistence (T15/14.3)
+
+Infra ✅:
+  Phase 0-16 ALL DONE
+  V2 Migration T1-T16 ALL DONE
+  1087 tests PASS (135 pre-existing failures in VM builtins)
 ```
 
-### Chưa có ❌
+### Chưa có / Đang làm ❌
 
 ```
-Machine code VM:
-  vm_x86_64.S     ❌   x86_64 assembly VM
-  vm_arm64.S      ❌   ARM64 assembly VM
-  vm_riscv.S      ❌   RISC-V assembly VM
-  vm_wasm.wat     ❌   WASM VM (text format)
+Giai đoạn 2 — HomeOS logic bằng Olang (ĐANG LÊN KẾ HOẠCH)
+  → Chi tiết: plans/PLAN_PHASE2_EXECUTION.md
+  Blocker: 135 test failures trong Vec/Dict/String builtins
+  emotion.ol    43 LOC (stub, cần 150)
+  curve.ol      73 LOC (stub, cần 120)
+  intent.ol     59 LOC (stub, cần 110)
+  response.ol   28 LOC (stub, cần 120)
+  leo.ol        41 LOC (stub, cần 100)
+  chief.ol      36 LOC (stub, cần 100)
+  worker.ol     42 LOC (stub, cần 100)
 
-Self-contained format:
-  builder         ❌   Tool: assemble VM + bytecode + knowledge → origin.olang
-  loader          ❌   ELF/Mach-O/PE header generation
+Giai đoạn 3 — Self-sufficient builder (Olang build Olang)
+  asm_emit.ol   ❌   Emit x86_64 machine code
+  elf_emit.ol   ❌   Create ELF64 executable
+  builder.ol    ❌   Builder thay thế Rust
 
-Bootstrap compiler (Olang):
-  semantic.ol     ❌   Validation + IR lowering
-  codegen.ol      ❌   Emit bytecode (thay vì C/Rust/WASM text)
-
-HomeOS logic (Olang):
-  emotion.ol, curve.ol, intent.ol, dream.ol,
-  instinct.ol, silk.ol, learning.ol, gate.ol   — tất cả ❌
+Giai đoạn 4-6 — Chưa bắt đầu
 ```
 
 ---
 
 ## 7 Giai đoạn
 
-### Giai đoạn 0 — Bootstrap loop trên Rust VM (HIỆN TẠI)
+### Giai đoạn 0 — Bootstrap loop trên Rust VM ✅ DONE
 
 **Mục tiêu:** Chứng minh Olang đủ mạnh để tự compile. Vẫn dùng Rust VM.
 
@@ -471,7 +490,7 @@ Deliverable: Olang compiler viết bằng Olang, chạy trên Rust VM.
              Cắt dây rốn bước 1: compiler không cần Rust nữa.
 ```
 
-### Giai đoạn 1 — Machine Code VM
+### Giai đoạn 1 — Machine Code VM ✅ DONE
 
 **Mục tiêu:** Viết VM bằng assembly. origin.olang tự chạy.
 
@@ -533,7 +552,7 @@ Deliverable: ./origin.olang chạy trên bare metal. Không cần Rust runtime.
              Cắt dây rốn bước 2: runtime không cần Rust nữa.
 ```
 
-### Giai đoạn 2 — Stdlib + HomeOS logic bằng Olang
+### Giai đoạn 2 — Stdlib + HomeOS logic bằng Olang ← ĐANG LÀM
 
 **Mục tiêu:** Mọi logic HomeOS = Olang bytecode trong origin.olang.
 
@@ -567,6 +586,10 @@ Deliverable: ./origin.olang chạy trên bare metal. Không cần Rust runtime.
      worker.ol       Tier 2 device protocol
 
 Deliverable: Toàn bộ HomeOS logic = Olang.
+
+→ Chi tiết thực hiện: plans/PLAN_PHASE2_EXECUTION.md
+→ Blocker: Fix 135 VM builtin test failures trước
+→ 6 bước: Fix Builtins → Stdlib → Emotion → Knowledge → Agents → E2E
 ```
 
 ### Giai đoạn 3 — Self-sufficient builder
