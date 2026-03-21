@@ -70,7 +70,7 @@ origin.olang = self-contained executable binary
 ├─────────────────────────────────────────────────────────┤
 │ SECTION 2: KNOWLEDGE — Append-only Data                  │
 │                                                          │
-│   L0 nodes (5400 UCD)   chain_hash + molecule + alias    │
+│   L0 nodes (9,584 UCD ⚠️v2)  chain_hash + u16 mol + alias │
 │   L1-L7 nodes           LCA-derived concepts             │
 │   Silk parent pointers  5460 × 8B = 43 KB                │
 │   STM observations      short-term memory                │
@@ -293,6 +293,9 @@ file: emotion.ol
 "buồn" → "mất-việc"             ← DATA: causality edge
 
 { S=1 R=6 V=60 A=180 T=4 }     ← DATA: molecular literal (buồn)
+// ⚠️ v2: Molecule = u16 packed [S:4][R:4][V:3][A:3][T:2]
+// Values above (V=60, A=180) exceed v2 bit ranges (V:3bits=0-7, A:3bits=0-7)
+// v2 equivalent: { S=1 R=6 V=2 A=5 T=3 } = packed u16
 
 ○{                               ← PROGRAM: bắt đầu code block
   fn blend_emotion(a, b, w) {
@@ -638,7 +641,7 @@ Deliverable: origin.olang chạy trên x86_64, ARM64, RISC-V, WASM.
 5.3  Memory optimization
      - Arena allocator per-turn (free tất cả cuối turn)
      - Zero-copy string handling
-     - Molecule pool (reuse 5-byte slots)
+     - Molecule pool (reuse 2-byte u16 slots — ⚠️ v2)
 
 5.4  Benchmark
      - origin.olang vs Rust binary: latency, throughput, memory
