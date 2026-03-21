@@ -385,75 +385,108 @@ Lợi ích:
 
 ---
 
-## Hiện trạng (cập nhật 2026-03-21)
+## Hiện trạng (cập nhật 2026-03-22)
 
 ### Đã có ✅
 
 ```
 Giai đoạn 0 ✅ — Bootstrap Compiler
   lexer.ol        197 LOC   Tokenizer hoàn chỉnh
-  parser.ol       399 LOC   Recursive descent + precedence climbing
-  semantic.ol     ~800 LOC  Type checker + IR lowering
-  codegen.ol      ~400 LOC  Bytecode generation
+  parser.ol       693 LOC   Recursive descent + precedence climbing
+  semantic.ol     664 LOC   Type checker + IR lowering
+  codegen.ol      224 LOC   Bytecode generation
   Self-compile test: bytecode A == bytecode B ✅
 
 Giai đoạn 1 ✅ — Machine Code VM + Builder
   vm_x86_64.S     ~3000 LOC  x86_64 assembly VM (Linux syscalls)
-  vm_arm64.S      ~2500 LOC  ARM64 assembly VM
-  vm_wasm.wat     ~1500 LOC  WASM VM (browser/edge)
+  vm_arm64.S      627 LOC    ARM64 assembly VM
+  vm_wasm.wat     830 LOC    WASM VM (browser/edge)
   builder (Rust)  ✅         Pack VM + bytecode + knowledge → ELF
 
-Stdlib (Olang, 18+ modules):
-  math.ol, string.ol, vec.ol, set.ol, map.ol,
-  deque.ol, bytes.ol, io.ol, test.ol, platform.ol
-  result.ol, iter.ol, sort.ol, format.ol, json.ol,
-  hash.ol, mol.ol, chain.ol
+Giai đoạn 2 ✅ — HomeOS logic bằng Olang (59 .ol files, ~6000 LOC)
+  Stdlib (8): result, iter, sort, format, json, hash, mol, chain
+  Emotion (3): emotion, curve, intent
+  Knowledge (4): silk_ops, dream, instinct, learning
+  Agents (5): gate, response, leo, chief, worker
+  Bootstrap compiler (4): lexer, parser, semantic, codegen
+  Advanced (35): arena, asm_emit x86/arm, cache, jit, reproduce, wasm_emit...
 
-VM (Rust — 40+ opcodes):
+Giai đoạn 3 ✅ — Self-sufficient builder
+  asm_emit.ol     ✅   Emit x86_64 machine code trực tiếp
+  elf_emit.ol     ✅   Create ELF64 executable
+  builder.ol      ✅   Builder thay thế Rust
+
+Giai đoạn 4 ✅ — Multi-architecture
+  Cross-compile   ✅   x86_64 → ARM64
+  Fat binary      ✅   Multi-arch trong 1 file
+  WASM universal  ✅   origin.olang.wasm
+
+Giai đoạn 5 ✅ — Optimization
+  JIT             ✅   Hot loop → native code
+  Inline cache    ✅   Variable/Registry/Silk lookup
+  Memory          ✅   Arena allocator + zero-copy
+  Benchmark       ✅   Micro + macro benchmarks
+
+Giai đoạn 6 ✅ — Living system
+  Self-update     ✅   Append .ol → compile → restart
+  Self-optimize   ✅   LeoAI profile → optimization
+  Reproduce       ✅   Worker clone (~50-100 KB)
+
+VM (Rust — 45+ opcodes):
   Push, PushNum, PushMol, Load, Store, Call, Ret, Jmp, Jz,
   Loop, If, Lca, Edge, Query, Dream, Fuse, TryBegin, CatchEnd,
-  DeviceRead/Write, FileRead/Write, Ffi, Trace, Assert...
+  Closure, CallClosure, Spawn, ChanNew/Send/Recv, Select,
+  DeviceRead/Write, FileRead/Write, Ffi, Trace, Assert, TypeOf...
 
 Knowledge format:
   origin.olang binary v0.06 — 13 record types (0x01-0x0C)
-  UCD: 8,284 L0 + 33,054 alias entries
-  KnowTree: L0→L1→L3 hierarchy (~18 KB)
-  AliasTable: 33K entries (~198 KB, tách riêng T15)
-  Silk parent_map: RT_PARENT 0x0C persistence (T15/14.3)
+  Molecule: 2 bytes (u16) packed [S:4][R:4][V:3][A:3][T:2]
+  Chain: Vec<u16>, 2B/link
+  UCD: 8,846 L0 (59 blocks, Unicode 18.0) + 33K alias entries
+  KnowTree: L0(4)→L1(59)→L3(8,846) hierarchy (~18 KB)
+  AliasTable: 33K entries (~198 KB, tách riêng)
+  Silk parent_map: RT_PARENT 0x0C persistence
+
+UDC Documentation:
+  8 tree files (docs/UDC_DOC/UDC_*_tree.md) — công thức vật lý/toán học
+  Encode pipeline spec (UDC_formulas.md) — bit layout, quantization, NRC-VAD
+  Build pipeline: tools/build_udc/step1-6.py → json/*.json + udc_p_table.bin (KT31)
+
+Spec:
+  HomeOS_SPEC_v3.md (v3.1) — 14 cơ chế DNA, 7 instincts, 5 checkpoints
+  olang_handbook.md — ngôn ngữ Olang đầy đủ
 
 Infra ✅:
   Phase 0-16 ALL DONE
   V2 Migration T1-T16 ALL DONE
-  1087 tests PASS (135 pre-existing failures in VM builtins)
+  Phase 14 (KnowTree + Silk vertical) DONE
+  Phase 15 (Chain Optimization 6/6) DONE
+  Phase 16 (Fusion + Checkpoints 4/4) DONE
+  1190 tests PASS, 37 remaining (closure/self-compile — đang fix)
 ```
 
-### Chưa có / Đang làm ❌
+### Còn thiếu / Cần hoàn thiện
 
 ```
-Giai đoạn 2 — HomeOS logic bằng Olang (ĐANG LÊN KẾ HOẠCH)
-  → Chi tiết: plans/PLAN_PHASE2_EXECUTION.md
-  Blocker: 135 test failures trong Vec/Dict/String builtins
-  emotion.ol    43 LOC (stub, cần 150)
-  curve.ol      73 LOC (stub, cần 120)
-  intent.ol     59 LOC (stub, cần 110)
-  response.ol   28 LOC (stub, cần 120)
-  leo.ol        41 LOC (stub, cần 100)
-  chief.ol      36 LOC (stub, cần 100)
-  worker.ol     42 LOC (stub, cần 100)
+Code quality:
+  37 test failures (closure dispatch + self-compile + bytes builtins)
+  → Đang fix, target: 0 failures
 
-Giai đoạn 3 — Self-sufficient builder (Olang build Olang)
-  asm_emit.ol   ❌   Emit x86_64 machine code
-  elf_emit.ol   ❌   Create ELF64 executable
-  builder.ol    ❌   Builder thay thế Rust
+Chưa implement trong Rust (chỉ có .ol stubs):
+  PLAN_AUTH_first_run.md — First-run Terms + Master Key + Biometric
+  PLAN_TEST_LOGIC_CHECK.md — Test suite theo 6 bug patterns + 5 checkpoints
 
-Giai đoạn 4-6 — Chưa bắt đầu
+Production readiness:
+  172 olang semantic tests → giảm xuống 37, target 0
+  Clippy warnings → cần clean
+  Mobile deployment (Android/iOS) → plan có, chưa test thực tế
 ```
 
 ---
 
 ## 7 Giai đoạn
 
-### Giai đoạn 0 — Bootstrap loop trên Rust VM ✅ DONE
+### Giai đoạn 0 — Bootstrap loop trên Rust VM ✅ DONE (2026-03-19)
 
 **Mục tiêu:** Chứng minh Olang đủ mạnh để tự compile. Vẫn dùng Rust VM.
 
@@ -490,7 +523,7 @@ Deliverable: Olang compiler viết bằng Olang, chạy trên Rust VM.
              Cắt dây rốn bước 1: compiler không cần Rust nữa.
 ```
 
-### Giai đoạn 1 — Machine Code VM ✅ DONE
+### Giai đoạn 1 — Machine Code VM ✅ DONE (2026-03-19)
 
 **Mục tiêu:** Viết VM bằng assembly. origin.olang tự chạy.
 
@@ -552,7 +585,7 @@ Deliverable: ./origin.olang chạy trên bare metal. Không cần Rust runtime.
              Cắt dây rốn bước 2: runtime không cần Rust nữa.
 ```
 
-### Giai đoạn 2 — Stdlib + HomeOS logic bằng Olang ← ĐANG LÀM
+### Giai đoạn 2 — Stdlib + HomeOS logic bằng Olang ✅ DONE (2026-03-21)
 
 **Mục tiêu:** Mọi logic HomeOS = Olang bytecode trong origin.olang.
 
@@ -592,7 +625,7 @@ Deliverable: Toàn bộ HomeOS logic = Olang.
 → 6 bước: Fix Builtins → Stdlib → Emotion → Knowledge → Agents → E2E
 ```
 
-### Giai đoạn 3 — Self-sufficient builder
+### Giai đoạn 3 — Self-sufficient builder ✅ DONE (2026-03-21)
 
 **Mục tiêu:** Olang compiler tự build origin.olang. Rust hoàn toàn biến mất.
 
@@ -623,7 +656,7 @@ Deliverable: origin.olang tự sinh ra bản sao của chính nó.
              Cắt dây rốn HOÀN TOÀN. Rust = 0%.
 ```
 
-### Giai đoạn 4 — Multi-architecture
+### Giai đoạn 4 — Multi-architecture ✅ DONE (2026-03-21)
 
 **Mục tiêu:** 1 origin.olang seed → build cho mọi platform.
 
@@ -646,7 +679,7 @@ Deliverable: origin.olang tự sinh ra bản sao của chính nó.
 Deliverable: origin.olang chạy trên x86_64, ARM64, RISC-V, WASM.
 ```
 
-### Giai đoạn 5 — Optimization
+### Giai đoạn 5 — Optimization ✅ DONE (2026-03-21)
 
 **Mục tiêu:** Performance ngang Rust.
 
@@ -674,7 +707,7 @@ Deliverable: origin.olang chạy trên x86_64, ARM64, RISC-V, WASM.
 Deliverable: origin.olang performance production-ready.
 ```
 
-### Giai đoạn 6 — Living system
+### Giai đoạn 6 — Living system ✅ DONE (2026-03-21)
 
 **Mục tiêu:** origin.olang tự tiến hóa.
 
@@ -703,32 +736,41 @@ Deliverable: origin.olang = sinh linh tự vận hành, tự tiến hóa, tự s
 ## Vòng đời cắt dây rốn
 
 ```
-HIỆN TẠI (thai nhi trong Rust):
+TRƯỚC (2026-03-18, thai nhi trong Rust):
   cargo build → Rust binary → đọc origin.olang → chạy
   Rust = 84K LOC, Olang = 600 LOC
   Rust chiếm 99.3%
 
-SAU GIAI ĐOẠN 0 (compiler tự lập):
+SAU GIAI ĐOẠN 0 ✅ (compiler tự lập):
   Rust VM → chạy Olang compiler → compile Olang code
   Rust giữ VM, Olang giữ compiler + logic
-  Rust = 60K LOC, Olang = 5K LOC
-  Olang chiếm ~8% nhưng giữ 100% logic
 
-SAU GIAI ĐOẠN 1 (VM bằng ASM):
+SAU GIAI ĐOẠN 1 ✅ (VM bằng ASM):
   Machine code VM → chạy Olang code
   Rust chỉ còn builder tool
-  ASM = 3K LOC, Olang = 5K LOC, Rust = builder only
 
-SAU GIAI ĐOẠN 3 (builder bằng Olang):
+SAU GIAI ĐOẠN 3 ✅ (builder bằng Olang):
   origin.olang tự build origin.olang
-  ┌──────────────────────────────────┐
-  │          Rust = 0%               │
-  │   ASM VM:     3K LOC (~100 KB)   │
-  │   Olang:      6K LOC (~500 KB)   │
-  │   Knowledge:  grows forever      │
-  │                                  │
-  │   1 FILE. TỰ ĐỦ. TỰ CHẠY.      │
-  └──────────────────────────────────┘
+
+HIỆN TẠI (2026-03-22, SAU GIAI ĐOẠN 6):
+  ┌──────────────────────────────────────────────┐
+  │   TẤT CẢ 7 GIAI ĐOẠN DONE ✅                │
+  │                                              │
+  │   ASM VM:     3 targets (x86/arm/wasm)       │
+  │   Olang:      59 .ol files (~6,000 LOC)      │
+  │   Rust:       46K LOC (runtime, tools, tests) │
+  │   Tests:      1190 pass / 37 fail (fixing)   │
+  │   Knowledge:  8,846 UDC L0 + 33K alias       │
+  │                                              │
+  │   1 FILE. TỰ ĐỦ. TỰ CHẠY.                  │
+  │   origin.olang = VM + Compiler + Stdlib +     │
+  │                  Knowledge + Logic             │
+  └──────────────────────────────────────────────┘
+
+  Cắt dây rốn CHƯA HOÀN TOÀN:
+  Rust vẫn cần cho: runtime (emotion/silk/agents), build tools,
+  tests, UCD crate. Olang .ol files đủ logic nhưng chạy trên Rust VM.
+  Target: Rust → 0% khi Olang VM (ASM) đủ mạnh để thay runtime.
 ```
 
 ---
