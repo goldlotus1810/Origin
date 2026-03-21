@@ -59,7 +59,7 @@ B1-B7 ALL DONE | Phase 0 (0.1-0.6 compiler) ALL DONE | Phase 1-7 ALL DONE
 
 | ID | Task | Plan | Depends | Status | Branch | Session | Notes |
 |----|------|------|---------|--------|--------|---------|-------|
-| 12 | Response Intelligence | `PLAN_12_RESPONSE_INTELLIGENCE` | Phase 0 | CLAIMED | `claude/update-audit-context-2MKRJ` | 2MKRJ | Wire 5 mắt xích: walk_emotion, STM recall, intent v2, response composer, lang fix. ~560 LOC Rust. |
+| 12 | Response Intelligence | `PLAN_12_RESPONSE_INTELLIGENCE` | Phase 0 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | Wire compose_response() thay render() (3 call sites), context-aware intent override (causality→skip AddClarify, repetition→EmpathizeFirst), detect_language đã có tiếng Việt không dấu. 308/310 tests pass (2 pre-existing failures). |
 
 ---
 

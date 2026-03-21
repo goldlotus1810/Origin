@@ -170,6 +170,38 @@ pub struct ResponseContext {
 /// Ghép 3 phần: acknowledgment + topic_phrase + follow_up.
 /// Mỗi phần tự sinh từ data (V → descriptor, topic → phrase).
 pub fn compose_response(p: &ResponseParams, ctx: &ResponseContext) -> String {
+    // Các action đặc biệt → fallback render() (Crisis, SoftRefusal, etc.)
+    match &p.action {
+        IntentAction::CrisisOverride
+        | IntentAction::SoftRefusal
+        | IntentAction::AskContext { .. }
+        | IntentAction::UserConfirm
+        | IntentAction::UserDeny
+        | IntentAction::ForceLearnQR
+        | IntentAction::ConfirmLearnQR
+        | IntentAction::SilentAck
+        | IntentAction::HomeControl => return render(p),
+        // EmpathizeFirst, AddClarify, Proceed, Observe → compose below
+        _ => {}
+    }
+
+    // Nếu có original (contradiction, contextual_reply, natural_reply) → ưu tiên dùng
+    if let Some(ref orig) = p.original {
+        if !orig.is_empty() {
+            // Ghép acknowledgment + original (thay vì template)
+            let lang = p.language;
+            let effective_v = ctx.walk_valence.unwrap_or(p.valence);
+            let ack = match lang {
+                Lang::Vi => acknowledgment_vi(p.tone, effective_v),
+                Lang::En => acknowledgment_en(p.tone, effective_v),
+            };
+            if ack.is_empty() {
+                return orig.clone();
+            }
+            return format!("{} {}", ack, orig);
+        }
+    }
+
     let lang = p.language;
     let v = p.valence;
 
