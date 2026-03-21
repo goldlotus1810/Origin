@@ -2,6 +2,10 @@
 
 > **Giao tiếp với user bằng TIẾNG VIỆT. User là người Việt.**
 > **⚠️ REWRITE đang diễn ra.** Đọc `TASKBOARD.md` → claim task → rồi mới code.
+> **Chia OUTAUDIT/TODOS thật nhỏ, làm từng phần tránh TIMED OUT**
+> **TẢI CẬP NHẬT MAIN MỚI NHẤT TRƯỚC KHI UP GIT.**
+> **CHECK XÁC NHẬN 2 LẦN TRƯỚC KHI THỰC HIỆN NHIỆM VỤ**
+> **Cấu trúc và logic thay đổi mới v2 đã được cập nhật.| `old/HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2.md` | **
 
 ---
 
@@ -55,9 +59,9 @@ Workers [tier 2] — SILENT, báo cáo chain (không raw data)
 ## Unicode 5D — Nền tảng
 
 ```
-P_weight [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5D
+P_weight [S][R][V][A][T] = 2 bytes = tọa độ trong không gian 5D
 Tính 1 lần lúc bootstrap từ json/udc.json → SEALED vĩnh viễn (L0 anchor)
-KnowTree: 65,536 × 5B = 328 KB (O(1) lookup)   Chain: 7.42 tỷ × 2B = 14.84 GB       Blocks   Ký tự    Chiều
+KnowTree: 65,536 × 2B = 128 KB (O(1) lookup)   Chain: 7.42 tỷ × 2B = 14.84 GB       Blocks   Ký tự    Chiều
 ──────────────────────────────────────────────────────
 SDF           13    1,904    Shape    (18 SDF primitives)
 MATH          21    3,088    Relation (75 kênh)
@@ -70,6 +74,14 @@ Silk ngang: 75 kênh × 31 mẫu = 2,325 kiểu quan hệ (implicit, 0 bytes)
 Silk dọc: parent_map 9,584 pointers = ~76 KB (CHƯA implement)
 Emotion: KHÔNG trung bình — AMPLIFY qua Silk walk (cortisol + adrenaline = mạnh hơn)
 ```
+                              o{65,536 × 2B = 128 KB}
+        ──────────────────────|──────────────────────
+       |           |          |           |          |
+       S           R          V           A          T
+    {65,536}   {65,536}    {65,536}   {65,536}    {65,536}
+  |────|────||────|────| |────|────| |────|────||────|────| 
+
+
 
 ---
 

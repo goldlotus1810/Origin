@@ -19,8 +19,8 @@ mọi f == ○[f]   instance     — mọi thứ là instance của ○
 Mỗi khái niệm = tọa độ trong không gian 5D, từ **9,584 L0 anchors (58 blocks, Unicode 18.0)**:
 
 ```
-P_weight = [Shape][Relation][Valence][Arousal][Time] = 5 bytes/node
-KnowTree: 65,536 × 5B = 328 KB (working memory, O(1) lookup)
+P_weight = [Shape][Relation][Valence][Arousal][Time] = 2 bytes/node
+KnowTree: 65,536 × 2B = 128 KB (working memory, O(1) lookup)
 Chain:    7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)
 
 Nhóm       Blocks   Ký tự    Chiều        Ý nghĩa
@@ -63,7 +63,7 @@ Silk dọc (parent pointer, ~76KB):
 Mỗi byte trong Molecule = **công thức**, không phải giá trị tĩnh:
 
 ```
-Molecule [S][R][V][A][T] = 5 bytes = tọa độ trong không gian 5D
+Molecule [S][R][V][A][T] = 2 bytes = tọa độ trong không gian 5D
     ├── SDF      → công thức hình dạng (hữu hình — render được)
     ├── Spline   → công thức biến đổi (vô hình — 6 temporal curves)
     └── Silk     → công thức quan hệ (kết nối — 0 bytes implicit)
