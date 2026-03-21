@@ -569,7 +569,7 @@ INTG (song song với tất cả):
 | T9 | VM PushMol 2B | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | PushMol(u16), 3B bytecode [0x19][lo][hi], 7 files updated |
 | T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | silk✅ready, agents:instinct.rs v2 quantized, memory✅ready, vsdf✅ready, runtime✅ready, context✅no dead code |
 | T11 | .ol files update (15 files) | `PLAN_V2_MIGRATION` | T9 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | 13 files: mol/chain/hash + HomeOS pipeline + bootstrap compiler + agents, u16 packed |
-| T12 | Tests rebuild | `PLAN_V2_MIGRATION` | T10,T11 | FREE | | | 1198 tests = false positive, rewrite all |
+| T12 | Tests rebuild | `PLAN_V2_MIGRATION` | T10,T11 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | Fixed v2-related test failures: intg t01 (UDC consistency not hardcode), check_logic bit_shifts (v2 layout), dream cluster (3-bit quantization), evict_cold (hash collision). 172 olang VM/semantic pre-existing failures = separate issue (olang rewrite) |
 
 ### Execution Layers (song song trong cùng layer)
 

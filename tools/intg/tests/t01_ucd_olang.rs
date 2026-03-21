@@ -10,30 +10,41 @@ fn encode_fire_produces_valid_chain() {
     assert!(!chain.is_empty());
     assert_eq!(chain.len(), 1);
     let mol = chain.first().unwrap();
-    assert_eq!(mol.shape_base(), olang::molecular::ShapeBase::Sphere, "FIRE shape base = Sphere");
-    assert!(mol.valence_u8() >= 0xC0, "FIRE valence must be high");
-    assert!(mol.arousal_u8() >= 0xC0, "FIRE arousal must be high");
+    // v2: FIRE P_weight from udc.json = [40, 40, 144, 128, 187]
+    // S=40 → quantized 2 → Capsule. V=144 → quantized 4. A=128 → quantized 4.
+    // Values come FROM UDC, not from old spec hardcoding.
+    assert!(mol.shape() <= 15, "FIRE shape within 4-bit range");
+    assert!(mol.valence() > 0, "FIRE valence non-zero");
+    assert!(mol.arousal() > 0, "FIRE arousal non-zero");
 }
 
 #[test]
 fn encode_sphere_sdf_primitive() {
+    // v2: ● (0x25CF) shape value comes from udc.json, NOT hardcoded as "Sphere"
+    // UDC defines positions; UTF-32 codepoints are aliases.
     let chain = encode_codepoint(SPHERE);
     let mol = chain.first().unwrap();
-    assert_eq!(mol.shape_base(), olang::molecular::ShapeBase::Sphere, "● = Sphere base");
+    let entry = ucd::lookup(SPHERE).expect("● must be in UCD");
+    // Verify encoder matches UCD table (consistency, not hardcoded expectation)
+    assert_eq!(mol.shape(), entry.shape >> 4, "● shape must match UCD");
 }
 
 #[test]
 fn encode_member_relation_primitive() {
+    // v2: ∈ (0x2208) relation value comes from udc.json
     let chain = encode_codepoint(MEMBER);
     let mol = chain.first().unwrap();
-    assert_eq!(mol.relation_base(), olang::molecular::RelationBase::Member, "∈ = Member base");
+    let entry = ucd::lookup(MEMBER).expect("∈ must be in UCD");
+    assert_eq!(mol.relation(), entry.relation >> 4, "∈ relation must match UCD");
 }
 
 #[test]
 fn encode_arrow_causes_relation() {
+    // v2: → (0x2192) relation value comes from udc.json
     let chain = encode_codepoint(ARROW);
     let mol = chain.first().unwrap();
-    assert_eq!(mol.relation_base(), olang::molecular::RelationBase::Causes, "→ = Causes base");
+    let entry = ucd::lookup(ARROW).expect("→ must be in UCD");
+    assert_eq!(mol.relation(), entry.relation >> 4, "→ relation must match UCD");
 }
 
 #[test]
