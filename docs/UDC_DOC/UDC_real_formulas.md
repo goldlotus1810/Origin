@@ -242,3 +242,145 @@ r(k) = r₀ · φᵏ       φ = (1+√5)/2
   k =  1  → MEDIUM       r = r₀·φ
   k =  2  → LARGE        r = r₀·φ²
 ```
+
+---
+
+## S.2 — VẼ HỘP (Box Drawing) — Đồ thị
+
+### Nét = đoạn thẳng trên lưới
+
+```
+Mỗi ô = 1 nút trên lưới Z²
+Mỗi ký tự box drawing = tập cạnh E ⊆ {N, S, E, W}
+
+  ─  →  E = {E, W}          ngang
+  │  →  E = {N, S}          dọc
+  ┌  →  E = {S, E}          góc xuống-phải
+  ┐  →  E = {S, W}          góc xuống-trái
+  └  →  E = {N, E}          góc lên-phải
+  ┘  →  E = {N, W}          góc lên-trái
+  ├  →  E = {N, S, E}       T dọc-phải
+  ┤  →  E = {N, S, W}       T dọc-trái
+  ┬  →  E = {S, E, W}       T ngang-xuống
+  ┴  →  E = {N, E, W}       T ngang-lên
+  ┼  →  E = {N, S, E, W}    giao cắt
+```
+
+### Trọng số cạnh (Weight)
+
+```
+Mỗi cạnh e ∈ E mang trọng số:
+
+  w(e) ∈ { 1:LIGHT, 2:HEAVY, (1,1):DOUBLE }
+
+BOX DRAWINGS LIGHT DOWN AND RIGHT:
+  E = {S:1, E:1}
+
+BOX DRAWINGS DOWN HEAVY AND RIGHT LIGHT:
+  E = {S:2, E:1}
+
+BOX DRAWINGS DOUBLE DOWN AND RIGHT:
+  E = {S:(1,1), E:(1,1)}
+```
+
+### Cung (Arc) — Bo tròn góc
+
+```
+Arc: thay góc vuông bằng 1/4 hình tròn
+
+  P(t) = c⃗ + r·(cos(θ₀ + t·π/2), sin(θ₀ + t·π/2))    t ∈ [0,1]
+
+  ╭: θ₀ = 3π/2  (arc down-right)
+  ╮: θ₀ = π     (arc down-left)
+  ╰: θ₀ = 0     (arc up-right)
+  ╯: θ₀ = π/2   (arc up-left)
+```
+
+---
+
+## S.3 — CHỮ NỔI (Braille) — Đại số Boolean
+
+```
+B = (b₁, b₂, b₃, b₄, b₅, b₆, b₇, b₈) ∈ GF(2)⁸
+
+  Ma trận vật lý:     Giá trị nhị phân:
+  [b₁] [b₄]           B = Σᵢ bᵢ · 2^(i-1)
+  [b₂] [b₅]
+  [b₃] [b₆]           B ∈ [0, 255]
+  [b₇] [b₈]           |B| = popcount(B) = số chấm bật
+
+  BRAILLE PATTERN DOTS-1     → B = 0b00000001 = 1
+  BRAILLE PATTERN DOTS-135   → B = 0b00010101 = 21
+  BRAILLE PATTERN DOTS-12345678 → B = 0b11111111 = 255
+  BRAILLE PATTERN BLANK      → B = 0b00000000 = 0
+```
+
+---
+
+## S.4 — APL — Đại số tổ hợp
+
+```
+APL(α, m) = α ⊕ m
+
+  α ∈ Σ_base = { α, ι, ω, ρ, ∇, Δ, ○, ◇, ★, ⎕, ∘, ∩, ∪, ∧, ∨, ⊤, ⊥, ⊢, ⊣, /, \, ,, ⌶, ⍬ }
+  m ∈ Σ_mod  = { ∅, ̲, ̈, ̃, |, — }
+
+  ⊕: Σ_base × Σ_mod → APL_Symbol
+  |Σ_base| = 24,  |Σ_mod| = 6
+
+  α ⊕ ∅ = α           (không modifier)
+  α ⊕ ̲ = α̲           (underbar)
+  ∇ ⊕ ̈ = ∇̈           (del diaeresis)
+  ∇ ⊕ ̃ = ∇̃           (del tilde)
+```
+
+---
+
+## S.5 — KỸ THUẬT (Technical) — Miền chuyên biệt
+
+```
+Tech(d, i) = Ψ_d(i)
+
+  d ∈ { nha_khoa, điện, hóa_học, đo_lường, thiết_bị }
+
+  Ψ_nha_khoa(dir, wave):
+    Nét = Box Drawing ∩ { wave modulation }
+    P(t) = segment(dir) + A·sin(2πft)·n⃗ · [wave=1]
+
+  Ψ_điện:
+    AC:  I(t) = I₀ · sin(ωt)
+    DC:  I(t) = I₀ = const
+
+  Ψ_hóa_học:
+    Benzene = SDF_polygon(p⃗, 6, r)          (lục giác đều)
+    Benzene + circle = SDF_polygon ∩ SDF_circle
+
+  Ψ_đo_lường:
+    Scan line y = k/9,  k ∈ {1, 3, 7, 9}
+```
+
+---
+
+## S.6 — KHỐI (Block) — Hàm đặc trưng trên [0,1]²
+
+```
+Block(π, ρ) = { p⃗ ∈ [0,1]² : C(p⃗; π, ρ) }
+
+  FULL BLOCK:           C = true                  (∀ p⃗)
+  UPPER HALF:           C = (y ≥ 1/2)
+  LOWER HALF:           C = (y < 1/2)
+  LEFT HALF:            C = (x < 1/2)
+  RIGHT HALF:           C = (x ≥ 1/2)
+
+  LEFT k/8 BLOCK:       C = (x < k/8)             k ∈ {1,2,3,4,5,6,7}
+  LOWER k/8 BLOCK:      C = (y < k/8)
+
+  UPPER LEFT QUADRANT:  C = (x < 1/2 ∧ y ≥ 1/2)
+  LOWER RIGHT QUADRANT: C = (x ≥ 1/2 ∧ y < 1/2)
+
+  LIGHT SHADE:          C = (hash(p⃗) < 0.25)     25% coverage
+  MEDIUM SHADE:         C = (hash(p⃗) < 0.50)     50%
+  DARK SHADE:           C = (hash(p⃗) < 0.75)     75%
+
+  ARC (cung):           C = (SDF_circle(p⃗ - corner, r) ≤ 0)  ∩ quadrant
+```
