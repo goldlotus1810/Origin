@@ -21,6 +21,7 @@ members = [
     "tools/builder",
     "tools/intg",
     "tools/udc_gen",
+    "tools/check_logic",
 ]
 
 [workspace.package]

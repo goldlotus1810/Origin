@@ -77,8 +77,12 @@ demo:
 verify:
 	@$(CARGO) test -p intg --test t16_e2e_demo -- --show-output
 
-# Full check: unit + integration + E2E + binary boot
-check-all: test intg verify smoke-binary
+# Logic check: v2 spec validation (6 bug patterns + 5 checkpoints + invariants + data)
+check-logic:
+	$(CARGO) run -p check_logic
+
+# Full check: unit + integration + E2E + binary boot + logic
+check-all: test intg verify smoke-binary check-logic
 	@echo "ALL CHECKS PASSED"
 
 # Clean
