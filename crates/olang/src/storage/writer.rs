@@ -543,14 +543,14 @@ mod tests {
         let offset = w.append_node(&chain, 0, false, 1000).unwrap();
 
         assert_eq!(offset, before as u64, "Offset phải là vị trí trước khi ghi");
-        // NodeRecord v0.05: 1(type) + tagged_chain_bytes + 1(layer) + 1(is_qr) + 8(ts)
-        // tagged_chain = 1(mol_count) + mol_tagged_size
-        let expected = 1 + chain.tagged_byte_size() + 1 + 1 + 8;
+        // NodeRecord v0.06: 1(type) + 2(link_count) + N*2(u16 links) + 1(layer) + 1(is_qr) + 8(ts)
+        let expected = 1 + 2 + chain.len() * 2 + 1 + 1 + 8;
         assert_eq!(
             w.size() - before,
             expected,
-            "NodeRecord size = {} bytes cho 1-mol chain (tagged)",
+            "NodeRecord size = {} bytes cho {}-mol chain (v0.06)",
             expected,
+            chain.len(),
         );
         assert_eq!(w.write_count(), 1);
     }
@@ -563,9 +563,9 @@ mod tests {
 
         // Verify QR flag
         let bytes = w.as_bytes();
-        // QR byte: offset = HEADER_SIZE + 1(type) + tagged_chain_size + 1(layer)
-        let tagged_size = chain.tagged_byte_size();
-        let qr_pos = HEADER_SIZE + 1 + tagged_size + 1;
+        // v0.06: QR byte at HEADER + 1(type) + 2(count) + N*2(links) + 1(layer)
+        let chain_data_size = 2 + chain.len() * 2;
+        let qr_pos = HEADER_SIZE + 1 + chain_data_size + 1;
         assert_eq!(bytes[qr_pos], 0x01, "QR flag = 0x01");
     }
 

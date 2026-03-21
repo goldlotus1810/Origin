@@ -3591,11 +3591,12 @@ mod tests {
 
     #[test]
     fn validate_mol_literal_zero_shape_errors() {
+        // v2: S=0 is valid (Sphere = index 0). No error expected.
         let stmts = parse("{ S=0 R=1 T=1 }").unwrap();
         let errors = validate(&stmts);
         assert!(
-            errors.iter().any(|e| e.message.contains("S must be > 0")),
-            "S=0 should error: {:?}", errors
+            !errors.iter().any(|e| e.message.contains("S must be > 0")),
+            "S=0 should NOT error in v2 (Sphere=0): {:?}", errors
         );
     }
 

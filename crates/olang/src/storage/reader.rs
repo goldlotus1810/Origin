@@ -622,6 +622,27 @@ impl<'a> OlangReader<'a> {
                     }
 
                     let chain_result = if self.version >= VERSION {
+                        // v0.06: u16 links [link_count: u16_le][u16_le × N]
+                        if pos + 2 > self.data.len() {
+                            error = Some(ParseError::Truncated);
+                            break;
+                        }
+                        let count = u16::from_le_bytes([self.data[pos], self.data[pos + 1]]) as usize;
+                        pos += 2;
+                        let chain_bytes_len = count * 2;
+                        if pos + chain_bytes_len + 1 + 1 + 8 > self.data.len() {
+                            error = Some(ParseError::Truncated);
+                            break;
+                        }
+                        let mut links = Vec::with_capacity(count);
+                        for i in 0..count {
+                            let lo = self.data[pos + i * 2];
+                            let hi = self.data[pos + i * 2 + 1];
+                            links.push(u16::from_le_bytes([lo, hi]));
+                        }
+                        pos += chain_bytes_len;
+                        Some(MolecularChain(links))
+                    } else if self.version >= VERSION_V05 {
                         // v0.05: tagged format
                         match MolecularChain::from_tagged_bytes(&self.data[pos..]) {
                             Some(chain) => {

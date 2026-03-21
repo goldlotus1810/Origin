@@ -1916,8 +1916,11 @@ mod tests {
 
     #[test]
     fn delta_all_fields_changed() {
-        let parent = test_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let child = test_mol(0x02, 0x06, 0xC0, 0x40, 0x05);
+        // v2: use pre-scaled values so all 5 quantized dims differ.
+        // parent: S=0, R=1, V=4, A=4, T=0
+        let parent = test_mol(0x00, 0x10, 0x80, 0x80, 0x03);
+        // child: S=3, R=6, V=6, A=2, T=3
+        let child = test_mol(0x30, 0x60, 0xC0, 0x40, 0xC0);
         let delta = DeltaMolecule::encode(&parent, &child);
         assert_eq!(delta.mask, 0x1F, "All 5 bits set");
         assert_eq!(delta.size(), 6, "1 bitmask + 5 changed bytes");
@@ -2006,14 +2009,14 @@ mod tests {
     #[test]
     fn dict_prune() {
         let mut dict = ChainDictionary::new(4);
-        // Fill 4 entries
-        for i in 0u8..4 {
-            let chain = MolecularChain::single(test_mol(i + 1, 0x01, 0x80, 0x80, 0x03));
+        // v2: use distinct quantized values (pre-scaled: i<<4 for shape)
+        for i in 0u16..4 {
+            let chain = MolecularChain::single(Molecule::from_u16(i * 0x1000)); // distinct shapes
             dict.register(&chain);
         }
         // Register one more → should trigger prune
         assert_eq!(dict.len(), 4);
-        let chain5 = MolecularChain::single(test_mol(0x01, 0x02, 0x80, 0x80, 0x03));
+        let chain5 = MolecularChain::single(Molecule::from_u16(0x4000));
         dict.register(&chain5);
         assert!(dict.len() <= 4, "After prune: len = {}", dict.len());
     }
@@ -2031,10 +2034,11 @@ mod tests {
 
     #[test]
     fn compact_node_delta_encoding() {
-        // Parent có nhiều non-default fields → tagged size lớn
-        let parent = MolecularChain::single(test_mol(0x02, 0x06, 0xC0, 0xC0, 0x04));
-        // Child chỉ khác parent ở valence → delta nhỏ hơn tagged
-        let child = MolecularChain::single(test_mol(0x02, 0x06, 0xD0, 0xC0, 0x04));
+        // v2: pre-scaled values with many non-default fields → tagged size > delta.
+        // parent: S=3, R=6, V=6, A=6, T=3 (all non-default)
+        let parent = MolecularChain::single(test_mol(0x30, 0x60, 0xC0, 0xC0, 0xC0));
+        // child: same except V=2 (different quantized value: 0x40>>5=2)
+        let child = MolecularChain::single(test_mol(0x30, 0x60, 0x40, 0xC0, 0xC0));
         let mut dict = ChainDictionary::new(100);
         dict.register(&parent); // pre-register parent
         let node = CompactNode::encode(&child, Some(&parent), &mut dict, 2, 1000);
@@ -2460,9 +2464,11 @@ mod tests {
 
     #[test]
     fn slim_node_fire_emoji() {
-        // 🔥-like: V=0xC0, A=0xC0, T=0x04 (3 non-default fields)
-        // MolecularChain tagged = [count:1][mask:1][V][A][T] = 5 bytes
-        let chain = MolecularChain::single(test_mol(0x01, 0x01, 0xC0, 0xC0, 0x04));
+        // v2: fire-like with 3 non-default fields (V, A, T)
+        // defaults: S=0x00, R=0x00, V=0x80, A=0x80, T=0x00
+        // Need V≠0x80, A≠0x80, T≠0x00
+        let chain = MolecularChain::single(test_mol(0x01, 0x01, 0xC0, 0xC0, 0xC0));
+        // V_u8=0xC0≠0x80 ✓, A_u8=0xC0≠0x80 ✓, T_u8=0xC0 (3<<6=0xC0)≠0x00 ✓
         let slim = SlimNode::from_chain(&chain);
         assert_eq!(slim.tagged.len(), 5, "Chain tagged = [count:1][mask:1][V][A][T] = 5 bytes");
         assert_eq!(slim.total_size(), 14, "hash:8 + len:1 + tagged:5 = 14 bytes");
