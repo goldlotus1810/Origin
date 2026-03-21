@@ -91,20 +91,47 @@ pub enum CodeLang {
 pub enum SdfPrimitive {
     Sphere = 0,
     Box = 1,
-    Cylinder = 2,
+    Capsule = 2,
     Plane = 3,
-    Mixed = 4,
+    Torus = 4,
+    Ellipsoid = 5,
+    Cone = 6,
+    Cylinder = 7,
+    Octahedron = 8,
+    Pyramid = 9,
+    HexPrism = 10,
+    Prism = 11,
+    RoundBox = 12,
+    Link = 13,
+    Revolve = 14,
+    Extrude = 15,
+    CutSphere = 16,
+    DeathStar = 17,
 }
 
 impl SdfPrimitive {
-    /// From raw byte.
+    /// From raw byte (18 SDF primitives, v2 spec).
     pub fn from_byte(b: u8) -> Self {
         match b {
             0 => Self::Sphere,
             1 => Self::Box,
-            2 => Self::Cylinder,
+            2 => Self::Capsule,
             3 => Self::Plane,
-            _ => Self::Mixed,
+            4 => Self::Torus,
+            5 => Self::Ellipsoid,
+            6 => Self::Cone,
+            7 => Self::Cylinder,
+            8 => Self::Octahedron,
+            9 => Self::Pyramid,
+            10 => Self::HexPrism,
+            11 => Self::Prism,
+            12 => Self::RoundBox,
+            13 => Self::Link,
+            14 => Self::Revolve,
+            15 => Self::Extrude,
+            16 => Self::CutSphere,
+            17 => Self::DeathStar,
+            _ => Self::Sphere, // fallback to default primitive
         }
     }
 }
@@ -499,11 +526,24 @@ impl ContentEncoder {
         // Map SDF primitive → geometric codepoint
         let prim = SdfPrimitive::from_byte(sdf_type);
         let primary_cp = match prim {
-            SdfPrimitive::Sphere => 0x25CF,   // ● BLACK CIRCLE
-            SdfPrimitive::Box => 0x25A0,      // ■ BLACK SQUARE
-            SdfPrimitive::Cylinder => 0x25AD,  // ▭ WHITE RECTANGLE (cylinder projection)
-            SdfPrimitive::Plane => 0x25B3,     // △ WHITE UP-POINTING TRIANGLE
-            SdfPrimitive::Mixed => 0x25C6,     // ◆ BLACK DIAMOND (composite)
+            SdfPrimitive::Sphere => 0x25CF,      // ● BLACK CIRCLE
+            SdfPrimitive::Box => 0x25A0,         // ■ BLACK SQUARE
+            SdfPrimitive::Capsule => 0x25AC,     // ▬ BLACK RECTANGLE
+            SdfPrimitive::Plane => 0x25B3,       // △ WHITE UP-POINTING TRIANGLE
+            SdfPrimitive::Torus => 0x25CB,       // ○ WHITE CIRCLE
+            SdfPrimitive::Ellipsoid => 0x2B2E,   // ⬮ BLACK VERTICAL ELLIPSE
+            SdfPrimitive::Cone => 0x25B2,        // ▲ BLACK UP-POINTING TRIANGLE
+            SdfPrimitive::Cylinder => 0x25AD,    // ▭ WHITE RECTANGLE
+            SdfPrimitive::Octahedron => 0x25C6,  // ◆ BLACK DIAMOND
+            SdfPrimitive::Pyramid => 0x25B3,     // △ WHITE UP-POINTING TRIANGLE
+            SdfPrimitive::HexPrism => 0x2B21,    // ⬡ WHITE HEXAGON
+            SdfPrimitive::Prism => 0x25B1,       // ▱ WHITE PARALLELOGRAM
+            SdfPrimitive::RoundBox => 0x25A2,    // ▢ WHITE SQUARE WITH ROUNDED CORNERS
+            SdfPrimitive::Link => 0x221E,        // ∞ INFINITY
+            SdfPrimitive::Revolve => 0x21BB,     // ↻ CLOCKWISE OPEN CIRCLE ARROW
+            SdfPrimitive::Extrude => 0x21E7,     // ⇧ UPWARDS WHITE ARROW
+            SdfPrimitive::CutSphere => 0x25D0,   // ◐ CIRCLE WITH LEFT HALF BLACK
+            SdfPrimitive::DeathStar => 0x2606,   // ☆ WHITE STAR
         };
 
         // Multi-region scenes: encode each region as sub-chain, then LCA
@@ -535,11 +575,24 @@ impl ContentEncoder {
         let arousal = motion_score.clamp(0.0, 1.0) * 0.7 + 0.1;
         let intensity = ((region_count as f32) / 10.0).clamp(0.1, 0.8);
         let dominance = match prim {
-            SdfPrimitive::Plane => 0.7,    // stable
-            SdfPrimitive::Sphere => 0.5,   // neutral
-            SdfPrimitive::Box => 0.6,      // structured
-            SdfPrimitive::Cylinder => 0.5, // neutral
-            SdfPrimitive::Mixed => 0.3,    // chaotic
+            SdfPrimitive::Plane => 0.7,       // stable
+            SdfPrimitive::Sphere => 0.5,     // neutral
+            SdfPrimitive::Box => 0.6,        // structured
+            SdfPrimitive::Cylinder => 0.5,   // neutral
+            SdfPrimitive::Capsule => 0.5,    // neutral
+            SdfPrimitive::Torus => 0.4,      // cyclic
+            SdfPrimitive::Ellipsoid => 0.5,  // neutral
+            SdfPrimitive::Cone => 0.6,       // directional
+            SdfPrimitive::Octahedron => 0.5, // balanced
+            SdfPrimitive::Pyramid => 0.6,    // structured
+            SdfPrimitive::HexPrism => 0.6,   // structured
+            SdfPrimitive::Prism => 0.5,      // neutral
+            SdfPrimitive::RoundBox => 0.6,   // structured
+            SdfPrimitive::Link => 0.4,       // connected
+            SdfPrimitive::Revolve => 0.4,    // cyclic
+            SdfPrimitive::Extrude => 0.5,    // neutral
+            SdfPrimitive::CutSphere => 0.4,  // partial
+            SdfPrimitive::DeathStar => 0.3,  // chaotic
         };
         let emotion = EmotionTag::new(valence, arousal, dominance, intensity);
 

@@ -481,24 +481,16 @@ fn get_dict_field(dict: &MolecularChain, key: &MolecularChain) -> MolecularChain
 /// - CSG ops (Torus○, Union∪, Intersect∩, Subtract∖) → mathematical composition
 /// - High emotion valence → emoticon-like
 ///
-/// Returns "SDF", "MATH", "EMOTICON", or "Mixed(SDF+MATH)".
+/// Returns "SDF", "EMOTICON", or "Mixed(SDF+EMOTICON)".
 fn classify_chain(chain: &MolecularChain) -> String {
-    use crate::molecular::ShapeBase;
     if chain.is_empty() {
         return "Empty".into();
     }
-    let (mut sdf, mut math, mut emo) = (0u32, 0u32, 0u32);
+    let (mut sdf, mut emo) = (0u32, 0u32);
     for mol in &chain.0 {
-        match mol.shape_base() {
-            // SDF primitives — geometric shapes
-            ShapeBase::Sphere | ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Cone => {
-                sdf += 1
-            }
-            // CSG/Math ops — compositional
-            ShapeBase::Torus | ShapeBase::Union | ShapeBase::Intersect | ShapeBase::Subtract => {
-                math += 1
-            }
-        }
+        // v2: all 18 ShapeBase variants are SDF primitives
+        let _shape = mol.shape_base();
+        sdf += 1;
         // Extreme valence → emoticon category
         let v = mol.emotion.valence;
         if !(80..=176).contains(&v) {
@@ -506,7 +498,8 @@ fn classify_chain(chain: &MolecularChain) -> String {
         }
     }
     let total = chain.len() as u32;
-    let dominant = [("SDF", sdf), ("MATH", math), ("EMOTICON", emo)];
+    // v2: all shapes are SDF primitives, MATH category no longer applies
+    let dominant = [("SDF", sdf), ("EMOTICON", emo)];
     let mut parts: Vec<&str> = dominant
         .iter()
         .filter(|(_, c)| *c * 2 >= total) // ≥50% of molecules

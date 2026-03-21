@@ -14,72 +14,108 @@ use alloc::vec::Vec;
 // 5 Base Dimensions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Chiều hình dạng — base category từ SDF group (Geometric Shapes 25A0..25FF).
+/// Chiều hình dạng — 18 SDF primitives từ v2 spec.
 ///
-/// 8 base primitives. Mỗi base có tối đa 31 sub-variants.
-/// Encoding: `value = base + (sub_index * 8)`.
-/// Extract: `base = ((value - 1) % 8) + 1`, `sub = (value - 1) / 8`.
+/// v2: 18 primitives indexed 0-17. Fits 5 bits.
+/// In packed P_weight [S:4][R:4][V:3][A:3][T:2], S uses 4 bits (0-15).
+/// Primitives 16-17 (CutSphere, DeathStar) not in udc_p_table.bin data.
+///
+/// Union/Intersect/Subtract are CSG operations, NOT SDF primitives.
+/// See `CsgOp` enum for CSG operations used in LCA compose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ShapeBase {
-    /// ● U+25CF Sphere
-    Sphere = 0x01,
-    /// ▬ U+25AC Capsule
-    Capsule = 0x02,
-    /// ■ U+25A0 Box
-    Box = 0x03,
-    /// ▲ U+25B2 Cone
-    Cone = 0x04,
-    /// ○ U+25CB Torus
-    Torus = 0x05,
-    /// ∪ U+222A Union
-    Union = 0x06,
-    /// ∩ U+2229 Intersect
-    Intersect = 0x07,
-    /// ∖ U+2216 Subtract
-    Subtract = 0x08,
+    /// SDF 0: sphere — most basic primitive
+    Sphere = 0,
+    /// SDF 1: axis-aligned box
+    Box = 1,
+    /// SDF 2: capsule (line segment + radius)
+    Capsule = 2,
+    /// SDF 3: infinite plane
+    Plane = 3,
+    /// SDF 4: torus (ring)
+    Torus = 4,
+    /// SDF 5: ellipsoid (stretched sphere)
+    Ellipsoid = 5,
+    /// SDF 6: cone
+    Cone = 6,
+    /// SDF 7: cylinder
+    Cylinder = 7,
+    /// SDF 8: octahedron (8 faces)
+    Octahedron = 8,
+    /// SDF 9: pyramid (4 faces + base)
+    Pyramid = 9,
+    /// SDF 10: hexagonal prism
+    HexPrism = 10,
+    /// SDF 11: triangular prism
+    Prism = 11,
+    /// SDF 12: box with rounded edges
+    RoundBox = 12,
+    /// SDF 13: chain link
+    Link = 13,
+    /// SDF 14: surface of revolution
+    Revolve = 14,
+    /// SDF 15: linear extrusion
+    Extrude = 15,
+    /// SDF 16: sphere with spherical cut
+    CutSphere = 16,
+    /// SDF 17: sphere with spherical subtraction (Death Star)
+    DeathStar = 17,
+}
+
+/// CSG operations — NOT SDF primitives.
+/// Used in LCA Shape compose: Cˢ = Union(Aˢ, Bˢ).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum CsgOp {
+    /// ∪ U+222A — combine shapes
+    Union = 0,
+    /// ∩ U+2229 — intersect shapes
+    Intersect = 1,
+    /// ∖ U+2216 — subtract shapes
+    Subtract = 2,
 }
 
 impl ShapeBase {
-    /// Parse exact base value từ byte (chỉ chấp nhận base values 0x01..0x08).
+    /// Parse from byte value (0-17).
     pub fn from_byte(b: u8) -> Option<Self> {
         match b {
-            0x01 => Some(Self::Sphere),
-            0x02 => Some(Self::Capsule),
-            0x03 => Some(Self::Box),
-            0x04 => Some(Self::Cone),
-            0x05 => Some(Self::Torus),
-            0x06 => Some(Self::Union),
-            0x07 => Some(Self::Intersect),
-            0x08 => Some(Self::Subtract),
+            0 => Some(Self::Sphere),
+            1 => Some(Self::Box),
+            2 => Some(Self::Capsule),
+            3 => Some(Self::Plane),
+            4 => Some(Self::Torus),
+            5 => Some(Self::Ellipsoid),
+            6 => Some(Self::Cone),
+            7 => Some(Self::Cylinder),
+            8 => Some(Self::Octahedron),
+            9 => Some(Self::Pyramid),
+            10 => Some(Self::HexPrism),
+            11 => Some(Self::Prism),
+            12 => Some(Self::RoundBox),
+            13 => Some(Self::Link),
+            14 => Some(Self::Revolve),
+            15 => Some(Self::Extrude),
+            16 => Some(Self::CutSphere),
+            17 => Some(Self::DeathStar),
             _ => None,
         }
     }
 
-    /// Extract base category từ hierarchical byte.
-    ///
-    /// Bất kỳ byte > 0 đều trích xuất được base: `((b - 1) % 8) + 1`.
-    /// Ví dụ: 0x09 (Sphere sub 1) → Sphere, 0x0A (Capsule sub 1) → Capsule.
+    /// Extract base category từ hierarchical byte (legacy compat).
+    /// v2: direct mapping, no sub-index scheme.
     pub fn from_hierarchical(b: u8) -> Option<Self> {
-        if b == 0 {
-            return None;
-        }
-        let base = ((b - 1) % 8) + 1;
-        Self::from_byte(base)
+        Self::from_byte(b)
     }
 
-    /// Sub-index within base category (0 = base representative).
-    pub fn sub_index(b: u8) -> u8 {
-        if b == 0 {
-            return 0;
-        }
-        (b - 1) / 8
+    /// Sub-index — v2 has no sub-index, always 0.
+    pub fn sub_index(_b: u8) -> u8 {
+        0
     }
 
-    /// Encode base + sub_index → hierarchical byte.
-    pub fn encode(self, sub: u8) -> u8 {
-        let base = self as u8;
-        base + sub.saturating_mul(8)
+    /// Encode — v2: identity (no sub-index encoding).
+    pub fn encode(self, _sub: u8) -> u8 {
+        self as u8
     }
 
     /// Byte value.
@@ -976,11 +1012,11 @@ impl Molecule {
         // Emoticons/Musical → Medium/Fast/Instant often
         // This is a soft rule — any combo is possible, but some are more natural
         let shape_time_ok = match sb {
-            ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Intersect | ShapeBase::Subtract => {
+            ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Plane | ShapeBase::Cylinder => {
                 // Geometric shapes can be any time, slightly prefer static/slow
                 true // geometric shapes are flexible
             }
-            _ => true, // sphere, cone, torus, union — all times valid
+            _ => true, // all SDF primitives — all times valid
         };
         if shape_time_ok {
             score += 1;
