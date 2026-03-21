@@ -235,11 +235,21 @@ DoD:     make verify → ALL PASS
 
 | ID | Task | Plan | Effort | Status | Notes |
 |----|------|------|--------|--------|-------|
-| 7.2 | Mobile (Android + iOS) | PLAN_7_2 | 2-3 tuần | FREE | ARM64 native + WASM iOS. Ưu tiên thấp. |
-| PW | P_weight migration 5B→2B | PLAN_PWEIGHT | LỚN | DRAFT | Data=2B, Code=5B mismatch. Ảnh hưởng tất cả crates. |
-| V2 | V2 Migration BIG BANG | PLAN_V2 | RẤT LỚN | DRAFT | 12 tasks, 5 layers. Molecule→u16, Chain→Vec<u16>. |
-| UDC | UDC Rebuild (59 blocks) | PLAN_UDC | Nhiều sessions | IN_PROGRESS | 8,846 entries từ Unicode 18.0. |
-| TLC | Test Logic Check (6 patterns) | PLAN_TEST_LOGIC | Trung bình | PARTIAL | 6 test files cần viết. |
+| PW | P_weight migration 5B→2B | PLAN_PWEIGHT | LỚN | DONE ✅ | T1-T12 V2 Migration hoàn thành. |
+| V2 | V2 Migration BIG BANG | PLAN_V2 | RẤT LỚN | DONE ✅ | T1-T16 ALL DONE. |
+| UDC | UDC Rebuild (59 blocks) | PLAN_UDC | Nhiều sessions | DONE ✅ | 8,846 entries, build pipeline v3.1, KT31 format. |
+| TLC | Test Logic Check (6 patterns) | PLAN_TEST_LOGIC | Trung bình | FREE | 6 test files cần viết theo CHECK_TO_PASS_LOGIC_HANDBOOK.md. |
+| AUTH | First-run Auth setup | PLAN_AUTH_first_run | ~200 LOC | FREE | Terms screen + Master Key (Ed25519) + Biometric option. Độc lập. |
+| 7.2 | Mobile (Android + iOS) | PLAN_7_2 | 2-3 tuần | FREE | ARM64 native + WASM iOS. |
+
+### Tier 4 — Cắt dây rốn (Rust → 0%)
+
+| ID | Task | Plan | Effort | Status | Notes |
+|----|------|------|--------|--------|-------|
+| CUT.1 | Migrate runtime Rust → Olang | PLAN_REWRITE GD2 | RẤT LỚN | FREE | emotion/silk/agents crate → .ol files chạy trên ASM VM. Hiện .ol stubs có, cần wire vào ASM VM thay Rust. |
+| CUT.2 | Migrate tools Rust → Olang | PLAN_REWRITE GD3 | LỚN | FREE | builder/server/bench/seeder → .ol. builder.ol đã có. |
+| CUT.3 | Migrate tests Rust → Olang | — | LỚN | FREE | 1190 Rust tests → Olang test framework. |
+| CUT.4 | Remove Rust dependency | PLAN_REWRITE | — | BLOCKED | Chỉ khi CUT.1-3 xong. origin.olang = 1 file tự đủ. |
 
 ---
 
@@ -249,9 +259,9 @@ DoD:     make verify → ALL PASS
                     ┌─────────────────────────────────────────┐
                     │         TIER 1 — Làm ngay               │
                     │                                         │
-  P2.0 (Fix VM) ───┤  8.1-8.3 (Parser)   12.1→12.5 (Response)
-       │            │  11.3→11.2→11.5 (E2E Server)           │
-       │            └─────────────────────────────────────────┘
+  P2.0 DONE ✅ ────┤  8.1-8.3 DONE ✅   12.1→12.5 DONE ✅   │
+  P2.0b CLAIMED    │  11.3→11.2→11.5 (E2E Server) FREE      │
+                    └─────────────────────────────────────────┘
        │                    │
        ▼                    ▼
   ┌────────────┐    ┌───────────────┐
@@ -263,8 +273,11 @@ DoD:     make verify → ALL PASS
   │ P2.5 E2E   │    │ 11.4 Native   │
   └────────────┘    └───────────────┘
 
-  TIER 3 (song song, kế hoạch riêng):
-    7.2 Mobile | PW Migration | V2 BIG BANG | UDC Rebuild | Test Logic
+  TIER 3 (song song):
+    TLC (Test Logic) | AUTH (First-run) | 7.2 (Mobile)
+
+  TIER 4 (cắt dây rốn — sequential):
+    CUT.1 (Runtime) → CUT.2 (Tools) → CUT.3 (Tests) → CUT.4 (Remove Rust)
 ```
 
 ---
