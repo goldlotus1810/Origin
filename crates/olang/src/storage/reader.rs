@@ -10,7 +10,8 @@ use alloc::vec::Vec;
 use crate::molecular::MolecularChain;
 use crate::writer::{
     HEADER_SIZE, MAGIC, RT_ALIAS, RT_AMEND, RT_AUTH, RT_CURVE, RT_EDGE, RT_HEBBIAN, RT_KNOWTREE,
-    RT_NODE, RT_NODE_KIND, RT_SLIM_KNOWTREE, RT_STM, VERSION, VERSION_V03, VERSION_V04, VERSION_V05,
+    RT_NODE, RT_NODE_KIND, RT_PARENT, RT_SLIM_KNOWTREE, RT_STM, VERSION, VERSION_V03, VERSION_V04,
+    VERSION_V05,
 };
 
 /// Read a little-endian u64 from a slice at offset. Caller must ensure pos+8 ≤ data.len().
@@ -176,6 +177,16 @@ pub struct ParsedAuth {
     pub file_offset: u64,
 }
 
+/// Parent record đã parse — Silk vertical parent_map (T15/14.3).
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub struct ParsedParent {
+    pub child_hash: u64,
+    pub parent_hash: u64,
+    pub timestamp: i64,
+    pub file_offset: u64,
+}
+
 /// Lỗi khi parse.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {
@@ -245,6 +256,7 @@ impl<'a> OlangReader<'a> {
         let mut auth_records: Vec<ParsedAuth> = Vec::new();
         let mut slim_knowtree_records: Vec<ParsedSlimKnowTree> = Vec::new();
         let mut curve_records: Vec<ParsedCurve> = Vec::new();
+        let mut parent_records: Vec<ParsedParent> = Vec::new();
 
         let mut pos = HEADER_SIZE;
 
@@ -520,6 +532,20 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_PARENT => {
+                    // [child:8][parent:8][ts:8] = 24
+                    if pos + 24 > self.data.len() {
+                        return Err(ParseError::Truncated);
+                    }
+                    let child = read_u64_le(self.data, pos); pos += 8;
+                    let parent = read_u64_le(self.data, pos); pos += 8;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    parent_records.push(ParsedParent {
+                        child_hash: child, parent_hash: parent,
+                        timestamp: ts, file_offset: record_offset,
+                    });
+                }
+
                 other => return Err(ParseError::UnknownRecordType(other)),
             }
         }
@@ -540,6 +566,7 @@ impl<'a> OlangReader<'a> {
             slim_knowtree_records,
             curve_records,
             auth_records,
+            parent_records,
             amended_offsets,
             created_at: self.created_at,
         })
@@ -577,6 +604,7 @@ impl<'a> OlangReader<'a> {
         let mut slim_knowtree_records: Vec<ParsedSlimKnowTree> = Vec::new();
         let mut curve_records: Vec<ParsedCurve> = Vec::new();
         let mut auth_records: Vec<ParsedAuth> = Vec::new();
+        let mut parent_records: Vec<ParsedParent> = Vec::new();
 
         let mut pos = HEADER_SIZE;
         let mut error = None;
@@ -852,6 +880,21 @@ impl<'a> OlangReader<'a> {
                     });
                 }
 
+                RT_PARENT => {
+                    // [child:8][parent:8][ts:8] = 24
+                    if pos + 24 > self.data.len() {
+                        error = Some(ParseError::Truncated);
+                        break;
+                    }
+                    let child = read_u64_le(self.data, pos); pos += 8;
+                    let parent = read_u64_le(self.data, pos); pos += 8;
+                    let ts = read_i64_le(self.data, pos); pos += 8;
+                    parent_records.push(ParsedParent {
+                        child_hash: child, parent_hash: parent,
+                        timestamp: ts, file_offset: record_offset,
+                    });
+                }
+
                 other => {
                     error = Some(ParseError::UnknownRecordType(other));
                     break;
@@ -862,7 +905,7 @@ impl<'a> OlangReader<'a> {
         let records_recovered = nodes.len() + edges.len() + aliases.len() + amends.len()
             + node_kinds.len() + stm_records.len() + hebbian_records.len()
             + knowtree_records.len() + slim_knowtree_records.len() + curve_records.len()
-            + auth_records.len();
+            + auth_records.len() + parent_records.len();
         let amended_offsets: alloc::collections::BTreeSet<u64> =
             amends.iter().map(|a| a.target_offset).collect();
         let file = ParsedFile {
@@ -877,6 +920,7 @@ impl<'a> OlangReader<'a> {
             slim_knowtree_records,
             curve_records,
             auth_records,
+            parent_records,
             amended_offsets,
             created_at: self.created_at,
         };
@@ -915,6 +959,8 @@ pub struct ParsedFile {
     pub curve_records: Vec<ParsedCurve>,
     /// Auth records — last one wins (append-only identity).
     pub auth_records: Vec<ParsedAuth>,
+    /// Parent records — Silk vertical parent_map (T15/14.3).
+    pub parent_records: Vec<ParsedParent>,
     /// Offsets đã bị amend — dùng để filter records.
     pub amended_offsets: alloc::collections::BTreeSet<u64>,
     /// Timestamp khi file được tạo.
@@ -1276,5 +1322,30 @@ mod tests {
         assert_eq!(pf.hebbian_records.len(), 1);
         assert_eq!(pf.knowtree_records.len(), 1);
         assert_eq!(pf.curve_records.len(), 1);
+    }
+
+    #[test]
+    fn roundtrip_parent_record() {
+        let pf = roundtrip(|w| {
+            w.append_parent(0xAAAA_BBBB, 0xCCCC_DDDD, 5000);
+        });
+        assert_eq!(pf.parent_records.len(), 1);
+        let p = &pf.parent_records[0];
+        assert_eq!(p.child_hash, 0xAAAA_BBBB);
+        assert_eq!(p.parent_hash, 0xCCCC_DDDD);
+        assert_eq!(p.timestamp, 5000);
+    }
+
+    #[test]
+    fn roundtrip_parent_multiple() {
+        let pf = roundtrip(|w| {
+            w.append_parent(0x0001, 0x0010, 1000);
+            w.append_parent(0x0002, 0x0010, 1001);
+            w.append_parent(0x0003, 0x0020, 1002);
+        });
+        assert_eq!(pf.parent_records.len(), 3);
+        assert_eq!(pf.parent_records[0].child_hash, 0x0001);
+        assert_eq!(pf.parent_records[1].child_hash, 0x0002);
+        assert_eq!(pf.parent_records[2].parent_hash, 0x0020);
     }
 }

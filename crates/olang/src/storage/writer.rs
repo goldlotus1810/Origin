@@ -136,6 +136,15 @@ pub const RT_SLIM_KNOWTREE: u8 = 0x0A;
 /// Boot replay: last RT_AUTH record wins.
 pub const RT_AUTH: u8 = 0x0B;
 
+/// Record type: Parent — Silk vertical parent_map persistence (T15/14.3).
+///
+/// Format: [0x0C][child_hash: 8][parent_hash: 8][timestamp: 8]
+/// Total: 1 + 8 + 8 + 8 = 25 bytes
+///
+/// Boot replay: rebuild SilkGraph.parent_map for bottom-up traversal.
+/// 8,846 pointers × 25B = ~221 KB on disk.
+pub const RT_PARENT: u8 = 0x0C;
+
 /// Header size: MAGIC(4) + VERSION(1) + CREATED(8) = 13 bytes
 pub const HEADER_SIZE: usize = 13;
 
@@ -424,6 +433,25 @@ impl OlangWriter {
         self.buf.push(RT_CURVE);
         self.buf.extend_from_slice(&valence.to_le_bytes());
         self.buf.extend_from_slice(&fx_dn.to_le_bytes());
+        self.buf.extend_from_slice(&timestamp.to_le_bytes());
+        self.write_count += 1;
+        offset
+    }
+
+    /// Ghi Parent record — Silk vertical parent_map persistence (T15/14.3).
+    ///
+    /// Format: [0x0C][child_hash: 8][parent_hash: 8][ts: 8]
+    /// Boot replay → SilkGraph.register_parent(child, parent).
+    pub fn append_parent(
+        &mut self,
+        child_hash: u64,
+        parent_hash: u64,
+        timestamp: i64,
+    ) -> u64 {
+        let offset = self.buf.len() as u64;
+        self.buf.push(RT_PARENT);
+        self.buf.extend_from_slice(&child_hash.to_le_bytes());
+        self.buf.extend_from_slice(&parent_hash.to_le_bytes());
         self.buf.extend_from_slice(&timestamp.to_le_bytes());
         self.write_count += 1;
         offset
