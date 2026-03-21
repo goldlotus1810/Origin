@@ -809,3 +809,1135 @@ Nguồn:
   PropertyAliases.txt      → property name → abbreviation
   mapping/NRC-VAD-Lexicon  → 54,801 terms × (valence, arousal, dominance)
 ```
+
+---
+
+## PHẦN 2: Danh sách TEXT trích xuất từ Unicode source files
+
+> **Nguồn**: UnicodeData.txt, PropList.txt, PropertyAliases.txt, PropertyValueAliases.txt,
+> NameAliases.txt, StandardizedVariants.txt, emoji-test.txt, emoji-data.txt,
+> emoji-sequences.txt, emoji-zwj-sequences.txt, mapping/NRC-VAD-Lexicon-v2.1
+>
+> **Quy tắc gom**: từ giống nhau → 1 từ. Cụm từ giống nhau → 1 cụm từ. Câu giống nhau → 1 câu.
+
+### Tổng quan
+
+| Chiều | Tổng từ | Từ riêng | Tổng cụm từ | Cụm từ riêng | Câu (4+ từ) |
+|-------|---------|----------|-------------|-------------|------------|
+| **S** (Shape) | 480 | 81 | 1,809 | 1,809 | 1,095 |
+| **R** (Relation) | 790 | 291 | 3,784 | 3,784 | 2,076 |
+| **V** (Valence) | 28,682 | 7,990 | 13,852 | 3,319 | 0 |
+| **A** (Arousal) | 29,155 | 8,472 | 11,174 | 641 | 0 |
+| **T** (Time) | 713 | 433 | 958 | 958 | 791 |
+| **V∩A** (shared) | 20,546 | — | 10,533 | — | — |
+
+---
+
+### S — Shape (SDF) · Từ vựng hình dạng
+
+**81 từ riêng biệt** (chỉ xuất hiện trong S, không trong R/V/A/T):
+```
+  ac
+  admetos
+  alternative
+  apl
+  apollon
+  arrowhead
+  arrowheads
+  arta
+  astrological
+  backslanted
+  benzene
+  binovile
+  bisected
+  bisecting
+  bud
+  conical
+  continuous
+  counterbore
+  crosshatch
+  cupido
+  cylindricity
+  del
+  dentistry
+  dimension
+  drafting
+  ellipse
+  eris
+  exponent
+  extend
+  extension
+  fisheye
+  florette
+  flowing
+  fuse
+  gapped
+  grapheme
+  hades
+  hellschreiber
+  helm
+  hysteresis
+  kronos
+  lobe
+  location
+  maltese
+  metrical
+  monostable
+  nessus
+  novile
+  option
+  paired
+  passed
+  pentagon
+  petalled
+  pholus
+  poseidon
+  propeller
+  quintile
+  recorder
+  rectilinear
+  rhombus
+  runout
+  scan
+  sedna
+  selena
+  sentagon
+  shouldered
+  spoked
+  taper
+  then
+  transpluto
+  trapezium
+  tredecile
+  trifoliate
+  underline
+  undo
+  variation
+  viewdata
+  vigintile
+  vulcanus
+  zeus
+  zilde
+```
+
+**480 từ tổng** (bao gồm từ chung với các chiều khác):
+```
+  above, ac, admetos, airplane, alarm, all, almost, alpha, alternative, ampersand, and, angle
+  anticlockwise, apl, apollon, arc, arrow, arrowhead, arrowheads, arrows, arta, asterisk, astraea, astrological
+  backslanted, backslash, ballot, bar, barb, bars, base, bell, below, bent, benzene, beside
+  between, binovile, bisected, bisecting, black, blade, blank, block, blue, board, bold, bottom
+  box, bracket, braille, breve, broken, brown, bud, bullet, bullseye, but, caret, ceiling
+  centre, centred, check, checker, chevron, circle, circled, circling, circular, clear, clock, clockwise
+  closed, colon, comma, composition, compressed, conical, containing, continuous, corner, corners, counterbore, countersink
+  crop, cross, crosshatch, crossing, cube, cupido, curly, current, curved, curving, cusp, cylindricity
+  dark, dash, dashed, david, decimal, del, delta, dentistry, dependent, diaeresis, diagonal, diameter
+  diamond, digit, dimension, dingbat, direct, directly, discontinuous, divide, division, dot, dotted, double
+  doubled, down, downwards, drafting, drawing, drawings, drive, earth, east, eight, eighth, eighths
+  eject, electric, electrical, electronics, ellipse, emphasis, enter, envelope, epsilon, equal, equals, equilateral
+  erase, eris, et, exclamation, exponent, extend, extension, extremely, eye, falling, fill, fish
+  fisheye, fist, five, flatness, flattened, floor, floral, florette, flowing, foot, for, form
+  four, from, frown, full, functional, fuse, gapped, geometric, grapheme, greek, green, ground
+  group, hades, half, hand, harpoon, head, headed, heart, heavy, hellschreiber, helm, hexagon
+  hollow, hook, hooked, horizontal, hourglass, house, hygiea, hysteresis, in, indicator, infinity, insertion
+  inside, integral, interest, interrobang, intersection, inverse, iota, isosceles, joined, jot, key, keyboard
+  kronos, large, latin, leaf, left, leftwards, ligature, light, line, lines, lobe, location
+  long, loop, low, lower, lozenge, maltese, mark, medium, metrical, middle, minus, monostable
+  moon, multiplication, narrow, negative, neptune, nessus, newline, next, nib, nine, north, northwest
+  not, notch, notched, novile, number, oblique, observer, octagon, of, omega, on, one
+  open, operator, option, or, orange, origin, ornament, orthogonal, outlined, oval, over, overbar
+  overlapping, page, paired, paragraph, parallelogram, parenthesis, passed, pattern, pause, pedestal, pencil, pentagon
+  pentaseme, perspective, petalled, pholus, piece, pinwheel, place, plus, pluto, point, pointed, pointer
+  pointing, poseidon, position, power, previous, print, projective, propeller, proserpina, purple, quad, quadrant
+  quadruple, quarter, quarters, question, quilt, quintile, quotation, quote, radical, raised, record, recorder
+  rectangle, rectilinear, red, return, reverse, reversed, rho, rhombus, ribbon, right, rightwards, ring
+  rising, rocket, rotated, round, rounded, runout, russian, safety, saltire, sand, scan, scissors
+  screen, script, section, sector, sedna, segment, selector, selena, semicircle, semicircular, semicolon, sentagon
+  separated, separator, seven, shade, shaded, shadowed, shaft, shell, shoe, short, shorts, shouldered
+  sign, single, six, sixteen, slanted, slash, sleep, slightly, slope, small, smile, snowflake
+  solid, solidus, south, sparkle, sparkles, spoked, square, squared, squares, squat, squiggle, squish
+  star, stem, stile, stop, stopwatch, straightness, stress, stroke, subset, summation, superset, swash
+  symbol, symmetry, syntax, tab, tack, tail, tape, taper, target, telephone, ten, tetraseme
+  the, then, thin, third, thirds, three, through, tight, tilde, timer, tiny, tip
+  to, top, tortoise, total, transparent, transpluto, trapezium, tredecile, triangle, trifoliate, triple, triseme
+  true, turned, twelve, two, type, uncertainty, underbar, underline, undo, united, up, upper
+  upwards, vane, variation, vertical, very, victory, viewdata, vigintile, vine, vulcanus, wall, watch
+  wave, wavy, west, white, width, with, within, writing, yellow, zeus, zigzag, zilde
+```
+
+**Cụm từ riêng S** (1809 cụm, hiển thị 80 mẫu):
+```
+  AC CURRENT
+  ADMETOS
+  AIRPLANE
+  ALARM CLOCK
+  ALL AROUND-PROFILE
+  ALTERNATIVE KEY SYMBOL
+  ANTICLOCKWISE CLOSED CIRCLE ARROW
+  ANTICLOCKWISE GAPPED CIRCLE ARROW
+  ANTICLOCKWISE OPEN CIRCLE ARROW
+  ANTICLOCKWISE TOP SEMICIRCLE ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED BOTTOM U-SHAPED ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED LEFT U-SHAPED ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED OPEN CIRCLE ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED RIGHT U-SHAPED ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED TOP U-SHAPED ARROW
+  APL FUNCTIONAL SYMBOL ALPHA
+  APL FUNCTIONAL SYMBOL ALPHA UNDERBAR
+  APL FUNCTIONAL SYMBOL BACKSLASH BAR
+  APL FUNCTIONAL SYMBOL CIRCLE BACKSLASH
+  APL FUNCTIONAL SYMBOL CIRCLE DIAERESIS
+  APL FUNCTIONAL SYMBOL CIRCLE JOT
+  APL FUNCTIONAL SYMBOL CIRCLE STAR
+  APL FUNCTIONAL SYMBOL CIRCLE STILE
+  APL FUNCTIONAL SYMBOL CIRCLE UNDERBAR
+  APL FUNCTIONAL SYMBOL COMMA BAR
+  APL FUNCTIONAL SYMBOL DEL DIAERESIS
+  APL FUNCTIONAL SYMBOL DEL STILE
+  APL FUNCTIONAL SYMBOL DEL TILDE
+  APL FUNCTIONAL SYMBOL DELTA STILE
+  APL FUNCTIONAL SYMBOL DELTA UNDERBAR
+  APL FUNCTIONAL SYMBOL DIAMOND UNDERBAR
+  APL FUNCTIONAL SYMBOL DOWN CARET TILDE
+  APL FUNCTIONAL SYMBOL DOWN SHOE STILE
+  APL FUNCTIONAL SYMBOL DOWN TACK JOT
+  APL FUNCTIONAL SYMBOL DOWN TACK UNDERBAR
+  APL FUNCTIONAL SYMBOL DOWNWARDS VANE
+  APL FUNCTIONAL SYMBOL EPSILON UNDERBAR
+  APL FUNCTIONAL SYMBOL GREATER-THAN DIAERESIS
+  APL FUNCTIONAL SYMBOL I-BEAM
+  APL FUNCTIONAL SYMBOL IOTA
+  APL FUNCTIONAL SYMBOL IOTA UNDERBAR
+  APL FUNCTIONAL SYMBOL JOT DIAERESIS
+  APL FUNCTIONAL SYMBOL JOT UNDERBAR
+  APL FUNCTIONAL SYMBOL LEFT SHOE STILE
+  APL FUNCTIONAL SYMBOL LEFTWARDS VANE
+  APL FUNCTIONAL SYMBOL OMEGA
+  APL FUNCTIONAL SYMBOL OMEGA UNDERBAR
+  APL FUNCTIONAL SYMBOL QUAD
+  APL FUNCTIONAL SYMBOL QUAD BACKSLASH
+  APL FUNCTIONAL SYMBOL QUAD CIRCLE
+  APL FUNCTIONAL SYMBOL QUAD COLON
+  APL FUNCTIONAL SYMBOL QUAD DEL
+  APL FUNCTIONAL SYMBOL QUAD DELTA
+  APL FUNCTIONAL SYMBOL QUAD DIAMOND
+  APL FUNCTIONAL SYMBOL QUAD DIVIDE
+  APL FUNCTIONAL SYMBOL QUAD DOWN CARET
+  APL FUNCTIONAL SYMBOL QUAD DOWNWARDS ARROW
+  APL FUNCTIONAL SYMBOL QUAD EQUAL
+  APL FUNCTIONAL SYMBOL QUAD GREATER-THAN
+  APL FUNCTIONAL SYMBOL QUAD JOT
+  APL FUNCTIONAL SYMBOL QUAD LEFTWARDS ARROW
+  APL FUNCTIONAL SYMBOL QUAD LESS-THAN
+  APL FUNCTIONAL SYMBOL QUAD NOT EQUAL
+  APL FUNCTIONAL SYMBOL QUAD QUESTION
+  APL FUNCTIONAL SYMBOL QUAD RIGHTWARDS ARROW
+  APL FUNCTIONAL SYMBOL QUAD SLASH
+  APL FUNCTIONAL SYMBOL QUAD UP CARET
+  APL FUNCTIONAL SYMBOL QUAD UPWARDS ARROW
+  APL FUNCTIONAL SYMBOL QUOTE QUAD
+  APL FUNCTIONAL SYMBOL QUOTE UNDERBAR
+  APL FUNCTIONAL SYMBOL RHO
+  APL FUNCTIONAL SYMBOL RIGHTWARDS VANE
+  APL FUNCTIONAL SYMBOL SEMICOLON UNDERBAR
+  APL FUNCTIONAL SYMBOL SLASH BAR
+  APL FUNCTIONAL SYMBOL SQUISH QUAD
+  APL FUNCTIONAL SYMBOL STAR DIAERESIS
+  APL FUNCTIONAL SYMBOL STILE TILDE
+  APL FUNCTIONAL SYMBOL TILDE DIAERESIS
+  APL FUNCTIONAL SYMBOL UP CARET TILDE
+  APL FUNCTIONAL SYMBOL UP SHOE JOT
+  ... +1729 cụm từ nữa
+```
+
+**Câu riêng S** (1095 câu, hiển thị 50 mẫu):
+```
+  ANTICLOCKWISE CLOSED CIRCLE ARROW
+  ANTICLOCKWISE GAPPED CIRCLE ARROW
+  ANTICLOCKWISE OPEN CIRCLE ARROW
+  ANTICLOCKWISE TOP SEMICIRCLE ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED BOTTOM U-SHAPED ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED LEFT U-SHAPED ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED OPEN CIRCLE ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED RIGHT U-SHAPED ARROW
+  ANTICLOCKWISE TRIANGLE-HEADED TOP U-SHAPED ARROW
+  APL FUNCTIONAL SYMBOL ALPHA
+  APL FUNCTIONAL SYMBOL ALPHA UNDERBAR
+  APL FUNCTIONAL SYMBOL BACKSLASH BAR
+  APL FUNCTIONAL SYMBOL CIRCLE BACKSLASH
+  APL FUNCTIONAL SYMBOL CIRCLE DIAERESIS
+  APL FUNCTIONAL SYMBOL CIRCLE JOT
+  APL FUNCTIONAL SYMBOL CIRCLE STAR
+  APL FUNCTIONAL SYMBOL CIRCLE STILE
+  APL FUNCTIONAL SYMBOL CIRCLE UNDERBAR
+  APL FUNCTIONAL SYMBOL COMMA BAR
+  APL FUNCTIONAL SYMBOL DEL DIAERESIS
+  APL FUNCTIONAL SYMBOL DEL STILE
+  APL FUNCTIONAL SYMBOL DEL TILDE
+  APL FUNCTIONAL SYMBOL DELTA STILE
+  APL FUNCTIONAL SYMBOL DELTA UNDERBAR
+  APL FUNCTIONAL SYMBOL DIAMOND UNDERBAR
+  APL FUNCTIONAL SYMBOL DOWN CARET TILDE
+  APL FUNCTIONAL SYMBOL DOWN SHOE STILE
+  APL FUNCTIONAL SYMBOL DOWN TACK JOT
+  APL FUNCTIONAL SYMBOL DOWN TACK UNDERBAR
+  APL FUNCTIONAL SYMBOL DOWNWARDS VANE
+  APL FUNCTIONAL SYMBOL EPSILON UNDERBAR
+  APL FUNCTIONAL SYMBOL GREATER-THAN DIAERESIS
+  APL FUNCTIONAL SYMBOL I-BEAM
+  APL FUNCTIONAL SYMBOL IOTA
+  APL FUNCTIONAL SYMBOL IOTA UNDERBAR
+  APL FUNCTIONAL SYMBOL JOT DIAERESIS
+  APL FUNCTIONAL SYMBOL JOT UNDERBAR
+  APL FUNCTIONAL SYMBOL LEFT SHOE STILE
+  APL FUNCTIONAL SYMBOL LEFTWARDS VANE
+  APL FUNCTIONAL SYMBOL OMEGA
+  APL FUNCTIONAL SYMBOL OMEGA UNDERBAR
+  APL FUNCTIONAL SYMBOL QUAD
+  APL FUNCTIONAL SYMBOL QUAD BACKSLASH
+  APL FUNCTIONAL SYMBOL QUAD CIRCLE
+  APL FUNCTIONAL SYMBOL QUAD COLON
+  APL FUNCTIONAL SYMBOL QUAD DEL
+  APL FUNCTIONAL SYMBOL QUAD DELTA
+  APL FUNCTIONAL SYMBOL QUAD DIAMOND
+  APL FUNCTIONAL SYMBOL QUAD DIVIDE
+  APL FUNCTIONAL SYMBOL QUAD DOWN CARET
+  ... +1045 câu nữa
+```
+---
+
+### R — Relation (MATH) · Từ vựng quan hệ
+
+**291 từ riêng biệt** (chỉ xuất hiện trong R):
+```
+  acrophonic, actually, addressed, ain, aktieselskab, alef, alphabetic, amalgamation, ancora, angstrom
+  antirestriction, approaches, approximate, approximately, arabic, aroura, artabe, assyrian, asterisks, asterism
+  asymptotically, austral, because, beh, bitcoin, buru, cada, capitulum, carriage, carystian
+  cedi, celsius, centered, circumflex, conjugate, contain, contains, contoured, coproduct, cornish
+  coronis, corresponds, counting, crossbar, cruzeiro, cuneiform, cyrenaic, dalet, definition, delimiter
+  delphic, descender, device, differential, digamma, dimensional, directional, dirham, divides, domain
+  dong, dotless, drachma, drachmas, elamite, elevatus, em, embedding, en, enclosing
+  epidaurean, equiangular, estimates, eta, euler, exists, facsimile, fahrenheit, feh, fifth
+  fifths, fifty, formatting, forty, fraktur, fullwidth, gal, gamma, geometrically, geshu
+  ghain, gimel, gleich, gramma, guarani, gur, ha, hah, heh, heraeum
+  hermionian, hermitian, homothetic, hryvnia, hyphen, hypodiastole, identical, ideographic, ilimmu, imin
+  increases, indic, indiction, intercalate, interpolation, intersecting, jeem, kaf, kappa, karor
+  karoran, kavyka, kelvin, khah, kip, kurrent, kyathos, lakh, lakhan, lam
+  lamda, lari, limmu, litra, livre, looped, manat, marratan, mathematical, matrix
+  medieval, meem, members, messenian, metretes, mill, mille, min, miny, mnas
+  models, modulo, monospace, mu, multimap, multiset, nabla, naira, nand, naxian
+  negated, nested, nigidaesh, nigidamin, nomisma, nonforking, nor, nu, numeric, numero
+  obelos, obol, obols, ocr, ohm, omani, omicron, ounkia, outer, outline
+  overline, paragraphos, paragraphus, paraphrase, patty, perpendicular, peseta, peso, phi, pilcrow
+  planck, plethron, precede, precedes, preceding, prefixed, proof, proportion, prove, psi
+  punctus, qaf, quadcolon, quantity, quaternion, questioned, ratio, recording, reh, rial
+  righthand, rim, riyal, roman, roundhand, ruble, rufiyaa, rupee, schema, schwa
+  seen, semidirect, serifs, shapes, shaping, sharu, sheqel, sibe, sigma, signs
+  sine, sinusoid, sixteenths, sixths, siyaq, slant, sloping, som, spesmilo, stacked
+  staters, stratian, strokes, subgroup, subjoined, substitute, substitution, succeeds, superimposed, surface
+  synchronous, tah, tailed, talents, tally, tatweel, tau, teh, tenge, tens
+  tenu, thal, theh, therefore, theta, tick, tironian, tournois, transversal, tricolon
+  troezenian, tryblion, tugrik, turkish, uae, una, underdot, undertie, upsilon, using
+  ussu, variant, vee, versicle, waw, won, xestes, xor, yeh, zah
+  zain
+```
+
+**790 từ tổng**:
+```
+  above, accent, account, acknowledge, acrophonic, activate, actually, acute, addressed, ain, aktieselskab, alef
+  aligned, all, almost, alpha, alphabetic, alternate, amalgamation, amount, ampersand, an, ancora, and
+  angle, angstrom, annuity, anticlockwise, antirestriction, application, approaches, approximate, approximately, arabic, arc, arm
+  around, aroura, arrow, artabe, as, ash, assertion, assyrian, asterisk, asterisks, asterism, asymptotically
+  at, attic, austral, average, backslash, backspace, bag, bank, bar, barb, base, because
+  beh, bell, below, belt, beside, bet, beta, between, big, binary, binding, bitcoin
+  black, blank, block, board, bold, bottom, bow, bowtie, box, bracket, branch, bridge
+  buckle, bullet, bumpy, buru, but, by, cada, cancel, cap, capital, capitulum, care
+  caret, carriage, carystian, cedi, celsius, centered, centre, centred, chair, chancery, character, check
+  checker, chi, circle, circled, circulation, circumflex, cjk, clockwise, close, closed, colon, combining
+  comma, commercial, compatibility, complement, composition, congruent, conjugate, consecutive, constant, contain, containing, contains
+  contour, contoured, control, coproduct, copyright, corner, cornish, coronis, corresponds, counting, cross, crossbar
+  cruzeiro, cube, cuneiform, cup, curly, currency, curve, curved, customer, cyrenaic, dad, dagger
+  dal, dalet, dash, data, definition, degree, degrees, delete, delimiter, delphic, delta, descender
+  device, diaeresis, diagonal, diamond, difference, differential, digamma, digit, dimensional, directional, dirham, dish
+  divide, divided, divider, divides, division, does, domain, dong, dot, dotless, dots, dotted
+  double, down, downwards, drachma, drachmas, early, editorial, eight, eighth, eighths, eighty, elamite
+  element, elevatus, eleven, ellipsis, em, embedding, empty, en, enclosing, end, ending, enquiry
+  epidaurean, epsilon, equal, equals, equiangular, equivalent, escape, estimated, estimates, et, eta, euler
+  euro, excess, exclamation, exist, exists, expanded, facsimile, factor, fahrenheit, falling, feed, feh
+  fence, fifth, fifths, fifty, figure, file, final, finite, first, five, flattened, flower
+  following, foot, for, force, forces, fork, forked, forking, form, formatting, forty, four
+  fourth, fraction, fraktur, franc, french, from, full, fullwidth, function, gal, gamma, geometric
+  geometrically, german, geshu, ghain, gimel, gleich, gramma, greek, group, guarani, guard, gur
+  ha, hah, hair, half, harpoon, heading, heh, heraeum, hermionian, hermitian, high, homothetic
+  hook, horizontal, hourglass, hryvnia, hundred, hyphen, hyphenation, hypodiastole, identical, identification, ideographic, idle
+  ilimmu, image, imin, in, including, incomplete, increases, increment, indian, indic, indiction, infinity
+  information, inhibit, initial, insertion, inside, integral, integration, intercalate, interior, interpolation, interrobang, intersecting
+  intersection, inverted, invisible, iota, isolate, italic, jeem, join, joined, joiner, kaf, kappa
+  karor, karoran, kavyka, kelvin, keycap, khah, kip, kurrent, kyathos, lakh, lakhan, lam
+  lamda, large, larger, lari, late, latin, lazy, leader, left, leftwards, leg, letter
+  ligature, limit, limmu, line, lines, link, lira, litra, livre, logical, long, looped
+  low, lower, lozenge, manat, mark, marker, marratan, math, mathematical, matrix, measured, medieval
+  medium, meem, member, members, membership, messenian, metretes, middle, midline, mill, mille, min
+  minus, miny, mnas, models, modifier, modulo, monospace, mu, much, multimap, multiplication, multiset
+  nabla, naira, nand, narrow, national, naxian, negated, negation, negative, neither, nested, new
+  newline, nigidaesh, nigidamin, nine, ninety, ninth, nominal, nomisma, nonforking, noon, nor, nordic
+  normal, north, not, notation, nu, null, number, numeral, numerator, numeric, numero, obelos
+  oblique, obol, obols, ocr, of, ohm, old, omani, omega, omicron, omission, one
+  open, opening, operator, or, original, ottoman, ounce, ounkia, out, outer, outline, over
+  overbar, overlapping, overlay, overline, override, palm, paragraph, paragraphos, paragraphus, parallel, paraphrase, parenthesis
+  part, partial, path, patty, penny, per, perpendicular, peseta, peso, phi, pi, pilcrow
+  piping, pitchfork, placeholder, planck, plethron, plus, point, pointing, pole, pop, precede, precedes
+  preceding, prefixed, prescription, prime, product, projection, proof, property, proportion, proportional, prove, psi
+  punctuation, punctus, qaf, quad, quadcolon, quadruple, quantity, quarter, quarters, quaternion, question, questioned
+  quill, quotation, raised, range, ratio, record, recording, rectangular, reference, reh, relation, relational
+  response, return, reverse, reversed, rho, rial, right, righthand, rightwards, rim, ring, rising
+  riyal, rod, roman, root, rotated, roundhand, ruble, rufiyaa, rule, rupee, sad, samaritan
+  saudi, schema, schwa, screen, script, scruple, second, section, seen, semicircular, semicolon, semidirect
+  separator, serifs, service, set, seven, seventh, seventy, shade, shapes, shaping, sharu, sheen
+  shell, sheqel, shift, short, shuffle, sibe, sideways, sigma, sign, signs, similar, sine
+  single, sinusoid, six, sixteenth, sixteenths, sixth, sixths, sixty, siyaq, slant, slanted, slash
+  sloping, small, smaller, smash, solidus, som, sound, source, space, spesmilo, spherical, spot
+  square, squared, squares, stacked, star, stark, start, staters, stem, stenographic, stop, stratian
+  stretched, strictly, stroke, strokes, strong, style, subgroup, subject, subjoined, subscript, subset, substitute
+  substitution, succeed, succeeds, sum, summation, superimposed, superscript, superset, surface, suspension, swapping, swung
+  symbol, symmetric, synchronous, tabulation, tack, tah, tailed, take, talent, talents, tall, tally
+  tatweel, tau, tee, teh, telephone, ten, tenge, tens, tenth, tenu, terminal, text
+  thal, than, the, theh, there, therefore, thermodynamic, thespian, theta, thin, third, thirds
+  thirty, thousand, three, through, tick, tie, tilde, times, tiny, tironian, to, top
+  tortoise, touching, tournois, trade, transmission, transposition, transversal, triangle, triangular, tricolon, triple, troezenian
+  true, tryblion, tugrik, turkish, turned, turnstile, twelve, twenty, two, type, uae, una
+  under, underbar, underdot, undertie, union, unit, up, upper, upsilon, upturn, upward, upwards
+  using, ussu, variant, vector, vee, verse, versicle, vertical, vertically, very, volume, vulgar
+  wave, waw, white, wide, width, wiggly, with, won, word, wreath, xestes, xi
+  xor, ya, year, yeh, yet, zah, zain, zero, zeta, zigzag
+```
+
+**Cụm từ riêng R** (3784 cụm, hiển thị 80 mẫu):
+```
+  ACCOUNT OF
+  ACTIVATE ARABIC FORM SHAPING
+  ACTIVATE SYMMETRIC SWAPPING
+  ACUTE ANGLE
+  ADDRESSED TO THE SUBJECT
+  AKTIESELSKAB
+  ALEF SYMBOL
+  ALL EQUAL TO
+  ALMOST EQUAL OR EQUAL TO
+  ALMOST EQUAL TO
+  ALMOST EQUAL TO WITH CIRCUMFLEX ACCENT
+  AMALGAMATION OR COPRODUCT
+  AND WITH DOT
+  ANGLE
+  ANGLE WITH S INSIDE
+  ANGLE WITH UNDERBAR
+  ANGSTROM SIGN
+  ANTICLOCKWISE CONTOUR INTEGRAL
+  ANTICLOCKWISE INTEGRATION
+  APPROACHES THE LIMIT
+  APPROXIMATELY BUT NOT ACTUALLY EQUAL TO
+  APPROXIMATELY EQUAL OR EQUAL TO
+  APPROXIMATELY EQUAL TO
+  APPROXIMATELY EQUAL TO OR THE IMAGE OF
+  ARABIC MATHEMATICAL AIN
+  ARABIC MATHEMATICAL ALEF
+  ARABIC MATHEMATICAL BEH
+  ARABIC MATHEMATICAL DAD
+  ARABIC MATHEMATICAL DAL
+  ARABIC MATHEMATICAL DOTLESS BEH
+  ARABIC MATHEMATICAL DOTLESS FEH
+  ARABIC MATHEMATICAL DOTLESS NOON
+  ARABIC MATHEMATICAL DOTLESS QAF
+  ARABIC MATHEMATICAL DOUBLE-STRUCK AIN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK BEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK DAD
+  ARABIC MATHEMATICAL DOUBLE-STRUCK DAL
+  ARABIC MATHEMATICAL DOUBLE-STRUCK FEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK GHAIN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK HAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK JEEM
+  ARABIC MATHEMATICAL DOUBLE-STRUCK KHAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK LAM
+  ARABIC MATHEMATICAL DOUBLE-STRUCK MEEM
+  ARABIC MATHEMATICAL DOUBLE-STRUCK NOON
+  ARABIC MATHEMATICAL DOUBLE-STRUCK QAF
+  ARABIC MATHEMATICAL DOUBLE-STRUCK REH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK SAD
+  ARABIC MATHEMATICAL DOUBLE-STRUCK SEEN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK SHEEN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK TAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK TEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK THAL
+  ARABIC MATHEMATICAL DOUBLE-STRUCK THEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK WAW
+  ARABIC MATHEMATICAL DOUBLE-STRUCK YEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK ZAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK ZAIN
+  ARABIC MATHEMATICAL FEH
+  ARABIC MATHEMATICAL GHAIN
+  ARABIC MATHEMATICAL HAH
+  ARABIC MATHEMATICAL INITIAL AIN
+  ARABIC MATHEMATICAL INITIAL BEH
+  ARABIC MATHEMATICAL INITIAL DAD
+  ARABIC MATHEMATICAL INITIAL FEH
+  ARABIC MATHEMATICAL INITIAL GHAIN
+  ARABIC MATHEMATICAL INITIAL HAH
+  ARABIC MATHEMATICAL INITIAL HEH
+  ARABIC MATHEMATICAL INITIAL JEEM
+  ARABIC MATHEMATICAL INITIAL KAF
+  ARABIC MATHEMATICAL INITIAL KHAH
+  ARABIC MATHEMATICAL INITIAL LAM
+  ARABIC MATHEMATICAL INITIAL MEEM
+  ARABIC MATHEMATICAL INITIAL NOON
+  ARABIC MATHEMATICAL INITIAL QAF
+  ARABIC MATHEMATICAL INITIAL SAD
+  ARABIC MATHEMATICAL INITIAL SEEN
+  ARABIC MATHEMATICAL INITIAL SHEEN
+  ARABIC MATHEMATICAL INITIAL TEH
+  ARABIC MATHEMATICAL INITIAL THEH
+  ... +3704 cụm từ nữa
+```
+
+**Câu riêng R** (2076 câu, hiển thị 50 mẫu):
+```
+  ACTIVATE ARABIC FORM SHAPING
+  ADDRESSED TO THE SUBJECT
+  ALMOST EQUAL OR EQUAL TO
+  ALMOST EQUAL TO WITH CIRCUMFLEX ACCENT
+  ANGLE WITH S INSIDE
+  APPROXIMATELY BUT NOT ACTUALLY EQUAL TO
+  APPROXIMATELY EQUAL OR EQUAL TO
+  APPROXIMATELY EQUAL TO OR THE IMAGE OF
+  ARABIC MATHEMATICAL DOTLESS BEH
+  ARABIC MATHEMATICAL DOTLESS FEH
+  ARABIC MATHEMATICAL DOTLESS NOON
+  ARABIC MATHEMATICAL DOTLESS QAF
+  ARABIC MATHEMATICAL DOUBLE-STRUCK AIN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK BEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK DAD
+  ARABIC MATHEMATICAL DOUBLE-STRUCK DAL
+  ARABIC MATHEMATICAL DOUBLE-STRUCK FEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK GHAIN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK HAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK JEEM
+  ARABIC MATHEMATICAL DOUBLE-STRUCK KHAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK LAM
+  ARABIC MATHEMATICAL DOUBLE-STRUCK MEEM
+  ARABIC MATHEMATICAL DOUBLE-STRUCK NOON
+  ARABIC MATHEMATICAL DOUBLE-STRUCK QAF
+  ARABIC MATHEMATICAL DOUBLE-STRUCK REH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK SAD
+  ARABIC MATHEMATICAL DOUBLE-STRUCK SEEN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK SHEEN
+  ARABIC MATHEMATICAL DOUBLE-STRUCK TAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK TEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK THAL
+  ARABIC MATHEMATICAL DOUBLE-STRUCK THEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK WAW
+  ARABIC MATHEMATICAL DOUBLE-STRUCK YEH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK ZAH
+  ARABIC MATHEMATICAL DOUBLE-STRUCK ZAIN
+  ARABIC MATHEMATICAL INITIAL AIN
+  ARABIC MATHEMATICAL INITIAL BEH
+  ARABIC MATHEMATICAL INITIAL DAD
+  ARABIC MATHEMATICAL INITIAL FEH
+  ARABIC MATHEMATICAL INITIAL GHAIN
+  ARABIC MATHEMATICAL INITIAL HAH
+  ARABIC MATHEMATICAL INITIAL HEH
+  ARABIC MATHEMATICAL INITIAL JEEM
+  ARABIC MATHEMATICAL INITIAL KAF
+  ARABIC MATHEMATICAL INITIAL KHAH
+  ARABIC MATHEMATICAL INITIAL LAM
+  ARABIC MATHEMATICAL INITIAL MEEM
+  ARABIC MATHEMATICAL INITIAL NOON
+  ... +2026 câu nữa
+```
+---
+
+### V∩A — Shared EMOTICON pool (Valence + Arousal chung)
+
+**20,546 từ chung V∩A** (hiển thị 150 mẫu):
+```
+  ab, abacus, abandoner, abase, abased, abasement, abash, abashedly, abashment, abatable
+  abate, abdicate, abdication, abdicator, abduct, abducted, abductee, abduction, abductor, aberrant
+  aberration, aberrational, abet, abhorrence, abhorrent, abhorring, abider, abiding, abjection, abjectly
+  abjectness, ablaze, ably, abnormality, aboard, abolisher, abolition, abolitionary, abolitionism, abolitionist
+  abominable, abominableness, abominably, abominate, abomination, abominator, abort, abortion, abortionist, abortive
+  abortively, about, above, aboveboard, abrasively, abrasiveness, abrupt, abruption, abruptly, abruptness
+  abscond, absconder, absence, absent, absentee, absentminded, absentmindedness, absentness, absoluteness, absolvable
+  absorbability, absorbable, absorbency, abstention, abstinent, abstinently, abstractionism, absurd, absurdness, abundance
+  abuse, abused, abuser, abusive, abusively, abusiveness, abuzz, abysmal, abysmally, abyssal
+  academically, academy, acapulco, acceleration, accelerative, acceleratory, accentuation, accept, acceptability, acceptable
+  acceptableness, acceptably, acceptance, acceptant, acceptor, accessorize, accident, accidental, accidentally, accidently
+  acclaimer, acclamation, acclamatory, acclimate, acclimation, acclimatization, acclimatize, accommodation, accommodative, accommodator
+  accompanier, accompanist, accomplish, accomplisher, accomplishment, accord, accordance, accordant, accordion, accost
+  account, accountable, accredit, accreditation, accrual, accumulativeness, accurateness, accurse, accursed, accursedness
+  accusation, accusative, accusatively, accusatorial, accusatorially, accusatory, accuse, accused, accuser, accusing
+  ... +20396 từ nữa
+```
+
+**10,533 cụm từ chung V∩A** (hiển thị 80 mẫu):
+```
+  1st place medal
+  2nd place medal
+  3rd place medal
+  A button (blood type)
+  AB button (blood type)
+  ABACUS
+  ACCORDION
+  ADHESIVE BANDAGE
+  ADI SHAKTI
+  ADMISSION TICKETS
+  ADULT
+  AERIAL TRAMWAY
+  AIRPLANE ARRIVING
+  AIRPLANE DEPARTURE
+  ALARM BELL SYMBOL
+  ALCHEMICAL SYMBOL FOR AIR
+  ALCHEMICAL SYMBOL FOR ALEMBIC
+  ALCHEMICAL SYMBOL FOR ALKALI
+  ALCHEMICAL SYMBOL FOR ALKALI-2
+  ALCHEMICAL SYMBOL FOR ALUM
+  ALCHEMICAL SYMBOL FOR AMALGAM
+  ALCHEMICAL SYMBOL FOR ANTIMONY ORE
+  ALCHEMICAL SYMBOL FOR AQUA REGIA
+  ALCHEMICAL SYMBOL FOR AQUA REGIA-2
+  ALCHEMICAL SYMBOL FOR AQUA VITAE
+  ALCHEMICAL SYMBOL FOR AQUA VITAE-2
+  ALCHEMICAL SYMBOL FOR AQUAFORTIS
+  ALCHEMICAL SYMBOL FOR ARSENIC
+  ALCHEMICAL SYMBOL FOR ASHES
+  ALCHEMICAL SYMBOL FOR AURIPIGMENT
+  ALCHEMICAL SYMBOL FOR BATH OF MARY
+  ALCHEMICAL SYMBOL FOR BATH OF VAPOURS
+  ALCHEMICAL SYMBOL FOR BISMUTH ORE
+  ALCHEMICAL SYMBOL FOR BLACK SULFUR
+  ALCHEMICAL SYMBOL FOR BORAX
+  ALCHEMICAL SYMBOL FOR BORAX-2
+  ALCHEMICAL SYMBOL FOR BORAX-3
+  ALCHEMICAL SYMBOL FOR BRICK
+  ALCHEMICAL SYMBOL FOR CADUCEUS
+  ALCHEMICAL SYMBOL FOR CALX
+  ALCHEMICAL SYMBOL FOR CAPUT MORTUUM
+  ALCHEMICAL SYMBOL FOR CINNABAR
+  ALCHEMICAL SYMBOL FOR COPPER ANTIMONIATE
+  ALCHEMICAL SYMBOL FOR COPPER ORE
+  ALCHEMICAL SYMBOL FOR CROCUS OF COPPER
+  ALCHEMICAL SYMBOL FOR CROCUS OF COPPER-2
+  ALCHEMICAL SYMBOL FOR CROCUS OF IRON
+  ALCHEMICAL SYMBOL FOR CRUCIBLE
+  ALCHEMICAL SYMBOL FOR CRUCIBLE-2
+  ALCHEMICAL SYMBOL FOR CRUCIBLE-3
+  ALCHEMICAL SYMBOL FOR CRUCIBLE-4
+  ALCHEMICAL SYMBOL FOR CRUCIBLE-5
+  ALCHEMICAL SYMBOL FOR DAY-NIGHT
+  ALCHEMICAL SYMBOL FOR DISSOLVE
+  ALCHEMICAL SYMBOL FOR DISSOLVE-2
+  ALCHEMICAL SYMBOL FOR DISTILL
+  ALCHEMICAL SYMBOL FOR EARTH
+  ALCHEMICAL SYMBOL FOR FIRE
+  ALCHEMICAL SYMBOL FOR GOLD
+  ALCHEMICAL SYMBOL FOR GUM
+  ALCHEMICAL SYMBOL FOR HALF DRAM
+  ALCHEMICAL SYMBOL FOR HALF OUNCE
+  ALCHEMICAL SYMBOL FOR HORSE DUNG
+  ALCHEMICAL SYMBOL FOR HOUR
+  ALCHEMICAL SYMBOL FOR IRON ORE
+  ALCHEMICAL SYMBOL FOR IRON ORE-2
+  ALCHEMICAL SYMBOL FOR IRON-COPPER ORE
+  ALCHEMICAL SYMBOL FOR LEAD ORE
+  ALCHEMICAL SYMBOL FOR LODESTONE
+  ALCHEMICAL SYMBOL FOR MARCASITE
+  ALCHEMICAL SYMBOL FOR MERCURY SUBLIMATE
+  ALCHEMICAL SYMBOL FOR MERCURY SUBLIMATE-2
+  ALCHEMICAL SYMBOL FOR MERCURY SUBLIMATE-3
+  ALCHEMICAL SYMBOL FOR MONTH
+  ALCHEMICAL SYMBOL FOR MOON-JUPITER
+  ALCHEMICAL SYMBOL FOR NIGHT
+  ALCHEMICAL SYMBOL FOR NITRE
+  ALCHEMICAL SYMBOL FOR OIL
+  ALCHEMICAL SYMBOL FOR OIL INVERTED
+  ALCHEMICAL SYMBOL FOR PHILOSOPHERS SULFUR
+  ... +10453 cụm từ nữa
+```
+
+---
+
+### V — Valence riêng (cảm xúc tích cực/tiêu cực)
+
+**7,990 từ chỉ V** (hiển thị 200 mẫu):
+```
+  abandon, abandoned, abandonment, abashed, abeyance, abhor, abhorrently, abilities, ability, able
+  abloom, abnormal, abnormally, abnormity, abound, aboveground, abracadabra, abroad, abrogate, abscess
+  absolutely, absolution, absolve, absolvent, absolver, abstinence, abstractionist, absurdist, absurdity, absurdly
+  abundant, abundantly, academic, accede, accentuate, acceptances, accepter, access, accessibility, accessible
+  accessibly, accessories, accolade, accommodate, accompaniment, accompany, accompanying, accomplishable, accomplished, accordable
+  according, accountability, accountably, accredited, accruement, accurate, accurately, accursedly, accusable, acerbic
+  acetic, acetylene, achievable, achieve, achieved, achilles, achiness, acidic, acidification, acidly
+  acknowledgeable, acknowledged, acknowledgement, acknowledgment, acne, acolyte, acquainted, acquire, acquiring, acquisition
+  acquittal, acreage, actor, actual, actuality, adamant, adapt, adaptability, adaptable, adaptation
+  add, added, additional, addressable, adeptness, adequately, adhd, adieu, adipose, adjusted
+  admin, administrable, admirable, admiral, admiralship, admiration, admired, admiring, admissibility, admissible
+  admittance, admitted, adopt, adoptability, adoptable, adoptively, adorable, adore, adoring, adorn
+  adornment, adulatory, adulterant, adulteration, advanced, advancement, advancing, advantageous, advantageously, advent
+  adverse, advice, advisable, advise, adviser, advisory, aeronautically, aeroplane, aesthetic, aesthetically
+  affable, affair, affectation, affectionate, affections, affiliated, affinitive, affinity, affirm, affirmable
+  affirmation, affirmative, affirmatively, afflict, afflicted, affliction, affluence, affluent, affordability, affordable
+  afro, aftermath, again, aged, agent, ages, aggregate, aggrieved, agh, aghhh
+  aglow, agnostic, agreeable, agreed, agreeing, agreement, agriculture, agrochemical, ahead, ailing
+  airhead, airworthy, airy, alamo, ale, alienate, align, alimentation, alkalize, all-star
+  allegedly, allegiance, allegorist, allergenic, allergies, allergy, alley, alliance, alliteration, alliterative
+  ... +7790 từ nữa
+```
+
+**3,319 cụm từ chỉ V** (hiển thị 80 mẫu):
+```
+  a good
+  a kickback
+  a mere
+  a peach
+  a pleasure
+  a plus
+  a sec
+  a shame
+  a smokescreen
+  a student
+  a treat
+  about face
+  above all
+  above water
+  absolutely not
+  academic freedom
+  academic year
+  according to
+  accused of
+  achieve success
+  achilles heel
+  acting out
+  ad hominem
+  ad nauseam
+  add on
+  added value
+  advance poll
+  advent calendar
+  agent orange
+  agree on
+  agree to
+  agree with
+  agreed upon
+  air conditioned
+  air duct
+  air flow
+  air freshener
+  air pollution
+  air raid
+  air time
+  alive with
+  all clear
+  all correct
+  all downhill
+  all important
+  all inclusive
+  all nations
+  all right
+  all round
+  all set
+  all together
+  all wet
+  all-star game
+  allow for
+  allow in
+  american dream
+  american express
+  american flag
+  american thanksgiving
+  american way
+  amusement park
+  animal kingdom
+  animal lover
+  anime series
+  any old
+  anything but
+  apartment building
+  april fool
+  argue over
+  argue with
+  art director
+  art gallery
+  art history
+  art museum
+  art school
+  art teacher
+  as possible
+  ash tray
+  at bay
+  at best
+  ... +3239 cụm từ nữa
+```
+
+---
+
+### A — Arousal riêng (cường độ kích thích)
+
+**8,472 từ chỉ A** (hiển thị 200 mẫu):
+```
+  abatement, abbot, abbreviation, abbreviator, abdominally, abiotic, abjudicate, abode, abolishable, abolishment
+  aboriginality, abovementioned, abridge, abridged, abridgement, abridgment, absenteeism, absently, absentmindedly, absolutism
+  absorbedly, absorbedness, absorber, absorptive, abstainer, abstentious, abstract, abstractedly, abstractedness, abstracter
+  abstractly, abstractness, abstractor, abutment, abutting, abyss, accelerant, accelerate, accelerated, accelerator
+  accelerometer, accessory, acclaim, accordionist, accountancy, accounts, accumulative, accumulatively, accumulator, accustom
+  acetate, achromatic, acorn, acoustical, acoustics, acquiesce, acquired, acquirer, acquisitive, acquisitively
+  acronymic, across, acrylic, actin, activist, actuarial, actuate, actuation, actuator, acumen
+  acupuncture, adamantly, adaptor, additionally, addressbook, addresser, adhere, adherently, adios, adjacent
+  adjacently, adjective, adjectively, adjudicator, adjunctive, adjure, adjust, administrant, administrate, administrational
+  administratively, admissibly, admitter, adobe, adolescence, adolescently, adrenal, adverbial, advert, advertently
+  advertiser, advertize, advisee, aerially, aerobiological, aerobiology, aerodrome, aerodynamic, aerodynamics, aeromechanical
+  aeromechanics, aerostatic, affectively, affiche, affix, affixation, affixer, affronted, afire, aflame
+  afoot, afore, aforementioned, aforethought, afterburner, afterburning, aftergame, afterhours, aftermarket, afterschool
+  aftertime, afterward, afterword, aga, agedness, agencies, agglomeration, aggregative, aggregator, agitated
+  agnostically, agnosticism, agribusiness, agriculturalist, agriculturally, agua, ahem, airbed, airboat, aircraft
+  aircraftman, aircraftsman, aircrew, airdrop, airfreight, airline, airman, airs, airspeed, airstrip
+  airwave, aisle, akimbo, akin, alarmclock, alas, albinism, albino, alchemically, alchemistic
+  alchemize, alcove, alehouse, alertness, alfalfa, algae, algebra, algebraically, algorithmic, alikeness
+  aliquot, alkaline, alkalinity, alkaloid, allegeable, allegoric, allegorically, allegorize, allergist, alligator
+  allocative, allowably, allspice, allude, allusion, allusively, along, alongside, aloud, alphabet
+  ... +8272 từ nữa
+```
+
+**641 cụm từ chỉ A** (hiển thị 80 mẫu):
+```
+  a bunch
+  a few
+  a little
+  acting up
+  action figure
+  action film
+  active duty
+  active list
+  adventure game
+  affiliate marketing
+  air force
+  aircraft carrier
+  airline industry
+  altar boy
+  american revolution
+  and so
+  arm chair
+  arm wrestling
+  armed forces
+  arrested development
+  artificial intelligence
+  as if
+  as per
+  as to
+  as usual
+  at ease
+  at rest
+  attention span
+  augmented reality
+  baby food
+  baby oil
+  bachelor party
+  back in
+  back porch
+  baseball season
+  based on
+  basketball game
+  basketball league
+  basketball player
+  basketball season
+  bath time
+  bath tub
+  battle royal
+  be full
+  be one
+  be quiet
+  bed bath
+  bed frame
+  bed in
+  bedside table
+  beef stew
+  bench press
+  big band
+  big old
+  big shot
+  black tea
+  blend in
+  blood test
+  blue moon
+  blue spruce
+  blue suit
+  body builder
+  body guard
+  boiled egg
+  booster dose
+  booster shot
+  boot camp
+  boot up
+  bottom line
+  bounce around
+  bow tie
+  boxing gloves
+  boxing match
+  boxing ring
+  bragging rights
+  brain teaser
+  breaking and entering
+  breaking news
+  brief time
+  brown rice
+  ... +561 cụm từ nữa
+```
+---
+
+### T — Time (MUSICAL) · Từ vựng thời gian / nhịp / dao động
+
+**433 từ riêng biệt** (chỉ xuất hiện trong T):
+```
+  accumulation, agogi, alli, allo, alta, anatrichisma, ano, antifonia, antikenokylisma, antikenoma
+  apeso, apli, aploun, apoderma, apodexia, apostrofoi, apostrofos, apothema, apothes, approach
+  archaion, argi, argosyntheton, argoteri, aristera, arktiko, arousing, arpeggiato, arseos, attaching
+  barline, bassa, before, borzaya, borzy, brace, branching, brevis, byzantine, caesura
+  capo, cauldron, chamili, chamilon, chashka, chelnu, chelyustka, chorevma, chroa, chroma
+  chronon, chronou, clef, climacus, clinging, clivis, cluster, coda, contention, contrariety
+  croix, cum, curlew, darkening, daseia, demestvenny, derbitsa, dexia, deyteros, deyterou
+  di, diacritic, diargon, diastoli, diatoniki, diatonon, diesis, difonias, diftoggos, digorgon
+  digramma, digrammos, dimming, dipli, diploun, disimou, divergence, dodekata, doit, duda
+  dva, dvoechelnaya, dvoechelnokryzhevaya, dvoechelnopovodnaya, dvoetochie, dvumya, dyo, ekfonitikon, ekstrepton, elafron
+  enarmonios, enarxis, encounters, endeavour, endofonon, enos, epegerma, eso, eteron, exo
+  fanerosis, fermata, fhtora, fingered, fingernails, fita, flexus, fretboard, fthora, fusa
+  ga, geniki, gg, glissando, golubchik, gorazdo, gorgi, gorgon, gorgosyntheton, gorgoteri
+  gorthmikon, gregorian, gromnaya, gromokryzhevaya, gromopovodnaya, gronthismata, hardness, hauptstimme, henze, hexagram
+  ichadin, ichimatos, ichos, ichou, imidiargon, imifonon, imifthora, imifthoron, imiseos, imperfecta
+  imperfectum, isakia, ison, kachka, kai, katava, katavasma, kathisti, kato, ke
+  kentima, kentimata, khamilo, khokhlom, kievan, klasma, kliton, klyuch, klyuchenepostoyannaya, klyuchenepostoyanny
+  klyuchepovodnaya, klyuchepovodny, klyuchevaya, klyuchevoy, kobyla, kontevma, koron, koronis, koufisma, kratima
+  kratimata, kratimokoufisma, kratimoyporroon, kremasti, kryuk, kryukovaya, kryzh, kryzhem, kryzhevaya, kufisma
+  kupnaya, kylisma, labouring, legetos, legion, leimma, lemoi, lomka, longa, loure
+  lygisma, malakon, malo, marcato, marrying, martyria, massing, maxima, measure, mechik
+  megali, mesi, meso, meta, metria, mezzo, mikri, mikron, minima, mired
+  monofonias, monogrammos, mrachnaya, mrachno, mrachnotikhaya, mrachny, multi, naos, nebenstimme, nemka
+  nenano, neo, nepostoyannaya, neume, ni, niente, nizko, notehead, nozhka, oblachko
+  oblako, ochkom, okto, oligon, omalon, omet, optionally, organ, osoka, otsechka
+  ottava, ou, oxeia, oxeiai, oyranisma, packing, palka, parakalesma, paraklit, paraklitiki
+  parestigmenon, parichon, pauk, pelaston, perevodka, perfecta, perfectum, perispomeni, pes, petasma
+  petasti, petastokoufisma, piasma, pizzicato, plagios, podatus, podchashie, podchashiem, podvertka, poli
+  polkulizmy, polnaya, polupovodnaya, porrectus, povodnaya, povodny, povyshe, preponderance, priznak, prolatione
+  prostaya, protos, protovarys, psifistolygisma, psifiston, psifistoparakalesma, psifistosynagma, psili, psilon, putnaya
+  quindicesima, rapisma, ravno, razseka, repeated, residence, resupinus, retreat, revma, rinforzando
+  ritual, rog, rogom, salzedo, saximata, scandicus, segno, seisma, semibrevis, semiminima
+  severance, simansis, skameytsa, skliron, skoba, slozhitie, sori, sorochya, spathi, sprechgesang
+  sredne, staccatissimo, staccato, statya, stavros, stavrou, stimme, stopitsa, straggismata, stranno
+  strela, subito, subpunctis, svetlaya, svetlo, svetly, synafi, synagma, syndesmos, synevma
+  syrma, syrmatiki, tablature, taming, teleia, telous, tempus, tenuto, tessaron, tessera
+  tetartimorion, tetartos, tetrafonias, tetragram, tetrapli, tetrasimou, thema, thematismos, thes, theseos
+  thita, tikhaya, tikhy, tinagma, tochka, tonal, torculus, tr, treading, tresvetlaya
+  tresvetlo, tresvetly, tria, trifonias, trigorgon, trigrammos, trion, tripli, trisimou, tritimorion
+  tritos, tromikolygisma, tromikon, tromikoparakalesma, tromikopsifiston, tromikosynagma, tryaska, tryasoglasnaya, tryasopovodnaya, tryasostrelnaya
+  tsata, udarka, unstress, vareia, vareiai, varys, vasis, vathy, virga, vocal
+  vou, vrakhiya, vysoko, wanderer, xiron, yfen, yfesis, ypokrisis, yporroi, ypsili
+  zaderzhka, zakrytaya, zakrytoe, zanozhek, zapyataya, zapyatoy, zapyatymi, zelo, zevok, zmeytsa
+  znamenny, zo, zygos
+```
+
+**713 từ tổng**:
+```
+  abundance, abysmal, accent, accumulation, advance, after, aggravation, agogi, all, alli, allo, alta
+  anatrichisma, and, ano, antifonia, antikenokylisma, antikenoma, apart, apeso, apli, aploun, apoderma, apodexia
+  apostrofoi, apostrofos, apothema, apothes, approach, archaion, argi, argon, argosyntheton, argoteri, aristera, arktiko
+  army, arousing, arpeggiato, arrow, arseos, ascent, at, attaching, augmentation, back, barline, barrier
+  bassa, beam, before, begin, beginning, behind, below, bend, biting, black, bold, borzaya
+  borzy, bow, brace, bracket, branching, breakthrough, breath, breve, brevis, bridge, buzz, byzantine
+  caesura, capo, cauldron, centre, chamili, chamilon, change, chashka, chelnu, chelyustka, chorevma, chroa
+  chroma, chronon, chronou, circle, clef, climacus, clinging, clivis, closed, closeness, closure, cluster
+  coda, combining, coming, common, completion, compliance, conflict, constancy, contact, contemplation, contention, contrariety
+  corners, creative, crescendo, croix, cum, curlew, curved, cut, da, dal, damp, darkening
+  daseia, dashed, decayed, decisiveness, decrease, decrescendo, defectiveness, degree, deliverance, demestvenny, departure, derbitsa
+  development, dexia, deyteros, deyterou, di, diacritic, diamond, diargon, diastoli, diatoniki, diatonon, diesis
+  difficulties, difficulty, difonias, diftoggos, digit, digorgon, digram, digramma, digrammos, diminishment, dimming, dipli
+  diploun, direction, disimou, dispersion, distortion, divergence, divider, dodekata, doit, dot, dots, double
+  doubt, down, drum, duda, duration, duties, dva, dvoechelnaya, dvoechelnokryzhevaya, dvoechelnopovodnaya, dvoetochie, dvumya
+  dyo, earth, earthly, ease, eighth, ekfonitikon, ekstrepton, elafron, embellishment, enarmonios, enarxis, encounters
+  end, endeavour, endofonon, enlargement, enos, enthusiasm, epegerma, eso, eternity, eteron, ex, exhaustion
+  exo, failure, family, fanerosis, fellowship, fermata, fhtora, final, fingered, fingernails, fire, fita
+  five, flat, flexus, flight, flip, following, folly, for, forte, fostering, four, fretboard
+  fthora, full, fullness, fusa, ga, gathering, geniki, gentle, gg, glissando, going, golubchik
+  gorazdo, gorgi, gorgon, gorgosyntheton, gorgoteri, gorthmikon, grace, great, greatness, greek, gregorian, gromnaya
+  gromokryzhevaya, gromopovodnaya, gronthismata, guardedness, half, hardness, harmonic, hauptstimme, heaven, heavenly, heavy, heel
+  henze, hexagram, holding, human, hundred, ichadin, ichimatos, ichos, ichou, imidiargon, imifonon, imifthora
+  imifthoron, imiseos, imperfecta, imperfectum, in, increase, indicator, influence, inner, innocence, instrumental, inverted
+  isakia, ison, joy, joyous, kachka, kai, katava, katavasma, kathisti, kato, ke, keeping
+  kentima, kentimata, khamilo, khokhlom, kievan, kinship, klasma, kliton, klyuch, klyuchenepostoyannaya, klyuchenepostoyanny, klyuchepovodnaya
+  klyuchepovodny, klyuchevaya, klyuchevoy, kobyla, kontevma, koron, koronis, koufisma, kratima, kratimata, kratimokoufisma, kratimoyporroon
+  kremasti, kryuk, kryukovaya, kryzh, kryzhem, kryzhevaya, kufisma, kupnaya, kylisma, labouring, lake, law
+  left, legetos, legion, leimma, lemoi, light, limitation, lomka, long, longa, loure, low
+  lower, lygisma, maiden, malakon, malo, marcato, mark, marrying, martyria, massing, maxima, measure
+  mechik, meet, megali, mesi, meso, meta, metria, mezzo, mikri, mikron, minima, mired
+  model, modesty, modifier, monofonias, monogram, monogrammos, moon, mountain, mouth, mrachnaya, mrachno, mrachnotikhaya
+  mrachny, multi, multiple, musical, nana, naos, natural, nebenstimme, nemka, nenano, neo, nepostoyannaya
+  neume, ni, niente, nine, nizko, no, notation, note, notehead, nozhka, null, oblachko
+  oblako, obstruction, ochkom, of, okto, oligon, omalon, omet, on, one, opposition, oppression
+  optionally, or, organ, ornament, osoka, otsechka, ottava, ou, out, oxeia, oxeiai, oyranisma
+  pa, packing, palka, parakalesma, paraklit, paraklitiki, parenthesis, parestigmenon, parichon, pattern, pauk, peace
+  pedal, pelaston, penetration, pentaseme, perevodka, perfecta, perfectum, perispomeni, pes, petasma, petasti, petastokoufisma
+  phrase, piano, piasma, piece, pizzicato, plagios, plus, podatus, podchashie, podchashiem, podvertka, poli
+  polkulizmy, polnaya, polupovodnaya, porrectus, possession, povodnaya, povodny, povyshe, power, preponderance, priznak, progress
+  prolatione, prostaya, protos, protovarys, psifistolygisma, psifiston, psifistoparakalesma, psifistosynagma, psili, psilon, purity, pushing
+  putnaya, quarter, quindicesima, range, rapisma, ravno, razseka, reach, receptive, recitative, release, repeat
+  repeated, residence, resistance, resolution, response, rest, resupinus, retreat, return, reverse, reversed, revma
+  revolution, right, rinforzando, ring, rip, ritual, rog, rogom, roll, salzedo, saximata, scandicus
+  segno, seisma, semibrevis, semiminima, seven, severance, sharp, short, sign, simansis, single, sinking
+  six, sixteenth, skameytsa, skliron, skoba, slash, slozhitie, slur, small, smear, snap, sori
+  sorochya, spathi, splitting, sprechgesang, square, sredne, staccatissimo, staccato, staff, standstill, statya, stavros
+  stavrou, stem, stigma, still, stimme, stopitsa, stoppage, stove, straggismata, stranno, strela, strength
+  stress, stroke, subito, subpunctis, suspension, svetlaya, svetlo, svetly, symbol, synafi, synagma, syndesmos
+  synevma, syrma, syrmatiki, system, tablature, taming, teleia, telous, tempus, tenuto, tessaron, tessera
+  tetartimorion, tetartos, tetrafonias, tetragram, tetrapli, tetraseme, tetrasimou, the, thema, thematismos, thes, theseos
+  thita, thousand, through, thunder, tie, tikhaya, tikhy, time, tinagma, to, tochka, toe
+  together, tonal, tone, tongue, top, torculus, tr, treading, tresvetlaya, tresvetlo, tresvetly, tria
+  triangle, triangular, trifonias, trigorgon, trigrammos, trion, triple, tripli, triseme, trisimou, tritimorion, tritos
+  tromikolygisma, tromikon, tromikoparakalesma, tromikopsifiston, tromikosynagma, truth, tryaska, tryasoglasnaya, tryasopovodnaya, tryasostrelnaya, tsata, turn
+  twelfth, two, udarka, unity, unstress, up, upward, vareia, vareiai, varys, vasis, vastness
+  vathy, verge, vertical, virga, vocal, void, vou, vrakhiya, vysoko, waiting, wanderer, wasting
+  watch, water, well, white, whole, wind, with, work, xiron, yfen, yfesis, youthful
+  youthfulness, ypokrisis, yporroi, ypsili, zaderzhka, zakrytaya, zakrytoe, zanozhek, zapyataya, zapyatoy, zapyatymi, zelo
+  zevok, zmeytsa, znamenny, zo, zygos
+```
+
+**Cụm từ riêng T** (958 cụm, hiển thị 80 mẫu):
+```
+  BYZANTINE MUSICAL SYMBOL AGOGI ARGI
+  BYZANTINE MUSICAL SYMBOL AGOGI ARGOTERI
+  BYZANTINE MUSICAL SYMBOL AGOGI GORGI
+  BYZANTINE MUSICAL SYMBOL AGOGI GORGOTERI
+  BYZANTINE MUSICAL SYMBOL AGOGI MESI
+  BYZANTINE MUSICAL SYMBOL AGOGI METRIA
+  BYZANTINE MUSICAL SYMBOL AGOGI POLI ARGI
+  BYZANTINE MUSICAL SYMBOL AGOGI POLI GORGI
+  BYZANTINE MUSICAL SYMBOL ANATRICHISMA
+  BYZANTINE MUSICAL SYMBOL ANTIKENOKYLISMA
+  BYZANTINE MUSICAL SYMBOL ANTIKENOMA
+  BYZANTINE MUSICAL SYMBOL APESO EKFONITIKON
+  BYZANTINE MUSICAL SYMBOL APESO EXO NEO
+  BYZANTINE MUSICAL SYMBOL APLI
+  BYZANTINE MUSICAL SYMBOL APODERMA ARCHAION
+  BYZANTINE MUSICAL SYMBOL APODERMA NEO
+  BYZANTINE MUSICAL SYMBOL APOSTROFOI SYNDESMOS NEO
+  BYZANTINE MUSICAL SYMBOL APOSTROFOI TELOUS ICHIMATOS
+  BYZANTINE MUSICAL SYMBOL APOSTROFOS
+  BYZANTINE MUSICAL SYMBOL APOSTROFOS DIPLI
+  BYZANTINE MUSICAL SYMBOL APOSTROFOS NEO
+  BYZANTINE MUSICAL SYMBOL APOTHEMA
+  BYZANTINE MUSICAL SYMBOL ARGON
+  BYZANTINE MUSICAL SYMBOL ARGOSYNTHETON
+  BYZANTINE MUSICAL SYMBOL ARKTIKO DI
+  BYZANTINE MUSICAL SYMBOL ARKTIKO GA
+  BYZANTINE MUSICAL SYMBOL ARKTIKO KE
+  BYZANTINE MUSICAL SYMBOL ARKTIKO NI
+  BYZANTINE MUSICAL SYMBOL ARKTIKO PA
+  BYZANTINE MUSICAL SYMBOL ARKTIKO VOU
+  BYZANTINE MUSICAL SYMBOL ARKTIKO ZO
+  BYZANTINE MUSICAL SYMBOL CHAMILI
+  BYZANTINE MUSICAL SYMBOL CHAMILON
+  BYZANTINE MUSICAL SYMBOL CHOREVMA ARCHAION
+  BYZANTINE MUSICAL SYMBOL CHOREVMA NEO
+  BYZANTINE MUSICAL SYMBOL CHROA KLITON
+  BYZANTINE MUSICAL SYMBOL CHROA SPATHI
+  BYZANTINE MUSICAL SYMBOL CHROA ZYGOS
+  BYZANTINE MUSICAL SYMBOL DASEIA
+  BYZANTINE MUSICAL SYMBOL DIARGON
+  BYZANTINE MUSICAL SYMBOL DIASTOLI APLI MEGALI
+  BYZANTINE MUSICAL SYMBOL DIASTOLI APLI MIKRI
+  BYZANTINE MUSICAL SYMBOL DIASTOLI DIPLI
+  BYZANTINE MUSICAL SYMBOL DIASTOLI THESEOS
+  BYZANTINE MUSICAL SYMBOL DIESIS APLI DYO DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS DIGRAMMOS EX DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS MONOGRAMMOS TESSERA DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS TETARTIMORION
+  BYZANTINE MUSICAL SYMBOL DIESIS TRIGRAMMOS OKTO DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS TRITIMORION
+  BYZANTINE MUSICAL SYMBOL DIFTOGGOS OU
+  BYZANTINE MUSICAL SYMBOL DIGORGON
+  BYZANTINE MUSICAL SYMBOL DIGORGON PARESTIGMENON ARISTERA ANO
+  BYZANTINE MUSICAL SYMBOL DIGORGON PARESTIGMENON ARISTERA KATO
+  BYZANTINE MUSICAL SYMBOL DIGORGON PARESTIGMENON DEXIA
+  BYZANTINE MUSICAL SYMBOL DIGRAMMA GG
+  BYZANTINE MUSICAL SYMBOL DIPLI
+  BYZANTINE MUSICAL SYMBOL DIPLI ARCHAION
+  BYZANTINE MUSICAL SYMBOL DYO
+  BYZANTINE MUSICAL SYMBOL EKSTREPTON
+  BYZANTINE MUSICAL SYMBOL ELAFRON
+  BYZANTINE MUSICAL SYMBOL ENARXIS KAI FTHORA VOU
+  BYZANTINE MUSICAL SYMBOL ENDOFONON
+  BYZANTINE MUSICAL SYMBOL EPEGERMA
+  BYZANTINE MUSICAL SYMBOL ETERON ARGOSYNTHETON
+  BYZANTINE MUSICAL SYMBOL ETERON PARAKALESMA
+  BYZANTINE MUSICAL SYMBOL EXO EKFONITIKON
+  BYZANTINE MUSICAL SYMBOL FANEROSIS DIFONIAS
+  BYZANTINE MUSICAL SYMBOL FANEROSIS MONOFONIAS
+  BYZANTINE MUSICAL SYMBOL FANEROSIS TETRAFONIAS
+  BYZANTINE MUSICAL SYMBOL FHTORA SKLIRON CHROMA VASIS
+  BYZANTINE MUSICAL SYMBOL FTHORA ARCHAION
+  BYZANTINE MUSICAL SYMBOL FTHORA ARCHAION DEYTEROU ICHOU
+  BYZANTINE MUSICAL SYMBOL FTHORA DIATONIKI DI
+  BYZANTINE MUSICAL SYMBOL FTHORA DIATONIKI KE
+  BYZANTINE MUSICAL SYMBOL FTHORA DIATONIKI NANA
+  BYZANTINE MUSICAL SYMBOL FTHORA DIATONIKI NI ANO
+  BYZANTINE MUSICAL SYMBOL FTHORA DIATONIKI NI KATO
+  BYZANTINE MUSICAL SYMBOL FTHORA DIATONIKI PA
+  BYZANTINE MUSICAL SYMBOL FTHORA DIATONIKI ZO
+  ... +878 cụm từ nữa
+```
+
+**Câu riêng T** (791 câu, hiển thị 50 mẫu):
+```
+  BYZANTINE MUSICAL SYMBOL AGOGI ARGI
+  BYZANTINE MUSICAL SYMBOL AGOGI ARGOTERI
+  BYZANTINE MUSICAL SYMBOL AGOGI GORGI
+  BYZANTINE MUSICAL SYMBOL AGOGI GORGOTERI
+  BYZANTINE MUSICAL SYMBOL AGOGI MESI
+  BYZANTINE MUSICAL SYMBOL AGOGI METRIA
+  BYZANTINE MUSICAL SYMBOL AGOGI POLI ARGI
+  BYZANTINE MUSICAL SYMBOL AGOGI POLI GORGI
+  BYZANTINE MUSICAL SYMBOL ANATRICHISMA
+  BYZANTINE MUSICAL SYMBOL ANTIKENOKYLISMA
+  BYZANTINE MUSICAL SYMBOL ANTIKENOMA
+  BYZANTINE MUSICAL SYMBOL APESO EKFONITIKON
+  BYZANTINE MUSICAL SYMBOL APESO EXO NEO
+  BYZANTINE MUSICAL SYMBOL APLI
+  BYZANTINE MUSICAL SYMBOL APODERMA ARCHAION
+  BYZANTINE MUSICAL SYMBOL APODERMA NEO
+  BYZANTINE MUSICAL SYMBOL APOSTROFOI SYNDESMOS NEO
+  BYZANTINE MUSICAL SYMBOL APOSTROFOI TELOUS ICHIMATOS
+  BYZANTINE MUSICAL SYMBOL APOSTROFOS
+  BYZANTINE MUSICAL SYMBOL APOSTROFOS DIPLI
+  BYZANTINE MUSICAL SYMBOL APOSTROFOS NEO
+  BYZANTINE MUSICAL SYMBOL APOTHEMA
+  BYZANTINE MUSICAL SYMBOL ARGON
+  BYZANTINE MUSICAL SYMBOL ARGOSYNTHETON
+  BYZANTINE MUSICAL SYMBOL ARKTIKO DI
+  BYZANTINE MUSICAL SYMBOL ARKTIKO GA
+  BYZANTINE MUSICAL SYMBOL ARKTIKO KE
+  BYZANTINE MUSICAL SYMBOL ARKTIKO NI
+  BYZANTINE MUSICAL SYMBOL ARKTIKO PA
+  BYZANTINE MUSICAL SYMBOL ARKTIKO VOU
+  BYZANTINE MUSICAL SYMBOL ARKTIKO ZO
+  BYZANTINE MUSICAL SYMBOL CHAMILI
+  BYZANTINE MUSICAL SYMBOL CHAMILON
+  BYZANTINE MUSICAL SYMBOL CHOREVMA ARCHAION
+  BYZANTINE MUSICAL SYMBOL CHOREVMA NEO
+  BYZANTINE MUSICAL SYMBOL CHROA KLITON
+  BYZANTINE MUSICAL SYMBOL CHROA SPATHI
+  BYZANTINE MUSICAL SYMBOL CHROA ZYGOS
+  BYZANTINE MUSICAL SYMBOL DASEIA
+  BYZANTINE MUSICAL SYMBOL DIARGON
+  BYZANTINE MUSICAL SYMBOL DIASTOLI APLI MEGALI
+  BYZANTINE MUSICAL SYMBOL DIASTOLI APLI MIKRI
+  BYZANTINE MUSICAL SYMBOL DIASTOLI DIPLI
+  BYZANTINE MUSICAL SYMBOL DIASTOLI THESEOS
+  BYZANTINE MUSICAL SYMBOL DIESIS APLI DYO DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS DIGRAMMOS EX DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS MONOGRAMMOS TESSERA DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS TETARTIMORION
+  BYZANTINE MUSICAL SYMBOL DIESIS TRIGRAMMOS OKTO DODEKATA
+  BYZANTINE MUSICAL SYMBOL DIESIS TRITIMORION
+  ... +741 câu nữa
+```
