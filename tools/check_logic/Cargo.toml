@@ -8,3 +8,8 @@ name = "check-logic"
 path = "src/main.rs"
 
 [dependencies]
+ucd      = { path = "../../crates/ucd" }
+olang    = { path = "../../crates/olang" }
+silk     = { path = "../../crates/silk" }
+context  = { path = "../../crates/context" }
+homemath = { path = "../../crates/homemath" }

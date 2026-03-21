@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 mod checks;
+pub mod parse_rs;
+mod structural;
+mod functional;
 
 fn main() {
     let root = find_project_root();
@@ -73,6 +76,21 @@ fn main() {
         checks::check_l0_similarity_dims(&root),
         checks::check_l0_mol_raw_public(&root),
         checks::check_rewrite_alignment(&root),
+        // ── FUNCTIONAL: Run real code, verify results ──
+        functional::check_ucd_encode_real(),
+        functional::check_molecule_roundtrip(),
+        functional::check_lca_rules(),
+        functional::check_hebbian_math(),
+        functional::check_emotion_pipeline(),
+        functional::check_performance(),
+        // ── STRUCTURAL: Parse-based, no hardcode ──
+        structural::check_molecule_size(&root),
+        structural::check_shapebase_variants(&root),
+        structural::check_compactqr_bits(&root),
+        structural::check_compile_coverage(&root),
+        structural::check_stdlib_builtins_xref(&root),
+        structural::check_opcode_coverage(&root),
+        structural::check_chain_type(&root),
     ];
 
     // ── Report ──
