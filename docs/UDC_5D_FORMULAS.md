@@ -870,3 +870,225 @@ Pipeline tìm kiếm:
     → UDC lookup → P_weight = [0, 9, V=0.388, A=0.570, 0]
     → Node 😡 với 5 công thức đầy đủ
 ```
+
+---
+
+### Nhóm 7 — Math & Geometric Properties
+
+```
+Tệp:
+  Blocks.txt    — phân chia dải mã (U+25A0..U+25FF = Geometric Shapes)
+  PropList.txt  — thuộc tính bổ sung (White_Space, Dash, Math...)
+
+Ánh xạ 5D:
+  Blocks.txt → XÁC ĐỊNH NHÓM NHANH:
+    Range Filtering: codepoint nằm trong dải nào?
+    → dải SDF   (13 blocks) → S dominant
+    → dải MATH  (18 blocks) → R dominant
+    → dải EMOT  (15 blocks) → V,A dominant
+    → dải MUSIC (7 blocks)  → T dominant
+    → O(1) lookup, không quét từng dòng
+
+  PropList.txt → TINH CHỈNH S, R:
+    Math=true         → R ≠ 0 (ký tự toán học mang relation)
+    Dash=true         → S=2 (CAPSULE — hình ngang dài)
+    Quotation_Mark    → R=14 (BRACKET — bao đóng)
+    White_Space       → S=3 (PLANE — khoảng trống phẳng)
+    Ideographic       → S=1 (BOX — chữ vuông CJK)
+
+Data thật (từ udc_utf32.json):
+  SQUARE chars  → S=1 (BOX) 100% consistent ✓
+  CIRCLE chars  → S=0 (SPHERE) 100% consistent ✓
+  TRIANGLE chars→ S=6 (CONE) 100% consistent ✓
+  DIAMOND chars → S=8 (OCTAHEDRON) consistent ✓
+```
+
+---
+
+### Nhóm 8 — Collation (Thứ tự sắp xếp)
+
+```
+Tệp:
+  allkeys.txt (DUCET — Default Unicode Collation Element Table)
+
+Ánh xạ 5D:
+  Collation weight → KHÔNG trực tiếp map vào 5D
+  Nhưng phục vụ:
+    ① Sắp xếp node theo "thứ tự tự nhiên" trong KnowTree
+    ② So sánh 2 ký tự khi merge alias:
+       "ä" vs "a" → collation nói "gần nhau"
+       → merge vào cùng parent node (LCA gần)
+    ③ Ordering trong hệ chữ viết → R=4 (ORDER)
+
+  VD: Tiếng Việt: a < ă < â < b < c < d < đ...
+    Collation weight → thứ tự trong KnowTree branch "Vietnamese"
+    Mỗi ký tự vẫn giữ P_weight riêng
+    Collation chỉ quyết định VỊ TRÍ HIỂN THỊ, không ảnh hưởng 5D
+```
+
+---
+
+### Nhóm chuyên biệt A — Shape & Geometry Data
+
+```
+Tệp:
+  Blocks.txt              — dải mã hình học
+  PropList.txt            — thuộc tính hình dáng
+  Unihan_Variants.txt     — biến thể glyph (CJK)
+
+Chiều phục vụ: S (Shape) — chủ đạo
+
+SDF Pipeline:
+  ① Xác định block → biết loại hình học (Geometric, Box Drawing, Arrows...)
+  ② Tra PropList → tinh chỉnh primitive (Dash → CAPSULE, Math → CONE...)
+  ③ Tra Unihan_Variants → biến thể cùng shape:
+     統 (thống) ←→ 统 (simplified) → cùng S=1 (BOX)
+     Khác glyph nhưng cùng SDF primitive
+
+Data chứng minh (word→S correlation):
+  Từ "SQUARE"     → S=1 (BOX)       100% chars   ← data thật
+  Từ "CIRCLE"     → S=0 (SPHERE)    100% chars
+  Từ "HORIZONTAL" → S=3 (PLANE)     mode
+  Từ "VERTICAL"   → S=3 (PLANE)     mode
+  Từ "POINTED"    → S=6 (CONE)      mode
+  Từ "SPIRAL"     → S=0 (SPHERE)    mode
+  Từ "CURVED"     → S=1 (BOX)       mode (curved box = round_box)
+```
+
+---
+
+### Nhóm chuyên biệt B — Semantic & Definition Data
+
+```
+Tệp:
+  Unihan_Readings.txt                   — đọc/nghĩa chữ Hán
+  cldr-json/main/{locale}/annotations.json — mô tả hành vi/ý nghĩa
+
+Chiều phục vụ: R (Relation) + V (Valence) — hỗ trợ
+
+Semantic → R:
+  kDefinition: "to govern, to rule" → R=4 (ORDER)
+  kDefinition: "to combine, to join" → R=7 (SET_OP / UNION)
+  kDefinition: "to compare" → R=3 (EQUALITY)
+  → Nghĩa từ điển → heuristic cho relation type
+
+Semantic → V:
+  kDefinition chứa "happy, joy" → V cao
+  kDefinition chứa "death, destroy" → V thấp
+  → NRC-VAD lookup trên từ khóa trong definition
+
+Data chứng minh:
+  Từ "SMILING" → V=0.706 (dương)    ← data thật
+  Từ "FROWNING"→ V=0.405 (âm)       ← data thật
+  Từ "LOVE"    → V=0.879 (cực dương) ← data thật
+  Từ "SKULL"   → V=0.232 (cực âm)   ← data thật
+```
+
+---
+
+### Nhóm chuyên biệt C — Sentiment & Nuance Data
+
+```
+Tệp:
+  NRC-VAD-Lexicon.txt     — V/A/D cho ~20,000 từ tiếng Anh
+  Emoji-Sentiment-Data.csv — sentiment score cho emoji
+  Emoji-Dis.csv            — discrete emotions cho emoji
+
+Chiều phục vụ: V (Valence) + A (Arousal) — CHỦ ĐẠO
+
+NRC-VAD → V, A trực tiếp:
+  Mỗi từ có tọa độ (Valence, Arousal, Dominance)
+  HomeOS dùng V và A, bỏ D (Dominance → thay bằng T)
+
+  VD từ NRC-VAD:
+    "love"    → V=0.958, A=0.718  → node: V≈7, A≈5
+    "fear"    → V=0.073, A=0.839  → node: V≈0, A≈6
+    "calm"    → V=0.826, A=0.120  → node: V≈6, A≈1
+    "rage"    → V=0.031, A=0.964  → node: V≈0, A≈7
+
+Emoji-Sentiment → cross-validate:
+  Score < 0 → V thấp (âm)
+  Score > 0 → V cao (dương)
+  → dùng để kiểm chứng UDC V values
+
+Emoji-Dis → discrete → continuous:
+  "joy"      → V=0.85, A=0.50
+  "anger"    → V=0.15, A=0.85
+  "surprise" → V=0.55, A=0.80
+  → Map emotions rời rạc → tọa độ V,A liên tục
+
+Data chứng minh (word→A correlation):
+  Từ "FIRE"  → A=0.706 (kích thích cao)  ← data thật
+  Từ "PEACE" → A=0.175 (rất tĩnh)        ← data thật
+  Từ "FAST"  → A=0.715 (kích thích cao)  ← data thật
+  Từ "SLOW"  → A=0.334 (tĩnh)            ← data thật
+  Từ "SOFT"  → A=0.329 (tĩnh)            ← data thật
+```
+
+---
+
+### Nhóm chuyên biệt D — Relation & Context Data
+
+```
+Tệp:
+  Scripts.txt          — hệ chữ (Latin, Han, Arabic, Cyrillic...)
+  ScriptExtensions.txt — ký tự dùng chung nhiều hệ chữ
+  LineBreak.txt        — quy tắc ngắt dòng
+
+Chiều phục vụ: R (Relation) + S (Shape) — ngữ cảnh
+
+Scripts.txt → R:
+  Script quyết định "môi trường văn hóa":
+    Latin  → R mặc định = IDENTITY (0)
+    Arabic → R mặc định = DIRECTIONAL (13) — phải→trái
+    Han    → R mặc định = AGGREGATE (12)   — chữ = tổ hợp bộ thủ
+
+  Cùng 1 shape nhưng khác script → khác sắc thái:
+    ○ trong Latin context: neutral (V=0.5)
+    ○ trong Emoji context: khác V tùy glyph
+
+ScriptExtensions.txt → R=8 (COMPOSE):
+  Ký tự dùng chung nhiều script = cầu nối
+  VD: dấu câu, số → script-independent
+  → R=8 vì chúng COMPOSE với mọi hệ chữ
+
+LineBreak.txt → S (gián tiếp):
+  Quy tắc ngắt dòng → hình dạng khối văn bản
+  CJK (mỗi char ngắt được) → S=1 (BOX) — chữ vuông
+  Latin (ngắt theo word) → S=2 (CAPSULE) — từ dài
+
+Data chứng minh (word→direction):
+  Từ "LEFTWARDS"  → S=14 (REVOLVE), R=13 (DIRECTIONAL)  ← data thật
+  Từ "RIGHTWARDS" → S=14 (REVOLVE), R=13 (DIRECTIONAL)  ← data thật
+  Từ "UPWARDS"    → V=0.553 (dương — lên = tích cực)    ← data thật
+  Từ "DOWNWARDS"  → V=0.411 (âm — xuống = tiêu cực)     ← data thật
+```
+
+---
+
+### Nhóm chuyên biệt E — Descriptive Alias
+
+```
+Tệp:
+  NameAliases.txt (Type: FIGURATIVE, CORRECTION, ABBREVIATION...)
+
+Chiều phục vụ: Tất cả 5D — qua alias resolution
+
+Các loại alias:
+  CORRECTION  — tên sửa lỗi (tên gốc sai → tên đúng)
+  FIGURATIVE  — tên mô tả hình tượng
+  ABBREVIATION — tên viết tắt
+  ALTERNATE   — tên thay thế
+
+Ánh xạ 5D:
+  Mọi alias → cùng 1 codepoint → cùng 1 P_weight
+  VD: U+2118
+    Tên gốc: "SCRIPT CAPITAL P"
+    FIGURATIVE: "WEIERSTRASS ELLIPTIC FUNCTION"
+    → Cả 2 tên → cùng node → cùng S=0, R=5, V, A, T
+
+  Description Search:
+    User gõ "Weierstrass" → alias match → U+2118 → P_weight
+    User gõ "script P"   → alias match → U+2118 → same P_weight
+    → 2 con đường khác nhau, cùng đích đến 5D
+```
