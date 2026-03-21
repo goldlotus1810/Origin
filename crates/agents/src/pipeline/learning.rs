@@ -294,6 +294,32 @@ impl LearningLoop {
         let emotion = encoded.emotion;
         let hash = chain.chain_hash();
 
+        // ── CHECKPOINT 2: ENCODE ────────────────────────────────────────────
+        // Spec §X CP2: entities≥1, chain_hash≠0, consistency≥0.75
+        // Vi phạm → Honesty: "Không hiểu input"
+        {
+            // (a) chain_hash phải khác 0
+            if hash == 0 {
+                return ProcessResult::Empty;
+            }
+            // (b) chain phải có ít nhất 1 link (entity)
+            if chain.len() < 1 {
+                return ProcessResult::Empty;
+            }
+            // (c) consistency: kiểm tra chain không toàn zero
+            let non_zero_count = chain.0.iter().filter(|&&m| m != 0).count();
+            let consistency = if chain.len() > 0 {
+                non_zero_count as f32 / chain.len() as f32
+            } else {
+                0.0
+            };
+            if consistency < 0.75 {
+                return ProcessResult::Blocked {
+                    reason: alloc::string::String::from("CP2: encode consistency < 0.75"),
+                };
+            }
+        }
+
         // ── 2. Context Engine — BẢN NĂNG: mọi modality cập nhật context ─────
         {
             use context::snapshot::RawInput;

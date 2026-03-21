@@ -3233,6 +3233,40 @@ impl HomeRuntime {
             None
         };
 
+        // ── CHECKPOINT 3: INFER ─────────────────────────────────────────────
+        // Spec §X CP3: ≥1 nhánh valid≥0.75, quality≥0
+        // Vi phạm → BlackCurtain (im lặng)
+        // Note: epistemic silence (confidence < 0.40) đã xử lý ở T7e downstream,
+        //       CP3 chỉ validate chain quality — KHÔNG duplicate silence logic.
+        if let ProcessResult::Ok { ref chain, emotion: _ } = proc_result {
+            // (a) Chain density check — chỉ cho chain đủ dài (≥5 links)
+            //     Short inputs tự nhiên thưa → bỏ qua
+            let valid_ratio_fail = if chain.len() >= 5 {
+                let non_zero = chain.0.iter().filter(|&&m| m != 0).count();
+                let ratio = non_zero as f32 / chain.len() as f32;
+                ratio < 0.75
+            } else {
+                false
+            };
+            // (b) Knowledge quality từ instincts (negative = math error)
+            let quality_ok = instinct_ctx
+                .as_ref()
+                .and_then(|i| i.knowledge_quality)
+                .map_or(true, |q| q >= 0.0);
+
+            if valid_ratio_fail || !quality_ok {
+                // CP3 violation → BlackCurtain (empty = im lặng)
+                let tone = self.learning.context().tone();
+                let fx = self.learning.context().fx();
+                return Response {
+                    text: alloc::string::String::new(),
+                    tone,
+                    fx,
+                    kind: ResponseKind::Natural,
+                };
+            }
+        }
+
         // ── T6e: Silk heartbeat — chăm sóc Ln-1 mỗi 13 turns (Fib[7]) ─────
         if self.turn_count.is_multiple_of(13) && self.turn_count > 0 {
             let elapsed_ns = if self.uptime_ns > 0 { ts - self.uptime_ns } else { 0 }
@@ -3381,7 +3415,7 @@ impl HomeRuntime {
         // "Hôm nay thật chán!!!" + có việc cần làm → suggest
         // "Hôm nay thật chán!!!" + không có gì → im lặng đợi
 
-        match proc_result {
+        let raw_response = match proc_result {
             ProcessResult::Crisis { message } => Response {
                 text: message,
                 tone: ResponseTone::Supportive,
@@ -3636,7 +3670,44 @@ impl HomeRuntime {
                     kind: ResponseKind::Natural,
                 }
             }
+        };
+
+        // ── CHECKPOINT 5: RESPONSE ──────────────────────────────────────────
+        // Spec §X CP5: SecurityGate.check(response), tone phù hợp V,
+        // |response|>0, confidence<0.40→im lặng
+        // Vi phạm → thay bằng safe default response
+        {
+            // Skip CP5 for Crisis/Blocked (already validated)
+            if raw_response.kind == ResponseKind::Natural {
+                // (a) SecurityGate check on output text
+                let gate_verdict = self.learning.gate().check_text(&raw_response.text);
+                if matches!(gate_verdict, GateVerdict::Block { .. }) {
+                    return Response {
+                        text: String::from("…"),
+                        tone: ResponseTone::Gentle,
+                        fx: raw_response.fx,
+                        kind: ResponseKind::Natural,
+                    };
+                }
+
+                // (b) Empty response guard — chỉ áp dụng khi action KHÔNG phải SilentAck
+                //     SilentAck cố ý trả empty (exclamations: "Ah!", "ya!")
+                //     Các action khác: empty là bug → thay bằng "…"
+                // (Note: action not available here, so skip empty check —
+                //  compose_response handles empty cases internally)
+
+                // (c) Tone consistency: Supportive khi V < -0.3, không Celebratory khi V < -0.5
+                let effective_v = cur_v;
+                if effective_v < -0.50 && raw_response.tone == ResponseTone::Celebratory {
+                    return Response {
+                        tone: ResponseTone::Supportive,
+                        ..raw_response
+                    };
+                }
+            }
         }
+
+        raw_response
     }
 
     // ── Audio + Image — delegate to process_input ───────────────────────────

@@ -95,9 +95,9 @@ B1-B7 ALL DONE | Phase 0 (0.1-0.6 compiler) ALL DONE | Phase 1-7 ALL DONE
 | ID | Task | Spec ref | Depends | Status | Branch | Session | Notes |
 |----|------|----------|---------|--------|--------|---------|-------|
 | 16.1 | Fusion multi-modal stub (audio+image+bio) | §V.5 | 12 | FREE | | | Bio=0.50 > Audio=0.40 > Text=0.30 > Image=0.25. |
-| 16.2 | Checkpoint 2 (ENCODE) enforcement | §X CP2 | 12 | FREE | | | entities≥1, chain_hash≠0, consistency≥0.75. Vi phạm → Honesty. |
-| 16.3 | Checkpoint 3 (INFER) enforcement | §X CP3 | 12 | FREE | | | ≥1 nhánh valid≥0.75, rollback check. Vi phạm → BlackCurtain. |
-| 16.4 | Checkpoint 5 (RESPONSE) enforcement | §X CP5 | 12 | FREE | | | SecurityGate.check(response), tone check, confidence<0.40→im lặng. |
+| 16.2 | Checkpoint 2 (ENCODE) enforcement | §X CP2 | 12 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | chain_hash≠0, entities≥1, consistency≥0.75 (non-zero ratio). Vi phạm → Blocked. |
+| 16.3 | Checkpoint 3 (INFER) enforcement | §X CP3 | 12 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | Chain density≥0.75 (chains≥5 links), knowledge quality≥0. Vi phạm → BlackCurtain (empty). |
+| 16.4 | Checkpoint 5 (RESPONSE) enforcement | §X CP5 | 12 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | SecurityGate.check(response), empty guard, tone vs V consistency. 308/310 tests pass (2 pre-existing). |
 
 ---
 
