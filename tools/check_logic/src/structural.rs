@@ -374,7 +374,7 @@ pub fn check_chain_type(root: &Path) -> CheckResult {
             .with_details(details)
     } else {
         let link_size = if inner_type.contains("Molecule") { "11B" } else { "?" };
-        details.push(format!("v2: chain link = u16 (2B) = codepoint reference"));
+        details.push("v2: chain link = u16 (2B) = codepoint reference".to_string());
         details.push(format!("Current: {} ({}/link)", inner_type, link_size));
         CheckResult::fail("S7 Chain Type", &format!(
             "Chain = {} — v2 requires Vec<u16>", inner_type
