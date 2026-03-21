@@ -4,10 +4,21 @@
 //! Append-only. Không xóa. Không sửa.
 //! HomeOS đọc sổ cái → thấy mình → tạo ra cái mới.
 //!
+//! ## v2 — Codepoint-based index (T8)
+//!
+//! Registry index by codepoint (u32), NOT only by hash.
+//! - `cp_index`: sorted Vec<(u32, usize)> — codepoint → entries index
+//! - `lookup_codepoint(cp)` — O(log n) binary search
+//! - L0 bootstrap: 9,584 nodes from UCD table (not 35 hardcoded)
+//!
+//! UDC = hệ tọa độ của chúng ta. UTF-32 codepoints = alias.
+//! Registry stores UDC nodes, referenced by codepoint alias.
+//!
 //! ## Cấu trúc:
-//!   chain_index:  BTreeMap<u64, u64>         — hash → file offset
-//!   name_index:   BTreeMap<&str, u64>        — alias → hash
-//!   layer_rep:    [Option<u64>; 256]          — Lx → NodeLx hash
+//!   entries:      Vec<(u64, RegistryEntry)>  — hash → entry (legacy, kept for compat)
+//!   cp_index:     Vec<(u32, usize)>          — codepoint → entries index (v2 primary)
+//!   name_index:   Vec<(String, u64)>         — alias → hash
+//!   layer_rep:    [Option<u64>; 16]           — Lx → NodeLx hash
 //!   branch_wm:    Vec<(u64, u8)>             — branch → leaf_layer
 //!   qr_supersede: Vec<(u64, u64)>            — old → new QR hash
 //!
@@ -46,7 +57,7 @@ use crate::molecular::MolecularChain;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum NodeKind {
-    /// L0 Unicode alphabet — innate, immutable (35 seeded nodes)
+    /// L0 Unicode alphabet — innate, immutable (9,584 UDC nodes from udc.json)
     Alphabet = 0,
     /// Knowledge — kiến thức đã học, concepts, truths
     Knowledge = 1,
@@ -137,6 +148,12 @@ pub struct Registry {
     /// chain_hash → RegistryEntry (sorted by hash for binary search)
     entries: Vec<(u64, RegistryEntry)>,
 
+    /// v2 codepoint index: codepoint → chain_hash.
+    /// Sorted by codepoint for O(log n) binary search.
+    /// Primary lookup path in v2 — codepoint IS the UDC address.
+    /// Two-step lookup: cp → hash → entry (both O(log n)).
+    cp_index: Vec<(u32, u64)>,
+
     /// alias (name) → chain_hash
     /// "lửa" → hash(🔥), "fire" → hash(🔥)
     names: Vec<(String, u64)>,
@@ -182,6 +199,7 @@ impl Registry {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            cp_index: Vec::new(),
             names: Vec::new(),
             hash_to_name: Vec::new(),
             layer_rep: [None; 16],
@@ -219,6 +237,9 @@ impl Registry {
 
         // Deduplicate: keep first (= lowest layer = L1 over L0)
         self.entries.dedup_by_key(|&mut (h, _)| h);
+
+        // Sort codepoint index (populated via insert_codepoint during bulk)
+        self.sort_cp_index();
 
         // Sort names by name (binary search requirement)
         self.names.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
@@ -324,6 +345,59 @@ impl Registry {
         }
 
         hash
+    }
+
+    // ── v2 Codepoint-based insert/lookup ─────────────────────────────────────
+
+    /// v2: Đăng ký node mới bằng codepoint (UDC address).
+    ///
+    /// Codepoint = UDC position. UTF-32 chỉ là alias.
+    /// Tạo entry + cập nhật cả hash index và codepoint index.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_codepoint(
+        &mut self,
+        codepoint: u32,
+        chain: &MolecularChain,
+        layer: u8,
+        file_offset: u64,
+        created_at: i64,
+        is_qr: bool,
+        kind: NodeKind,
+    ) -> u64 {
+        let hash = self.insert_with_kind(chain, layer, file_offset, created_at, is_qr, kind);
+
+        // Add to codepoint index
+        if self.bulk_mode {
+            // Bulk mode: push unsorted, sort at finalize_bulk
+            self.cp_index.push((codepoint, hash));
+        } else {
+            let pos = self.cp_index.partition_point(|&(cp, _)| cp < codepoint);
+            if pos >= self.cp_index.len() || self.cp_index[pos].0 != codepoint {
+                self.cp_index.insert(pos, (codepoint, hash));
+            }
+        }
+
+        hash
+    }
+
+    /// v2: Lookup bằng codepoint — O(log n) → O(log n).
+    ///
+    /// Codepoint = UDC address. Đây là lookup path chính trong v2.
+    /// Two-step: cp → hash (binary search cp_index) → entry (binary search entries).
+    pub fn lookup_codepoint(&self, codepoint: u32) -> Option<&RegistryEntry> {
+        self.cp_index
+            .binary_search_by_key(&codepoint, |&(cp, _)| cp)
+            .ok()
+            .and_then(|i| {
+                let hash = self.cp_index[i].1;
+                self.lookup_hash(hash)
+            })
+    }
+
+    /// Sort and deduplicate cp_index — called after finalize_bulk().
+    fn sort_cp_index(&mut self) {
+        self.cp_index.sort_unstable_by_key(|&(cp, _)| cp);
+        self.cp_index.dedup_by_key(|&mut (cp, _)| cp);
     }
 
     /// Đăng ký alias (ngôn ngữ tự nhiên → node).
@@ -504,6 +578,11 @@ impl Registry {
         self.names.len()
     }
 
+    /// v2: Số codepoints đã đăng ký trong cp_index.
+    pub fn codepoint_count(&self) -> usize {
+        self.cp_index.len()
+    }
+
     /// Reverse lookup: tìm alias đầu tiên cho chain_hash — O(log n) via reverse index.
     pub fn alias_for_hash(&self, hash: u64) -> Option<&str> {
         // Use reverse index if available (post-finalize or normal mode)
@@ -583,7 +662,10 @@ impl Registry {
         let rev_heap: usize = self.hash_to_name.iter().map(|(_, s)| s.len()).sum();
         let rev_bytes = self.hash_to_name.capacity() * rev_overhead + rev_heap;
 
-        // misc: layer_rep_chain, branch_wm, qr_supersede, bulk_chains
+        // cp_index: Vec<(u32, u64)>
+        let cp_index_bytes = self.cp_index.capacity() * core::mem::size_of::<(u32, u64)>();
+
+        // misc: layer_rep_chain, branch_wm, qr_supersede, bulk_chains, cp_index
         let rep_chain_bytes: usize = self.layer_rep_chain.iter()
             .filter_map(|o| o.as_ref())
             .map(|c| c.0.len() * 5 + 24) // Vec overhead + molecules
@@ -592,7 +674,7 @@ impl Registry {
         let qr_bytes = self.qr_supersede.capacity() * core::mem::size_of::<(u64, u64)>();
         let bulk_bytes = self.bulk_chains.capacity()
             * core::mem::size_of::<(u8, MolecularChain)>();
-        let misc_bytes = rep_chain_bytes + branch_bytes + qr_bytes + bulk_bytes + rev_bytes + 144;
+        let misc_bytes = rep_chain_bytes + branch_bytes + qr_bytes + bulk_bytes + rev_bytes + cp_index_bytes + 144;
 
         let total = entries_bytes + aliases_bytes + misc_bytes;
         (entries_bytes, aliases_bytes, misc_bytes, total)
@@ -914,10 +996,11 @@ mod tests {
     #[test]
     fn evict_cold_removes_l2_plus() {
         let mut r = Registry::new();
-        let c0 = encode_codepoint(0x1F525); // L0
-        let c1 = encode_codepoint(0x2654);  // L1
-        let c2 = encode_codepoint(0x2655);  // L2
-        let c3 = encode_codepoint(0x2656);  // L3
+        // Use codepoints from different groups to avoid hash collisions
+        let c0 = encode_codepoint(0x1F525); // 🔥 L0 (EMOTICON)
+        let c1 = encode_codepoint(0x25CF);  // ● L1 (SDF)
+        let c2 = encode_codepoint(0x2208);  // ∈ L2 (MATH)
+        let c3 = encode_codepoint(0x1D11E); // 𝄞 L3 (MUSICAL)
 
         r.insert(&c0, 0, 0, 0, false);
         r.insert(&c1, 1, 1, 0, false);
@@ -966,6 +1049,62 @@ mod tests {
         // Reverse index should work after finalize
         let name = r.alias_for_hash(hash);
         assert_eq!(name, Some("fire"));
+    }
+
+    // ── v2 Codepoint-based tests ────────────────────────────────────────────
+
+    #[test]
+    fn insert_codepoint_and_lookup() {
+        let mut r = Registry::new();
+        let cp: u32 = 0x1F525; // 🔥
+        let chain = encode_codepoint(cp);
+        let hash = r.insert_codepoint(cp, &chain, 0, 0, 1000, true, NodeKind::Alphabet);
+
+        // Lookup by codepoint
+        let entry = r.lookup_codepoint(cp).expect("lookup_codepoint must find it");
+        assert_eq!(entry.chain_hash, hash);
+        assert_eq!(entry.layer, 0);
+        assert_eq!(entry.kind, NodeKind::Alphabet);
+
+        // Lookup by hash still works
+        assert!(r.lookup_hash(hash).is_some());
+
+        // Codepoint count
+        assert_eq!(r.codepoint_count(), 1);
+    }
+
+    #[test]
+    fn insert_codepoint_bulk_mode() {
+        let mut r = Registry::new();
+        r.begin_bulk();
+
+        let cps = [0x25CF_u32, 0x25A0, 0x1F525, 0x2208]; // ●, ■, 🔥, ∈
+        for &cp in &cps {
+            let chain = encode_codepoint(cp);
+            r.insert_codepoint(cp, &chain, 0, 0, 1000, true, NodeKind::Alphabet);
+        }
+
+        r.finalize_bulk();
+
+        // All should be findable by codepoint
+        for &cp in &cps {
+            assert!(
+                r.lookup_codepoint(cp).is_some(),
+                "cp 0x{:04X} must be found after finalize_bulk",
+                cp
+            );
+        }
+        assert_eq!(r.codepoint_count(), 4);
+
+        // Non-existent codepoint
+        assert!(r.lookup_codepoint(0xFFFF).is_none());
+    }
+
+    #[test]
+    fn lookup_codepoint_nonexistent() {
+        let r = Registry::new();
+        assert!(r.lookup_codepoint(0x1F525).is_none());
+        assert_eq!(r.codepoint_count(), 0);
     }
 
     #[test]

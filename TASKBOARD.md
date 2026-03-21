@@ -562,10 +562,10 @@ INTG (song song với tất cả):
 | T2 | ShapeBase 8→18 SDF primitives | `PLAN_V2_MIGRATION` | — | DONE | `claude/project-audit-review-2pN6F` | 2026-03-21 | 18 SDF + CsgOp tách, encoder/vm/origin updated |
 | T3 | Molecule 5B→2B packed u16 | `PLAN_V2_MIGRATION` | T1,T2 | DONE | `claude/project-audit-review-2pN6F` | 2026-03-21 | Molecule{bits:u16}, 19 files, 304 tests pass |
 | T4 | Chain Vec\<Mol\>→Vec\<u16\> | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | MolecularChain(Vec<u16>), 21 files, mol_at/mols/first helpers, chain_hash 2B/link |
-| T5 | LCA v2 compose rules | `PLAN_V2_MIGRATION` | T3 | FREE | | | amplify/Union/max/dominant, KILL avg |
-| T6 | KnowTree array 65536×2B | `PLAN_V2_MIGRATION` | T3 | FREE | | | O(1) lookup, 128KB, 9584 L0 seeds |
+| T5 | LCA v2 compose rules | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | amplify/Union/max/dominant, compose_union/amplify/max/dominant in lca.rs |
+| T6 | KnowTree array 65536×2B | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | Vec<u16> 131072 capacity, O(1) lookup, L0 bootstrap from UCD |
 | T7 | Writer/Reader v2 format | `PLAN_V2_MIGRATION` | T4 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | v0.06: NodeRecord [len:2][u16×N], Curve 0x09 already existed, backward compat v0.03-v0.05 |
-| T8 | Registry codepoint-based | `PLAN_V2_MIGRATION` | T4,T6 | FREE | | | Index by u16, not hash |
+| T8 | Registry codepoint-based | `PLAN_V2_MIGRATION` | T4,T6 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | cp_index Vec<(u32,u64)>, insert_codepoint(), lookup_codepoint(), bulk sort, fixed evict_cold hash collision |
 | T9 | VM PushMol 2B | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | PushMol(u16), 3B bytecode [0x19][lo][hi], 7 files updated |
 | T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | FREE | | | silk/agents/memory/vsdf/runtime/context |
 | T11 | .ol files update (15 files) | `PLAN_V2_MIGRATION` | T9 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | 13 files: mol/chain/hash + HomeOS pipeline + bootstrap compiler + agents, u16 packed |
