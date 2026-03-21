@@ -143,6 +143,69 @@ pub fn table() -> &'static [UcdEntry] {
     UCD_TABLE
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KnowTree hierarchy API
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Number of groups (L0) in the KnowTree hierarchy.
+#[inline]
+pub fn group_count() -> usize {
+    KNOWTREE_GROUP_COUNT
+}
+
+/// Number of blocks (L1) in the KnowTree hierarchy.
+#[inline]
+pub fn block_count() -> usize {
+    KNOWTREE_BLOCK_COUNT
+}
+
+/// Group definitions: &[(name, aggregate_p_weight, &[block_indices])].
+#[inline]
+pub fn groups() -> &'static [(&'static str, u16, &'static [u16])] {
+    KNOWTREE_GROUPS
+}
+
+/// Block definitions: &[(name, aggregate_p_weight, chars_start_idx, chars_count)].
+#[inline]
+pub fn blocks() -> &'static [(&'static str, u16, u16, u16)] {
+    KNOWTREE_BLOCKS
+}
+
+/// Block indices belonging to a given group.
+///
+/// Returns empty slice if group_idx out of range.
+#[inline]
+pub fn group_blocks(group_idx: usize) -> &'static [u16] {
+    if group_idx < KNOWTREE_GROUPS.len() {
+        KNOWTREE_GROUPS[group_idx].2
+    } else {
+        &[]
+    }
+}
+
+/// UCD entries belonging to a given block.
+///
+/// Returns empty slice if block_idx out of range.
+#[inline]
+pub fn block_chars(block_idx: usize) -> &'static [UcdEntry] {
+    if block_idx < KNOWTREE_BLOCKS.len() {
+        let (_, _, start, count) = KNOWTREE_BLOCKS[block_idx];
+        let s = start as usize;
+        let e = s + count as usize;
+        if e <= UCD_TABLE.len() {
+            &UCD_TABLE[s..e]
+        } else {
+            &[]
+        }
+    } else {
+        &[]
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SDF + RELATION primitives
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Kiểm tra codepoint có phải SDF primitive không.
 #[inline]
 pub fn is_sdf_primitive(cp: u32) -> bool {
@@ -323,5 +386,69 @@ mod tests {
         assert_eq!(arousal_of(0x0041), 0x80); // moderate
         assert_eq!(time_of(0x0041), 0x03); // Medium
         assert_eq!(group_of(0x0041), 0x00); // no group
+    }
+
+    // ── KnowTree hierarchy API ──────────────────────────────────────────
+
+    #[test]
+    fn knowtree_group_count() {
+        assert_eq!(group_count(), 4, "Must have 4 groups (SDF, MATH, EMOTICON, MUSICAL)");
+    }
+
+    #[test]
+    fn knowtree_block_count() {
+        assert!(block_count() > 0, "Must have blocks");
+    }
+
+    #[test]
+    fn knowtree_groups_data() {
+        let g = groups();
+        assert_eq!(g.len(), 4);
+        // Check group names
+        assert_eq!(g[0].0, "SDF");
+        assert_eq!(g[1].0, "MATH");
+        assert_eq!(g[2].0, "EMOTICON");
+        assert_eq!(g[3].0, "MUSICAL");
+        // Each group should have block indices
+        for (name, _pw, block_idxs) in g {
+            assert!(!block_idxs.is_empty(), "Group {} should have blocks", name);
+        }
+    }
+
+    #[test]
+    fn knowtree_blocks_data() {
+        let b = blocks();
+        assert!(!b.is_empty());
+        // First block should have a name and valid counts
+        let (name, _pw, _start, count) = b[0];
+        assert!(!name.is_empty());
+        assert!(count > 0, "First block should have chars");
+    }
+
+    #[test]
+    fn knowtree_group_blocks_api() {
+        for gi in 0..group_count() {
+            let block_idxs = group_blocks(gi);
+            assert!(!block_idxs.is_empty(), "Group {} should have blocks", gi);
+            for &bi in block_idxs {
+                assert!((bi as usize) < block_count(),
+                    "Block index {} out of range for group {}", bi, gi);
+            }
+        }
+        // Out of range
+        assert!(group_blocks(999).is_empty());
+    }
+
+    #[test]
+    fn knowtree_block_chars_api() {
+        for bi in 0..block_count() {
+            let chars = block_chars(bi);
+            // Block should have characters (or be empty for sparse blocks)
+            let (_, _, _, count) = blocks()[bi];
+            assert_eq!(chars.len(), count as usize,
+                "Block {} char count mismatch", bi);
+        }
+        // Out of range
+        assert!(block_chars(999).is_empty());
     }
 }

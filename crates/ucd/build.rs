@@ -24,6 +24,18 @@ use std::path::PathBuf;
 #[derive(Deserialize)]
 struct UdcJson {
     characters: Vec<UdcCharacter>,
+    #[serde(default)]
+    blocks: Vec<UdcBlock>,
+}
+
+#[derive(Deserialize)]
+struct UdcBlock {
+    name: String,
+    group: String,
+    range: String,        // e.g. "2190..21FF"
+    #[serde(default)]
+    #[allow(dead_code)]
+    id: String,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +110,23 @@ fn group_byte(group: &str) -> u8 {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Entry struct — intermediate representation for codegen
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct Entry {
+    cp: u32,
+    group: u8,
+    shape: u8,
+    relation: u8,
+    valence: u8,
+    arousal: u8,
+    time: u8,
+    p_weight: u16,
+    hash: u64,
+    name: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FNV-1a hash — giống với chain_hash() trong molecular.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -156,18 +185,6 @@ fn main() {
     eprintln!("cargo:warning=UDC: parsed {} characters from udc.json", udc.characters.len());
 
     // ── Build entries ────────────────────────────────────────────────────
-    struct Entry {
-        cp: u32,
-        group: u8,
-        shape: u8,
-        relation: u8,
-        valence: u8,
-        arousal: u8,
-        time: u8,
-        p_weight: u16,
-        hash: u64,
-        name: String,
-    }
 
     let mut entries: Vec<Entry> = Vec::with_capacity(udc.characters.len());
 
@@ -319,6 +336,11 @@ fn main() {
         writeln!(src, "    (0x{:04X}, 0x{:02X}),", cp, byte).unwrap();
     }
     writeln!(src, "];").unwrap();
+    writeln!(src).unwrap();
+
+    // ── KnowTree topology: Groups (L0) and Blocks (L1) ─────────────────
+    // Build block→char mapping from udc.json blocks + character block fields
+    generate_knowtree_topology(&mut src, &udc, &entries);
 
     fs::write(&out_file, &src).expect("write ucd_generated.rs");
     eprintln!(
@@ -326,6 +348,207 @@ fn main() {
         entries.len(),
         hash_to_cp.len(),
         bucket_list.len()
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KnowTree topology generation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compute aggregate P_weight via per-dimension mode (most frequent value).
+/// P_weight layout: [S:4][R:4][V:3][A:3][T:2]
+fn mode_p_weight(p_weights: &[u16]) -> u16 {
+    if p_weights.is_empty() {
+        return 0;
+    }
+
+    // Extract each dimension, count frequencies, pick mode
+    let s_vals: Vec<u16> = p_weights.iter().map(|pw| (pw >> 12) & 0xF).collect();
+    let r_vals: Vec<u16> = p_weights.iter().map(|pw| (pw >> 8) & 0xF).collect();
+    let v_vals: Vec<u16> = p_weights.iter().map(|pw| (pw >> 5) & 0x7).collect();
+    let a_vals: Vec<u16> = p_weights.iter().map(|pw| (pw >> 2) & 0x7).collect();
+    let t_vals: Vec<u16> = p_weights.iter().map(|pw| pw & 0x3).collect();
+
+    fn dim_mode_n(values: &[u16], max: usize) -> u16 {
+        let mut freq = vec![0u32; max];
+        for &v in values {
+            freq[v as usize] += 1;
+        }
+        freq.iter()
+            .enumerate()
+            .max_by_key(|(_, &c)| c)
+            .map(|(i, _)| i as u16)
+            .unwrap_or(0)
+    }
+
+    let s = dim_mode_n(&s_vals, 16);
+    let r = dim_mode_n(&r_vals, 16);
+    let v = dim_mode_n(&v_vals, 8);
+    let a = dim_mode_n(&a_vals, 8);
+    let t = dim_mode_n(&t_vals, 4);
+
+    (s << 12) | (r << 8) | (v << 5) | (a << 2) | t
+}
+
+/// Parse block range string "2190..21FF" → (start, end) as u32
+fn parse_range(range: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = range.split("..").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let start = u32::from_str_radix(parts[0], 16).ok()?;
+    let end = u32::from_str_radix(parts[1], 16).ok()?;
+    Some((start, end))
+}
+
+#[allow(clippy::needless_range_loop)]
+fn generate_knowtree_topology(src: &mut String, udc: &UdcJson, entries: &[Entry]) {
+    // Group order (deterministic)
+    let group_order = ["SDF", "MATH", "EMOTICON", "MUSICAL"];
+
+    // Collect blocks sorted by group then by range start
+    struct BlockInfo {
+        name: String,
+        group: String,
+        range_start: u32,
+        range_end: u32,
+    }
+
+    let mut blocks: Vec<BlockInfo> = Vec::new();
+    for b in &udc.blocks {
+        if let Some((start, end)) = parse_range(&b.range) {
+            blocks.push(BlockInfo {
+                name: b.name.clone(),
+                group: b.group.clone(),
+                range_start: start,
+                range_end: end,
+            });
+        }
+    }
+
+    // Sort: group order first, then range start
+    blocks.sort_by(|a, b| {
+        let ga = group_order.iter().position(|&g| g == a.group).unwrap_or(99);
+        let gb = group_order.iter().position(|&g| g == b.group).unwrap_or(99);
+        ga.cmp(&gb).then(a.range_start.cmp(&b.range_start))
+    });
+
+    // Map characters to blocks
+    // For each block, find characters whose codepoint falls in [range_start, range_end]
+    // entries is sorted by cp
+    struct BlockWithChars {
+        name: String,
+        group_idx: usize,
+        chars_start: u16,
+        chars_count: u16,
+        char_p_weights: Vec<u16>,
+    }
+
+    let mut block_entries: Vec<BlockWithChars> = Vec::new();
+
+    for blk in &blocks {
+        let group_idx = group_order.iter().position(|&g| g == blk.group).unwrap_or(0);
+
+        // Find chars in this block's range via binary search on sorted entries
+        // entries is sorted by cp, same order as UCD_TABLE
+        let start_pos = entries.partition_point(|e| e.cp < blk.range_start);
+        let end_pos = entries.partition_point(|e| e.cp <= blk.range_end);
+        let count = (end_pos - start_pos) as u16;
+
+        let char_pws: Vec<u16> = entries[start_pos..end_pos]
+            .iter()
+            .map(|e| e.p_weight)
+            .collect();
+
+        block_entries.push(BlockWithChars {
+            name: blk.name.clone(),
+            group_idx,
+            chars_start: start_pos as u16, // index into UCD_TABLE
+            chars_count: count,
+            char_p_weights: char_pws,
+        });
+    }
+
+    // Build group → block indices
+    let mut group_block_indices: Vec<Vec<u16>> = vec![Vec::new(); group_order.len()];
+    for (bi, be) in block_entries.iter().enumerate() {
+        group_block_indices[be.group_idx].push(bi as u16);
+    }
+
+    // Compute block aggregate P_weights
+    let block_p_weights: Vec<u16> = block_entries
+        .iter()
+        .map(|be| mode_p_weight(&be.char_p_weights))
+        .collect();
+
+    // Compute group aggregate P_weights (mode over all block P_weights in group)
+    let group_p_weights: Vec<u16> = group_block_indices
+        .iter()
+        .map(|block_idxs| {
+            let pws: Vec<u16> = block_idxs.iter().map(|&bi| block_p_weights[bi as usize]).collect();
+            mode_p_weight(&pws)
+        })
+        .collect();
+
+    // ── Generate KNOWTREE_GROUPS ────────────────────────────────────────
+    writeln!(src, "/// KnowTree group definitions (L0). (name, aggregate_p_weight, &[block_indices])").unwrap();
+    writeln!(src, "pub static KNOWTREE_GROUPS: &[(&str, u16, &[u16])] = &[").unwrap();
+    for (gi, gname) in group_order.iter().enumerate() {
+        let pw = group_p_weights[gi];
+        let idxs = &group_block_indices[gi];
+        let idx_str: Vec<String> = idxs.iter().map(|i| i.to_string()).collect();
+        writeln!(
+            src,
+            "    (\"{}\", 0x{:04X}, &[{}]),",
+            gname,
+            pw,
+            idx_str.join(", ")
+        )
+        .unwrap();
+    }
+    writeln!(src, "];").unwrap();
+    writeln!(src).unwrap();
+
+    // ── Generate KNOWTREE_BLOCKS ────────────────────────────────────────
+    writeln!(src, "/// KnowTree block definitions (L1). (name, aggregate_p_weight, chars_start_idx, chars_count)").unwrap();
+    writeln!(src, "pub static KNOWTREE_BLOCKS: &[(&str, u16, u16, u16)] = &[").unwrap();
+    for (bi, be) in block_entries.iter().enumerate() {
+        let safe_name = be.name.replace('\\', "\\\\").replace('"', "\\\"");
+        writeln!(
+            src,
+            "    (\"{}\", 0x{:04X}, {}, {}),",
+            safe_name,
+            block_p_weights[bi],
+            be.chars_start,
+            be.chars_count,
+        )
+        .unwrap();
+    }
+    writeln!(src, "];").unwrap();
+    writeln!(src).unwrap();
+
+    // ── Generate KNOWTREE_GROUP_COUNT / KNOWTREE_BLOCK_COUNT ────────────
+    writeln!(
+        src,
+        "/// Number of groups in KnowTree hierarchy."
+    )
+    .unwrap();
+    writeln!(src, "pub const KNOWTREE_GROUP_COUNT: usize = {};", group_order.len()).unwrap();
+    writeln!(src).unwrap();
+    writeln!(
+        src,
+        "/// Number of blocks in KnowTree hierarchy."
+    )
+    .unwrap();
+    writeln!(src, "pub const KNOWTREE_BLOCK_COUNT: usize = {};", block_entries.len()).unwrap();
+    writeln!(src).unwrap();
+
+    let total_chars_mapped: u16 = block_entries.iter().map(|b| b.chars_count).sum();
+    eprintln!(
+        "cargo:warning=KnowTree topology: {} groups, {} blocks, {} chars mapped",
+        group_order.len(),
+        block_entries.len(),
+        total_chars_mapped,
     );
 }
 
@@ -351,6 +574,10 @@ pub static CP_BUCKET_DATA: &[u32] = &[];
 pub static CP_BUCKET_INDEX: &[(u8,u8,u32,u32)] = &[];
 pub static SDF_PRIMITIVES: &[(u32,u8)] = &[];
 pub static RELATION_PRIMITIVES: &[(u32,u8)] = &[];
+pub static KNOWTREE_GROUPS: &[(&str, u16, &[u16])] = &[];
+pub static KNOWTREE_BLOCKS: &[(&str, u16, u16, u16)] = &[];
+pub const KNOWTREE_GROUP_COUNT: usize = 0;
+pub const KNOWTREE_BLOCK_COUNT: usize = 0;
 "#,
     )
     .unwrap();

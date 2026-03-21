@@ -881,49 +881,58 @@ pub fn check_pweight_ucd_build(root: &Path) -> CheckResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// DEEP CHECK: KnowTree size = 65,536 × 2B = 128 KB (v2)
-// Current: 65,536 × 5B = 320 KB
+// DEEP CHECK: KnowTree = hierarchical L0→L1→L3 tree (~18KB)
+// T14: refactored from flat array to hierarchical tree
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_pweight_knowtree_size(root: &Path) -> CheckResult {
-    println!("[18/37] DEEP — KnowTree node size...");
+    println!("[18/37] DEEP — KnowTree hierarchical structure...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
     let mut details = Vec::new();
 
-    // Check KnowTree stores Molecule (5B+metadata) or u16 (2B)
-    let knowtree_molecule = grep_pattern(&files, "Vec<Molecule>");
-    let knowtree_u16 = grep_pattern(&files, "Vec<u16>");
+    // Check KnowTree has hierarchical structure (L0, L1, L3 fields)
+    let has_l0 = grep_pattern(&files, "l0: Vec<u16>");
+    let has_l1 = grep_pattern(&files, "l1: Vec<u16>");
+    let has_l3 = grep_pattern(&files, "l3: Vec<u16>");
+    let has_topology = grep_pattern(&files, "l0_to_l1");
+    let has_bootstrap = grep_pattern(&files, "bootstrap_from_ucd");
 
-    // Check FormulaTable size constant
-    let _formula_65536 = grep_pattern(&files, "65_536");
-    let _formula_64k = grep_pattern(&files, "65536");
-
-    // Check Molecule in FormulaTable (it holds Vec<Molecule>)
-    let formula_table_mol: Vec<_> = knowtree_molecule.iter()
-        .filter(|(p, _, l)| {
-            let ps = p.to_str().unwrap_or("");
-            ps.contains("molecular") && l.contains("FormulaTable")
-                || l.contains("formula") || l.contains("table")
+    // Filter to knowtree.rs only
+    let in_knowtree = |matches: &[(std::path::PathBuf, usize, String)]| -> bool {
+        matches.iter().any(|(p, _, _)| {
+            p.to_str().unwrap_or("").contains("knowtree")
         })
-        .collect();
+    };
 
-    if !formula_table_mol.is_empty() {
-        details.push("FormulaTable stores Vec<Molecule> (5B+ each): ❌".into());
-        details.push("v2 spec: KnowTree node = 2B (P_weight packed u16)".into());
-        details.push("Current: 65,536 × ~11B = ~704 KB (Molecule is 11 bytes in struct)".into());
-        details.push("Expected: 65,536 × 2B = 128 KB".into());
-        CheckResult::fail("P_weight KnowTree", "FormulaTable uses Molecule (5B+) — v2 requires u16 (2B) per node")
-            .with_details(details)
-    } else if !knowtree_u16.is_empty() {
-        details.push("KnowTree stores u16 entries: ✅".into());
-        CheckResult::pass("P_weight KnowTree", "OK — KnowTree uses u16 (2B per node)")
+    let is_hierarchical = in_knowtree(&has_l0)
+        && in_knowtree(&has_l1)
+        && in_knowtree(&has_l3)
+        && in_knowtree(&has_topology);
+
+    details.push(format!("L0 (groups) field: {} refs", has_l0.len()));
+    details.push(format!("L1 (blocks) field: {} refs", has_l1.len()));
+    details.push(format!("L3 (leaves) field: {} refs", has_l3.len()));
+    details.push(format!("Topology (l0_to_l1): {} refs", has_topology.len()));
+    details.push(format!("bootstrap_from_ucd: {} refs", has_bootstrap.len()));
+
+    if is_hierarchical {
+        details.push("KnowTree is hierarchical L0->L1->L3: OK".into());
+        CheckResult::pass("P_weight KnowTree", "OK — KnowTree uses hierarchical tree (~18KB)")
             .with_details(details)
     } else {
-        details.push("Cannot determine KnowTree node type".into());
-        CheckResult::warn("P_weight KnowTree", "Cannot verify KnowTree node size — check manually")
-            .with_details(details)
+        // Check if it's still flat array
+        let has_flat = grep_pattern(&files, "KNOWTREE_CAPACITY");
+        if !has_flat.is_empty() {
+            details.push("KnowTree still uses flat array (KNOWTREE_CAPACITY found)".into());
+            CheckResult::fail("P_weight KnowTree", "KnowTree is flat array — T14 requires hierarchical L0->L1->L3")
+                .with_details(details)
+        } else {
+            details.push("Cannot determine KnowTree structure".into());
+            CheckResult::warn("P_weight KnowTree", "Cannot verify KnowTree structure — check manually")
+                .with_details(details)
+        }
     }
 }
 
@@ -1217,45 +1226,54 @@ pub fn check_shapebase_18sdf(root: &Path) -> CheckResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// AUDIT #3: KnowTree = array 65,536 × 2B, not hash-based
+// AUDIT #3: KnowTree = hierarchical tree L0→L1→L3, ~18KB
+// T14: refactored from flat array to hierarchical tree
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_knowtree_array(root: &Path) -> CheckResult {
-    println!("[24/37] AUDIT — KnowTree = array, not hash...");
+    println!("[24/37] AUDIT — KnowTree = hierarchical tree...");
     let olang_dir = root.join("crates/olang");
     let files = scan_rs_files(&olang_dir);
 
     let mut details = Vec::new();
 
-    // Check: KnowTree uses array index (codepoint → P_weight) vs hash-based
-    let hash_lookup = grep_pattern(&files, "chain_hash");
-    let compact_node = grep_pattern(&files, "CompactNode");
-    let slim_node = grep_pattern(&files, "SlimNode");
-    let array_index = grep_pattern(&files, "[codepoint]");  // array index syntax
+    // Check: KnowTree uses hierarchical structure (L0→L1→L3)
+    let has_l0_to_l1 = grep_pattern(&files, "l0_to_l1");
+    let has_l1_to_l3 = grep_pattern(&files, "l1_to_l3");
+    let has_bootstrap = grep_pattern(&files, "bootstrap_from_ucd");
+    let has_group_pw = grep_pattern(&files, "group_p_weight");
+    let has_block_pw = grep_pattern(&files, "block_p_weight");
 
-    // Check: size is 65,536 × 2B = 128KB?
-    let tiered_store = grep_pattern(&files, "TieredStore");
+    // Check for UCD hierarchy API usage
+    let has_ucd_groups = grep_pattern(&files, "ucd::groups");
+    let has_ucd_blocks = grep_pattern(&files, "ucd::blocks");
 
-    let is_hash_based = !hash_lookup.is_empty() && (!compact_node.is_empty() || !slim_node.is_empty());
-    let is_array_based = !array_index.is_empty() && tiered_store.is_empty();
+    let is_hierarchical = !has_l0_to_l1.is_empty()
+        && !has_l1_to_l3.is_empty()
+        && !has_bootstrap.is_empty();
 
-    details.push(format!("Hash-based lookup (chain_hash): {} refs", hash_lookup.len()));
-    details.push(format!("CompactNode (hash 8B + mol + meta): {} refs", compact_node.len()));
-    details.push(format!("SlimNode: {} refs", slim_node.len()));
-    details.push(format!("TieredStore: {} refs", tiered_store.len()));
+    details.push(format!("L0→L1 topology: {} refs", has_l0_to_l1.len()));
+    details.push(format!("L1→L3 topology: {} refs", has_l1_to_l3.len()));
+    details.push(format!("bootstrap_from_ucd: {} refs", has_bootstrap.len()));
+    details.push(format!("group_p_weight: {} refs", has_group_pw.len()));
+    details.push(format!("block_p_weight: {} refs", has_block_pw.len()));
+    details.push(format!("ucd::groups: {} refs", has_ucd_groups.len()));
+    details.push(format!("ucd::blocks: {} refs", has_ucd_blocks.len()));
 
-    if is_array_based {
-        CheckResult::pass("KnowTree Array", "OK — array-based O(1) lookup by codepoint")
-            .with_details(details)
-    } else if is_hash_based {
-        details.push("v2 spec: KnowTree[codepoint] → P_weight, O(1) array lookup".into());
-        details.push("Current: chain_hash → CompactNode → Molecule, O(log n) hash lookup".into());
-        details.push("Expected: array 65,536 × 2B = 128 KB".into());
-        CheckResult::fail("KnowTree Array", "KnowTree is hash-based — v2 requires array 65,536 × 2B")
+    if is_hierarchical {
+        CheckResult::pass("KnowTree Hierarchy", "OK — hierarchical L0->L1->L3 tree (~18KB)")
             .with_details(details)
     } else {
-        CheckResult::warn("KnowTree Array", "Cannot determine KnowTree type")
-            .with_details(details)
+        // Check for legacy flat array
+        let has_flat_capacity = grep_pattern(&files, "KNOWTREE_CAPACITY");
+        if !has_flat_capacity.is_empty() {
+            details.push("KNOWTREE_CAPACITY found — still using flat 256KB array".into());
+            CheckResult::fail("KnowTree Hierarchy", "KnowTree is flat array — T14 requires hierarchical tree")
+                .with_details(details)
+        } else {
+            CheckResult::warn("KnowTree Hierarchy", "Cannot determine KnowTree structure — check manually")
+                .with_details(details)
+        }
     }
 }
 
