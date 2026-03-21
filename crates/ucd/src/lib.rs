@@ -283,30 +283,42 @@ mod tests {
     // ── SDF + RELATION primitives ───────────────────────────────────────────
 
     #[test]
-    fn sdf_primitives_count() {
-        assert_eq!(SDF_PRIMITIVES.len(), 18, "Phải có đúng 18 SDF primitives (v2)");
+    fn sdf_primitives_derived_from_udc() {
+        // SDF_PRIMITIVES now contains ALL characters with group=SDF from udc.json
+        // (not just 18 hardcoded ones). Each carries its UDC shape position.
+        assert!(
+            SDF_PRIMITIVES.len() > 0,
+            "SDF primitives must be derived from udc.json (group=SDF)"
+        );
     }
 
     #[test]
-    fn relation_primitives_count() {
-        assert_eq!(
-            RELATION_PRIMITIVES.len(),
-            8,
-            "Phải có đúng 8 RELATION primitives"
+    fn relation_primitives_derived_from_udc() {
+        // RELATION_PRIMITIVES now contains ALL characters with group=MATH from udc.json
+        assert!(
+            RELATION_PRIMITIVES.len() > 0,
+            "RELATION primitives must be derived from udc.json (group=MATH)"
         );
     }
 
     #[test]
     fn is_sdf_primitive_correct() {
-        assert!(is_sdf_primitive(0x25CF), "● = SDF primitive");
-        assert!(is_sdf_primitive(0x25CB), "○ = SDF primitive");
+        // UTF-32 codepoints are aliases mapping into UDC positions
+        assert!(is_sdf_primitive(0x25CF), "● = SDF alias (UDC SPHERE)");
+        assert!(is_sdf_primitive(0x25CB), "○ = SDF alias (UDC TORUS)");
         assert!(!is_sdf_primitive(0x0041), "'A' không phải SDF primitive");
     }
 
     #[test]
     fn is_relation_primitive_correct() {
-        assert!(is_relation_primitive(0x2208), "∈ = RELATION primitive");
-        assert!(is_relation_primitive(0x2192), "→ = RELATION primitive");
+        // UTF-32 math symbols are aliases mapping into UDC relation positions
+        // RELATION_PRIMITIVES = all characters with group=MATH in udc.json
+        assert!(is_relation_primitive(0x2208), "∈ = MATH group (UDC MEMBER)");
+        // Note: 0x2192 (→) is in Arrows block = SDF group, NOT MATH group
+        assert!(
+            !is_relation_primitive(0x2192),
+            "→ belongs to SDF group (Arrows), not MATH"
+        );
         assert!(
             !is_relation_primitive(0x25CF),
             "● không phải RELATION primitive"

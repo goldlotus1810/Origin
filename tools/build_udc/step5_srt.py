@@ -29,7 +29,14 @@ BASE_DIR = os.path.join(os.path.dirname(__file__), '..', '..')
 JSON_DIR = os.path.join(BASE_DIR, 'json')
 OUTPUT_DIR = '/tmp/udc_build'
 
-# ─── 18 SDF PRIMITIVES (from spec) ───
+# ─── 18 SDF PRIMITIVES (UDC positions) ───
+# These are UDC-defined shape positions (0-17).
+# UDC = our coordinate system (positions + formulas + P_weight).
+# UTF-32 codepoints are just ALIASES (human language mapping into UDC).
+#
+# Example: UDC position 0 = SPHERE. UTF-32 alias = U+25CF (● BLACK CIRCLE).
+# The shape value comes FROM UDC, not from the UTF-32 character name.
+#
 # Encoded as 4 bits (0-15), with 16-17 for composite/other
 SDF_PRIMITIVES = {
     0:  "SPHERE",
@@ -52,7 +59,9 @@ SDF_PRIMITIVES = {
     # 17: DEATH_STAR (overflow, use 15 + flag)
 }
 
-# ─── RELATION TYPES (from spec) ───
+# ─── RELATION TYPES (UDC positions) ───
+# Same principle: these are UDC-defined relation positions.
+# UTF-32 math symbols (∈, ⊂, ≡...) are aliases into these positions.
 RELATION_TYPES = {
     0:  "IDENTITY",     # self, default for letters/digits
     1:  "MEMBER",       # ∈, ∋
@@ -83,12 +92,16 @@ TIME_MODES = {
 
 def compute_S(name, cat, flags, group, block_name):
     """
-    Compute Shape (S) from Unicode data.
-    S is the SDF primitive that best describes the visual shape.
+    Compute Shape (S) = UDC shape position for this character.
+
+    NOTE: S is a UDC value (our coordinate system).
+    UTF-32 character names are used as HEURISTICS to infer the
+    best UDC shape position, but the result is a UDC value.
+    The UTF-32 name is just an alias — the shape IS the UDC position.
 
     Derived from:
     - Block name patterns → geometric shapes
-    - Character name → shape keywords
+    - Character name → shape keywords (heuristic from UTF-32 alias)
     - Category → default shape
     - Emoji group → face/body/nature shapes
     """
