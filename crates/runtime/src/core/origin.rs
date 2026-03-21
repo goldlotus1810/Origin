@@ -27,7 +27,7 @@ use olang::ir::{compile_expr, OlangIrExpr};
 use olang::optimize::{self, OptLevel};
 use olang::semantic;
 use olang::syntax;
-use olang::knowtree::{KnowTree, SlimKnowTree};
+use olang::knowtree::{KnowTreeLegacy, SlimKnowTreeLegacy};
 use olang::registry::Registry;
 use vsdf::body::{body_from_molecule_full, BodyStore};
 use olang::self_model::SelfModel;
@@ -125,9 +125,9 @@ pub struct HomeRuntime {
     /// QT9: bytes chờ ghi disk — caller (server) drain và flush.
     pending_writes: alloc::vec::Vec<u8>,
     /// L2-Ln knowledge storage — TieredStore compact encoding (legacy).
-    knowtree: KnowTree,
+    knowtree: KnowTreeLegacy,
     /// L2-Ln knowledge storage — spec-compliant ~10B/node format.
-    slim_knowtree: SlimKnowTree,
+    slim_knowtree: SlimKnowTreeLegacy,
     /// Recent text history — cho reference resolution ("bà ấy", "anh ta"...).
     /// Giữ tối đa 16 turns gần nhất (text + timestamp).
     recent_texts: alloc::vec::Vec<RecentText>,
@@ -333,8 +333,8 @@ impl HomeRuntime {
             turn_count: 0,
             last_dream_turn: 0,
             pending_writes,
-            knowtree: KnowTree::for_pc(),
-            slim_knowtree: SlimKnowTree::new(),
+            knowtree: KnowTreeLegacy::for_pc(),
+            slim_knowtree: SlimKnowTreeLegacy::new(),
             recent_texts: alloc::vec::Vec::new(),
             dream_fib_index: 4, // Fib[4]=5: first dream after 5 turns
             dream_cycles: 0,
@@ -3914,10 +3914,10 @@ impl HomeRuntime {
     pub fn tone(&self) -> ResponseTone {
         self.learning.context().tone()
     }
-    pub fn knowtree(&self) -> &KnowTree {
+    pub fn knowtree(&self) -> &KnowTreeLegacy {
         &self.knowtree
     }
-    pub fn knowtree_mut(&mut self) -> &mut KnowTree {
+    pub fn knowtree_mut(&mut self) -> &mut KnowTreeLegacy {
         &mut self.knowtree
     }
 

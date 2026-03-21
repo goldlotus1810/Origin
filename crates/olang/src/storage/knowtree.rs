@@ -1,42 +1,204 @@
-//! # knowtree — L2-Ln Knowledge Tree
+//! # knowtree — v2 KnowTree + Legacy wrappers
 //!
-//! Kết nối TieredStore (compact encoding) với learning pipeline.
+//! ## v2 KnowTree (spec-compliant)
 //!
-//! Pipeline:
-//!   BookReader → sentences → encode → L2 CompactNode (via KnowTree)
-//!   Dream → cluster → LCA → promote to L2+ CompactNode
-//!   Query → hash → TieredStore.lookup_with_edges → response
+//! ```text
+//! KnowTree = Vec<u16> indexed by codepoint → P_weight (2B Molecule)
+//! O(1) lookup, ~256KB (131072 × 2B, covers BMP + Supplementary Plane 1)
+//! L0 = 8,284+ pre-filled entries from UCD table (sealed at bootstrap)
+//! ```
 //!
-//! Layers:
-//!   L0: UCD base (35 seeded nodes) — always in RAM
-//!   L1: User interactions (STM → promoted) — always in RAM
-//!   L2: Book knowledge (sentences, concepts) — TieredStore
-//!   L3: Abstracted patterns (LCA of L2 clusters) — TieredStore
-//!   L4+: Higher abstractions — TieredStore
+//! ## Legacy types (sẽ bị xóa ở T10)
 //!
-//! KnowTree = wrapper quanh TieredStore, cung cấp:
-//!   - store_sentence(): encode text → L2 compact node + silk edges
-//!   - store_concept(): LCA chain → L3+ compact node
-//!   - query(): hash → node + neighbors
-//!   - promote(): STM observation → L2 node
+//! - `KnowTreeLegacy` — old TieredStore wrapper
+//! - `SlimKnowTreeLegacy` — old SlimNode/SlimPage wrapper
 
 extern crate alloc;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use alloc::collections::BTreeMap;
 
 use crate::compact::{CompactEdge, CompactNode, NodeWithEdges, SlimNode, SlimPage, TieredStore};
 use crate::hash::fnv1a_str;
-use crate::molecular::{MolecularChain, RelationBase};
+use crate::molecular::{MolecularChain, Molecule, RelationBase};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KnowTree
+// KnowTree v2 — O(1) codepoint → P_weight array
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Knowledge tree — L2-Ln storage powered by TieredStore.
+/// Maximum codepoint index (covers BMP + Supplementary Plane 1).
+///
+/// Unicode codepoints in UCD go up to ~0x1FBFA.
+/// 131072 = 0x20000, covers planes 0 and 1.
+pub const KNOWTREE_CAPACITY: usize = 131072;
+
+/// v2 KnowTree — flat array mapping codepoint → P_weight (packed u16 Molecule).
+///
+/// ```text
+/// KnowTree[cp] = P_weight packed u16 [S:4][R:4][V:3][A:3][T:2]
+/// 0 = unknown/empty slot
+/// O(1) lookup by codepoint
+/// Bootstrap: fill from UCD table (L0 anchor points, sealed)
+/// ```
+///
+/// Size: 131072 × 2B = 256KB (spec says 128KB for 65536, but emoji
+/// codepoints exceed u16 range, requiring 131072 slots).
 pub struct KnowTree {
+    /// P_weight array indexed by codepoint.
+    /// 0 = empty/unknown.
+    table: Vec<u16>,
+    /// Number of filled (non-zero) entries.
+    count: u32,
+}
+
+impl KnowTree {
+    /// Create empty KnowTree (all zeros).
+    pub fn new() -> Self {
+        Self {
+            table: vec![0u16; KNOWTREE_CAPACITY],
+            count: 0,
+        }
+    }
+
+    /// Bootstrap from UCD table — fill L0 anchor points.
+    ///
+    /// Reads `ucd::table()` and fills `table[cp] = p_weight` for each entry.
+    /// Called once at startup. L0 entries are SEALED (never overwritten).
+    pub fn bootstrap_from_ucd(ucd_table: &[(u32, u16)]) -> Self {
+        let mut kt = Self::new();
+        for &(cp, p_weight) in ucd_table {
+            if (cp as usize) < KNOWTREE_CAPACITY && p_weight != 0 {
+                kt.table[cp as usize] = p_weight;
+                kt.count += 1;
+            }
+        }
+        kt
+    }
+
+    /// O(1) lookup: codepoint → P_weight (packed u16 Molecule).
+    ///
+    /// Returns 0 if unknown or out of range.
+    #[inline]
+    pub fn get(&self, cp: u32) -> u16 {
+        let idx = cp as usize;
+        if idx < KNOWTREE_CAPACITY {
+            self.table[idx]
+        } else {
+            0
+        }
+    }
+
+    /// O(1) lookup: codepoint → Molecule (from packed u16).
+    ///
+    /// Returns None if unknown or out of range.
+    #[inline]
+    pub fn get_mol(&self, cp: u32) -> Option<Molecule> {
+        let pw = self.get(cp);
+        if pw != 0 {
+            Some(Molecule::from_u16(pw))
+        } else {
+            None
+        }
+    }
+
+    /// O(1) set: store P_weight for codepoint.
+    ///
+    /// Append-only semantics: only sets if slot is currently 0 (empty).
+    /// Returns true if stored, false if slot was already occupied or out of range.
+    pub fn set(&mut self, cp: u32, p_weight: u16) -> bool {
+        let idx = cp as usize;
+        if idx < KNOWTREE_CAPACITY && self.table[idx] == 0 && p_weight != 0 {
+            self.table[idx] = p_weight;
+            self.count += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Number of filled (non-zero) entries.
+    #[inline]
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// Check if codepoint has a known P_weight.
+    #[inline]
+    pub fn contains(&self, cp: u32) -> bool {
+        self.get(cp) != 0
+    }
+
+    /// RAM usage in bytes.
+    #[inline]
+    pub fn ram_usage(&self) -> usize {
+        KNOWTREE_CAPACITY * 2 // Vec<u16> payload
+    }
+
+    /// Serialize to compact bytes: only non-zero entries.
+    ///
+    /// Format: `[count:4][cp:4 + pw:2]×count`
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(4 + self.count as usize * 6);
+        buf.extend_from_slice(&self.count.to_be_bytes());
+        for (cp, &pw) in self.table.iter().enumerate() {
+            if pw != 0 {
+                buf.extend_from_slice(&(cp as u32).to_be_bytes());
+                buf.extend_from_slice(&pw.to_be_bytes());
+            }
+        }
+        buf
+    }
+
+    /// Restore from compact bytes.
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        if b.len() < 4 {
+            return None;
+        }
+        let count = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+        let mut kt = Self::new();
+        let mut offset = 4;
+        for _ in 0..count {
+            if offset + 6 > b.len() {
+                return None;
+            }
+            let cp = u32::from_be_bytes([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
+            let pw = u16::from_be_bytes([b[offset + 4], b[offset + 5]]);
+            offset += 6;
+            if (cp as usize) < KNOWTREE_CAPACITY && pw != 0 {
+                kt.table[cp as usize] = pw;
+                kt.count += 1;
+            }
+        }
+        Some(kt)
+    }
+
+    /// Summary string.
+    pub fn summary(&self) -> String {
+        format!(
+            "KnowTree v2: {} entries, {}KB RAM",
+            self.count,
+            self.ram_usage() / 1024,
+        )
+    }
+}
+
+impl Default for KnowTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KnowTreeLegacy — old TieredStore wrapper (T10 sẽ xóa)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Legacy knowledge tree — L2-Ln storage powered by TieredStore.
+///
+/// DEPRECATED: Sẽ bị xóa ở T10. Dùng `KnowTree` (v2) thay thế.
+pub struct KnowTreeLegacy {
     /// Underlying tiered storage
     store: TieredStore,
     /// Total sentences stored
@@ -47,7 +209,7 @@ pub struct KnowTree {
     promotions: u64,
 }
 
-impl KnowTree {
+impl KnowTreeLegacy {
     /// Create for PC (610 page cache, 8192 dict).
     pub fn for_pc() -> Self {
         Self {
@@ -313,7 +475,7 @@ impl KnowTree {
 /// ```
 ///
 /// 500M nodes × 11B avg = 5.5GB → VỪA ĐIỆN THOẠI
-pub struct SlimKnowTree {
+pub struct SlimKnowTreeLegacy {
     /// Pages per layer (layer → list of pages)
     pages: Vec<(u8, SlimPage)>,
     /// Hash index: hash → (layer, page_index) for O(1) lookup
@@ -328,7 +490,7 @@ pub struct SlimKnowTree {
     promotions: u64,
 }
 
-impl SlimKnowTree {
+impl SlimKnowTreeLegacy {
     /// Create new SlimKnowTree.
     pub fn new() -> Self {
         Self {
@@ -612,7 +774,7 @@ impl SlimKnowTree {
     /// Summary.
     pub fn summary(&self) -> String {
         format!(
-            "SlimKnowTree: {} sentences + {} concepts + {} promotions\n\
+            "SlimKnowTreeLegacy: {} sentences + {} concepts + {} promotions\n\
              Nodes: {} | Edges: {} | Pages: {} | Avg: {:.1}B/node",
             self.sentences_stored,
             self.concepts_stored,
@@ -646,7 +808,7 @@ impl SlimKnowTree {
     }
 }
 
-impl Default for SlimKnowTree {
+impl Default for SlimKnowTreeLegacy {
     fn default() -> Self {
         Self::new()
     }
@@ -685,7 +847,7 @@ mod tests {
 
     #[test]
     fn knowtree_store_sentence() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         let chain = test_chain(0x80);
         let words = alloc::vec![0xAAAA, 0xBBBB, 0xCCCC];
         let hash = kt.store_sentence(&chain, None, &words, 1000);
@@ -697,7 +859,7 @@ mod tests {
 
     #[test]
     fn knowtree_store_concept() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         let chain = test_chain(0x90);
         let sources = alloc::vec![0x1111, 0x2222, 0x3333];
         let hash = kt.store_concept(&chain, None, 3, &sources, 1000);
@@ -708,7 +870,7 @@ mod tests {
 
     #[test]
     fn knowtree_promote() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         let chain = test_chain(0xA0);
         let hash = kt.promote_from_stm(&chain, None, 5, 1000);
         assert!(hash != 0);
@@ -717,7 +879,7 @@ mod tests {
 
     #[test]
     fn knowtree_lookup() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         let chain = test_chain(0x80);
         let hash = kt.store_sentence(&chain, None, &[], 1000);
 
@@ -727,7 +889,7 @@ mod tests {
 
     #[test]
     fn knowtree_query_with_edges() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         let c1 = test_chain(0x80);
         let c2 = test_chain(0x90);
         let h1 = kt.store_sentence(&c1, None, &[], 1000);
@@ -741,7 +903,7 @@ mod tests {
 
     #[test]
     fn knowtree_store_chapter() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         let chains: Vec<(MolecularChain, Vec<u64>)> = (0u8..5)
             .map(|i| {
                 (
@@ -762,7 +924,7 @@ mod tests {
 
     #[test]
     fn knowtree_summary() {
-        let kt = KnowTree::new(4, 100);
+        let kt = KnowTreeLegacy::new(4, 100);
         let s = kt.summary();
         assert!(s.contains("KnowTree"), "{}", s);
         assert!(s.contains("0 sentences"), "{}", s);
@@ -770,7 +932,7 @@ mod tests {
 
     #[test]
     fn knowtree_for_pc() {
-        let kt = KnowTree::for_pc();
+        let kt = KnowTreeLegacy::for_pc();
         assert_eq!(kt.total_nodes(), 0); // freshly created, no nodes
     }
 
@@ -795,7 +957,7 @@ mod tests {
 
     #[test]
     fn knowtree_concept_minimum_layer() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         let chain = test_chain(0x80);
         // Try to store at layer 1 → should be forced to L3
         kt.store_concept(&chain, None, 1, &[], 1000);
@@ -804,7 +966,7 @@ mod tests {
 
     #[test]
     fn knowtree_ram_disk_usage() {
-        let mut kt = KnowTree::new(4, 100);
+        let mut kt = KnowTreeLegacy::new(4, 100);
         for i in 0u8..10 {
             let chain = test_chain(0x80 + i);
             kt.store_sentence(&chain, None, &[], i as i64);
@@ -812,13 +974,13 @@ mod tests {
         assert!(kt.ram_usage() > 0);
     }
 
-    // ── SlimKnowTree ────────────────────────────────────────────────────────
+    // ── SlimKnowTreeLegacy ─────────────────────────────────────────────────
 
-    use super::SlimKnowTree;
+    use super::SlimKnowTreeLegacy;
 
     #[test]
     fn slim_knowtree_store_sentence() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         let chain = test_chain(0x80);
         let words = alloc::vec![0xAAAAu64, 0xBBBB, 0xCCCC];
         let hash = skt.store_sentence(&chain, &words, 1000);
@@ -831,7 +993,7 @@ mod tests {
 
     #[test]
     fn slim_knowtree_store_concept() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         let chain = test_chain(0x90);
         let sources = alloc::vec![0x1111u64, 0x2222, 0x3333];
         let hash = skt.store_concept(&chain, 3, &sources, 1000);
@@ -842,7 +1004,7 @@ mod tests {
 
     #[test]
     fn slim_knowtree_promote() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         let chain = test_chain(0xA0);
         let hash = skt.promote_from_stm(&chain, 1000);
         assert!(hash != 0);
@@ -851,7 +1013,7 @@ mod tests {
 
     #[test]
     fn slim_knowtree_lookup() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         let chain = test_chain(0x80);
         let hash = skt.store_sentence(&chain, &[], 1000);
 
@@ -862,7 +1024,7 @@ mod tests {
 
     #[test]
     fn slim_knowtree_lookup_chain() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         let chain = test_chain(0xB0);
         let hash = skt.store_sentence(&chain, &[], 1000);
 
@@ -873,7 +1035,7 @@ mod tests {
 
     #[test]
     fn slim_knowtree_store_chapter() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         let chains: Vec<(MolecularChain, Vec<u64>)> = (0u8..5)
             .map(|i| {
                 (
@@ -893,21 +1055,21 @@ mod tests {
 
     #[test]
     fn slim_knowtree_serialization_roundtrip() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         for i in 0u8..10 {
             let chain = test_chain(0x80 + i);
             skt.store_sentence(&chain, &[], i as i64);
         }
 
         let bytes = skt.to_bytes();
-        let mut restored = SlimKnowTree::new();
+        let mut restored = SlimKnowTreeLegacy::new();
         assert!(restored.restore_from_bytes(&bytes));
         assert_eq!(restored.total_nodes(), 10);
     }
 
     #[test]
     fn slim_knowtree_avg_bytes_per_node() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         for i in 0u8..50 {
             let chain = test_chain(0x80 + (i % 20));
             skt.store_sentence(&chain, &[], i as i64);
@@ -923,14 +1085,14 @@ mod tests {
 
     #[test]
     fn slim_knowtree_summary() {
-        let skt = SlimKnowTree::new();
+        let skt = SlimKnowTreeLegacy::new();
         let s = skt.summary();
-        assert!(s.contains("SlimKnowTree"), "{}", s);
+        assert!(s.contains("SlimKnowTreeLegacy"), "{}", s);
     }
 
     #[test]
     fn slim_knowtree_concept_minimum_layer() {
-        let mut skt = SlimKnowTree::new();
+        let mut skt = SlimKnowTreeLegacy::new();
         let chain = test_chain(0x80);
         // Try layer 1 → forced to L3
         skt.store_concept(&chain, 1, &[], 1000);
@@ -938,5 +1100,95 @@ mod tests {
         // Should be findable at layer 3
         let hash = chain.chain_hash();
         assert!(skt.lookup(hash, 3).is_some());
+    }
+
+    // ── KnowTree v2 ──────────────────────────────────────────────────────
+
+    #[test]
+    fn knowtree_v2_new_empty() {
+        let kt = KnowTree::new();
+        assert_eq!(kt.count(), 0);
+        assert_eq!(kt.get(0x1F525), 0);
+        assert!(kt.get_mol(0x1F525).is_none());
+    }
+
+    #[test]
+    fn knowtree_v2_set_get() {
+        let mut kt = KnowTree::new();
+        let pw: u16 = 0xABCD;
+        assert!(kt.set(0x1F525, pw));
+        assert_eq!(kt.get(0x1F525), pw);
+        assert_eq!(kt.count(), 1);
+        assert!(kt.contains(0x1F525));
+    }
+
+    #[test]
+    fn knowtree_v2_append_only() {
+        let mut kt = KnowTree::new();
+        kt.set(0x1F525, 0x1234);
+        // Second set should fail (append-only)
+        assert!(!kt.set(0x1F525, 0x5678));
+        assert_eq!(kt.get(0x1F525), 0x1234, "Original value preserved");
+    }
+
+    #[test]
+    fn knowtree_v2_out_of_range() {
+        let mut kt = KnowTree::new();
+        // Codepoint beyond capacity
+        assert!(!kt.set(0xFFFFFF, 0x1234));
+        assert_eq!(kt.get(0xFFFFFF), 0);
+    }
+
+    #[test]
+    fn knowtree_v2_get_mol() {
+        let mut kt = KnowTree::new();
+        let mol = Molecule::pack(0x10, 0x20, 0xA0, 0x60, 0x80);
+        kt.set(0x2190, mol.bits);
+        let restored = kt.get_mol(0x2190).unwrap();
+        assert_eq!(restored.bits, mol.bits);
+    }
+
+    #[test]
+    fn knowtree_v2_bootstrap() {
+        let ucd_data: Vec<(u32, u16)> = alloc::vec![
+            (0x1F525, 0x1234), // fire
+            (0x1F4A7, 0x5678), // water
+            (0x2190, 0x9ABC),  // arrow
+        ];
+        let kt = KnowTree::bootstrap_from_ucd(&ucd_data);
+        assert_eq!(kt.count(), 3);
+        assert_eq!(kt.get(0x1F525), 0x1234);
+        assert_eq!(kt.get(0x1F4A7), 0x5678);
+        assert_eq!(kt.get(0x2190), 0x9ABC);
+    }
+
+    #[test]
+    fn knowtree_v2_serialization_roundtrip() {
+        let mut kt = KnowTree::new();
+        kt.set(0x1F525, 0x1234);
+        kt.set(0x1F4A7, 0x5678);
+        kt.set(0x2744, 0x9ABC);
+
+        let bytes = kt.to_bytes();
+        let restored = KnowTree::from_bytes(&bytes).unwrap();
+        assert_eq!(restored.count(), 3);
+        assert_eq!(restored.get(0x1F525), 0x1234);
+        assert_eq!(restored.get(0x1F4A7), 0x5678);
+        assert_eq!(restored.get(0x2744), 0x9ABC);
+    }
+
+    #[test]
+    fn knowtree_v2_ram_usage() {
+        let kt = KnowTree::new();
+        // 131072 × 2 = 262144 bytes = 256KB
+        assert_eq!(kt.ram_usage(), 262144);
+    }
+
+    #[test]
+    fn knowtree_v2_summary() {
+        let kt = KnowTree::new();
+        let s = kt.summary();
+        assert!(s.contains("KnowTree v2"), "{}", s);
+        assert!(s.contains("0 entries"), "{}", s);
     }
 }
