@@ -22,7 +22,7 @@ HomeOS:  9,584 công thức SDF → chuỗi tỷ links → toàn bộ tri thức
 | Bits/ký tự | 2 | 14 (= 2 bytes) |
 | Chuỗi | Dài tỷ bases, đọc từ đầu đến cuối | Dài tỷ links, đọc từ gốc đến ngọn |
 | Cơ chế đọc | Ribosome evaluate → protein | SDF evaluate → hình dạng + màu + âm + vị trí |
-| Lưu gì | Genotype (ATCG chuỗi) + phenotype (protein concentration trong tế bào) | Chain links (2B/link = genotype) + P_weight per node (5B = cached phenotype) |
+| Lưu gì | Genotype (ATCG chuỗi) + phenotype (protein concentration trong tế bào) | Chain links (2B/link = genotype) + P_weight per node (2B = cached phenotype) |
 
 ---
 
@@ -312,15 +312,15 @@ Ví dụ "tôi buồn vì mất việc":
 ```
 KnowTree = array 65,536 phần tử:
   Position (u16) = codepoint = INDEX IMPLICIT — không lưu trong node
-  Value          = P_weight (5B Molecule)     — LÀ node
+  Value          = P_weight (2B Molecule)     — LÀ node
 
   KnowTree[0x1F525] → P(🔥) = [S=Sphere, R=Causes, V=0xC0, A=0xC0, T=Fast]
   KnowTree[0x25CF]  → P(●)  = [S=Sphere, R=Member,  V=0x80, A=0x40, T=Static]
 
 Node layout:
-  P_weight: Mol  (5 bytes)   — trọng số đã tính (S,R,V,A,T)
+  P_weight: Mol  (2 bytes)   — trọng số đã tính (S,R,V,A,T)
   ─────────────────────────────────────────────────────
-  Total:         5 bytes/node   ← index là vị trí array, implicit
+  Total:         2 bytes/node   ← index là vị trí array, implicit
 
 L0 emoji nodes (9,584):
   P_weight = được xây 1 lần từ TÀI LIỆU NÀY khi bootstrap
@@ -330,7 +330,7 @@ L5+ learned nodes:
   P_weight = kết quả Encoder tích lũy qua thời gian
   Cập nhật theo Hebbian cho đến khi CHÍN → promote QR → immutable
 
-KnowTree toàn bộ: 65,536 × 5B = 328 KB
+Một nhánh trên KnowTree toàn bộ: 65,536 × 2B = 128 KB
 ```
 
 **Decoder = đạo hàm (∂)**
@@ -411,8 +411,8 @@ Có 3 loại KHÔNG được nhầm:
 ┌─────────────────────────────────────────────────────────────────┐
 │ Loại 1 — KnowTree (in-memory, working memory)                  │
 │   Array 65,536 phần tử, index = vị trí = IMPLICIT              │
-│   Mỗi phần tử = P_weight: Mol (5 bytes)                        │
-│   → KnowTree toàn bộ: 65,536 × 5B = 328 KB                    │
+│   Mỗi phần tử = P_weight: Mol (2 bytes)                        │
+│   → Một nhánh trên KnowTree toàn bộ: 65,536 × 2B = 128 KB      │
 │                                                                 │
 │   KnowTree[codepoint] → P_weight — O(1), không cần hash        │
 ├─────────────────────────────────────────────────────────────────┤
@@ -442,7 +442,7 @@ u16 slot layout:
 ```
 
 ```
-KnowTree working memory : 328 KB   (65,536 × 5B — vừa L1 cache)
+KnowTree working memory : 128 KB   (65,536 × 2B — vừa L1 cache)
 Chain data (tri thức)   : ~14 GB   (7.42 tỷ u16 links)
 origin.olang (persist)  : ~25B/rec (hash + timestamp + mol)
 ```
