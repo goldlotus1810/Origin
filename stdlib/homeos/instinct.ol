@@ -86,7 +86,7 @@ pub fn confidence_label(conf) {
 
 fn detect_contradiction(observation, knowledge) {
   // Check if new observation contradicts existing knowledge
-  // Valence opposition: V > 0 vs V < 0 for same concept
+  // Valence opposition: V > neutral vs V < neutral for same concept
   let mol = observation.mol;
   let i = 0;
   let entries = knowledge.stm.entries;
@@ -96,11 +96,11 @@ fn detect_contradiction(observation, knowledge) {
     let existing = entries[i];
     let sim = similarity(mol, existing.mol);
     if sim > 0.7 {
-      // Similar concept — check valence direction
-      let v_new = mol.v;
-      let v_old = existing.mol.v;
-      // Opposition: one > 128 (positive) and one < 128 (negative)
-      if (v_new > 160 && v_old < 96) || (v_new < 96 && v_old > 160) {
+      // Similar concept — check valence direction (V range 0-7, neutral=4)
+      let v_new = mol_valence(mol);
+      let v_old = mol_valence(existing.mol);
+      // Opposition: one > 5 (positive) and one < 3 (negative)
+      if (v_new > 5 && v_old < 3) || (v_new < 3 && v_old > 5) {
         return true;
       }
     }
@@ -115,7 +115,7 @@ fn detect_causality(observation, knowledge) {
   // Temporal co-activation + Relation::Causes → causal link
   // Simplified: if two concepts frequently co-activate with Causes relation
   let mol = observation.mol;
-  if mol.r == 6 { return true; }  // Relation = Causes
+  if mol_relation(mol) == 6 { return true; }  // Relation = Causes
   return false;
 }
 
@@ -154,7 +154,7 @@ fn find_analogy(observation, knowledge) {
   let prev = entries[len(entries) - 1].mol;
   let delta = dimension_delta(prev, mol);
 
-  if delta.delta > 50 {
+  if delta.delta > 2 {
     return "evolve(" + delta.dim + ")";
   }
   return "";

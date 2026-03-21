@@ -1,77 +1,85 @@
-// stdlib/mol.ol — Molecule helpers for Olang
-// Molecule [S][R][V][A][T] = 5 bytes = tọa độ 5D
+// stdlib/mol.ol — Molecule helpers for Olang (v2)
+// Molecule = packed u16: [S:4][R:4][V:3][A:3][T:2] = 16 bits
 
-// Constructors
+// ── Constructor ──────────────────────────────────────────────
+// Packs 5 dimensions into a single u16.
+//   S occupies bits 15..12, R bits 11..8, V bits 7..5, A bits 4..2, T bits 1..0
 pub fn mol_new(s, r, v, a, t) {
-  return { s: s, r: r, v: v, a: a, t: t };
+  return (s << 12) | (r << 8) | (v << 5) | (a << 2) | t;
 }
 
+// Default molecule: Sphere(0), Member(0), V=4(neutral), A=4(neutral), Medium(2)
 pub fn mol_default() {
-  // Defaults: S=Sphere, R=Member, V=0x80, A=0x80, T=Medium
-  return mol_new(1, 1, 128, 128, 3);
+  return mol_new(0, 0, 4, 4, 2);
 }
 
-// Accessors
-pub fn shape(mol) { return mol.s; }
-pub fn relation(mol) { return mol.r; }
-pub fn valence(mol) { return mol.v; }
-pub fn arousal(mol) { return mol.a; }
-pub fn time(mol) { return mol.t; }
+// ── Accessors (extract via bit shifts) ───────────────────────
+pub fn shape(mol)    { return (mol >> 12) & 0xF; }
+pub fn relation(mol) { return (mol >> 8)  & 0xF; }
+pub fn valence(mol)  { return (mol >> 5)  & 0x7; }
+pub fn arousal(mol)  { return (mol >> 2)  & 0x7; }
+pub fn time(mol)     { return mol & 0x3; }
 
-// Shape constants (8 primitives)
-let SPHERE = 1;
-let LINE = 2;
-let BOX = 3;
-let TRIANGLE = 4;
-let CIRCLE = 5;
-let CUP = 6;
-let CAP = 7;
-let SLASH = 8;
+// ── Shape constants (18 SDF primitives, 0-17) ────────────────
+let SPHERE      = 0;
+let BOX         = 1;
+let CAPSULE     = 2;
+let PLANE       = 3;
+let TORUS       = 4;
+let ELLIPSOID   = 5;
+let CONE        = 6;
+let CYLINDER    = 7;
+let OCTAHEDRON  = 8;
+let PYRAMID     = 9;
+let HEX_PRISM   = 10;
+let PRISM       = 11;
+let ROUND_BOX   = 12;
+let LINK        = 13;
+let REVOLVE     = 14;
+let EXTRUDE     = 15;
+let CUT_SPHERE  = 16;
+let DEATH_STAR  = 17;
 
-// Relation constants (8 relations)
-let MEMBER = 1;
-let SUBSET = 2;
-let EQUIVALENT = 3;
-let ORTHOGONAL = 4;
-let COMPOSE = 5;
-let CAUSES = 6;
-let APPROXIMATES = 7;
-let CAUSED_BY = 8;
+// ── Relation constants (8 relations, 0-7) ────────────────────
+let MEMBER       = 0;
+let SUBSET       = 1;
+let EQUIVALENT   = 2;
+let ORTHOGONAL   = 3;
+let COMPOSE      = 4;
+let CAUSES       = 5;
+let APPROXIMATES = 6;
+let CAUSED_BY    = 7;
 
-// Time constants
-let STATIC = 1;
-let SLOW = 2;
-let MEDIUM = 3;
-let FAST = 4;
-let INSTANT = 5;
+// ── Time constants (4 levels, 0-3) ───────────────────────────
+let STATIC = 0;
+let SLOW   = 1;
+let MEDIUM = 2;
+let FAST   = 3;
 
-// Evolution: mutate 1 dimension → new concept
+// ── Evolution: replace one dimension → new packed u16 ────────
 pub fn evolve(mol, dim, new_val) {
-  if dim == "s" || dim == "shape" {
-    return mol_new(new_val, mol.r, mol.v, mol.a, mol.t);
-  }
-  if dim == "r" || dim == "relation" {
-    return mol_new(mol.s, new_val, mol.v, mol.a, mol.t);
-  }
-  if dim == "v" || dim == "valence" {
-    return mol_new(mol.s, mol.r, new_val, mol.a, mol.t);
-  }
-  if dim == "a" || dim == "arousal" {
-    return mol_new(mol.s, mol.r, mol.v, new_val, mol.t);
-  }
-  if dim == "t" || dim == "time" {
-    return mol_new(mol.s, mol.r, mol.v, mol.a, new_val);
-  }
-  return mol;
+  let s = shape(mol);
+  let r = relation(mol);
+  let v = valence(mol);
+  let a = arousal(mol);
+  let t = time(mol);
+
+  if dim == "s" || dim == "shape"    { s = new_val; }
+  if dim == "r" || dim == "relation" { r = new_val; }
+  if dim == "v" || dim == "valence"  { v = new_val; }
+  if dim == "a" || dim == "arousal"  { a = new_val; }
+  if dim == "t" || dim == "time"     { t = new_val; }
+
+  return mol_new(s, r, v, a, t);
 }
 
-// Find which dimension differs most
+// ── Dimension delta: find which dimension differs most ───────
 pub fn dimension_delta(a, b) {
-  let ds = abs(a.s - b.s);
-  let dr = abs(a.r - b.r);
-  let dv = abs(a.v - b.v);
-  let da = abs(a.a - b.a);
-  let dt = abs(a.t - b.t);
+  let ds = abs(shape(a)    - shape(b));
+  let dr = abs(relation(a) - relation(b));
+  let dv = abs(valence(a)  - valence(b));
+  let da = abs(arousal(a)  - arousal(b));
+  let dt = abs(time(a)     - time(b));
 
   let max_d = ds;
   let max_dim = "shape";
@@ -84,34 +92,42 @@ pub fn dimension_delta(a, b) {
   return { dim: max_dim, delta: max_d };
 }
 
-// LCA of two molecules (per-dimension average)
+// ── LCA (deprecated — v2 uses amplify in Rust LCA) ──────────
+// @deprecated: Use Rust-side LCA with amplify instead.
 pub fn mol_lca(a, b) {
   return mol_new(
-    (a.s + b.s) / 2,
-    (a.r + b.r) / 2,
-    (a.v + b.v) / 2,
-    (a.a + b.a) / 2,
-    (a.t + b.t) / 2
+    (shape(a)    + shape(b))    / 2,
+    (relation(a) + relation(b)) / 2,
+    (valence(a)  + valence(b))  / 2,
+    (arousal(a)  + arousal(b))  / 2,
+    (time(a)     + time(b))     / 2
   );
 }
 
-// Check consistency: ≥3/4 semantic rules must hold
+// ── Consistency check (v2 ranges) ────────────────────────────
+// S: 0-17, R: 0-7, V: 0-7, A: 0-7, T: 0-3
 pub fn is_consistent(mol) {
   let score = 0;
-  // Rule 1: shape in valid range (1-8)
-  if mol.s >= 1 && mol.s <= 8 { score = score + 1; }
-  // Rule 2: relation in valid range (1-8)
-  if mol.r >= 1 && mol.r <= 8 { score = score + 1; }
-  // Rule 3: valence in byte range (0-255)
-  if mol.v >= 0 && mol.v <= 255 { score = score + 1; }
-  // Rule 4: time in valid range (1-5)
-  if mol.t >= 1 && mol.t <= 5 { score = score + 1; }
-  return score >= 3;
+  let s = shape(mol);
+  let r = relation(mol);
+  let v = valence(mol);
+  let a = arousal(mol);
+  let t = time(mol);
+
+  if s >= 0 && s <= 17 { score = score + 1; }
+  if r >= 0 && r <= 7  { score = score + 1; }
+  if v >= 0 && v <= 7  { score = score + 1; }
+  if a >= 0 && a <= 7  { score = score + 1; }
+  if t >= 0 && t <= 3  { score = score + 1; }
+
+  return score >= 4;
 }
 
-// Display
+// ── Display ──────────────────────────────────────────────────
 pub fn mol_to_str(mol) {
-  return "{ S=" + to_string(mol.s) + " R=" + to_string(mol.r) +
-         " V=" + to_string(mol.v) + " A=" + to_string(mol.a) +
-         " T=" + to_string(mol.t) + " }";
+  return "{ S=" + to_string(shape(mol)) +
+         " R="  + to_string(relation(mol)) +
+         " V="  + to_string(valence(mol)) +
+         " A="  + to_string(arousal(mol)) +
+         " T="  + to_string(time(mol)) + " }";
 }

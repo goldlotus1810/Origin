@@ -23,7 +23,7 @@ union Expr {
     PathExpr { base: Str, member: Str },
     StructLit { path: Str, fields: Vec[FieldInit] },
     IfExpr { cond: Expr, then_expr: Expr, else_expr: Expr },
-    MolLiteral { s: Num, r: Num, v: Num, a: Num, t: Num },
+    MolLiteral { packed: Num },
     MatchExpr { subject: Expr, arms: Vec[MatchArm] },
 }
 
@@ -328,9 +328,9 @@ fn parse_primary(p) {
                 advance(p);
                 let s = 0;
                 let r = 0;
-                let v = 128;
-                let a = 128;
-                let t = 3;
+                let v = 0;
+                let a = 0;
+                let t = 0;
                 while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
                     let dim = expect_ident(p);
                     expect_symbol(p, "=");
@@ -347,7 +347,9 @@ fn parse_primary(p) {
                     };
                 };
                 expect_symbol(p, "}");
-                return Expr::MolLiteral { s: s, r: r, v: v, a: a, t: t };
+                // Pack into u16: [S:4][R:4][V:3][A:3][T:2]
+                let packed = mol_new(s, r, v, a, t);
+                return Expr::MolLiteral { packed: packed };
             };
             emit "Parse error: unexpected symbol '" + ch + "'";
             advance(p);

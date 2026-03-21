@@ -193,12 +193,9 @@ fn encode_op(output, op) {
         emit_u32_le(output, op.value);
     };
     if op.tag == "PushMol" {
-        // PushMol: [s:1][r:1][v:1][a:1][t:1]
-        emit_byte(output, op.value);
-        emit_byte(output, op.value2);
-        emit_byte(output, op.value3);
-        emit_byte(output, op.value4);
-        emit_byte(output, op.value5);
+        // PushMol(u16): bytecode = 3B [0x19][lo][hi]
+        // value = packed u16 [S:4][R:4][V:3][A:3][T:2]
+        emit_u16_le(output, op.value);
     };
     if op.tag == "Edge" || op.tag == "Query" {
         // Edge/Query: [rel:1]

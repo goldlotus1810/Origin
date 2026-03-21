@@ -49,9 +49,10 @@ pub fn process_one(text, emotion, context) {
 }
 
 // ── Text → Molecule (simplified encoding) ──
+// Molecule is now a packed u16: [S:4][R:4][V:3][A:3][T:2] = 16 bits
 
 fn text_to_mol(text, emotion) {
-  // Map text + emotion → 5D molecule
+  // Map text + emotion → packed u16 molecule
   // Shape: based on text type (statement=Sphere, question=Circle, command=Triangle)
   let s = 1;  // default Sphere
   if ends_with(text, "?") { s = 5; }  // Circle for questions
@@ -60,14 +61,14 @@ fn text_to_mol(text, emotion) {
   // Relation: default Member
   let r = 1;
 
-  // Valence/Arousal from emotion
-  let v = clamp(128 + emotion.v * 127, 0, 255);
-  let a = clamp(emotion.a * 255, 0, 255);
+  // Valence/Arousal from emotion (V: 0-7, 3 bits; A: 0-7, 3 bits)
+  let v = clamp(round((emotion.v + 1.0) / 2.0 * 7), 0, 7);
+  let a = clamp(round(emotion.a * 7), 0, 7);
 
-  // Time: based on text length
-  let t = 3;  // Medium
-  if len(text) < 10 { t = 4; }   // Short = Fast
-  if len(text) > 100 { t = 2; }  // Long = Slow
+  // Time: based on text length (T: 0-3, 2 bits)
+  let t = 1;  // Medium
+  if len(text) < 10 { t = 2; }   // Short = Fast
+  if len(text) > 100 { t = 0; }  // Long = Slow
 
   return mol_new(s, r, v, a, t);
 }

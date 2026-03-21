@@ -1,5 +1,6 @@
 // homeos/dream.ol — Offline consolidation (STM → cluster → promote)
 // Dream = neuron analog: dendrites consolidate during sleep
+// v2: mol is packed u16 [S:4][R:4][V:3][A:3][T:2]. similarity() takes u16 args.
 
 // ── STM (Short-Term Memory) ──
 

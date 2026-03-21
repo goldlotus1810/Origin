@@ -1,41 +1,46 @@
-// stdlib/chain.ol — MolecularChain helpers for Olang
-// Chain = ordered sequence of Molecules.
+// stdlib/chain.ol — MolecularChain helpers for Olang (v2)
+// Chain = ordered list of u16 packed molecules.
+// Each link is a u16 with layout [S:4][R:4][V:3][A:3][T:2].
 
 pub fn chain_new() {
-  return { mols: [], hash: 0 };
+  return { links: [], hash: 0 };
 }
 
-pub fn chain_from_mol(mol) {
-  return { mols: [mol], hash: __fnv1a(mol_bytes(mol)) };
+// Create chain from a single u16 molecule
+pub fn chain_from_mol(mol_u16) {
+  return { links: [mol_u16], hash: __fnv1a(mol_bytes(mol_u16)) };
 }
 
-pub fn chain_append(c, mol) {
-  push(c.mols, mol);
-  c.hash = hash_combine(c.hash, __fnv1a(mol_bytes(mol)));
+// Append a u16 molecule to chain
+pub fn chain_append(c, mol_u16) {
+  push(c.links, mol_u16);
+  c.hash = hash_combine(c.hash, __fnv1a(mol_bytes(mol_u16)));
   return c;
 }
 
 pub fn chain_len(c) {
-  return len(c.mols);
+  return len(c.links);
 }
 
+// Returns u16 molecule at index
 pub fn chain_get(c, idx) {
-  if idx < 0 || idx >= len(c.mols) { return mol_default(); }
-  return c.mols[idx];
+  if idx < 0 || idx >= len(c.links) { return mol_default(); }
+  return c.links[idx];
 }
 
 pub fn chain_first(c) {
-  if len(c.mols) == 0 { return mol_default(); }
-  return c.mols[0];
+  if len(c.links) == 0 { return mol_default(); }
+  return c.links[0];
 }
 
 pub fn chain_last(c) {
-  let n = len(c.mols);
+  let n = len(c.links);
   if n == 0 { return mol_default(); }
-  return c.mols[n - 1];
+  return c.links[n - 1];
 }
 
-// LCA of two chains (per-dimension average of corresponding molecules)
+// ── LCA of two chains ───────────────────────────────────────
+// Per-position mol_lca (or __lca builtin) of corresponding u16 molecules
 pub fn chain_lca(a, b) {
   let result = chain_new();
   let n = min(chain_len(a), chain_len(b));
@@ -48,7 +53,7 @@ pub fn chain_lca(a, b) {
   return result;
 }
 
-// Concatenate two chains
+// ── Concatenate two chains ──────────────────────────────────
 pub fn chain_concat(a, b) {
   let result = chain_new();
   let i = 0;
@@ -64,7 +69,7 @@ pub fn chain_concat(a, b) {
   return result;
 }
 
-// Split chain at position
+// ── Split chain at position ─────────────────────────────────
 pub fn chain_split(c, pos) {
   let left = chain_new();
   let right = chain_new();
@@ -81,7 +86,8 @@ pub fn chain_split(c, pos) {
   return [left, right];
 }
 
-// Compare chains: -1, 0, 1
+// ── Compare chains: -1, 0, 1 ────────────────────────────────
+// Extracts dims from each u16 molecule via accessors
 pub fn chain_compare(a, b) {
   let na = chain_len(a);
   let nb = chain_len(b);
@@ -91,11 +97,16 @@ pub fn chain_compare(a, b) {
     let ma = chain_get(a, i);
     let mb = chain_get(b, i);
     // Compare by dimension priority: S, R, V, A, T
-    if ma.s != mb.s { if ma.s < mb.s { return -1; } return 1; }
-    if ma.r != mb.r { if ma.r < mb.r { return -1; } return 1; }
-    if ma.v != mb.v { if ma.v < mb.v { return -1; } return 1; }
-    if ma.a != mb.a { if ma.a < mb.a { return -1; } return 1; }
-    if ma.t != mb.t { if ma.t < mb.t { return -1; } return 1; }
+    let sa = shape(ma);    let sb = shape(mb);
+    if sa != sb { if sa < sb { return -1; } return 1; }
+    let ra = relation(ma); let rb = relation(mb);
+    if ra != rb { if ra < rb { return -1; } return 1; }
+    let va = valence(ma);  let vb = valence(mb);
+    if va != vb { if va < vb { return -1; } return 1; }
+    let aa = arousal(ma);  let ab = arousal(mb);
+    if aa != ab { if aa < ab { return -1; } return 1; }
+    let ta = time(ma);     let tb = time(mb);
+    if ta != tb { if ta < tb { return -1; } return 1; }
     i = i + 1;
   }
   if na < nb { return -1; }
@@ -103,7 +114,8 @@ pub fn chain_compare(a, b) {
   return 0;
 }
 
-// Similarity between two chains (average molecule similarity)
+// ── Similarity between two chains ───────────────────────────
+// Average molecule similarity across corresponding u16 molecules
 pub fn chain_similarity(a, b) {
   let na = chain_len(a);
   let nb = chain_len(b);
@@ -118,7 +130,9 @@ pub fn chain_similarity(a, b) {
   return total / n;
 }
 
-// Helper: molecule to bytes (for hashing)
-fn mol_bytes(mol) {
-  return [mol.s, mol.r, mol.v, mol.a, mol.t];
+// ── Helper: u16 molecule to 2-byte array [hi, lo] ──────────
+pub fn mol_bytes(mol) {
+  let hi = (mol >> 8) & 0xFF;
+  let lo = mol & 0xFF;
+  return [hi, lo];
 }
