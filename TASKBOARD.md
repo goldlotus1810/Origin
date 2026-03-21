@@ -567,7 +567,7 @@ INTG (song song với tất cả):
 | T7 | Writer/Reader v2 format | `PLAN_V2_MIGRATION` | T4 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | v0.06: NodeRecord [len:2][u16×N], Curve 0x09 already existed, backward compat v0.03-v0.05 |
 | T8 | Registry codepoint-based | `PLAN_V2_MIGRATION` | T4,T6 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | cp_index Vec<(u32,u64)>, insert_codepoint(), lookup_codepoint(), bulk sort, fixed evict_cold hash collision |
 | T9 | VM PushMol 2B | `PLAN_V2_MIGRATION` | T3 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | PushMol(u16), 3B bytecode [0x19][lo][hi], 7 files updated |
-| T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | FREE | | | silk/agents/memory/vsdf/runtime/context |
+| T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | silk✅ready, agents:instinct.rs v2 quantized, memory✅ready, vsdf✅ready, runtime✅ready, context✅no dead code |
 | T11 | .ol files update (15 files) | `PLAN_V2_MIGRATION` | T9 | DONE | `claude/read-homeOS-biology-jg1ji` | 2026-03-21 | 13 files: mol/chain/hash + HomeOS pipeline + bootstrap compiler + agents, u16 packed |
 | T12 | Tests rebuild | `PLAN_V2_MIGRATION` | T10,T11 | FREE | | | 1198 tests = false positive, rewrite all |
 
