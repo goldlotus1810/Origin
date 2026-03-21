@@ -79,25 +79,25 @@ impl DeltaMolecule {
         let mut mask = 0u8;
         let mut data = Vec::new();
 
-        if child.shape != parent.shape {
+        if child.shape_u8() != parent.shape_u8() {
             mask |= 0x01;
-            data.push(child.shape);
+            data.push(child.shape_u8());
         }
-        if child.relation != parent.relation {
+        if child.relation_u8() != parent.relation_u8() {
             mask |= 0x02;
-            data.push(child.relation);
+            data.push(child.relation_u8());
         }
-        if child.emotion.valence != parent.emotion.valence {
+        if child.valence_u8() != parent.valence_u8() {
             mask |= 0x04;
-            data.push(child.emotion.valence);
+            data.push(child.valence_u8());
         }
-        if child.emotion.arousal != parent.emotion.arousal {
+        if child.arousal_u8() != parent.arousal_u8() {
             mask |= 0x08;
-            data.push(child.emotion.arousal);
+            data.push(child.arousal_u8());
         }
-        if child.time != parent.time {
+        if child.time_u8() != parent.time_u8() {
             mask |= 0x10;
-            data.push(child.time);
+            data.push(child.time_u8());
         }
 
         Self { mask, data }
@@ -111,35 +111,35 @@ impl DeltaMolecule {
             idx += 1;
             b
         } else {
-            parent.shape
+            parent.shape_u8()
         };
         let relation = if self.mask & 0x02 != 0 {
             let b = *self.data.get(idx)?;
             idx += 1;
             b
         } else {
-            parent.relation
+            parent.relation_u8()
         };
         let valence = if self.mask & 0x04 != 0 {
             let b = *self.data.get(idx)?;
             idx += 1;
             b
         } else {
-            parent.emotion.valence
+            parent.valence_u8()
         };
         let arousal = if self.mask & 0x08 != 0 {
             let b = *self.data.get(idx)?;
             idx += 1;
             b
         } else {
-            parent.emotion.arousal
+            parent.arousal_u8()
         };
         let time = if self.mask & 0x10 != 0 {
             let b = *self.data.get(idx)?;
             let _ = idx;
             b
         } else {
-            parent.time
+            parent.time_u8()
         };
 
         Some(Molecule::raw(shape, relation, valence, arousal, time))

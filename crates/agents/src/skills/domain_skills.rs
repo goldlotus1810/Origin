@@ -651,12 +651,12 @@ impl Skill for GeneralizationSkill {
 
         for chain in &ctx.input_chains {
             for mol in &chain.0 {
-                let s = (mol.shape & 0x07) as usize;
-                let r = (mol.relation & 0x07) as usize;
+                let s = (mol.shape_u8() & 0x07) as usize;
+                let r = (mol.relation_u8() & 0x07) as usize;
                 shape_counts[s] += 1;
                 rel_counts[r] += 1;
-                val_sum += mol.emotion.valence as f32 / 255.0;
-                aro_sum += mol.emotion.arousal as f32 / 255.0;
+                val_sum += mol.valence_u8() as f32 / 255.0;
+                aro_sum += mol.arousal_u8() as f32 / 255.0;
                 total_mols += 1;
             }
         }

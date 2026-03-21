@@ -570,7 +570,7 @@ impl LeoAI {
         // Generate molecular literal assertion
         Some(alloc::format!(
             "{{ S={} R={} V={} A={} T={} }}",
-            mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time,
+            mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), mol.time_u8(),
         ))
     }
 
@@ -584,7 +584,7 @@ impl LeoAI {
 
         Some(alloc::format!(
             "\"{}\" == {{ S={} R={} V={} A={} T={} }}",
-            alias, mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time,
+            alias, mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), mol.time_u8(),
         ))
     }
 
@@ -601,7 +601,7 @@ impl LeoAI {
                 let mol = obs.chain.first()?;
                 Some(alloc::format!(
                     "{{ S={} R={} V={} A={} T={} }}",
-                    mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time,
+                    mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), mol.time_u8(),
                 ))
             })
             .collect()
@@ -637,8 +637,8 @@ impl LeoAI {
 
         Some(alloc::format!(
             "{{ S={} R={} V={} A={} T={} }} ← {{ S={} R={} V={} A={} T={} }} (* Δ{} *)",
-            e_mol.shape, e_mol.relation, e_mol.emotion.valence, e_mol.emotion.arousal, e_mol.time,
-            s_mol.shape, s_mol.relation, s_mol.emotion.valence, s_mol.emotion.arousal, s_mol.time,
+            e_mol.shape_u8(), e_mol.relation_u8(), e_mol.valence_u8(), e_mol.arousal_u8(), e_mol.time_u8(),
+            s_mol.shape_u8(), s_mol.relation_u8(), s_mol.valence_u8(), s_mol.arousal_u8(), s_mol.time_u8(),
             dim_name,
         ))
     }
@@ -789,11 +789,11 @@ impl LeoAI {
         if let Some(obs) = self.learning.stm().find_by_hash(chain_hash) {
             if let Some(mol) = obs.chain.first() {
                 let (s, r, v, a, t) = match dim {
-                    "S" | "shape" => (new_val, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time),
-                    "R" | "relation" => (mol.shape, new_val, mol.emotion.valence, mol.emotion.arousal, mol.time),
-                    "V" | "valence" => (mol.shape, mol.relation, new_val, mol.emotion.arousal, mol.time),
-                    "A" | "arousal" => (mol.shape, mol.relation, mol.emotion.valence, new_val, mol.time),
-                    "T" | "time" => (mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, new_val),
+                    "S" | "shape" => (new_val, mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), mol.time_u8()),
+                    "R" | "relation" => (mol.shape_u8(), new_val, mol.valence_u8(), mol.arousal_u8(), mol.time_u8()),
+                    "V" | "valence" => (mol.shape_u8(), mol.relation_u8(), new_val, mol.arousal_u8(), mol.time_u8()),
+                    "A" | "arousal" => (mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), new_val, mol.time_u8()),
+                    "T" | "time" => (mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), new_val),
                     _ => {
                         return ProgResult {
                             outputs: Vec::new(),

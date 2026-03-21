@@ -451,6 +451,7 @@ mod tests {
     fn make_stm_unique(emotions: &[(f32, f32, u32)]) -> ShortTermMemory {
         // emotions = (valence, arousal, fire_count)
         // Tạo chains từ codepoints có V/A khác nhau
+        #[allow(unused_imports)]
         use olang::molecular::EmotionDim;
         let mut stm = ShortTermMemory::new(512);
         let cps = [
@@ -461,10 +462,9 @@ mod tests {
             let mut chain = encode_codepoint(cp);
             // Override emotion bytes to make unique
             if let Some(mol) = chain.0.first_mut() {
-                mol.emotion = EmotionDim {
-                    valence: ((v + 1.0) * 127.5) as u8,
-                    arousal: (a * 255.0) as u8,
-                };
+                let new_v = ((v + 1.0) * 127.5) as u8;
+                let new_a = (a * 255.0) as u8;
+                *mol = olang::molecular::Molecule::pack(mol.shape_u8(), mol.relation_u8(), new_v, new_a, mol.time_u8());
             }
             for j in 0..fires {
                 stm.push(

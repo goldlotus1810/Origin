@@ -96,7 +96,7 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
     if valid.len() == 1 {
         // Single chain: extremity = how extreme its valence+arousal are
         let m = &valid[0].0 .0[0];
-        let ext = extremity_single(m.emotion.valence, m.emotion.arousal);
+        let ext = extremity_single(m.valence_u8(), m.arousal_u8());
         return LcaResult {
             chain: valid[0].0.clone(),
             variance: 0.0,
@@ -122,43 +122,23 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         // Collect dimension values từ mọi chain tại vị trí mol_idx
         let shapes: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].shape, *w))
+            .map(|(c, w)| (c.0[mol_idx].shape_u8(), *w))
             .collect();
         let relations: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].relation, *w))
+            .map(|(c, w)| (c.0[mol_idx].relation_u8(), *w))
             .collect();
         let valences: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].emotion.valence, *w))
+            .map(|(c, w)| (c.0[mol_idx].valence_u8(), *w))
             .collect();
         let arousals: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].emotion.arousal, *w))
+            .map(|(c, w)| (c.0[mol_idx].arousal_u8(), *w))
             .collect();
         let times: Vec<(u8, u32)> = valid
             .iter()
-            .map(|(c, w)| (c.0[mol_idx].time, *w))
-            .collect();
-        let fs_vals: Vec<(u8, u32)> = valid
-            .iter()
-            .map(|(c, w)| (c.0[mol_idx].fs, *w))
-            .collect();
-        let fr_vals: Vec<(u8, u32)> = valid
-            .iter()
-            .map(|(c, w)| (c.0[mol_idx].fr, *w))
-            .collect();
-        let fv_vals: Vec<(u8, u32)> = valid
-            .iter()
-            .map(|(c, w)| (c.0[mol_idx].fv, *w))
-            .collect();
-        let fa_vals: Vec<(u8, u32)> = valid
-            .iter()
-            .map(|(c, w)| (c.0[mol_idx].fa, *w))
-            .collect();
-        let ft_vals: Vec<(u8, u32)> = valid
-            .iter()
-            .map(|(c, w)| (c.0[mol_idx].ft, *w))
+            .map(|(c, w)| (c.0[mol_idx].time_u8(), *w))
             .collect();
 
         let shape_byte = mode_or_wavg_base(&shapes, total_weight, 8);
@@ -166,11 +146,6 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
         let valence = mode_or_wavg(&valences, total_weight);
         let arousal = mode_or_wavg(&arousals, total_weight);
         let time_byte = mode_or_wavg_base(&times, total_weight, 5);
-        let fs = mode_or_wavg(&fs_vals, total_weight);
-        let fr = mode_or_wavg(&fr_vals, total_weight);
-        let fv = mode_or_wavg(&fv_vals, total_weight);
-        let fa = mode_or_wavg(&fa_vals, total_weight);
-        let ft = mode_or_wavg(&ft_vals, total_weight);
 
         // Per-dimension weighted variance: Σ w_i × (val_i - mean)² / Σ w_i
         let all_dims: [&[(u8, u32)]; 5] = [&shapes, &relations, &valences, &arousals, &times];
@@ -215,12 +190,7 @@ pub fn lca_with_variance(pairs: &[(&MolecularChain, u32)]) -> LcaResult {
             time_byte
         };
 
-        let mut mol = Molecule::formula(shape, relation, valence, arousal, time);
-        mol.fs = fs;
-        mol.fr = fr;
-        mol.fv = fv;
-        mol.fa = fa;
-        mol.ft = ft;
+        let mol = Molecule::formula(shape, relation, valence, arousal, time);
         // LCA result = CÔNG THỨC MỚI — chờ evidence để evaluate
         // evaluated = 0x00 (từ Molecule::formula)
         result_mols.push(mol);
@@ -458,8 +428,8 @@ pub fn lca_many_with_variance(chains: &[MolecularChain]) -> LcaResult {
             0.0
         } else {
             extremity_single(
-                chains[0].0[0].emotion.valence,
-                chains[0].0[0].emotion.arousal,
+                chains[0].0[0].valence_u8(),
+                chains[0].0[0].arousal_u8(),
             )
         };
         return LcaResult {
@@ -602,14 +572,14 @@ mod tests {
         let pm = &parent.0[0];
 
         // Valence: giữa lửa (0xFF) và nước (0xC0) → khoảng 0xDF
-        let expected_v = ((fm.emotion.valence as u16 + wm.emotion.valence as u16) / 2) as u8;
-        let diff_v = pm.emotion.valence.abs_diff(expected_v);
+        let expected_v = ((fm.valence_u8() as u16 + wm.valence_u8() as u16) / 2) as u8;
+        let diff_v = pm.valence_u8().abs_diff(expected_v);
         assert!(
             diff_v <= 5,
             "LCA valence={} ≈ avg({},{})={}",
-            pm.emotion.valence,
-            fm.emotion.valence,
-            wm.emotion.valence,
+            pm.valence_u8(),
+            fm.valence_u8(),
+            wm.valence_u8(),
             expected_v
         );
     }
@@ -639,9 +609,9 @@ mod tests {
         let result = lca_many_weighted(&[f.clone(), w.clone()], &[10, 1]);
         // Valence: fire=0xFF, water=0xC0
         // weighted: (0xFF×10 + 0xC0×1) / 11 ≈ 0xF9
-        let fire_val = f.0[0].emotion.valence;
-        let water_val = w.0[0].emotion.valence;
-        let result_val = result.0[0].emotion.valence;
+        let fire_val = f.0[0].valence_u8();
+        let water_val = w.0[0].valence_u8();
+        let result_val = result.0[0].valence_u8();
         // result phải gần fire hơn water
         let dist_to_fire = result_val.abs_diff(fire_val);
         let dist_to_water = result_val.abs_diff(water_val);
@@ -678,9 +648,9 @@ mod tests {
         let c = cold();
         let result = lca(&f, &c);
 
-        let fire_val = f.0[0].emotion.valence;
-        let cold_val = c.0[0].emotion.valence;
-        let res_val = result.0[0].emotion.valence;
+        let fire_val = f.0[0].valence_u8();
+        let cold_val = c.0[0].valence_u8();
+        let res_val = result.0[0].valence_u8();
 
         // Kết quả phải nằm giữa lửa và lạnh
         let min_val = fire_val.min(cold_val);

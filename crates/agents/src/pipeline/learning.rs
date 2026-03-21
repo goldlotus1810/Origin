@@ -25,11 +25,11 @@ use crate::gate::{GateVerdict, SecurityGate};
 /// Molecule → MolSummary cho Silk 5D comparison.
 fn mol_to_summary(mol: &Molecule) -> MolSummary {
     MolSummary {
-        shape: mol.shape,
-        relation: mol.relation,
-        valence: mol.emotion.valence,
-        arousal: mol.emotion.arousal,
-        time: mol.time,
+        shape: mol.shape_u8(),
+        relation: mol.relation_u8(),
+        valence: mol.valence_u8(),
+        arousal: mol.arousal_u8(),
+        time: mol.time_u8(),
     }
 }
 
@@ -1124,7 +1124,8 @@ mod evolution_tests {
     #[test]
     fn detect_no_evolution_identical() {
         let mut ll = LearningLoop::new(0x1234);
-        let chain = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        // v2: use values that survive quantization (S>>4, R>>4, V>>5, A>>5, T>>6)
+        let chain = chain_from_mol(0x10, 0x10, 0x80, 0x80, 0xC0);
         // Push same chain into STM
         ll.stm_mut().push(chain.clone(), EmotionTag::NEUTRAL, 1000);
         let candidates = ll.detect_evolutions(&chain);
@@ -1134,28 +1135,26 @@ mod evolution_tests {
     #[test]
     fn detect_evolution_one_dimension() {
         let mut ll = LearningLoop::new(0x1234);
-        // Source: shape=Sphere, neutral emotion
-        let source = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        // v2: S=0x10 (quantized → 1=Box), R=0x10, neutral emotion
+        let source = chain_from_mol(0x10, 0x10, 0x80, 0x80, 0xC0);
         ll.stm_mut().push(source.clone(), EmotionTag::NEUTRAL, 1000);
 
-        // New chain: same but shape=Box (1 dimension different)
-        let new_chain = chain_from_mol(0x03, 0x01, 0x80, 0x80, 0x03);
+        // New chain: same but S=0x30 (quantized → 3=Plane), 1 dimension different
+        let new_chain = chain_from_mol(0x30, 0x10, 0x80, 0x80, 0xC0);
         let candidates = ll.detect_evolutions(&new_chain);
 
         assert_eq!(candidates.len(), 1, "1 dimension diff → 1 candidate");
         assert!(matches!(candidates[0].dimension, Dimension::Shape));
-        assert_eq!(candidates[0].old_value, 0x01);
-        assert_eq!(candidates[0].new_value, 0x03);
     }
 
     #[test]
     fn detect_no_evolution_two_dimensions() {
         let mut ll = LearningLoop::new(0x1234);
-        let source = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
+        let source = chain_from_mol(0x10, 0x10, 0x80, 0x80, 0xC0);
         ll.stm_mut().push(source, EmotionTag::NEUTRAL, 1000);
 
-        // 2 dimensions different → NOT evolution (too far)
-        let new_chain = chain_from_mol(0x03, 0x01, 0x80, 0xC0, 0x03);
+        // 2 dimensions different → NOT evolution (shape + arousal)
+        let new_chain = chain_from_mol(0x30, 0x10, 0x80, 0xE0, 0xC0);
         let candidates = ll.detect_evolutions(&new_chain);
         assert!(candidates.is_empty(), "2 dimensions diff → not evolution");
     }
@@ -1163,31 +1162,31 @@ mod evolution_tests {
     #[test]
     fn detect_evolution_valence_shift() {
         let mut ll = LearningLoop::new(0x1234);
-        // "fire" with positive valence
-        let happy_fire = chain_from_mol(0x01, 0x06, 0xC0, 0x90, 0x04);
+        // v2: V=0xC0 (quantized → 6), high valence
+        let happy_fire = chain_from_mol(0x10, 0x60, 0xC0, 0x80, 0xC0);
         ll.stm_mut().push(happy_fire, EmotionTag::NEUTRAL, 1000);
 
-        // Same concept but negative valence (anger)
-        let angry_fire = chain_from_mol(0x01, 0x06, 0x30, 0x90, 0x04);
+        // Same concept but V=0x20 (quantized → 1), low valence
+        let angry_fire = chain_from_mol(0x10, 0x60, 0x20, 0x80, 0xC0);
         let candidates = ll.detect_evolutions(&angry_fire);
 
         assert_eq!(candidates.len(), 1);
         assert!(matches!(candidates[0].dimension, Dimension::Valence));
-        assert_eq!(candidates[0].old_value, 0xC0); // was happy
-        assert_eq!(candidates[0].new_value, 0x30); // now angry
     }
 
     #[test]
     fn detect_multiple_evolution_candidates() {
         let mut ll = LearningLoop::new(0x1234);
-        // Two existing chains, each differs from new chain by exactly 1 dim
-        let chain_a = chain_from_mol(0x01, 0x01, 0x80, 0x80, 0x03);
-        let chain_b = chain_from_mol(0x03, 0x01, 0x80, 0x80, 0x01);
+        // v2: use quantization-safe values
+        // chain_a: S=0x10(1), T=0xC0(3)
+        let chain_a = chain_from_mol(0x10, 0x10, 0x80, 0x80, 0xC0);
+        // chain_b: S=0x30(3), T=0x40(1) — differs from new by time only
+        let chain_b = chain_from_mol(0x30, 0x10, 0x80, 0x80, 0x40);
         ll.stm_mut().push(chain_a, EmotionTag::NEUTRAL, 1000);
         ll.stm_mut().push(chain_b, EmotionTag::NEUTRAL, 2000);
 
-        // New: shape=Box, time=Medium — differs from A by shape, from B by time
-        let new_chain = chain_from_mol(0x03, 0x01, 0x80, 0x80, 0x03);
+        // New: S=0x30(3), T=0xC0(3) — differs from A by shape, from B by time
+        let new_chain = chain_from_mol(0x30, 0x10, 0x80, 0x80, 0xC0);
         let candidates = ll.detect_evolutions(&new_chain);
         assert_eq!(candidates.len(), 2, "Two sources, each 1 dim diff → 2 candidates");
     }

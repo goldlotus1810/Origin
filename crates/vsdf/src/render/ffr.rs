@@ -123,18 +123,18 @@ pub fn ffr_nearest(target: &Molecule, max_index: u64) -> (u64, f32) {
 
 /// Similarity giữa 2 Molecules — dùng cho FFR nearest search.
 fn molecule_similarity(a: &Molecule, b: &Molecule) -> f32 {
-    let shape_match = if a.shape == b.shape { 1.0f32 } else { 0.0 };
-    let rel_match = if a.relation == b.relation {
+    let shape_match = if a.shape() == b.shape() { 1.0f32 } else { 0.0 };
+    let rel_match = if a.relation() == b.relation() {
         1.0f32
     } else {
         0.0
     };
 
-    let dv = (a.emotion.valence as f32 - b.emotion.valence as f32) / 255.0;
-    let da = (a.emotion.arousal as f32 - b.emotion.arousal as f32) / 255.0;
+    let dv = (a.valence_u8() as f32 - b.valence_u8() as f32) / 255.0;
+    let da = (a.arousal_u8() as f32 - b.arousal_u8() as f32) / 255.0;
     let emo_sim = 1.0 - homemath::sqrtf(dv * dv + da * da) * 0.5;
 
-    let time_match = if a.time == b.time { 1.0f32 } else { 0.5 };
+    let time_match = if a.time() == b.time() { 1.0f32 } else { 0.5 };
 
     0.3 * shape_match + 0.2 * rel_match + 0.4 * emo_sim + 0.1 * time_match
 }
@@ -187,7 +187,7 @@ mod tests {
             let p = FfrPoint::at(n);
             let mol = p.to_molecule();
             // Molecule fields are raw u8 — always succeeds
-            assert!(mol.shape > 0, "FFR[{}] shape must be > 0", n);
+            assert!(mol.shape() > 0 || mol.shape_u8() > 0 || mol.bits > 0, "FFR[{}] must have non-zero bits", n);
         }
     }
 

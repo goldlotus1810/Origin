@@ -10,34 +10,30 @@ fn encode_fire_produces_valid_chain() {
     assert!(!chain.is_empty());
     assert_eq!(chain.len(), 1);
     let mol = &chain.0[0];
-    let shape_base = ((mol.shape - 1) % 8) + 1;
-    assert_eq!(shape_base, 0x01, "FIRE shape base = Sphere");
-    assert!(mol.emotion.valence >= 0xC0, "FIRE valence must be high");
-    assert!(mol.emotion.arousal >= 0xC0, "FIRE arousal must be high");
+    assert_eq!(mol.shape_base(), olang::molecular::ShapeBase::Sphere, "FIRE shape base = Sphere");
+    assert!(mol.valence_u8() >= 0xC0, "FIRE valence must be high");
+    assert!(mol.arousal_u8() >= 0xC0, "FIRE arousal must be high");
 }
 
 #[test]
 fn encode_sphere_sdf_primitive() {
     let chain = encode_codepoint(SPHERE);
     let mol = &chain.0[0];
-    let shape_base = ((mol.shape - 1) % 8) + 1;
-    assert_eq!(shape_base, 0x01, "● = Sphere base");
+    assert_eq!(mol.shape_base(), olang::molecular::ShapeBase::Sphere, "● = Sphere base");
 }
 
 #[test]
 fn encode_member_relation_primitive() {
     let chain = encode_codepoint(MEMBER);
     let mol = &chain.0[0];
-    let rel_base = ((mol.relation - 1) % 8) + 1;
-    assert_eq!(rel_base, 0x01, "∈ = Member base");
+    assert_eq!(mol.relation_base(), olang::molecular::RelationBase::Member, "∈ = Member base");
 }
 
 #[test]
 fn encode_arrow_causes_relation() {
     let chain = encode_codepoint(ARROW);
     let mol = &chain.0[0];
-    let rel_base = ((mol.relation - 1) % 8) + 1;
-    assert_eq!(rel_base, 0x06, "→ = Causes base");
+    assert_eq!(mol.relation_base(), olang::molecular::RelationBase::Causes, "→ = Causes base");
 }
 
 #[test]
@@ -119,9 +115,10 @@ fn ucd_lookup_matches_encoder_molecule() {
     let entry = ucd::lookup(FIRE).expect("FIRE must be in UCD");
     let chain = encode_codepoint(FIRE);
     let mol = &chain.0[0];
-    assert_eq!(mol.shape, entry.shape);
-    assert_eq!(mol.relation, entry.relation);
-    assert_eq!(mol.emotion.valence, entry.valence);
-    assert_eq!(mol.emotion.arousal, entry.arousal);
-    assert_eq!(mol.time, entry.time);
+    // v2: Molecule packs raw u8 values into quantized bits, so compare quantized
+    assert_eq!(mol.shape(), entry.shape >> 4, "shape quantized match");
+    assert_eq!(mol.relation(), entry.relation >> 4, "relation quantized match");
+    assert_eq!(mol.valence(), entry.valence >> 5, "valence quantized match");
+    assert_eq!(mol.arousal(), entry.arousal >> 5, "arousal quantized match");
+    assert_eq!(mol.time(), entry.time >> 6, "time quantized match");
 }

@@ -118,14 +118,10 @@ pub fn check_molecule_roundtrip() -> CheckResult {
         // Roundtrip: bytes → Molecule → bytes
         if chain.len() == 1 {
             let wire = mol.to_bytes();
-            if let Some(rebuilt) = olang::mol::molecular::Molecule::from_bytes(&wire) {
-                if rebuilt.to_bytes() != wire {
-                    fails += 1;
-                    details.push(format!("  ❌ roundtrip MISMATCH for U+{:04X}", cp));
-                }
-            } else {
+            let rebuilt = olang::mol::molecular::Molecule::from_bytes_v2(&wire);
+            if rebuilt.to_bytes() != wire {
                 fails += 1;
-                details.push(format!("  ❌ from_bytes() returned None for U+{:04X}", cp));
+                details.push(format!("  ❌ roundtrip MISMATCH for U+{:04X}", cp));
             }
         }
     }
@@ -186,32 +182,34 @@ pub fn check_lca_rules() -> CheckResult {
     let a_avg = (0xE0u16 + 0x40u16) / 2;  // 0x90 = wrong
 
     // Check Valence: should NOT be average
-    let v_is_avg = (r.emotion.valence as i16 - v_avg as i16).unsigned_abs() < 5;
+    let rv = r.valence_u8();
+    let ra = r.arousal_u8();
+    let v_is_avg = (rv as i16 - v_avg as i16).unsigned_abs() < 5;
     if v_is_avg {
         fails += 1;
         details.push(format!("❌ V = 0x{:02X} ≈ avg(0x20,0xE0)=0x{:02X} — should AMPLIFY, not average",
-            r.emotion.valence, v_avg));
+            rv, v_avg));
     } else {
-        details.push(format!("✅ V = 0x{:02X} (not avg 0x{:02X})", r.emotion.valence, v_avg));
+        details.push(format!("✅ V = 0x{:02X} (not avg 0x{:02X})", rv, v_avg));
     }
 
     // Check Arousal: should be max
-    if r.emotion.arousal != a_max {
-        let a_is_avg = (r.emotion.arousal as i16 - a_avg as i16).unsigned_abs() < 5;
+    if ra != a_max {
+        let a_is_avg = (ra as i16 - a_avg as i16).unsigned_abs() < 5;
         if a_is_avg {
             fails += 1;
             details.push(format!("❌ A = 0x{:02X} ≈ avg(0xE0,0x40)=0x{:02X} — should be max()=0xE0",
-                r.emotion.arousal, a_avg));
+                ra, a_avg));
         } else {
             details.push(format!("⚠️  A = 0x{:02X} (not max 0x{:02X}, not avg 0x{:02X})",
-                r.emotion.arousal, a_max, a_avg));
+                ra, a_max, a_avg));
         }
     } else {
-        details.push(format!("✅ A = 0x{:02X} = max(0xE0,0x40)", r.emotion.arousal));
+        details.push(format!("✅ A = 0x{:02X} = max(0xE0,0x40)", ra));
     }
 
     details.push(format!("LCA result: S={} R={} V=0x{:02X} A=0x{:02X} T={}",
-        r.shape, r.relation, r.emotion.valence, r.emotion.arousal, r.time));
+        r.shape_u8(), r.relation_u8(), rv, ra, r.time_u8()));
 
     let check_elapsed = check_start.elapsed();
     details.push(format!("Check time: {:?}", check_elapsed));

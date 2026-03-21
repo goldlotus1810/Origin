@@ -68,9 +68,9 @@ impl Skill for AnalogySkill {
             return SkillResult::Insufficient;
         };
 
-        let bytes_a = ma.to_bytes();
-        let bytes_b = mb.to_bytes();
-        let bytes_c = mc.to_bytes();
+        let bytes_a = ma.to_bytes_legacy();
+        let bytes_b = mb.to_bytes_legacy();
+        let bytes_c = mc.to_bytes_legacy();
 
         // D = C + (B - A) trong mỗi chiều
         let mut d_bytes = [0u8; 5];
@@ -287,8 +287,8 @@ impl Skill for ContradictionSkill {
             return SkillResult::Insufficient;
         };
 
-        let ba = ma.to_bytes();
-        let bb = mb.to_bytes();
+        let ba = ma.to_bytes_legacy();
+        let bb = mb.to_bytes_legacy();
 
         // Test 1: Valence opposition — cùng cực đoan nhưng ngược dấu
         let v_a = ba[2] as f32 / 255.0; // 0..1

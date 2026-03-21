@@ -26,10 +26,10 @@ pub fn chain_to_string(chain: &MolecularChain) -> Option<String> {
         return Some(String::new());
     }
     // Check if it looks like a string chain (all shape=0x02, relation=0x01)
-    let is_string = chain.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01);
+    let is_string = chain.0.iter().all(|m| m.shape_u8() == 0x02 && m.relation_u8() == 0x01);
     if is_string {
         // Decode bytes as UTF-8 (strings are stored as 1 molecule = 1 byte)
-        let bytes: Vec<u8> = chain.0.iter().map(|m| m.emotion.valence).collect();
+        let bytes: Vec<u8> = chain.0.iter().map(|m| m.valence_u8()).collect();
         match String::from_utf8(bytes) {
             Ok(s) => Some(s),
             Err(e) => {
@@ -317,9 +317,9 @@ fn split_iter_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     let mut result = Vec::new();
     let mut current = Vec::new();
     for mol in &chain.0 {
-        if mol.shape == 0xFE && mol.relation == 0
-            && mol.emotion.valence == 0 && mol.emotion.arousal == 0
-            && mol.time == 0
+        if mol.shape_u8() == 0xFE && mol.relation_u8() == 0
+            && mol.valence_u8() == 0 && mol.arousal_u8() == 0
+            && mol.time_u8() == 0
         {
             result.push(MolecularChain(core::mem::take(&mut current)));
         } else {
@@ -345,8 +345,8 @@ fn make_array_ref(idx: usize) -> MolecularChain {
 
 /// Check if chain is a dict heap reference.
 fn as_dict_ref(chain: &MolecularChain) -> Option<usize> {
-    if chain.0.len() == 1 && chain.0[0].shape == 0xFC && chain.0[0].relation == 0x01 {
-        Some(chain.0[0].emotion.valence as usize | ((chain.0[0].emotion.arousal as usize) << 8))
+    if chain.0.len() == 1 && chain.0[0].shape_u8() == 0xFC && chain.0[0].relation_u8() == 0x01 {
+        Some(chain.0[0].valence_u8() as usize | ((chain.0[0].arousal_u8() as usize) << 8))
     } else {
         None
     }
@@ -354,8 +354,8 @@ fn as_dict_ref(chain: &MolecularChain) -> Option<usize> {
 
 /// Check if chain is an array heap reference.
 fn as_array_ref(chain: &MolecularChain) -> Option<usize> {
-    if chain.0.len() == 1 && chain.0[0].shape == 0xFD && chain.0[0].relation == 0x01 {
-        Some(chain.0[0].emotion.valence as usize | ((chain.0[0].emotion.arousal as usize) << 8))
+    if chain.0.len() == 1 && chain.0[0].shape_u8() == 0xFD && chain.0[0].relation_u8() == 0x01 {
+        Some(chain.0[0].valence_u8() as usize | ((chain.0[0].arousal_u8() as usize) << 8))
     } else {
         None
     }
@@ -400,16 +400,16 @@ fn materialize_heap_value(
 
 /// Check if a molecule is a null separator (used by dicts: key|null|val|null|key|null|val).
 fn is_null_separator(mol: &Molecule) -> bool {
-    mol.shape == 0 && mol.relation == 0
-        && mol.emotion.valence == 0 && mol.emotion.arousal == 0
-        && mol.time == 0
+    mol.shape_u8() == 0 && mol.relation_u8() == 0
+        && mol.valence_u8() == 0 && mol.arousal_u8() == 0
+        && mol.time_u8() == 0
 }
 
 /// Check if a molecule is an array element separator (0xFE tag).
 fn is_array_separator(mol: &Molecule) -> bool {
-    mol.shape == 0xFE && mol.relation == 0
-        && mol.emotion.valence == 0 && mol.emotion.arousal == 0
-        && mol.time == 0
+    mol.shape_u8() == 0xFE && mol.relation_u8() == 0
+        && mol.valence_u8() == 0 && mol.arousal_u8() == 0
+        && mol.time_u8() == 0
 }
 
 /// Split a chain by null separators (used for dicts AND legacy arrays without 0xFE separators).
@@ -420,7 +420,7 @@ pub fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     let mut result = Vec::new();
     let mut current = Vec::new();
     // Skip the 0xFD tag molecule used by __array_push to track element count
-    let start = if !chain.0.is_empty() && chain.0[0].shape == 0xFD { 1 } else { 0 };
+    let start = if !chain.0.is_empty() && chain.0[0].shape_u8() == 0xFD { 1 } else { 0 };
     // Check if this array uses 0xFE array separators (modern format)
     let has_array_seps = chain.0[start..].iter().any(|m| is_array_separator(m));
     for mol in &chain.0[start..] {
@@ -492,7 +492,7 @@ fn classify_chain(chain: &MolecularChain) -> String {
         let _shape = mol.shape_base();
         sdf += 1;
         // Extreme valence → emoticon category
-        let v = mol.emotion.valence;
+        let v = mol.valence_u8();
         if !(80..=176).contains(&v) {
             emo += 1;
         }
@@ -1021,9 +1021,9 @@ impl OlangVM {
                             // Extract tag from subject: everything before first null separator
                             let mut tag_mols = Vec::new();
                             for mol in &subject.0 {
-                                if mol.shape == 0 && mol.relation == 0
-                                    && mol.emotion.valence == 0 && mol.emotion.arousal == 0
-                                    && mol.time == 0
+                                if mol.shape() == 0 && mol.relation() == 0
+                                    && mol.valence_u8() == 0 && mol.arousal_u8() == 0
+                                    && mol.time() == 0
                                 {
                                     break; // stop at first separator
                                 }
@@ -1109,11 +1109,11 @@ impl OlangVM {
                             let matches = if !actual.is_empty() && !expected.is_empty() {
                                 let a = &actual.0[0];
                                 let e = &expected.0[0];
-                                a.shape == e.shape
-                                    && a.relation == e.relation
-                                    && a.emotion.valence == e.emotion.valence
-                                    && a.emotion.arousal == e.emotion.arousal
-                                    && a.time == e.time
+                                a.shape() == e.shape()
+                                    && a.relation() == e.relation()
+                                    && a.valence_u8() == e.valence_u8()
+                                    && a.arousal_u8() == e.arousal_u8()
+                                    && a.time() == e.time()
                             } else {
                                 actual.is_empty() && expected.is_empty()
                             };
@@ -1146,16 +1146,16 @@ impl OlangVM {
                                 constraints.iter().all(|c| {
                                     if c.is_empty() { return true; }
                                     let cm = &c.0[0];
-                                    let dim_val = match cm.shape {
-                                        1 => mol.shape,
-                                        2 => mol.relation,
-                                        3 => mol.emotion.valence,
-                                        4 => mol.emotion.arousal,
-                                        5 => mol.time,
+                                    let dim_val = match cm.shape() {
+                                        1 => mol.shape(),
+                                        2 => mol.relation(),
+                                        3 => mol.valence_u8(),
+                                        4 => mol.arousal_u8(),
+                                        5 => mol.time(),
                                         _ => return true,
                                     };
-                                    let threshold = cm.emotion.valence; // value stored in V position
-                                    match cm.relation { // op stored in R position
+                                    let threshold = cm.valence_u8(); // value stored in V position
+                                    match cm.relation() { // op stored in R position
                                         0 => dim_val == threshold,     // Eq
                                         1 => dim_val > threshold,      // Gt
                                         2 => dim_val < threshold,      // Lt
@@ -1191,16 +1191,16 @@ impl OlangVM {
                                 for c in &constraints {
                                     if c.is_empty() { continue; }
                                     let cm = &c.0[0];
-                                    let dim_name = match cm.shape {
+                                    let dim_name = match cm.shape() {
                                         1 => "S", 2 => "R", 3 => "V", 4 => "A", 5 => "T", _ => "?",
                                     };
-                                    let dim_val = match cm.shape {
-                                        1 => mol.shape, 2 => mol.relation,
-                                        3 => mol.emotion.valence, 4 => mol.emotion.arousal,
-                                        5 => mol.time, _ => continue,
+                                    let dim_val = match cm.shape() {
+                                        1 => mol.shape(), 2 => mol.relation(),
+                                        3 => mol.valence_u8(), 4 => mol.arousal_u8(),
+                                        5 => mol.time(), _ => continue,
                                     };
-                                    let threshold = cm.emotion.valence;
-                                    let ok = match cm.relation {
+                                    let threshold = cm.valence_u8();
+                                    let ok = match cm.relation() {
                                         0 => dim_val == threshold,
                                         1 => dim_val > threshold,
                                         2 => dim_val < threshold,
@@ -1210,7 +1210,7 @@ impl OlangVM {
                                         _ => true,
                                     };
                                     if !ok {
-                                        let op_str = match cm.relation {
+                                        let op_str = match cm.relation() {
                                             0 => "=", 1 => ">", 2 => "<", 3 => ">=", 4 => "<=", _ => "?",
                                         };
                                         events.push(VmEvent::Error(VmError::ConstraintViolation(
@@ -1266,13 +1266,13 @@ impl OlangVM {
                                 let _ = stack.push(MolecularChain::from_number(count as f64));
                             } else if arr.is_empty() {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
-                            } else if !arr.0.is_empty() && arr.0[0].shape == 0xFD {
+                            } else if !arr.0.is_empty() && arr.0[0].shape() == (0xFD >> 4) {
                                 // Tagged array (from push): count is stored in tag molecule
-                                let count = arr.0[0].emotion.valence as f64;
+                                let count = arr.0[0].valence_u8() as f64;
                                 let _ = stack.push(MolecularChain::from_number(count));
                             } else if !arr.0.is_empty()
-                                && arr.0[0].shape == 0x02 && arr.0[0].relation == 0x01
-                                && arr.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01)
+                                && arr.0[0].shape() == (0x02 >> 4) && arr.0[0].relation() == (0x01 >> 4)
+                                && arr.0.iter().all(|m| m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4))
                             {
                                 // Pure string chain: length = number of characters
                                 let _ = stack.push(MolecularChain::from_number(arr.0.len() as f64));
@@ -1482,7 +1482,7 @@ impl OlangVM {
                             // Convert value to string chain
                             let val = vm_pop!(stack, events);
                             // If already a string chain, keep as-is
-                            if !val.is_empty() && val.0.iter().all(|m| m.shape == 0x02 && m.relation == 0x01) {
+                            if !val.is_empty() && val.0.iter().all(|m| m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4)) {
                                 let _ = stack.push(val);
                             } else {
                                 // Number → string chain
@@ -1504,7 +1504,7 @@ impl OlangVM {
                             } else {
                                 // Decode string bytes from valence
                                 let s: String = val.0.iter()
-                                    .map(|m| m.emotion.valence as char)
+                                    .map(|m| m.valence_u8() as char)
                                     .collect();
                                 if let Ok(n) = s.parse::<f64>() {
                                     let _ = stack.push(MolecularChain::from_number(n));
@@ -1626,8 +1626,8 @@ impl OlangVM {
                             let delim = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
                             // Decode both to byte strings via valence
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
-                            let d_bytes: Vec<u8> = delim.0.iter().map(|m| m.emotion.valence).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
+                            let d_bytes: Vec<u8> = delim.0.iter().map(|m| m.valence_u8()).collect();
                             if d_bytes.is_empty() {
                                 let _ = stack.push(s); // no split on empty delim
                             } else {
@@ -1666,8 +1666,8 @@ impl OlangVM {
                             // Stack: [haystack, needle] → 1.0 if contains, empty if not
                             let needle = vm_pop!(stack, events);
                             let haystack = vm_pop!(stack, events);
-                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.emotion.valence).collect();
-                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.emotion.valence).collect();
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.valence_u8()).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.valence_u8()).collect();
                             let found = if n_bytes.is_empty() {
                                 true
                             } else {
@@ -1684,9 +1684,9 @@ impl OlangVM {
                             let new_pat = vm_pop!(stack, events);
                             let old_pat = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
-                            let old_bytes: Vec<u8> = old_pat.0.iter().map(|m| m.emotion.valence).collect();
-                            let new_bytes: Vec<u8> = new_pat.0.iter().map(|m| m.emotion.valence).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
+                            let old_bytes: Vec<u8> = old_pat.0.iter().map(|m| m.valence_u8()).collect();
+                            let new_bytes: Vec<u8> = new_pat.0.iter().map(|m| m.valence_u8()).collect();
                             let mut result_bytes = Vec::new();
                             let mut i = 0;
                             if old_bytes.is_empty() {
@@ -1714,8 +1714,8 @@ impl OlangVM {
                             // Stack: [string, prefix] → 1.0 if starts with, empty if not
                             let prefix = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
-                            let p_bytes: Vec<u8> = prefix.0.iter().map(|m| m.emotion.valence).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
+                            let p_bytes: Vec<u8> = prefix.0.iter().map(|m| m.valence_u8()).collect();
                             let starts = s_bytes.starts_with(&p_bytes);
                             if starts {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
@@ -1726,8 +1726,8 @@ impl OlangVM {
                         "__str_ends_with" => {
                             let suffix = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
-                            let x_bytes: Vec<u8> = suffix.0.iter().map(|m| m.emotion.valence).collect();
+                            let s_bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
+                            let x_bytes: Vec<u8> = suffix.0.iter().map(|m| m.valence_u8()).collect();
                             let ends = s_bytes.ends_with(&x_bytes);
                             if ends {
                                 let _ = stack.push(MolecularChain::from_number(1.0));
@@ -1739,8 +1739,8 @@ impl OlangVM {
                             // Stack: [haystack, needle] → index (number) or -1
                             let needle = vm_pop!(stack, events);
                             let haystack = vm_pop!(stack, events);
-                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.emotion.valence).collect();
-                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.emotion.valence).collect();
+                            let h_bytes: Vec<u8> = haystack.0.iter().map(|m| m.valence_u8()).collect();
+                            let n_bytes: Vec<u8> = needle.0.iter().map(|m| m.valence_u8()).collect();
                             let idx = if n_bytes.is_empty() {
                                 0i64
                             } else {
@@ -1754,7 +1754,7 @@ impl OlangVM {
                         "__str_trim" => {
                             let s = vm_pop!(stack, events);
                             // Trim leading/trailing whitespace (space=0x20, tab=0x09, etc)
-                            let bytes: Vec<u8> = s.0.iter().map(|m| m.emotion.valence).collect();
+                            let bytes: Vec<u8> = s.0.iter().map(|m| m.valence_u8()).collect();
                             let trimmed: &[u8] = {
                                 let start = bytes.iter().position(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').unwrap_or(bytes.len());
                                 let end = bytes.iter().rposition(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r').map(|i| i + 1).unwrap_or(start);
@@ -1770,7 +1770,7 @@ impl OlangVM {
                             let s = vm_pop!(stack, events);
                             let mut mols = Vec::new();
                             for m in &s.0 {
-                                let b = m.emotion.valence;
+                                let b = m.valence_u8();
                                 let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
                                 mols.push(Molecule::raw(0x02, 0x01, upper, 0 , 0x01));
                             }
@@ -1780,7 +1780,7 @@ impl OlangVM {
                             let s = vm_pop!(stack, events);
                             let mut mols = Vec::new();
                             for m in &s.0 {
-                                let b = m.emotion.valence;
+                                let b = m.valence_u8();
                                 let lower = if b.is_ascii_uppercase() { b + 32 } else { b };
                                 mols.push(Molecule::raw(0x02, 0x01, lower, 0 , 0x01));
                             }
@@ -2036,9 +2036,9 @@ impl OlangVM {
                             } else { split_array_chain(&arr) };
                             let mut mapped_elems: Vec<MolecularChain> = Vec::new();
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         let mapped = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2076,9 +2076,9 @@ impl OlangVM {
                             } else { split_array_chain(&arr) };
                             let mut filtered: Vec<MolecularChain> = Vec::new();
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         let keep = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2106,9 +2106,9 @@ impl OlangVM {
                             } else { split_array_chain(&arr) };
                             let mut acc = init;
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         acc = call_closure_inline(
                                             prog, body_pc, &[acc, elem.clone()],
@@ -2129,9 +2129,9 @@ impl OlangVM {
                             } else { split_array_chain(&arr) };
                             let mut found = false;
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2157,9 +2157,9 @@ impl OlangVM {
                             } else { split_array_chain(&arr) };
                             let mut all_pass = true;
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2185,9 +2185,9 @@ impl OlangVM {
                             } else { split_array_chain(&arr) };
                             let mut found = MolecularChain::empty();
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2231,9 +2231,9 @@ impl OlangVM {
                             } else { split_array_chain(&arr) };
                             let mut count = 0usize;
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         let r = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -2643,9 +2643,9 @@ impl OlangVM {
                                         i += 2;
 
                                         if let Some(mol) = closure_marker.first() {
-                                            if mol.shape == 0xFF {
-                                                let body_pc = mol.emotion.valence as usize
-                                                    | ((mol.emotion.arousal as usize) << 8);
+                                            if mol.shape() == (0xFF >> 4) {
+                                                let body_pc = mol.valence_u8() as usize
+                                                    | ((mol.arousal_u8() as usize) << 8);
                                                 match xform.as_str() {
                                                     "F" => {
                                                         // Filter: keep elements where closure returns non-empty
@@ -2899,9 +2899,9 @@ impl OlangVM {
                             let mut result = MolecularChain(Vec::new());
                             let mut count = 0usize;
                             if let Some(mol) = closure_marker.first() {
-                                if mol.shape == 0xFF {
-                                    let body_pc = mol.emotion.valence as usize
-                                        | ((mol.emotion.arousal as usize) << 8);
+                                if mol.shape() == (0xFF >> 4) {
+                                    let body_pc = mol.valence_u8() as usize
+                                        | ((mol.arousal_u8() as usize) << 8);
                                     for elem in &elements {
                                         let mapped = call_closure_inline(
                                             prog, body_pc, core::slice::from_ref(elem),
@@ -3251,8 +3251,8 @@ impl OlangVM {
                             } else {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { val.clone() };
                                 if let Some(mol) = closure_marker.first() {
-                                    if mol.shape == 0xFF {
-                                        let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
+                                    if mol.shape() == (0xFF >> 4) {
+                                        let body_pc = mol.valence_u8() as usize | ((mol.arousal_u8() as usize) << 8);
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let some_tag = string_to_chain("Option::Some");
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
@@ -3274,8 +3274,8 @@ impl OlangVM {
                             if tag.ends_with("::Ok") || tag == "Ok" {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
                                 if let Some(mol) = closure_marker.first() {
-                                    if mol.shape == 0xFF {
-                                        let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
+                                    if mol.shape() == (0xFF >> 4) {
+                                        let body_pc = mol.valence_u8() as usize | ((mol.arousal_u8() as usize) << 8);
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let ok_tag = string_to_chain("Result::Ok");
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
@@ -3436,8 +3436,8 @@ impl OlangVM {
                             if tag.ends_with("::Err") || tag == "Err" {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
                                 if let Some(mol) = closure_marker.first() {
-                                    if mol.shape == 0xFF {
-                                        let body_pc = mol.emotion.valence as usize | ((mol.emotion.arousal as usize) << 8);
+                                    if mol.shape() == (0xFF >> 4) {
+                                        let body_pc = mol.valence_u8() as usize | ((mol.arousal_u8() as usize) << 8);
                                         let mapped = call_closure_inline(prog, body_pc, core::slice::from_ref(&payload), &scopes, &mut steps, self.max_steps);
                                         let err_tag = string_to_chain("Result::Err");
                                         let sep = Molecule::raw(0, 0, 0, 0, 0);
@@ -3825,7 +3825,7 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i < buf.0.len() {
-                                let _ = stack.push(MolecularChain::from_number(buf.0[i].shape as f64));
+                                let _ = stack.push(MolecularChain::from_number(buf.0[i].shape() as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
                             }
@@ -3838,7 +3838,7 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u8;
                             if i < buf.0.len() {
-                                buf.0[i].shape = v;
+                                buf.0[i] = Molecule::raw(v, 0, 0, 0, 0);
                             }
                             let _ = stack.push(buf);
                         }
@@ -3848,8 +3848,8 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i + 1 < buf.0.len() {
-                                let hi = buf.0[i].shape as u16;
-                                let lo = buf.0[i + 1].shape as u16;
+                                let hi = buf.0[i].shape() as u16;
+                                let lo = buf.0[i + 1].shape() as u16;
                                 let _ = stack.push(MolecularChain::from_number(((hi << 8) | lo) as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
@@ -3863,8 +3863,8 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u16;
                             if i + 1 < buf.0.len() {
-                                buf.0[i].shape = (v >> 8) as u8;
-                                buf.0[i + 1].shape = (v & 0xFF) as u8;
+                                buf.0[i] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0);
+                                buf.0[i + 1] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0);
                             }
                             let _ = stack.push(buf);
                         }
@@ -3874,10 +3874,10 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i + 3 < buf.0.len() {
-                                let v = (buf.0[i].shape as u32) << 24
-                                    | (buf.0[i + 1].shape as u32) << 16
-                                    | (buf.0[i + 2].shape as u32) << 8
-                                    | (buf.0[i + 3].shape as u32);
+                                let v = (buf.0[i].shape() as u32) << 24
+                                    | (buf.0[i + 1].shape() as u32) << 16
+                                    | (buf.0[i + 2].shape() as u32) << 8
+                                    | (buf.0[i + 3].shape() as u32);
                                 let _ = stack.push(MolecularChain::from_number(v as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
@@ -3891,10 +3891,10 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u32;
                             if i + 3 < buf.0.len() {
-                                buf.0[i].shape = (v >> 24) as u8;
-                                buf.0[i + 1].shape = (v >> 16) as u8;
-                                buf.0[i + 2].shape = (v >> 8) as u8;
-                                buf.0[i + 3].shape = (v & 0xFF) as u8;
+                                buf.0[i] = Molecule::raw((v >> 24) as u8, 0, 0, 0, 0);
+                                buf.0[i + 1] = Molecule::raw((v >> 16) as u8, 0, 0, 0, 0);
+                                buf.0[i + 2] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0);
+                                buf.0[i + 3] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0);
                             }
                             let _ = stack.push(buf);
                         }
@@ -3934,7 +3934,7 @@ impl OlangVM {
                                 let mut val: u64 = 0;
                                 for bi in 0..size {
                                     if offset + bi < bytes.0.len() {
-                                        val = (val << 8) | bytes.0[offset + bi].shape as u64;
+                                        val = (val << 8) | bytes.0[offset + bi].shape() as u64;
                                     }
                                 }
                                 offset += size;
@@ -4320,7 +4320,7 @@ impl OlangVM {
                     let value = if let Some(n) = val_chain.to_number() {
                         n as u8
                     } else if let Some(mol) = val_chain.0.first() {
-                        mol.emotion.valence
+                        mol.valence_u8()
                     } else {
                         0
                     };
@@ -4456,9 +4456,9 @@ impl OlangVM {
                     let closure = vm_pop!(stack, events);
                     // Check if it's a closure marker (shape == 0xFF)
                     if let Some(mol) = closure.first() {
-                        if mol.shape == 0xFF {
-                            let body_pc = mol.emotion.valence as usize
-                                | ((mol.emotion.arousal as usize) << 8);
+                        if mol.shape() == (0xFF >> 4) {
+                            let body_pc = mol.valence_u8() as usize
+                                | ((mol.arousal_u8() as usize) << 8);
                             // Save stack depth BEFORE pushing args back — this is the caller's
                             // clean stack depth. Ret will restore to this depth.
                             let caller_stack_depth = stack.data.len();
@@ -5454,11 +5454,11 @@ pub mod tests {
         let chain = outputs[0];
         assert_eq!(chain.len(), 1, "Chain has exactly 1 molecule");
         let mol = chain.first().unwrap();
-        assert_eq!(mol.shape, 1);
-        assert_eq!(mol.relation, 6);
-        assert_eq!(mol.emotion.valence, 200);
-        assert_eq!(mol.emotion.arousal, 180);
-        assert_eq!(mol.time, 4);
+        assert_eq!(mol.shape(), 1 >> 4);
+        assert_eq!(mol.relation(), 6 >> 4);
+        assert_eq!(mol.valence_u8(), (200 >> 5) << 5);
+        assert_eq!(mol.arousal_u8(), (180 >> 5) << 5);
+        assert_eq!(mol.time(), 4 >> 6);
     }
 
     #[test]
@@ -5471,11 +5471,11 @@ pub mod tests {
         let result = vm().execute(&prog);
         assert!(!result.has_error());
         let mol = result.outputs()[0].first().unwrap();
-        assert_eq!(mol.shape, 1);
-        assert_eq!(mol.relation, 1);
-        assert_eq!(mol.emotion.valence, 128);
-        assert_eq!(mol.emotion.arousal, 128);
-        assert_eq!(mol.time, 3);
+        assert_eq!(mol.shape(), 1 >> 4);
+        assert_eq!(mol.relation(), 1 >> 4);
+        assert_eq!(mol.valence_u8(), (128 >> 5) << 5);
+        assert_eq!(mol.arousal_u8(), (128 >> 5) << 5);
+        assert_eq!(mol.time(), 3 >> 6);
     }
 
     #[test]
@@ -5973,7 +5973,7 @@ pub mod tests {
         assert!(!result.has_error());
         let out = &result.outputs()[0];
         // Result should be "hello olang" encoded as molecules
-        let decoded: Vec<u8> = out.0.iter().map(|m| m.emotion.valence).collect();
+        let decoded: Vec<u8> = out.0.iter().map(|m| m.valence_u8()).collect();
         assert_eq!(&decoded, b"hello olang");
     }
 
@@ -5999,7 +5999,7 @@ pub mod tests {
             .push_op(Op::Emit)
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
-        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.emotion.valence).collect();
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.valence_u8()).collect();
         assert_eq!(&decoded, b"hello");
     }
 
@@ -6011,7 +6011,7 @@ pub mod tests {
             .push_op(Op::Emit)
             .push_op(Op::Halt);
         let result = vm().execute(&prog);
-        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.emotion.valence).collect();
+        let decoded: Vec<u8> = result.outputs()[0].0.iter().map(|m| m.valence_u8()).collect();
         assert_eq!(&decoded, b"HELLO");
     }
 

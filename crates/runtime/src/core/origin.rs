@@ -1667,7 +1667,7 @@ impl HomeRuntime {
                 let mol_details: alloc::vec::Vec<String> = chain.0.iter().enumerate().map(|(i, mol)| {
                     format!(
                         "  mol[{}]: S={} R={} V={} A={} T={}",
-                        i, mol.shape, mol.relation, mol.emotion.valence, mol.emotion.arousal, mol.time
+                        i, mol.shape_u8(), mol.relation_u8(), mol.valence_u8(), mol.arousal_u8(), mol.time_u8()
                     )
                 }).collect();
                 Response {
@@ -3115,11 +3115,11 @@ impl HomeRuntime {
                 if self.body_store.get(hash).is_none() {
                     let body = body_from_molecule_full(
                         hash,
-                        mol.shape,
-                        mol.relation,
-                        mol.emotion.valence,
-                        mol.emotion.arousal,
-                        mol.time,
+                        mol.shape_u8(),
+                        mol.relation_u8(),
+                        mol.valence_u8(),
+                        mol.arousal_u8(),
+                        mol.time_u8(),
                     );
                     // Insert into store
                     let entry = self.body_store.get_or_create(hash);
@@ -3166,11 +3166,11 @@ impl HomeRuntime {
                                 if self.body_store.get(evolved_hash).is_none() {
                                     let body = body_from_molecule_full(
                                         evolved_hash,
-                                        evolved_mol.shape,
-                                        evolved_mol.relation,
-                                        evolved_mol.emotion.valence,
-                                        evolved_mol.emotion.arousal,
-                                        evolved_mol.time,
+                                        evolved_mol.shape_u8(),
+                                        evolved_mol.relation_u8(),
+                                        evolved_mol.valence_u8(),
+                                        evolved_mol.arousal_u8(),
+                                        evolved_mol.time_u8(),
                                     );
                                     let entry = self.body_store.get_or_create(evolved_hash);
                                     *entry = body;
@@ -4965,11 +4965,11 @@ mod tests {
         assert!(!chain.is_empty());
         // Chain phải match UCD values
         let mol = &chain.0[0];
-        assert_eq!(mol.shape as u8, ucd::shape_of(0x1F525), "Shape phải từ UCD");
+        assert_eq!(mol.shape_u8(), ucd::shape_of(0x1F525) & 0xF0, "Shape phải từ UCD (quantized)");
         assert_eq!(
-            mol.emotion.valence,
-            ucd::valence_of(0x1F525),
-            "Valence phải từ UCD"
+            mol.valence_u8(),
+            ucd::valence_of(0x1F525) & 0xE0,
+            "Valence phải từ UCD (quantized)"
         );
     }
 
@@ -5239,7 +5239,7 @@ fn classify_chain_type(chain: &olang::molecular::MolecularChain) -> alloc::strin
             | ShapeBase::Extrude | ShapeBase::CutSphere | ShapeBase::DeathStar => sdf += 1,
             ShapeBase::Torus | ShapeBase::Plane => math += 1,
         }
-        if !(80..=176).contains(&mol.emotion.valence) {
+        if !(80..=176).contains(&mol.valence_u8()) {
             emo += 1;
         }
     }
@@ -5301,8 +5301,8 @@ fn chain_info(chain: &olang::molecular::MolecularChain, cp: Option<u32>) -> allo
         olang::molecular::RelationBase::DerivedFrom => "←",
     };
 
-    let v = mol.emotion.valence;
-    let a = mol.emotion.arousal;
+    let v = mol.valence_u8();
+    let a = mol.arousal_u8();
     let hash = chain.chain_hash();
 
     let cp_str = if let Some(cp) = cp {

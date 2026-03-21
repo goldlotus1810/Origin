@@ -47,13 +47,14 @@ pub fn encode_zwj_sequence(codepoints: &[u32]) -> MolecularChain {
         .iter()
         .enumerate()
         .map(|(i, &cp)| {
-            let mut mol = encode_codepoint(cp).0.remove(0);
-            mol.relation = if i < last {
+            let mol = encode_codepoint(cp).0.remove(0);
+            let new_rel = if i < last {
                 RelationBase::Compose.as_byte() // ∘ — còn tiếp
             } else {
                 RelationBase::Member.as_byte() // ∈ — kết thúc
             };
-            mol
+            // Rebuild molecule with new relation, keeping other dimensions
+            Molecule::pack(mol.shape_u8(), new_rel, mol.valence_u8(), mol.arousal_u8(), mol.time_u8())
         })
         .collect();
 
@@ -89,8 +90,8 @@ mod tests {
             RelationBase::Member,
             "FIRE relation = Member"
         );
-        assert!(m.emotion.valence >= 0xC0, "FIRE valence cao");
-        assert!(m.emotion.arousal >= 0xC0, "FIRE arousal cao");
+        assert!(m.valence_u8() >= 0xC0, "FIRE valence cao");
+        assert!(m.arousal_u8() >= 0xC0, "FIRE arousal cao");
         assert_eq!(m.time_base(), TimeDim::Fast, "FIRE time = Fast");
     }
 
@@ -99,8 +100,8 @@ mod tests {
         let chain = encode_codepoint(0x1F4A7); // 💧
         assert_eq!(chain.len(), 1);
         let m = &chain.0[0];
-        assert!(m.emotion.valence >= 0x80, "DROPLET valence moderate");
-        assert!(m.emotion.arousal <= 0x80, "DROPLET arousal thấp");
+        assert!(m.valence_u8() >= 0x80, "DROPLET valence moderate");
+        assert!(m.arousal_u8() <= 0x80, "DROPLET arousal thấp");
         assert_eq!(m.time_base(), TimeDim::Slow, "DROPLET time = Slow");
     }
 
@@ -180,13 +181,21 @@ mod tests {
     #[test]
     fn encode_no_hardcode_verify() {
         // Verify chain đến từ UCD — so sánh với UCD trực tiếp
+        // Values are quantized during pack(), so compare packed results
         let cp = 0x1F525u32;
         let chain = encode_codepoint(cp);
         let m = &chain.0[0];
-        assert_eq!(m.shape, ucd::shape_of(cp));
-        assert_eq!(m.relation, ucd::relation_of(cp));
-        assert_eq!(m.emotion.valence, ucd::valence_of(cp));
-        assert_eq!(m.emotion.arousal, ucd::arousal_of(cp));
-        assert_eq!(m.time, ucd::time_of(cp));
+        let expected = Molecule::pack(
+            ucd::shape_of(cp),
+            ucd::relation_of(cp),
+            ucd::valence_of(cp),
+            ucd::arousal_of(cp),
+            ucd::time_of(cp),
+        );
+        assert_eq!(m.shape(), expected.shape());
+        assert_eq!(m.relation(), expected.relation());
+        assert_eq!(m.valence(), expected.valence());
+        assert_eq!(m.arousal(), expected.arousal());
+        assert_eq!(m.time(), expected.time());
     }
 }
