@@ -349,41 +349,104 @@ impl Default for KnowTree {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AliasTable — stub for T15
+// AliasTable — UTF-32 alias lookup, tách riêng khỏi KnowTree (T15)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Alias mapping: natural language word → UDC codepoint.
+/// Alias table — maps UTF-32 codepoints to packed P_weight u16.
 ///
-/// Populated by T15. Currently a stub.
+/// Separated from KnowTree per T15 spec. Contains ~33K emoji/UTF-32 entries
+/// that are NOT in L0 UCD_TABLE. Each entry: (cp: u32, p_weight: u16) = 6 bytes.
+///
+/// ```text
+/// Lookup: alias_table.get(cp) → u16 P_weight   O(log n) binary search
+/// Size:   ~33K entries × 6B = ~198 KB (static, zero-copy)
+/// Source: json/udc_utf32_compact.json (generated at build time by ucd/build.rs)
+/// ```
+///
+/// For L0 codepoints (8,846 entries), use `KnowTree::get()` instead.
+/// For combined lookup, use `AliasTable::get_full()` which checks both.
 pub struct AliasTable {
-    /// (alias_cp, udc_cp) pairs
-    entries: Vec<(u32, u32)>,
+    /// Marker to prevent direct construction; all data is in ucd statics.
+    _private: (),
 }
 
 impl AliasTable {
-    /// Create empty alias table.
+    /// Create an AliasTable handle.
+    ///
+    /// No allocation — all data lives in ucd's static tables generated at build time.
     pub fn new() -> Self {
-        Self {
-            entries: Vec::new(),
+        Self { _private: () }
+    }
+
+    /// Lookup P_weight for a codepoint in the alias table only.
+    ///
+    /// Returns 0 if codepoint not found. O(log n).
+    #[inline]
+    pub fn get(&self, cp: u32) -> u16 {
+        ucd::alias_p_weight(cp)
+    }
+
+    /// Lookup Molecule for a codepoint in the alias table.
+    #[inline]
+    pub fn get_mol(&self, cp: u32) -> Option<Molecule> {
+        let pw = self.get(cp);
+        if pw != 0 {
+            Some(Molecule::from_u16(pw))
+        } else {
+            None
         }
     }
 
-    /// Lookup: alias codepoint → UDC codepoint.
-    pub fn lookup(&self, cp: u32) -> Option<u32> {
-        self.entries
-            .iter()
-            .find(|(alias, _)| *alias == cp)
-            .map(|(_, udc_cp)| *udc_cp)
+    /// Full lookup: tries L0 UCD_TABLE first, then alias table.
+    ///
+    /// Returns 0 only if codepoint is in neither table.
+    #[inline]
+    pub fn get_full(&self, cp: u32) -> u16 {
+        ucd::p_weight_full(cp)
     }
 
-    /// Number of aliases.
+    /// Full Molecule lookup across both tables.
+    #[inline]
+    pub fn get_mol_full(&self, cp: u32) -> Option<Molecule> {
+        let pw = self.get_full(cp);
+        if pw != 0 {
+            Some(Molecule::from_u16(pw))
+        } else {
+            None
+        }
+    }
+
+    /// Check if codepoint exists in alias table.
+    #[inline]
+    pub fn contains(&self, cp: u32) -> bool {
+        self.get(cp) != 0
+    }
+
+    /// Number of entries in alias table.
+    #[inline]
     pub fn len(&self) -> usize {
-        self.entries.len()
+        ucd::alias_table_len()
     }
 
-    /// Check if empty.
+    /// Whether alias table is empty.
+    #[inline]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.len() == 0
+    }
+
+    /// RAM usage — zero (static data, no heap allocation).
+    #[inline]
+    pub fn ram_usage(&self) -> usize {
+        0 // all data in static tables
+    }
+
+    /// Summary string.
+    pub fn summary(&self) -> String {
+        format!(
+            "AliasTable: {} entries, ~{}KB (static)",
+            self.len(),
+            (self.len() * 6) / 1024,
+        )
     }
 }
 
@@ -1449,13 +1512,36 @@ mod tests {
         assert!(KnowTree::from_bytes(b"KT").is_none()); // too short
     }
 
-    // ── AliasTable stub ──────────────────────────────────────────────────
+    // ── AliasTable (T15) ──────────────────────────────────────────────────
 
     #[test]
-    fn alias_table_empty() {
+    fn alias_table_populated() {
         let at = super::AliasTable::new();
-        assert!(at.is_empty());
-        assert_eq!(at.len(), 0);
-        assert!(at.lookup(0x1F525).is_none());
+        assert!(!at.is_empty(), "Alias table should have entries");
+        assert!(at.len() > 30_000, "Should have >30K entries, got {}", at.len());
+    }
+
+    #[test]
+    fn alias_table_lookup() {
+        let at = super::AliasTable::new();
+        // Latin 'A' (0x0041) should be in alias table, not in L0
+        let pw = at.get(0x0041);
+        assert!(pw != 0, "Latin A should have nonzero P_weight in alias table");
+    }
+
+    #[test]
+    fn alias_table_excludes_l0() {
+        let at = super::AliasTable::new();
+        // FIRE (0x1F525) is L0, should NOT be in alias table
+        assert_eq!(at.get(0x1F525), 0, "L0 codepoint should not be in alias table");
+    }
+
+    #[test]
+    fn alias_table_full_lookup() {
+        let at = super::AliasTable::new();
+        // L0 codepoint
+        assert!(at.get_full(0x1F525) != 0, "FIRE via get_full");
+        // Alias codepoint
+        assert!(at.get_full(0x0041) != 0, "Latin A via get_full");
     }
 }
