@@ -67,6 +67,12 @@ fn main() {
         checks::check_olang_handbook_vs_v2(&root),
         checks::check_olang_pushmol(&root),
         checks::check_olang_bootstrap(&root),
+        // ── L0 CASCADE: Foundation errors ──
+        checks::check_l0_valence_source(&root),
+        checks::check_l0_seed_count(&root),
+        checks::check_l0_similarity_dims(&root),
+        checks::check_l0_mol_raw_public(&root),
+        checks::check_rewrite_alignment(&root),
     ];
 
     // ── Report ──
