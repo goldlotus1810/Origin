@@ -384,3 +384,254 @@ Block(π, ρ) = { p⃗ ∈ [0,1]² : C(p⃗; π, ρ) }
 
   ARC (cung):           C = (SDF_circle(p⃗ - corner, r) ≤ 0)  ∩ quadrant
 ```
+
+---
+
+## R.0 — TOÁN TỬ (Operator)
+
+### Cộng / Trừ
+
+```
+a + b = a + b           (cộng)
+a − b = a + (−b)        (trừ = cộng nghịch đảo)
+
+Circled:  a ⊕ b = (a + b) mod n     (cộng modular, nhóm Z_n)
+          a ⊖ b = (a − b) mod n
+```
+
+### Nhân / Chia
+
+```
+a × b                   (nhân)
+a ÷ b = a · b⁻¹         (chia = nhân nghịch đảo)
+
+Circled:  a ⊗ b          (tích tensor)
+Dot:      a ⊙ b = Σᵢ aᵢbᵢ  (tích vô hướng)
+```
+
+### Tích phân (Integral)
+
+```
+∫ₐᵇ f(x) dx = lim_{n→∞} Σᵢ f(xᵢ)·Δx        (Riemann)
+
+∮_γ f(z) dz = 0                               (Cauchy, γ kín)
+
+∬_S f dA,  ∭_V f dV                            (mặt, thể tích)
+
+Chiều:  ω = +1 → ∮ (clockwise),  ω = -1 → ∮ (anticlockwise)
+```
+
+### Tổng / Tích (Summation / Product)
+
+```
+Σᵢ₌₁ⁿ aᵢ = a₁ + a₂ + ⋯ + aₙ
+
+∏ᵢ₌₁ⁿ aᵢ = a₁ · a₂ · ⋯ · aₙ
+
+∐ (coproduct) = dual of ∏ trong lý thuyết phạm trù
+```
+
+### Căn (Root)
+
+```
+√x = x^(1/2)
+∛x = x^(1/3)
+∜x = x^(1/4)
+ⁿ√x = x^(1/n)
+```
+
+### Vi phân (Differential)
+
+```
+∂f/∂x = lim_{h→0} [f(x+h) - f(x)] / h       (đạo hàm riêng)
+
+∇f = (∂f/∂x, ∂f/∂y, ∂f/∂z)                   (gradient)
+
+∇·F⃗ = ∂Fx/∂x + ∂Fy/∂y + ∂Fz/∂z              (divergence)
+
+∇×F⃗ = | i⃗   j⃗   k⃗  |                         (curl)
+        | ∂x  ∂y  ∂z |
+        | Fx  Fy  Fz |
+```
+
+---
+
+## R.1 — SO SÁNH (Comparison) — Quan hệ thứ tự
+
+### Bằng / Không bằng
+
+```
+a = b    ⟺  d(a,b) = 0                (metric space)
+a ≠ b    ⟺  d(a,b) > 0
+a ≡ b    ⟺  a mod n = b mod n         (đồng dư)
+a ≅ b    ⟺  ∃ isomorphism f: a → b    (đẳng cấu)
+```
+
+### Xấp xỉ
+
+```
+a ≈ b    ⟺  |a - b| < ε              (ε-xấp xỉ)
+a ∼ b    ⟺  lim a/b = 1              (tiệm cận)
+a ≍ b    ⟺  c₁·b ≤ a ≤ c₂·b         (cùng bậc)
+a ∝ b    ⟺  ∃k: a = k·b              (tỷ lệ)
+```
+
+### Thứ tự
+
+```
+a < b    ⟺  b - a > 0
+a ≤ b    ⟺  a < b ∨ a = b
+a ≪ b    ⟺  a/b → 0                  (nhỏ hơn nhiều)
+a ≺ b    ⟺  a precedes b              (thứ tự bộ phận)
+```
+
+### Tập hợp
+
+```
+x ∈ A    ⟺  x là phần tử của A
+A ⊂ B    ⟺  ∀x: x ∈ A → x ∈ B
+A ∪ B    = { x : x ∈ A ∨ x ∈ B }
+A ∩ B    = { x : x ∈ A ∧ x ∈ B }
+A \ B    = { x : x ∈ A ∧ x ∉ B }
+```
+
+### Phủ định (thêm gạch chéo /)
+
+```
+a ≠ b    = ¬(a = b)
+a ∉ A    = ¬(a ∈ A)
+A ⊄ B    = ¬(A ⊂ B)
+a ≇ b    = ¬(a ≅ b)
+
+Tổng quát:  R̸ = ¬R    (gạch chéo = phủ định quan hệ)
+```
+
+---
+
+## R.2 — CHỮ CÁI TOÁN (Math Letter) — Tích Descartes
+
+```
+MathLetter = Script × Style × Case × Alphabet
+
+Script  ∈ { Latin, Greek, Arabic }
+Style   ∈ { serif, sans, bold, italic, bold-italic, fraktur,
+             double-struck, script, mono, ... }
+Case    ∈ { UPPER, lower }
+Alphabet = hệ chữ cái của Script
+
+MathLetter(s, f, c, l) = font_map(s, f, c)(l)
+
+Ví dụ:
+  font_map(Latin, bold, UPPER)(A) = 𝐀
+  font_map(Latin, fraktur, UPPER)(A) = 𝔄
+  font_map(Latin, double-struck, UPPER)(A) = 𝔸
+  font_map(Greek, italic, lower)(α) = 𝛼
+
+|MathLetter| = 3 × 13 × 2 × |Alphabet| ≈ 2600
+```
+
+---
+
+## R.3 — SỐ (Number) — Hệ đếm vị trí
+
+### Hệ thập phân (positional)
+
+```
+N = Σᵢ dᵢ · Bⁱ       B = base,  dᵢ = digit tại vị trí i
+
+  B = 10: decimal      123 = 1·10² + 2·10¹ + 3·10⁰
+  B = 60: sexagesimal  (Lưỡng Hà / cuneiform)
+```
+
+### Que đếm (Counting Rod)
+
+```
+Rod(place, value):
+  place ∈ { UNIT, TENS }
+  value ∈ { 1..9 }
+
+  UNIT: nét dọc = value
+  TENS: nét ngang = value
+```
+
+### La Mã (Roman)
+
+```
+Roman = Σ sᵢ · vᵢ     sᵢ ∈ {+1, -1}
+
+  sᵢ = -1 nếu vᵢ < vᵢ₊₁  (subtractive: IV = -1 + 5 = 4)
+  sᵢ = +1 ngược lại
+
+  v: { I:1, V:5, X:10, L:50, C:100, D:500, M:1000 }
+```
+
+### Phân số (Fraction)
+
+```
+p/q ∈ Q       p, q ∈ Z,  q ≠ 0
+
+  ½ = 1/2,  ⅓ = 1/3,  ¼ = 1/4,  ⅕ = 1/5, ...
+  ⅔ = 2/3,  ¾ = 3/4,  ⅗ = 3/5, ...
+```
+
+---
+
+## R.4 — DẤU CÂU (Punctuation) — Cặp đối xứng
+
+```
+Ngoặc = cặp (open, close) với tính chất lồng nhau:
+
+  depth(s) = Σᵢ δ(sᵢ)    δ(open) = +1,  δ(close) = -1
+
+  Hợp lệ ⟺ depth(s) = 0 ∀ prefix: depth ≥ 0    (Dyck language)
+
+  (  )     depth: 0 → 1 → 0   ✓
+  ( ( ) )  depth: 0 → 1 → 2 → 1 → 0   ✓
+  ) (      depth: 0 → -1   ✗
+
+Phản xạ:  mirror(left) = right
+  mirror( ( ) = mirror( ) )
+  mirror( [ ) = mirror( ] )
+  mirror( { ) = mirror( } )
+  mirror( ⟨ ) = mirror( ⟩ )
+  mirror( « ) = mirror( » )
+```
+
+---
+
+## R.5 — TIỀN TỆ (Currency) — Ánh xạ ký hiệu → giá trị
+
+```
+Currency(symbol) = (name, ISO_4217, region)
+
+  $(·) = amount · exchange_rate(USD, target)
+
+  $1 USD = ¥ · rate(USD→JPY)
+         = € · rate(USD→EUR)
+         = £ · rate(USD→GBP)
+         = ₿ · rate(USD→BTC)
+
+  rate: Currency × Currency → R⁺
+  rate(A,B) · rate(B,A) = 1     (nghịch đảo)
+  rate(A,C) = rate(A,B) · rate(B,C)   (bắc cầu)
+```
+
+---
+
+## R.6 — CỔ ĐẠI (Ancient) — Hệ đếm phi vị trí
+
+```
+Greek Acrophonic:
+
+  Value = Σᵢ sᵢ      (additive, không subtractive)
+
+  Symbols:  Ι=1, Π=5, Δ=10, Η=100, Χ=1000, Μ=10000
+
+  50 = ΠΔ = 5×10     (multiplicative compound)
+  500 = ΠΗ = 5×100
+
+  Với đơn vị:
+  Value(symbol, unit) = numeric_value × unit_weight
+
+  unit_weight: { stater=1, talent=6000, drachma=1/6, mina=100 }
+```
