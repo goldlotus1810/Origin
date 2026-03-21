@@ -70,9 +70,9 @@ B1-B7 ALL DONE | Phase 0 (0.1-0.6 compiler) ALL DONE | Phase 1-7 ALL DONE
 
 | ID | Task | Spec ref | Depends | Status | Branch | Session | Notes |
 |----|------|----------|---------|--------|--------|---------|-------|
-| 14.1 | → Xem T14 (V2 Migration) KnowTree cây phân tầng | §1.7 | T12 | FREE | | | Đã có task T14 ở V2 Migration section. |
-| 14.2 | → Xem T15 (V2 Migration) Alias table tách riêng | §1.7 | T14 | FREE | | | Đã có task T15 ở V2 Migration section. |
-| 14.3 | Silk vertical: parent_map 8,846 pointers | §2.3 | T14 | FREE | | | Silk dọc cho phép đi từ lá lên gốc. register_parent() hook đã có ở 7.1 nhưng chưa full impl. ~71 KB. |
+| 14.1 | → Xem T14 (V2 Migration) KnowTree cây phân tầng | §1.7 | T12 | DONE | | | T14 merged #217. |
+| 14.2 | → Xem T15 (V2 Migration) Alias table tách riêng | §1.7 | T14 | FREE | | | T14 xong → unblocked. |
+| 14.3 | Silk vertical: parent_map 8,846 pointers | §2.3 | T14 | FREE | | | T14 xong → unblocked. register_parent() hook đã có ở 7.1 nhưng chưa full impl. ~71 KB. |
 
 ## Phase 15 — Chain Optimization (Spec §IX — 6 thuật toán)
 
@@ -142,8 +142,8 @@ T1-T12 ALL DONE. → Chi tiết: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_AR
 | ID | Task | Depends | Status | Notes |
 |----|------|---------|--------|-------|
 | T13 | check_logic test_bit_shifts fix | T12 | DONE | Đã pass sẵn — bit shift test OK với v2 layout. (2pN6F) |
-| T14 | **KnowTree → cây phân tầng** | T12 | CLAIMED | ⚠️ CRITICAL: đang được session khác implement. |
-| T15 | Alias table tách riêng | T14 | FREE | 41,338 emoji/UTF-32 → alias riêng, KHÔNG gộp KnowTree. |
+| T14 | **KnowTree → cây phân tầng** | T12 | DONE | Flat array → hierarchical tree. Merged #217. |
+| T15 | Alias table tách riêng | T14 | FREE | 41,338 emoji/UTF-32 → alias riêng, KHÔNG gộp KnowTree. T14 xong → unblocked. |
 | T16 | olang_handbook.md update v2 | T3 | DONE | Molecule 5B→2B, Chain Vec<u16>, Shape 16 values, 8846 L0. (2pN6F) |
 
 ---
