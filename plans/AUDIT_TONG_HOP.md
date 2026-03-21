@@ -162,6 +162,13 @@ Phát hiện sơ bộ từ screenshot:
   - Toàn bộ cơ chế học dài hạn = dead code
 
 → Đợi report đầy đủ từ branch đó rồi tổng hợp chung vào PLAN fix.
+
+UPDATE 2026-03-21: main merge thêm:
+  - plans/PLAN_PWEIGHT_MIGRATION.md — Plan 3 phase cho P_weight 5B→2B
+  - tools/check_logic/ — Tool kiểm tra logic tự động
+  → PLAN_PWEIGHT_MIGRATION chỉ cover P_weight packing.
+    CHƯA cover: LCA rules, KnowTree array, Chain Vec<u16>, 18 SDF, 9584 L0.
+    Cần tổng hợp với audit này để ra PLAN fix toàn diện.
 ```
 
 ---
