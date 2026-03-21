@@ -12,6 +12,7 @@ use crate::CheckResult;
 
 pub fn check_ucd_encode_real() -> CheckResult {
     println!("  [F1] UCD — encode real codepoints...");
+    let check_start = Instant::now();
     let mut details = Vec::new();
     let mut fails = 0;
 
@@ -69,12 +70,15 @@ pub fn check_ucd_encode_real() -> CheckResult {
     }
     details.push(format!("Sample coverage: {} found, {} missing (arrows+emoticons)", found, missing));
 
+    let check_elapsed = check_start.elapsed();
+    details.push(format!("Check time: {:?}", check_elapsed));
+
     if fails == 0 && missing < 50 {
-        CheckResult::pass("F1 UCD Encode", &format!("OK — {} anchors verified, {} coverage", test_cases.len(), found))
+        CheckResult::pass("F1 UCD Encode", &format!("OK — {} anchors, {} coverage [{:?}]", test_cases.len(), found, check_elapsed))
             .with_details(details)
     } else {
         CheckResult::fail("F1 UCD Encode", &format!(
-            "{} anchor issues, {} missing codepoints", fails, missing
+            "{} anchor issues, {} missing [{:?}]", fails, missing, check_elapsed
         ))
             .with_details(details)
     }
@@ -86,6 +90,7 @@ pub fn check_ucd_encode_real() -> CheckResult {
 
 pub fn check_molecule_roundtrip() -> CheckResult {
     println!("  [F2] Molecule — encode roundtrip...");
+    let check_start = Instant::now();
     let mut details = Vec::new();
     let mut fails = 0;
 
@@ -132,14 +137,17 @@ pub fn check_molecule_roundtrip() -> CheckResult {
     let mol_size = std::mem::size_of::<olang::mol::molecular::Molecule>();
     details.push(format!("Molecule struct size: {} bytes (v2 target: 2 bytes)", mol_size));
 
+    let check_elapsed = check_start.elapsed();
+    details.push(format!("Check time: {:?}", check_elapsed));
+
     if fails == 0 {
         CheckResult::pass("F2 Molecule Roundtrip", &format!(
-            "OK — {} roundtrips, struct={}B", test_cps.len(), mol_size
+            "OK — {} roundtrips, struct={}B [{:?}]", test_cps.len(), mol_size, check_elapsed
         ))
             .with_details(details)
     } else {
         CheckResult::fail("F2 Molecule Roundtrip", &format!(
-            "{} roundtrip failures", fails
+            "{} roundtrip failures [{:?}]", fails, check_elapsed
         ))
             .with_details(details)
     }
@@ -151,6 +159,7 @@ pub fn check_molecule_roundtrip() -> CheckResult {
 
 pub fn check_lca_rules() -> CheckResult {
     println!("  [F3] LCA — compose rule verification...");
+    let check_start = Instant::now();
     let mut details = Vec::new();
     let mut fails = 0;
 
@@ -204,11 +213,14 @@ pub fn check_lca_rules() -> CheckResult {
     details.push(format!("LCA result: S={} R={} V=0x{:02X} A=0x{:02X} T={}",
         r.shape, r.relation, r.emotion.valence, r.emotion.arousal, r.time));
 
+    let check_elapsed = check_start.elapsed();
+    details.push(format!("Check time: {:?}", check_elapsed));
+
     if fails == 0 {
-        CheckResult::pass("F3 LCA Rules", "OK — compose rules correct")
+        CheckResult::pass("F3 LCA Rules", &format!("OK — compose rules correct [{:?}]", check_elapsed))
             .with_details(details)
     } else {
-        CheckResult::fail("F3 LCA Rules", &format!("{} compose rule violations", fails))
+        CheckResult::fail("F3 LCA Rules", &format!("{} compose rule violations [{:?}]", fails, check_elapsed))
             .with_details(details)
     }
 }
@@ -219,6 +231,7 @@ pub fn check_lca_rules() -> CheckResult {
 
 pub fn check_hebbian_math() -> CheckResult {
     println!("  [F4] Hebbian — mathematical properties...");
+    let check_start = Instant::now();
     let mut details = Vec::new();
     let mut fails = 0;
 
@@ -289,11 +302,14 @@ pub fn check_hebbian_math() -> CheckResult {
     }
     details.push(format!("✅ promote threshold = {} (φ⁻¹+φ⁻³ ≈ 0.854)", silk::hebbian::PROMOTE_WEIGHT));
 
+    let check_elapsed = check_start.elapsed();
+    details.push(format!("Check time: {:?}", check_elapsed));
+
     if fails == 0 {
-        CheckResult::pass("F4 Hebbian Math", "OK — all 7 math properties verified")
+        CheckResult::pass("F4 Hebbian Math", &format!("OK — 7 properties [{:?}]", check_elapsed))
             .with_details(details)
     } else {
-        CheckResult::fail("F4 Hebbian Math", &format!("{} math property violations", fails))
+        CheckResult::fail("F4 Hebbian Math", &format!("{} violations [{:?}]", fails, check_elapsed))
             .with_details(details)
     }
 }
@@ -304,6 +320,7 @@ pub fn check_hebbian_math() -> CheckResult {
 
 pub fn check_emotion_pipeline() -> CheckResult {
     println!("  [F5] Emotion — sentence_affect real test...");
+    let check_start = Instant::now();
     let mut details = Vec::new();
     let mut fails = 0;
 
@@ -350,13 +367,16 @@ pub fn check_emotion_pipeline() -> CheckResult {
     let elapsed = start.elapsed();
     details.push(format!("sentence_affect time: {:?} for {} inputs", elapsed, test_cases.len()));
 
+    let check_elapsed = check_start.elapsed();
+    details.push(format!("Check time: {:?}", check_elapsed));
+
     if fails == 0 {
         CheckResult::pass("F5 Emotion Pipeline", &format!(
-            "OK — {} texts, bounds verified, {:?}", test_cases.len(), elapsed
+            "OK — {} texts, bounds OK [{:?}]", test_cases.len(), check_elapsed
         ))
             .with_details(details)
     } else {
-        CheckResult::fail("F5 Emotion Pipeline", &format!("{} bound violations", fails))
+        CheckResult::fail("F5 Emotion Pipeline", &format!("{} violations [{:?}]", fails, check_elapsed))
             .with_details(details)
     }
 }
@@ -436,19 +456,66 @@ pub fn check_performance() -> CheckResult {
         ("chain_hash", hash_per),
     ];
 
-    let slowest = times.iter().max_by_key(|t| t.1).unwrap();
-    let fastest = times.iter().min_by_key(|t| t.1).unwrap();
-    details.push(format!("SLOWEST: {} ({}ns)", slowest.0, slowest.1));
-    details.push(format!("FASTEST: {} ({}ns)", fastest.0, fastest.1));
+    // Thresholds — ngưỡng tối đa chấp nhận được
+    // HomeOS real-time: user gõ → phải phản hồi < 50ms
+    // Mỗi operation trong pipeline phải nhanh hơn budget
+    let thresholds_ns: &[(&str, u128)] = &[
+        ("UCD lookup",          1_000),       // < 1µs — O(log n) binary search
+        ("encode_codepoint",    5_000),       // < 5µs — lookup + construct
+        ("LCA",                 10_000),      // < 10µs — 5D compose
+        ("sentence_affect",     10_000_000),  // < 10ms — full NLP pipeline
+        ("hebbian_strengthen",  500),         // < 500ns — pure math
+        ("chain_hash",          500),         // < 500ns — FNV-1a
+    ];
 
-    if slowest.1 > 0 && fastest.1 > 0 {
-        let ratio = slowest.1 / fastest.1.max(1);
-        details.push(format!("Bottleneck ratio: {}x", ratio));
+    let mut fails = 0;
+    let mut slowest_name = "";
+    let mut slowest_ns: u128 = 0;
+
+    for (name, per_ns) in &times {
+        let threshold = thresholds_ns.iter()
+            .find(|(n, _)| *n == *name)
+            .map(|(_, t)| *t)
+            .unwrap_or(100_000); // default 100µs
+
+        let over = *per_ns > threshold;
+        let ratio = if threshold > 0 { *per_ns as f64 / threshold as f64 } else { 0.0 };
+
+        if over {
+            fails += 1;
+            details.push(format!("❌ {} = {}ns/call > {}ns threshold ({:.1}x over)",
+                name, per_ns, threshold, ratio));
+        } else {
+            details.push(format!("✅ {} = {}ns/call < {}ns threshold ({:.0}% budget)",
+                name, per_ns, threshold, ratio * 100.0));
+        }
+
+        if *per_ns > slowest_ns {
+            slowest_ns = *per_ns;
+            slowest_name = name;
+        }
     }
 
-    // This is informational — always WARN (no pass/fail for perf)
-    CheckResult::warn("F6 Performance", &format!(
-        "Bottleneck: {} — see details", slowest.0
-    ))
-        .with_details(details)
+    // Total pipeline budget: 50ms for full T1→T7
+    let total_ns = times.iter().map(|(_, t)| t).sum::<u128>();
+    let total_ms = total_ns as f64 / 1_000_000.0;
+    details.push(format!("Total pipeline estimate: {:.2}ms (budget: 50ms)", total_ms));
+    if total_ms > 50.0 {
+        fails += 1;
+        details.push("❌ Total > 50ms — user will feel lag".into());
+    }
+
+    details.push(format!("BOTTLENECK: {} ({}ns/call)", slowest_name, slowest_ns));
+
+    if fails == 0 {
+        CheckResult::pass("F6 Performance", &format!(
+            "OK — all within budget, total {:.2}ms", total_ms
+        ))
+            .with_details(details)
+    } else {
+        CheckResult::fail("F6 Performance", &format!(
+            "{} operations exceed threshold — bottleneck: {}", fails, slowest_name
+        ))
+            .with_details(details)
+    }
 }
