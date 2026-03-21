@@ -99,6 +99,46 @@ Công thức duy nhất: f(dots) = bitmask 8-bit
   Composition algebra: (S, ∘) forms a monoid
     Identity: I (identity combinator)
     Associativity: (f ∘ g) ∘ h = f ∘ (g ∘ h)
+
+  Ánh xạ từng ký tự gốc → toán tử toán học cụ thể:
+
+  ┌─────────────┬──────────────────────────────────────────────────────┐
+  │ Ký tự gốc   │ Toán tử / Ý nghĩa toán học                         │
+  ├─────────────┼──────────────────────────────────────────────────────┤
+  │ ALPHA (α)   │ Đối số trái: f α x = f(α, x)                       │
+  │ OMEGA (ω)   │ Đối số phải: f ω = f(ω)                            │
+  │ IOTA (ι)    │ Index generator: ιn = [0, 1, ..., n−1]             │
+  │ RHO (ρ)     │ Shape/Reshape: ρA = dimensions(A), n ρ A = reshape │
+  │ DEL (∇)     │ Function definition: ∇f ≡ define f                 │
+  │ DELTA (Δ)   │ Operator definition: Δg ≡ define g as operator     │
+  │ CIRCLE (○)  │ Circular/Trig: 1○x = sin(x), 2○x = cos(x), ...    │
+  │ DIAMOND (◇) │ Conditional: ◇ = error guard / protected execute   │
+  │ STAR (★)    │ Exponent/Log: ★x = e^x, a★b = a^b                 │
+  │ QUAD (⎕)    │ System variable: ⎕IO = index origin, ⎕CT = tolerance│
+  │ JOT (∘)     │ Compose: f∘g ≡ f(g(ω)), outer product              │
+  │ SHOE (∩/∪)  │ Intersection/Union: A∩B, A∪B                       │
+  │ CARET (∧/∨) │ AND/OR: Boolean a∧b = min(a,b), a∨b = max(a,b)    │
+  │ TACK (⊤/⊥)  │ Encode/Decode: base⊤n = digits, base⊥d = value    │
+  │ SLASH (/)   │ Reduce: /f [a,b,c] = f(a, f(b, c))                │
+  │ I-BEAM (⌶)  │ System function: variant, I-beam operator          │
+  │ ZILDE (⍬)   │ Empty vector: ⍬ = ρ0 (zero-length vector)          │
+  └─────────────┴──────────────────────────────────────────────────────┘
+
+  Modifier = toán tử bậc cao (higher-order operator):
+  ┌─────────────┬──────────────────────────────────────────────────────┐
+  │ Modifier    │ Phép biến đổi                                       │
+  ├─────────────┼──────────────────────────────────────────────────────┤
+  │ UNDERBAR _  │ f̲(x) = fix(f, x) : tìm điểm bất động f(x) = x    │
+  │ DIAERESIS ¨ │ f¨A = map(f, A) : áp dụng f lên từng phần tử      │
+  │ TILDE ~     │ f̃(a,b) = f(b,a) : hoán vị đối số (commute)       │
+  │ STILE |     │ f|(x) = |f(x)| : lấy giá trị tuyệt đối           │
+  │ BAR —       │ f̄(x) = f⁻¹(x) : nghịch đảo hàm (inverse)        │
+  └─────────────┴──────────────────────────────────────────────────────┘
+
+  Đại số tổ hợp: (APL_symbols, ∘) tạo thành đại số toán tử
+    Identity: ⊢ (right tack, identity function)
+    |APL_base| = 18, |Modifier| = 6
+    Tổ hợp lý thuyết: 18 × 6 = 108, thực tế: 52 (sparse)
 ```
 
 ```
@@ -226,6 +266,21 @@ ELECTRICAL INTERSECTION                   → giao điểm điện
   AC: v(t) = V₀sin(ωt)  với ω = 2πf (tần số góc)
   DC: v(t) = V₀  (hằng số)
   Electrical intersection: node trong circuit graph với deg(v) ≥ 3
+
+  Công thức điện cụ thể:
+
+  AC CURRENT:
+    v(t) = V₀·sin(2πft)     (f = 50/60 Hz)
+    i(t) = I₀·sin(2πft + φ) (φ = phase shift)
+    P = V_rms · I_rms · cos(φ)  (công suất thực)
+
+  DC CURRENT:
+    v(t) = V₀ = const
+    P = V·I = I²R = V²/R
+
+  ELECTRICAL INTERSECTION:
+    Kirchhoff junction: Σ Iₖ = 0 (KCL at node)
+    Kirchhoff loop: Σ Vₖ = 0 (KVL around loop)
 ```
 
 **HÓA HỌC (chemistry) — 2 cụm:**
@@ -241,6 +296,18 @@ BENZENE RING WITH CIRCLE                  → vòng benzen + tròn trong
   Delocalized π electrons: ψ = Σcᵢφᵢ  (LCAO-MO: tổ hợp tuyến tính orbital nguyên tử)
   BENZENE RING = hexagonal graph C₆  (6 đỉnh, 6 cạnh)
   BENZENE RING WITH CIRCLE = C₆ + π delocalization (vòng tròn = mật độ electron π)
+
+  Công thức hóa học cụ thể:
+
+  BENZENE RING (C₆H₆):
+    Orbital phân tử: ψₖ = (1/√6) Σⱼ₌₁⁶ e^(2πijk/6) · φⱼ
+    Năng lượng: Eₖ = α + 2β·cos(2πk/6),  k = 0,1,...,5
+    Năng lượng liên hợp: E_deloc = 6α + 8β  (vs 6α + 6β cho 3 liên kết đôi cô lập)
+    → Năng lượng ổn định hóa = 2β (resonance energy)
+
+  BENZENE RING WITH CIRCLE:
+    Vòng tròn = electron π phi địa phương (delocalized π electrons)
+    Biểu diễn: 6 electron trong 3 MO liên kết: π₁, π₂, π₃
 ```
 
 **ĐO LƯỜNG (measurement) — 4 cụm:**
@@ -261,6 +328,22 @@ HYSTERESIS SYMBOL                         → ký hiệu trễ
     H(x) = { H₊  nếu x đang tăng (increasing)
             { H₋  nếu x đang giảm (decreasing)
     Tạo vòng trễ: ngưỡng bật ≠ ngưỡng tắt
+
+  Công thức đo lường cụ thể:
+
+  SCAN LINE:
+    Position y = (k−1)/(N−1),  N=9 lines
+    Line-1: y = 0.000 (đỉnh)
+    Line-3: y = 0.250
+    Line-7: y = 0.750
+    Line-9: y = 1.000 (đáy)
+    Sampling theorem: f_sample ≥ 2·f_max (Nyquist)
+
+  HYSTERESIS:
+    Output H(x) phụ thuộc lịch sử:
+    H(x) = { H₊(x) = +M·tanh(x/x₀ − a)  nếu dx/dt > 0 (tăng)
+            { H₋(x) = +M·tanh(x/x₀ + a)  nếu dx/dt < 0 (giảm)
+    Diện tích vòng trễ = năng lượng hao phí: W = ∮ H·dx
 ```
 
 **THIẾT BỊ — 1 cụm:**
@@ -295,6 +378,37 @@ HELM SYMBOL                               → ký hiệu lái
 
   Fractional blocks form a GROUP under composition:
     α₁ ∪ α₂ covers area min(α₁+α₂, 1)
+
+  Bảng tỷ lệ phủ đầy đủ:
+
+  ┌────────────────────────────┬────────┬──────────────────────┐
+  │ Block element              │ α      │ Domain D ⊂ [0,1]²    │
+  ├────────────────────────────┼────────┼──────────────────────┤
+  │ FULL BLOCK                 │ 1.000  │ [0,1]²               │
+  │ UPPER HALF                 │ 0.500  │ [0,1]×[0.5,1]        │
+  │ LOWER HALF                 │ 0.500  │ [0,1]×[0,0.5]        │
+  │ LEFT HALF                  │ 0.500  │ [0,0.5]×[0,1]        │
+  │ RIGHT HALF                 │ 0.500  │ [0.5,1]×[0,1]        │
+  │ LEFT 1/8                   │ 0.125  │ [0,0.125]×[0,1]      │
+  │ LEFT 1/4                   │ 0.250  │ [0,0.25]×[0,1]       │
+  │ LEFT 3/8                   │ 0.375  │ [0,0.375]×[0,1]      │
+  │ LEFT 5/8                   │ 0.625  │ [0,0.625]×[0,1]      │
+  │ LEFT 3/4                   │ 0.750  │ [0,0.75]×[0,1]       │
+  │ LEFT 7/8                   │ 0.875  │ [0,0.875]×[0,1]      │
+  │ LOWER 1/8                  │ 0.125  │ [0,1]×[0,0.125]      │
+  │ LIGHT SHADE                │ 0.250  │ stipple p=0.25       │
+  │ MEDIUM SHADE               │ 0.500  │ stipple p=0.50       │
+  │ DARK SHADE                 │ 0.750  │ stipple p=0.75       │
+  │ QUADRANT (each)            │ 0.250  │ quarter cell          │
+  │ ARC (each)                 │ π/16   │ quarter circle arc    │
+  └────────────────────────────┴────────┴──────────────────────┘
+
+  Shade as probability:
+    pixel_on ~ Bernoulli(p),  expected coverage E[α] = p
+    Light: p = 1/4,  Medium: p = 1/2,  Dark: p = 3/4
+
+  Fractional blocks encode: α = k/8 for k ∈ {1,2,3,4,5,6,7,8}
+    → 3 bits of information: log₂(8) = 3 bits per block fraction
 ```
 
 ### Tầng 1: "Kiểu khối gì?"

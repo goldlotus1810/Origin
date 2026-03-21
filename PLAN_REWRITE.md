@@ -70,7 +70,7 @@ origin.olang = self-contained executable binary
 ├─────────────────────────────────────────────────────────┤
 │ SECTION 2: KNOWLEDGE — Append-only Data                  │
 │                                                          │
-│   L0 nodes (9,584 UCD ⚠️v2)  chain_hash + u16 mol + alias │
+│   L0 nodes (8,846 UCD ⚠️v2)  chain_hash + u16 mol + alias │
 │   L1-L7 nodes           LCA-derived concepts             │
 │   Silk parent pointers  5460 × 8B = 43 KB                │
 │   STM observations      short-term memory                │

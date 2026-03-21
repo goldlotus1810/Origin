@@ -171,7 +171,7 @@ def main():
     final = {
         "○": "UTF32-SDF-INTEGRATOR",
         "version": "18.0",
-        "spec": "HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2",
+        "spec": "HomeOS_SPEC_v3",
         "structure": "○{plane{block{char}}}",
         "P_layout": "[S:4][R:4][V:3][A:3][T:2] = 16 bits",
         "axes": {
@@ -331,34 +331,167 @@ def main():
     csize = os.path.getsize(compact_path)
     print(f"  → {csize / 1024 / 1024:.1f} MB")
 
-    # Write binary P table (just codepoint → 16-bit P, for embedded)
+    # ── Write binary P table — v3.1 hierarchical format ──
+    # Spec v3.1: KnowTree = tree L0→L1→L2→L3 (UDC only) + alias table (emoji/UTF-32)
     bin_path = os.path.join(os.path.dirname(final_path), 'udc_p_table.bin')
-    print(f"\n  Writing binary P table {bin_path}...")
+    print(f"\n  Writing binary P table (v3.1 hierarchical) {bin_path}...")
     import struct
-    # Format: [count:4][entries: (cp:4, P:2) × count]
-    entries = []
+
+    # ── 1. Classify: UDC blocks (58 blocks = KnowTree) vs alias (everything else) ──
+    UDC_GROUPS = {"SDF", "MATH", "EMOTICON", "MUSICAL"}
+
+    # Build hierarchical KnowTree
+    # L0: 5 groups (4 UDC groups + RELATION mapped from MATH)
+    # L1: 58 blocks within groups
+    # L2: sub-ranges within blocks (chars grouped by semantic sub-type)
+    # L3: individual UDC chars (9,584 leaf nodes)
+    knowtree_l3 = []       # (cp, P, block_name, group)
+    alias_entries = []     # (cp, P, closest_l3_index)
+
     for pid, plane in final["planes"].items():
         for bname, block in plane["blocks"].items():
+            group = block.get("group", "")
+            is_udc = group in UDC_GROUPS
             for cp_hex, cd in block.get("chars", {}).items():
                 cp = int(cp_hex, 16)
-                entries.append((cp, cd["P"]))
-    entries.sort()
+                P = cd["P"]
+                if is_udc:
+                    knowtree_l3.append((cp, P, bname, group))
+                else:
+                    alias_entries.append((cp, P))
+
+    knowtree_l3.sort()
+    alias_entries.sort()
+
+    # Build L1 (blocks) — aggregate P from L3 chars via LCA (mode/weighted avg)
+    block_groups = defaultdict(list)  # block_name → [(cp, P)]
+    for cp, P, bname, group in knowtree_l3:
+        block_groups[(group, bname)].append((cp, P))
+
+    # Build L0 (groups) — aggregate from L1
+    group_blocks = defaultdict(list)  # group → [(bname, block_P)]
+
+    knowtree_l1 = []  # (group, block_name, block_P, char_count)
+    for (group, bname), chars in sorted(block_groups.items()):
+        # LCA: mode of P values (≥60% same → use it, else weighted mean)
+        p_values = [p for _, p in chars]
+        from collections import Counter
+        p_counts = Counter(p_values)
+        most_common_p, most_common_count = p_counts.most_common(1)[0]
+        if most_common_count / len(p_values) >= 0.6:
+            block_P = most_common_p
+        else:
+            # Weighted average of S,R,V,A,T then repack
+            avg_S = round(sum((p >> 12) & 0xF for p in p_values) / len(p_values))
+            avg_R = round(sum((p >> 8) & 0xF for p in p_values) / len(p_values))
+            avg_V = round(sum((p >> 5) & 0x7 for p in p_values) / len(p_values))
+            avg_A = round(sum((p >> 2) & 0x7 for p in p_values) / len(p_values))
+            avg_T = round(sum(p & 0x3 for p in p_values) / len(p_values))
+            block_P = pack_p(avg_S, avg_R, avg_V, avg_A, avg_T)
+        knowtree_l1.append((group, bname, block_P, len(chars)))
+        group_blocks[group].append((bname, block_P))
+
+    knowtree_l0 = []  # (group, group_P, block_count)
+    for group, blocks in sorted(group_blocks.items()):
+        p_values = [bp for _, bp in blocks]
+        avg_S = round(sum((p >> 12) & 0xF for p in p_values) / len(p_values))
+        avg_R = round(sum((p >> 8) & 0xF for p in p_values) / len(p_values))
+        avg_V = round(sum((p >> 5) & 0x7 for p in p_values) / len(p_values))
+        avg_A = round(sum((p >> 2) & 0x7 for p in p_values) / len(p_values))
+        avg_T = round(sum(p & 0x3 for p in p_values) / len(p_values))
+        group_P = pack_p(avg_S, avg_R, avg_V, avg_A, avg_T)
+        knowtree_l0.append((group, group_P, len(blocks)))
+
+    # ── 2. Build alias → L3 index mapping ──
+    # For each alias, find nearest L3 UDC char by P_weight distance
+    l3_sorted_p = [(cp, P) for cp, P, _, _ in knowtree_l3]
+    l3_index = {cp: idx for idx, (cp, P, _, _) in enumerate(knowtree_l3)}
+
+    alias_with_index = []
+    for cp, P in alias_entries:
+        # Simple: find L3 char with closest P (hamming on packed bits)
+        best_idx = 0
+        best_dist = 0xFFFF
+        S_a, R_a, V_a, A_a, T_a = unpack_p(P)
+        for idx, (l3_cp, l3_P) in enumerate(l3_sorted_p):
+            S_b, R_b, V_b, A_b, T_b = unpack_p(l3_P)
+            dist = abs(S_a - S_b) + abs(R_a - R_b) + abs(V_a - V_b) + abs(A_a - A_b) + abs(T_a - T_b)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = idx
+                if dist == 0:
+                    break
+        alias_with_index.append((cp, P, best_idx))
+
+    # ── 3. Write binary ──
+    # Format v3.1:
+    #   Header:
+    #     [magic:4B "KT31"]
+    #     [l0_count:2B][l1_count:2B][l3_count:2B][alias_count:4B]
+    #   L0 section: (group_name_len:1B, group_name:NB, P:2B, block_count:2B) × l0_count
+    #   L1 section: (group_idx:1B, block_name_len:1B, block_name:NB, P:2B, char_count:2B) × l1_count
+    #   L3 section: (cp:4B, P:2B) × l3_count
+    #   Alias section: (cp:4B, P:2B, l3_index:2B) × alias_count
 
     with open(bin_path, 'wb') as f:
-        f.write(struct.pack('<I', len(entries)))
-        for cp, p in entries:
-            f.write(struct.pack('<IH', cp, p))
+        # Header
+        f.write(b'KT31')
+        f.write(struct.pack('<HHH I',
+            len(knowtree_l0), len(knowtree_l1), len(knowtree_l3), len(alias_with_index)))
+
+        # L0 section
+        for group, group_P, block_count in knowtree_l0:
+            name_bytes = group.encode('utf-8')
+            f.write(struct.pack('<B', len(name_bytes)))
+            f.write(name_bytes)
+            f.write(struct.pack('<HH', group_P, block_count))
+
+        # L1 section
+        group_names = [g for g, _, _ in knowtree_l0]
+        for group, bname, block_P, char_count in knowtree_l1:
+            group_idx = group_names.index(group) if group in group_names else 0
+            name_bytes = bname.encode('utf-8')
+            f.write(struct.pack('<BB', group_idx, len(name_bytes)))
+            f.write(name_bytes)
+            f.write(struct.pack('<HH', block_P, char_count))
+
+        # L3 section (UDC chars only)
+        for cp, P, _, _ in knowtree_l3:
+            f.write(struct.pack('<IH', cp, P))
+
+        # Alias section
+        for cp, P, l3_idx in alias_with_index:
+            f.write(struct.pack('<IHH', cp, P, l3_idx))
+
     bsize = os.path.getsize(bin_path)
-    print(f"  → {bsize / 1024:.0f} KB ({len(entries)} entries × 6B)")
+    print(f"  → {bsize / 1024:.1f} KB")
+    print(f"    KnowTree: L0={len(knowtree_l0)} groups, L1={len(knowtree_l1)} blocks, L3={len(knowtree_l3)} chars")
+    print(f"    Alias table: {len(alias_with_index)} entries (emoji/UTF-32 → L3 UDC)")
+
+    # Also write legacy flat format for backward compat
+    legacy_bin_path = bin_path.replace('.bin', '_legacy.bin')
+    print(f"\n  Writing legacy flat binary {legacy_bin_path}...")
+    all_entries = [(cp, P) for cp, P, _, _ in knowtree_l3]
+    all_entries.extend([(cp, P) for cp, P, _ in alias_with_index])
+    all_entries.sort()
+    with open(legacy_bin_path, 'wb') as f:
+        f.write(struct.pack('<I', len(all_entries)))
+        for cp, p in all_entries:
+            f.write(struct.pack('<IH', cp, p))
+    lsize = os.path.getsize(legacy_bin_path)
+    print(f"  → {lsize / 1024:.0f} KB ({len(all_entries)} entries × 6B) [legacy compat]")
 
     print(f"\n{'='*60}")
-    print(f"  FINAL OUTPUT:")
+    print(f"  FINAL OUTPUT (v3.1 hierarchical):")
     print(f"    JSON (pretty):  {final_path} ({fsize/1024/1024:.1f} MB)")
     print(f"    JSON (compact): {compact_path} ({csize/1024/1024:.1f} MB)")
-    print(f"    Binary P table: {bin_path} ({bsize/1024:.0f} KB)")
+    print(f"    Binary P table: {bin_path} ({bsize/1024:.1f} KB) [KT31 hierarchical]")
+    print(f"    Legacy binary:  {legacy_bin_path} ({lsize/1024:.0f} KB) [flat compat]")
+    print(f"    KnowTree: L0={len(knowtree_l0)} → L1={len(knowtree_l1)} → L3={len(knowtree_l3)} UDC chars")
+    print(f"    Alias table: {len(alias_with_index)} emoji/UTF-32 → L3 UDC")
     print(f"    Total codepoints: {total_chars}")
     print(f"    Packed entries: {total_packed}")
-    print(f"\nStep 6 DONE ✓ — ○{{UTF32-SDF-INTEGRATOR}} v18.0 complete")
+    print(f"\nStep 6 DONE ✓ — ○{{UTF32-SDF-INTEGRATOR}} v18.0 / Spec v3.1 complete")
 
 
 if __name__ == '__main__':

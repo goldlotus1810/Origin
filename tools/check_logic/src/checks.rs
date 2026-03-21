@@ -1365,11 +1365,11 @@ pub fn check_lca_compose_rules(root: &Path) -> CheckResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// AUDIT #7: UCD blocks — 29 ranges vs v2 58 blocks
+// AUDIT #7: UCD blocks — 29 ranges vs v3 59 blocks
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_ucd_block_count(root: &Path) -> CheckResult {
-    println!("[27/37] AUDIT — UCD blocks 29 vs v2 58...");
+    println!("[27/37] AUDIT — UCD blocks 29 vs v3 59...");
     let build_path = root.join("crates/ucd/build.rs");
 
     if !build_path.exists() {
@@ -1395,8 +1395,8 @@ pub fn check_ucd_block_count(root: &Path) -> CheckResult {
     let has_znamenny = content.contains("1CF00") || content.contains("Znamenny");
     let has_byzantine = content.contains("1D000") || content.contains("Byzantine");
 
-    // Check L0 anchor count — v2 says 9,584
-    let table_size_match = content.contains("9584") || content.contains("9_584");
+    // Check L0 anchor count — v3 says 8,846
+    let table_size_match = content.contains("8846") || content.contains("8_846");
 
     details.push(format!("Braille Patterns: {}", if has_braille { "✅" } else { "❌ missing" }));
     details.push(format!("Ornamental Dingbats: {}", if has_ornamental { "✅" } else { "❌ missing" }));
@@ -1405,19 +1405,19 @@ pub fn check_ucd_block_count(root: &Path) -> CheckResult {
     details.push(format!("Playing Cards: {}", if has_playing { "✅" } else { "❌ missing" }));
     details.push(format!("Znamenny Musical: {}", if has_znamenny { "✅" } else { "❌ missing" }));
     details.push(format!("Byzantine Musical: {}", if has_byzantine { "✅" } else { "❌ missing" }));
-    details.push(format!("L0 anchor count = 9,584: {}", if table_size_match { "✅" } else { "❌" }));
+    details.push(format!("L0 anchor count = 8,846: {}", if table_size_match { "✅" } else { "❌" }));
 
     let missing_count = [has_braille, has_ornamental, has_mahjong, has_domino,
                          has_playing, has_znamenny, has_byzantine]
         .iter().filter(|&&x| !x).count();
 
     if missing_count == 0 && table_size_match {
-        CheckResult::pass("UCD Blocks", "OK — all 58 blocks covered, 9,584 anchors")
+        CheckResult::pass("UCD Blocks", "OK — all 59 blocks covered, 8,846 anchors")
             .with_details(details)
     } else {
-        details.push(format!("{} key blocks missing — v2 requires 58 blocks / 9,584 L0 anchors", missing_count));
+        details.push(format!("{} key blocks missing — v3 requires 59 blocks / 8,846 L0 anchors", missing_count));
         CheckResult::fail("UCD Blocks", &format!(
-            "{} key blocks missing, L0 anchors ≠ 9,584 — v2 requires 58 blocks",
+            "{} key blocks missing, L0 anchors ≠ 8,846 — v3 requires 59 blocks",
             missing_count
         ))
             .with_details(details)
@@ -1724,12 +1724,12 @@ pub fn check_l0_valence_source(root: &Path) -> CheckResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// L0 CASCADE #2: L0 seed = 35 nodes, v2 = 9,584 (E5.2 + E1.3)
+// L0 CASCADE #2: L0 seed = 35 nodes, v3 = 8,846 (E5.2 + E1.3)
 // 44% of anchor points fallback to Sphere/neutral → meaningless
 // ═══════════════════════════════════════════════════════════════════
 
 pub fn check_l0_seed_count(root: &Path) -> CheckResult {
-    println!("[34/37] L0 — Seed count: 35 vs 9,584...");
+    println!("[34/37] L0 — Seed count: 35 vs 8,846...");
     let crates = root.join("crates");
     let files = scan_rs_files(&crates);
 
@@ -1737,8 +1737,8 @@ pub fn check_l0_seed_count(root: &Path) -> CheckResult {
 
     // Check KnowTree seed count
     let seed_35 = grep_pattern(&files, "35 seeded");
-    let seed_9584 = grep_pattern(&files, "9584");
-    let seed_9k = grep_pattern(&files, "9_584");
+    let seed_8846 = grep_pattern(&files, "8846");
+    let seed_9k = grep_pattern(&files, "8_846");
 
     // Check UCD_TABLE size
     let _table_refs = grep_pattern(&files, "UCD_TABLE");
@@ -1748,21 +1748,21 @@ pub fn check_l0_seed_count(root: &Path) -> CheckResult {
     let fallback_neutral = grep_pattern(&files, "unwrap_or(0x80)");
 
     details.push(format!("'35 seeded' refs: {}", seed_35.len()));
-    details.push(format!("'9584' or '9_584' refs: {}", seed_9584.len() + seed_9k.len()));
+    details.push(format!("'8846' or '8_846' refs: {}", seed_8846.len() + seed_9k.len()));
     details.push(format!("Fallback to Sphere (0x01): {} refs", fallback_sphere.len()));
     details.push(format!("Fallback to neutral (0x80): {} refs", fallback_neutral.len()));
 
-    let has_correct_seed = !seed_9584.is_empty() || !seed_9k.is_empty();
+    let has_correct_seed = !seed_8846.is_empty() || !seed_9k.is_empty();
 
     if has_correct_seed && seed_35.is_empty() {
-        CheckResult::pass("L0 Seed Count", "OK — 9,584 L0 anchors")
+        CheckResult::pass("L0 Seed Count", "OK — 8,846 L0 anchors")
             .with_details(details)
     } else {
-        details.push("v2: 58 blocks × ~165 avg = 9,584 L0 anchor points".into());
-        details.push("Current: 35 seeds → 9,549 missing → fallback Sphere/neutral".into());
+        details.push("v3: 59 blocks × ~150 avg = 8,846 L0 anchor points".into());
+        details.push("Current: 35 seeds → 8,811 missing → fallback Sphere/neutral".into());
         details.push("→ 44% L0 anchors = Sphere + neutral = MEANINGLESS".into());
         details.push("→ ALL distance comparisons using missing anchors = WRONG".into());
-        CheckResult::fail("L0 Seed Count", "Only 35 L0 seeds — v2 requires 9,584 (4,184 codepoints missing)")
+        CheckResult::fail("L0 Seed Count", "Only 35 L0 seeds — v3 requires 8,846 (4,184 codepoints missing)")
             .with_details(details)
     }
 }

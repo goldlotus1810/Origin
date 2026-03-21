@@ -59,7 +59,7 @@ pub fn check_ucd_encode_real() -> CheckResult {
     let elapsed = start.elapsed();
     details.push(format!("Lookup time: {:?} for {} entries", elapsed, test_cases.len()));
 
-    // Test coverage: how many of 9,584 expected L0 codepoints exist?
+    // Test coverage: how many of 8,846 expected L0 codepoints exist?
     let mut found = 0;
     let mut missing = 0;
     for cp in 0x2190..=0x27FF {  // Arrows + misc symbols (should be SDF)

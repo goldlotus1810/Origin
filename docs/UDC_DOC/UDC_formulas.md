@@ -1,7 +1,12 @@
-# UDC Formulas — Công thức ánh xạ giá trị → đối tượng
+# UDC Encode Pipeline — Codepoint → P_weight (42 công thức)
 
-> **Nghiên cứu**: Từ tên các nhóm ngữ nghĩa đã phân loại,
-> suy ra các công thức cần thiết để: **thay 1 giá trị vào → ra đối tượng tương ứng**.
+> **Vai trò:** Spec kỹ thuật encode — định nghĩa cách chuyển Unicode codepoint → P_weight 2 bytes.
+> Đây là **encode pipeline** (bit layout, quantization, data sources).
+>
+> **Công thức vật lý/hình học chi tiết** cho từng chiều → xem các file `_tree.md`:
+> `UDC_A_AROUSAL_tree.md`, `UDC_V_VALENCE_tree.md`, `UDC_R_RELATION_tree.md`,
+> `UDC_S0_ARROW_tree.md`, `UDC_S1_GEOMETRIC_tree.md`, `UDC_S2_BOXDRAWING_tree.md`,
+> `UDC_S3_S7_tree.md`, `UDC_T_TIME_tree.md`
 
 ---
 

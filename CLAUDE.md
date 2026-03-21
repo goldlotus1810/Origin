@@ -63,15 +63,15 @@ P_weight [S][R][V][A][T] = 2 bytes = tọa độ trong không gian 5D
 Tính 1 lần lúc bootstrap từ json/udc.json → SEALED vĩnh viễn (L0 anchor)
 KnowTree: 65,536 × 2B = 128 KB (O(1) lookup)   Chain: 7.42 tỷ × 2B = 14.84 GB       Blocks   Ký tự    Chiều
 ──────────────────────────────────────────────────────
-SDF           13    1,904    Shape    (18 SDF primitives)
-MATH          21    3,088    Relation (75 kênh)
-EMOTICON      17    3,568    Valence+Arousal (chia sẻ 17 blocks)
-MUSICAL        7    1,024    Time
+SDF           14    1,838    Shape    (18 SDF primitives)
+MATH          21    2,563    Relation (75 kênh)
+EMOTICON      17    3,487    Valence+Arousal (chia sẻ 17 blocks)
+MUSICAL        7      958    Time
 ──────────────────────────────────────────────────────
-Tổng          58    9,584    = L0 anchor points
+Tổng          59    8,846    = L0 anchor points
 
 Silk ngang: 75 kênh × 31 mẫu = 2,325 kiểu quan hệ (implicit, 0 bytes)
-Silk dọc: parent_map 9,584 pointers = ~76 KB (CHƯA implement)
+Silk dọc: parent_map 8,846 pointers = ~71 KB (CHƯA implement)
 Emotion: KHÔNG trung bình — AMPLIFY qua Silk walk (cortisol + adrenaline = mạnh hơn)
 ```
                               o{65,536 × 2B = 128 KB}
