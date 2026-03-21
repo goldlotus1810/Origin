@@ -1092,3 +1092,186 @@ Các loại alias:
     User gõ "script P"   → alias match → U+2118 → same P_weight
     → 2 con đường khác nhau, cùng đích đến 5D
 ```
+
+---
+
+## Pipeline tổng hợp: UTF-32 → 5D
+
+> Quy trình đầy đủ từ 1 mã UTF-32 → node 5D [S, R, V, A, T].
+> Kết hợp tất cả 13 nhóm tệp UCD ở trên.
+
+```
+INPUT: 4-byte UTF-32 codepoint (VD: 0x1F525 = 🔥)
+
+═══════════════════════════════════════════════════════════════════
+B1: NORMALIZE
+═══════════════════════════════════════════════════════════════════
+  DerivedNormalizationProps.txt + CompositionExclusions.txt
+  → NFC normalize input
+  → Đảm bảo "é" (1 cp) và "é" (2 cp) → cùng 1 lookup
+
+═══════════════════════════════════════════════════════════════════
+B2: IDENTIFY (Tra từ điển gốc)
+═══════════════════════════════════════════════════════════════════
+  UnicodeData.txt → Name + General_Category
+  NameAliases.txt → Alias (FIGURATIVE, CORRECTION...)
+  → "FIRE" + Emoji_Presentation
+
+═══════════════════════════════════════════════════════════════════
+B3: CLASSIFY (Phân loại nhóm)
+═══════════════════════════════════════════════════════════════════
+  Blocks.txt → range filtering → block nào?
+  emoji-data.txt → Is_Emoji? → true/false
+  Scripts.txt → hệ chữ nào?
+  PropList.txt → Math? Dash? Ideographic?
+
+  Decision tree:
+    Is_Emoji=true          → EMOTICON group (V,A dominant)
+    block ∈ SDF_BLOCKS     → SDF group (S dominant)
+    block ∈ MATH_BLOCKS    → MATH group (R dominant)
+    block ∈ MUSIC_BLOCKS   → MUSICAL group (T dominant)
+    else                   → TEXT group (block default)
+
+  0x1F525 → Is_Emoji=true → EMOTICON group ✓
+
+═══════════════════════════════════════════════════════════════════
+B4: SEGMENT (Xác định đơn vị)
+═══════════════════════════════════════════════════════════════════
+  GraphemeBreakProperty.txt → grapheme cluster?
+  emoji-sequences.txt → multi-codepoint sequence?
+
+  Nếu single codepoint → tiếp B5
+  Nếu cluster/sequence → compose thành phần:
+    P_weight = compose(P_part1, P_part2, ...)
+    Rules: S=Union, R=Compose, V=amplify, A=max, T=dominant
+
+  0x1F525 → single codepoint → tiếp B5 ✓
+
+═══════════════════════════════════════════════════════════════════
+B5: LOOKUP 5D (Tra tọa độ)
+═══════════════════════════════════════════════════════════════════
+  ① Tra udc.json trực tiếp:
+     udc_utf32.json → planes → blocks → chars → 0x1F525
+     → S=0, R=9, V=0.447, A=0.706, T=0
+
+  ② Nếu không có trong UDC, tra NRC-VAD:
+     NRC-VAD-Lexicon.txt → lookup Name words → V, A
+     Emoji-Sentiment-Data.csv → cross-validate V
+     Emoji-Dis.csv → discrete emotion → V, A
+
+  ③ Nếu vẫn không có → block default:
+     p_default từ Blocks mapping → {S, R, V, A, T}
+
+  0x1F525 → ① thành công → S=0, R=9, V=0.447, A=0.706, T=0 ✓
+
+═══════════════════════════════════════════════════════════════════
+B6: CONTEXT ADJUST (Điều chỉnh ngữ cảnh)
+═══════════════════════════════════════════════════════════════════
+  Scripts.txt → script context → điều chỉnh R
+  ScriptExtensions.txt → multi-script → R=COMPOSE?
+  LineBreak.txt → gián tiếp ảnh hưởng S
+  CLDR annotations.json → alias đa ngôn ngữ
+
+  Context rules:
+    Cùng codepoint + khác script context → V,A có thể khác
+    VD: 🔥 trong "cháy nhà" → A boost (nguy hiểm)
+        🔥 trong "bài hát hot" → V boost (tích cực)
+    → Điều chỉnh runtime, KHÔNG thay đổi UDC gốc
+
+═══════════════════════════════════════════════════════════════════
+B7: PACK & CREATE NODE
+═══════════════════════════════════════════════════════════════════
+  P_weight = pack(S:4, R:4, V:3, A:3, T:2) = 16 bits = 2 bytes
+  Molecule = encode_codepoint(0x1F525)  ← KHÔNG viết tay (Quy tắc ④)
+  chain    = chain từ LCA hoặc UCD     ← KHÔNG viết tay (Quy tắc ⑤)
+  hash     = chain_hash(chain)          ← tự sinh (Quy tắc ⑥)
+
+  → Append node vào registry (Quy tắc ⑩: append-only)
+  → Ghi file TRƯỚC, cập nhật RAM SAU (Quy tắc ⑨)
+
+OUTPUT: Node 🔥 hoàn chỉnh
+  P_weight = [S=0, R=9, V=0.447, A=0.706, T=0]
+  Formulas = [SPHERE, CAUSES, amplify(0.447), max(0.706), TIMELESS]
+```
+
+### Bảng tổng hợp: UCD Files → 5D Dimensions
+
+```
+┌─────────────────────────────────────┬───┬───┬───┬───┬───┬────────────────┐
+│ UCD File / Source                   │ S │ R │ V │ A │ T │ Vai trò        │
+├─────────────────────────────────────┼───┼───┼───┼───┼───┼────────────────┤
+│ UnicodeData.txt                     │ · │ · │ · │ · │ · │ Entry point    │
+│ NameAliases.txt                     │ · │ · │ · │ · │ · │ Alias → node   │
+│ PropertyAliases/Values.txt          │ ● │ ● │   │   │   │ S,R heuristic  │
+│ GraphemeBreakProperty.txt           │ ● │ ● │   │   │   │ Cluster → S,R  │
+│ WordBreakProperty.txt               │   │   │ ● │ ● │   │ Word → V,A     │
+│ SentenceBreakProperty.txt           │   │   │   │   │ ● │ Sentence → T   │
+│ DerivedNormalizationProps.txt       │ ● │   │   │   │   │ Shape normalize│
+│ CompositionExclusions.txt           │ ● │   │   │   │   │ Compose rules  │
+│ emoji-data.txt                      │   │   │ ● │ ● │   │ Emoji filter   │
+│ emoji-sequences.txt                 │ ● │ ● │ ● │ ● │ ● │ Multi-cp node  │
+│ CLDR annotations.json               │   │   │ ● │ ● │   │ i18n alias V,A │
+│ Blocks.txt                          │ ● │ ● │   │   │ ● │ Block → group  │
+│ PropList.txt                        │ ● │ ● │   │   │   │ Fine-tune S,R  │
+│ allkeys.txt (DUCET)                 │   │ ● │   │   │   │ Order (R=4)    │
+│ Unihan_Variants.txt                 │ ● │   │   │   │   │ Glyph → S      │
+│ Unihan_Readings.txt                 │   │ ● │ ● │   │   │ Semantic R,V   │
+│ NRC-VAD-Lexicon.txt                 │   │   │ ● │ ● │   │ V,A primary    │
+│ Emoji-Sentiment-Data.csv            │   │   │ ● │   │   │ V validate     │
+│ Emoji-Dis.csv                       │   │   │ ● │ ● │   │ V,A discrete   │
+│ Scripts.txt                         │   │ ● │   │   │   │ Script → R     │
+│ ScriptExtensions.txt                │   │ ● │   │   │   │ Multi-script R │
+│ LineBreak.txt                       │ ● │   │   │   │   │ Layout → S     │
+├─────────────────────────────────────┼───┼───┼───┼───┼───┼────────────────┤
+│ ● = trực tiếp ảnh hưởng chiều đó   │   │   │   │   │   │                │
+│ · = entry point, ảnh hưởng gián tiếp│   │   │   │   │   │                │
+└─────────────────────────────────────┴───┴───┴───┴───┴───┴────────────────┘
+```
+
+### Sơ đồ luồng dữ liệu
+
+```
+                    ┌─────────────────┐
+                    │  UTF-32 Input   │
+                    │  (4 bytes)      │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  B1: NORMALIZE  │ ← DerivedNormalization, CompositionExclusions
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  B2: IDENTIFY   │ ← UnicodeData, NameAliases
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+            ┌───────┤  B3: CLASSIFY   │ ← Blocks, emoji-data, Scripts, PropList
+            │       └────────┬────────┘
+            │                │
+     ┌──────▼──────┐ ┌──────▼──────┐
+     │  EMOTICON   │ │  SDF/MATH/  │
+     │  (V,A dom)  │ │  MUSIC/TEXT │
+     └──────┬──────┘ └──────┬──────┘
+            │                │
+            └───────┬────────┘
+                    │
+           ┌────────▼────────┐
+           │  B4: SEGMENT    │ ← GraphemeBreak, emoji-sequences
+           └────────┬────────┘
+                    │
+           ┌────────▼────────┐
+           │  B5: LOOKUP 5D  │ ← udc.json, NRC-VAD, Emoji-Sentiment
+           └────────┬────────┘
+                    │
+           ┌────────▼────────┐
+           │  B6: CONTEXT    │ ← Scripts, CLDR, LineBreak
+           └────────┬────────┘
+                    │
+           ┌────────▼────────┐
+           │  B7: PACK NODE  │ → P_weight [S:4][R:4][V:3][A:3][T:2]
+           └────────┬────────┘
+                    │
+                    ▼
+            Node 5D hoàn chỉnh
+            (2 bytes + formulas)
+```
