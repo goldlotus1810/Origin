@@ -94,7 +94,7 @@ B1-B7 ALL DONE | Phase 0 (0.1-0.6 compiler) ALL DONE | Phase 1-7 ALL DONE
 
 | ID | Task | Spec ref | Depends | Status | Branch | Session | Notes |
 |----|------|----------|---------|--------|--------|---------|-------|
-| 16.1 | Fusion multi-modal stub (audio+image+bio) | §V.5 | 12 | FREE | | | Bio=0.50 > Audio=0.40 > Text=0.30 > Image=0.25. |
+| 16.1 | Fusion multi-modal stub (audio+image+bio) | §V.5 | 12 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | recent_modalities buffer + fuse() wired in process_input. FUSION_WINDOW_MS=2s. 308/310 tests pass. |
 | 16.2 | Checkpoint 2 (ENCODE) enforcement | §X CP2 | 12 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | chain_hash≠0, entities≥1, consistency≥0.75 (non-zero ratio). Vi phạm → Blocked. |
 | 16.3 | Checkpoint 3 (INFER) enforcement | §X CP3 | 12 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | Chain density≥0.75 (chains≥5 links), knowledge quality≥0. Vi phạm → BlackCurtain (empty). |
 | 16.4 | Checkpoint 5 (RESPONSE) enforcement | §X CP5 | 12 | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | SecurityGate.check(response), empty guard, tone vs V consistency. 308/310 tests pass (2 pre-existing). |
@@ -141,10 +141,10 @@ T1-T12 ALL DONE. → Chi tiết: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_AR
 
 | ID | Task | Depends | Status | Notes |
 |----|------|---------|--------|-------|
-| T13 | check_logic test_bit_shifts fix | T12 | FREE | parse_rs.rs:489 — assertion `r` bit shift 10 fails. |
-| T14 | **KnowTree → cây phân tầng** | T12 | FREE | ⚠️ CRITICAL: mảng phẳng → CÂY L0→L1→L2→L3. Spec v3 §1.7. |
+| T13 | check_logic test_bit_shifts fix | T12 | DONE | Đã pass sẵn — bit shift test OK với v2 layout. (2pN6F) |
+| T14 | **KnowTree → cây phân tầng** | T12 | CLAIMED | ⚠️ CRITICAL: đang được session khác implement. |
 | T15 | Alias table tách riêng | T14 | FREE | 41,338 emoji/UTF-32 → alias riêng, KHÔNG gộp KnowTree. |
-| T16 | olang_handbook.md update v2 | T3 | FREE | 3 xung đột: Molecule 5B→2B, Chain, Shape 8→18. |
+| T16 | olang_handbook.md update v2 | T3 | DONE | Molecule 5B→2B, Chain Vec<u16>, Shape 16 values, 8846 L0. (2pN6F) |
 
 ---
 

@@ -170,6 +170,10 @@ pub struct HomeRuntime {
     auth_state: AuthState,
     /// Auth header: master pubkey, salt, setup metadata
     auth_header: AuthHeader,
+    /// Recent modality signals for cross-modal fusion (Spec §V.5).
+    /// Stores last EmotionTag + timestamp per modality (Audio, Bio).
+    /// Expires after FUSION_WINDOW_MS (2000ms).
+    recent_modalities: alloc::vec::Vec<RecentModality>,
 }
 
 /// Lưu text gần đây cho reference resolution.
@@ -182,6 +186,18 @@ struct RecentText {
     /// Tên riêng đã extract được (nếu có)
     names: alloc::vec::Vec<String>,
 }
+
+/// Recent modality signal for cross-modal fusion.
+#[derive(Debug, Clone)]
+struct RecentModality {
+    tag: silk::edge::EmotionTag,
+    kind: context::analysis::fusion::ModalityKind,
+    confidence: f32,
+    timestamp: i64,
+}
+
+/// Fusion window: signals older than this are discarded (2 seconds).
+const FUSION_WINDOW_MS: i64 = 2000;
 
 /// Extract first integer from text (e.g., "đặt nhiệt độ 25" → 25).
 fn extract_number(s: &str) -> Option<i32> {
@@ -357,6 +373,7 @@ impl HomeRuntime {
             module_loader: olang::module::ModuleLoader::new(alloc::vec!["stdlib".into(), ".".into()]),
             auth_state,
             auth_header,
+            recent_modalities: alloc::vec::Vec::new(),
         };
 
         // Restore KnowTree compact nodes từ file (legacy 0x08)
@@ -2920,7 +2937,7 @@ impl HomeRuntime {
         }
 
         // ── T1+T2+T3: Context + Emotion — tùy modality ─────────────────────
-        let (raw_tag, emo_ctx_scale) = match &input {
+        let (mut raw_tag, emo_ctx_scale) = match &input {
             ContentInput::Text { content, .. } => {
                 let emo_ctx = infer_context(content);
                 let raw = sentence_affect(content);
@@ -2962,6 +2979,52 @@ impl HomeRuntime {
                 (silk::edge::EmotionTag::NEUTRAL, 0.3)
             }
         };
+
+        // ── T3.5: Cross-modal Fusion (Spec §V.5) ──────────────────────────
+        // Lưu modality signal hiện tại, rồi fuse tất cả signals gần đây.
+        {
+            use context::analysis::fusion::{ModalityKind, ModalityInput as FusionInput, fuse};
+
+            // Xác định modality kind + confidence cho input hiện tại
+            let current_modality = match &input {
+                ContentInput::Text { .. } => Some((ModalityKind::Text, 0.85_f32)),
+                ContentInput::Audio { .. } => Some((ModalityKind::Audio, 0.80)),
+                ContentInput::Sensor { .. } => Some((ModalityKind::Bio, 0.70)),
+                _ => None,
+            };
+
+            // Lưu signal hiện tại vào buffer
+            if let Some((kind, conf)) = current_modality {
+                // Xóa signal cũ cùng kind
+                self.recent_modalities.retain(|m| m.kind != kind);
+                self.recent_modalities.push(RecentModality {
+                    tag: raw_tag,
+                    kind,
+                    confidence: conf,
+                    timestamp: ts,
+                });
+            }
+
+            // Xóa signals quá hạn
+            self.recent_modalities.retain(|m| ts - m.timestamp < FUSION_WINDOW_MS);
+
+            // Fuse nếu có ≥2 modalities
+            if self.recent_modalities.len() >= 2 {
+                let inputs: alloc::vec::Vec<FusionInput> = self.recent_modalities
+                    .iter()
+                    .map(|m| FusionInput {
+                        tag: m.tag,
+                        confidence: m.confidence,
+                        source: m.kind,
+                    })
+                    .collect();
+                let fused = fuse(&inputs);
+                // Override raw_tag nếu fusion confident
+                if fused.is_certain() {
+                    raw_tag = fused.tag;
+                }
+            }
+        }
 
         // ── T4: Intent estimate ─────────────────────────────────────────────
         let cur_v = self.learning.context().fx();
