@@ -344,10 +344,59 @@ Trước khi commit code liên quan đến pipeline, kiểm tra:
 □ quality weights có Σ = 1.0?
 □ entropy có ε_floor cho Σc?
 □ HNSW insert có tie-breaking deterministic?
-□ SecurityGate có ≥ 2 layers?
+□ SecurityGate có ≥ 3 layers?
 □ Pipeline có đủ 5 checkpoints?
 □ Mỗi checkpoint vi phạm → có hành động cụ thể (DỪNG/im lặng/giữ STM)?
 ```
+
+---
+
+## 9. CÔNG CỤ KIỂM TRA TỰ ĐỘNG — `check-logic`
+
+> **BẮT BUỘC chạy trước khi push. Không pass = không push.**
+
+```bash
+# Chạy tool
+make check-logic
+# hoặc
+cargo run -p check_logic
+```
+
+Tool kiểm tra **14 điểm** tự động:
+
+```
+6 Bug Patterns:
+  [1]  BP#1  Compose — no simple average cho Valence
+  [2]  BP#2  Self-correct — rollback guard
+  [3]  BP#3  Quality weights — Σ = 1.0
+  [4]  BP#4  Entropy — ε_floor cho Σc
+  [5]  BP#5  HNSW insert — deterministic tie-breaking
+  [6]  BP#6  SecurityGate — 3-layer detection
+
+5 Checkpoints:
+  [7]  CP1-5 Pipeline checkpoints (Gate, QT8, fire_count, Variance, Response)
+
+7 Invariants (23 rules):
+  [8]  QT④   Molecule chỉ từ encode_codepoint/LCA — không handwrite
+  [9]  QT⑧⑨⑩ Append-only — không delete, không overwrite
+  [10] QT⑮   Agent tiers — AAM↔Worker bị cấm
+  [11] QT⑭   L0 không import L1
+  [12] QT⑲-㉓ Skill stateless
+  [13] Worker gửi chain, không raw data
+
+Data Integrity:
+  [14] json/udc_utf32.json — P_weight, anchors, aliases, binary table
+```
+
+Kết quả: `✅ PASS` | `⚠️ WARN` | `❌ FAIL`
+
+```
+❌ FAIL  → PHẢI sửa trước khi push
+⚠️ WARN  → Được push, nhưng nên sửa
+✅ PASS  → OK
+```
+
+Source: `tools/check_logic/src/main.rs` + `checks.rs`
 
 ---
 
@@ -356,4 +405,7 @@ Trước khi commit code liên quan đến pipeline, kiểm tra:
 ```
 2026-03-19  Tạo file. 6 bug fixes + 5 checkpoints từ v2.md.
             Nguồn: HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2.md Section IX-C.
+2026-03-21  Thêm Section 9: công cụ check-logic tự động (14 checks).
+            Tích hợp vào Makefile: make check-logic + make check-all.
+            Kiểm tra data mới json/udc_utf32.json (○{UTF32-SDF-INTEGRATOR} v18.0).
 ```

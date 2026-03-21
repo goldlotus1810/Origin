@@ -1,0 +1,10 @@
+[package]
+name = "check_logic"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "check-logic"
+path = "src/main.rs"
+
+[dependencies]
