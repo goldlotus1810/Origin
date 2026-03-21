@@ -1246,7 +1246,7 @@ Expected: onOutput receives "stack overflow"
 ### Test 6: Event bridge
 
 ```
-Bytecode: PushMol(1,6,200,180,4) → Emit → Dream → Halt
+Bytecode: PushMol(0x1680) → Emit → Dream → Halt  // ⚠️ v2: u16 packed, was (1,6,200,180,4)
 Expected events:
   { type: 0, data: mol_bytes }  // Output
   { type: 7, data: null }       // TriggerDream
@@ -1363,8 +1363,8 @@ WORKLOAD → ACCELERATOR MAPPING (WASM context):
   Opcode dispatch             ✅            ❌            Sequential
   FNV-1a (single)             ✅            ❌            64-bit, sequential
   FNV-1a (batch 10M)          ❌ slow       ⚠️ i64 issue  Emulate 64-bit trên GPU
-  LCA (batch 1M, 5D avg)      ❌ slow       ✅ f32 OK     5D avg = f32 acceptable
-  Dream distance matrix        ❌ slow       ✅            Pairwise 5D distance
+  LCA (batch 1M, v2 rules)    ❌ slow       ✅ f32 OK     ⚠️ v2: amplify/Union/max/dominant, NOT avg
+  Dream distance matrix        ❌ slow       ✅            Pairwise 5D distance (Molecule=u16)
   KNN search                   ❌ slow       ✅            Parallel scan
   Silk BFS                     ⚠️            ⚠️           Graph = irregular access
   SHA-256 (batch)              ❌ slow       ✅ u32 ops    SHA-256 = u32 math

@@ -99,7 +99,8 @@ Flow đúng:
 
 ### P hiện tại trong Olang/ucd (SAI):
 ```
-Molecule = 5 bytes [S][R][V][A][T]
+⚠️ v2: Molecule = u16 packed [S:4][R:4][V:3][A:3][T:2] = 2 bytes
+LEGACY (SAI): Molecule = 5 bytes [S][R][V][A][T]
 encode_codepoint(cp) → mỗi ký tự được gán VÀO 1 chiều
 → ● được gán S=Sphere, các chiều còn lại = default
 → Olang hiểu: "● THUỘC chiều S" (phân loại)
@@ -167,7 +168,7 @@ Tất cả sinh từ P[gốc] với input từ json/ucd.json.
 KnowTree = cây Fibonacci nhiều tầng:
 
   Root branch (L0 working memory):
-    Array 65,536 × 5B = 328KB  ← ĐÂY CHỈ LÀ 1 NHÁNH (root branch)
+    Array 65,536 × 2B = 128KB  ← v2 (was 5B = 328KB)
     KnowTree[u16] → P_weight   — O(1), không cần hash
     9,584 slots đầu = UDC L0   — phần còn lại = learned/system
 
@@ -517,7 +518,7 @@ Checklist:
 
 ### Task 4: Geometric Shapes — U+25A0..U+25FF (1 session, ~60 chars chính)
 
-**8 SDF primitives nằm ở đây** — quan trọng nhất.
+**18 SDF primitives (⚠️ v2: was 8) nằm ở đây** — quan trọng nhất.
 
 ```
 SDF Primitives (PHẢI encode chính xác):
@@ -532,7 +533,7 @@ SDF Primitives (PHẢI encode chính xác):
 ```
 
 Checklist:
-- [ ] Encode 8 SDF primitives chính xác
+- [ ] Encode 18 SDF primitives (⚠️ v2: was 8) chính xác
 - [ ] Encode colored variants: 🔴🟠🟡🟢🔵🟣⚫⚪ (1F534..1F7E3 region)
 - [ ] Encode squares/diamonds/triangles quan trọng
 - [ ] Aliases vi + en
@@ -676,7 +677,7 @@ Checklist:
 - [ ] Viết `parse_ucd_json()` trong build.rs (~50 LOC)
 - [ ] Merge P values: JSON priority > formula
 - [ ] Sinh `ALIAS_TABLE: &[(&str, u64)]` (alias → hash)
-- [ ] Test: verify 8 SDF primitives + 8 Relation primitives có P đúng
+- [ ] Test: verify 18 SDF primitives (⚠️ v2: was 8) + 8 Relation primitives có P đúng
 - [ ] `cargo test -p ucd` pass
 - [ ] `make smoke-binary` pass
 - [ ] Commit: `feat(ucd): build.rs reads json/ucd.json for P values`
@@ -763,7 +764,7 @@ json/
       "group": "SDF",
       "dominant_axis": "S",
       "integral_kernel": "P_block = ∭_{S.04} f(p) dV",
-      "note": "S dominant — 8 SDF primitives (● ▬ ■ ▲ ○ ∪ ∩ ∖)",
+      "note": "S dominant — 18 SDF primitives (⚠️ v2: was 8) (● ▬ ■ ▲ ○ ∪ ∩ ∖)",
       "sub_groups": [
         {
           "id": "SG_CIRCLE",

@@ -58,7 +58,7 @@ Tag    Op              Payload
 0x16   Fuse            (none)
 0x17   ScopeBegin      (none)
 0x18   ScopeEnd        (none)
-0x19   PushMol         [s:1][r:1][v:1][a:1][t:1]
+0x19   PushMol         [lo:1][hi:1]              ⚠️ v2: 2B packed u16, KHÔNG phải 5B
 0x1A   TryBegin        [catch_pc:4]
 0x1B   CatchEnd        (none)
 0x1C   StoreUpdate     [name_len:1][name:N]

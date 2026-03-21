@@ -292,22 +292,27 @@ op_emit:
 
 ```asm
 op_lca:
-    # Pop 2 chains, compute 5D weighted average
+    # ⚠️ v2: LCA KHÔNG dùng average. Compose rules:
+    #   S = Union(A,B)        — CSG union
+    #   R = Compose (fixed)   — always Compose
+    #   V = amplify(Va,Vb,w)  — KHÔNG trung bình
+    #   A = max(Aa,Ab)        — lấy cao hơn
+    #   T = dominant(Ta,Tb)   — lấy chủ đạo
+    # Molecule = u16 packed [S:4][R:4][V:3][A:3][T:2] = 2 bytes
+    #
+    # TODO(v2): Implement v2 LCA rules thay vì average
+    # Pop 2 chains, compute LCA per v2 spec
     # Chain A: (%r14)
     # Chain B: 16(%r14)
-    #
-    # LCA = per-dimension: (A[dim] + B[dim]) / 2
-    # Molecule = 5 bytes: [S][R][V][A][T]
-    #
-    # Simplified: compare first molecule of each chain
 
     mov     (%r14), %rsi           # chain A ptr
     mov     16(%r14), %rdi         # chain B ptr
     add     $32, %r14              # pop 2
 
-    # Allocate result on heap (5 bytes)
+    # Allocate result on heap (2 bytes — v2 Molecule = u16)
     mov     %r15, %rax
-    # For each dim: result[i] = (A[i] + B[i]) / 2
+    # TODO(v2): implement amplify/Union/max/dominant
+    # Current (LEGACY): (A[i] + B[i]) / 2
     movzbl  (%rsi), %ecx
     movzbl  (%rdi), %edx
     add     %edx, %ecx

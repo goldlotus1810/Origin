@@ -5232,8 +5232,12 @@ fn classify_chain_type(chain: &olang::molecular::MolecularChain) -> alloc::strin
     let (mut sdf, mut math, mut emo) = (0u32, 0u32, 0u32);
     for mol in &chain.0 {
         match mol.shape_base() {
-            ShapeBase::Sphere | ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Cone => sdf += 1,
-            ShapeBase::Torus | ShapeBase::Union | ShapeBase::Intersect | ShapeBase::Subtract => math += 1,
+            ShapeBase::Sphere | ShapeBase::Capsule | ShapeBase::Box | ShapeBase::Cone
+            | ShapeBase::Ellipsoid | ShapeBase::Cylinder | ShapeBase::Octahedron
+            | ShapeBase::Pyramid | ShapeBase::HexPrism | ShapeBase::Prism
+            | ShapeBase::RoundBox | ShapeBase::Link | ShapeBase::Revolve
+            | ShapeBase::Extrude | ShapeBase::CutSphere | ShapeBase::DeathStar => sdf += 1,
+            ShapeBase::Torus | ShapeBase::Plane => math += 1,
         }
         if !(80..=176).contains(&mol.emotion.valence) {
             emo += 1;
@@ -5268,13 +5272,23 @@ fn chain_info(chain: &olang::molecular::MolecularChain, cp: Option<u32>) -> allo
     let mol = &chain.0[0];
     let shape_sym = match mol.shape_base() {
         olang::molecular::ShapeBase::Sphere => "●",
-        olang::molecular::ShapeBase::Capsule => "▬",
         olang::molecular::ShapeBase::Box => "■",
-        olang::molecular::ShapeBase::Cone => "▲",
+        olang::molecular::ShapeBase::Capsule => "▬",
+        olang::molecular::ShapeBase::Plane => "▽",
         olang::molecular::ShapeBase::Torus => "○",
-        olang::molecular::ShapeBase::Union => "∪",
-        olang::molecular::ShapeBase::Intersect => "∩",
-        olang::molecular::ShapeBase::Subtract => "∖",
+        olang::molecular::ShapeBase::Ellipsoid => "⬮",
+        olang::molecular::ShapeBase::Cone => "▲",
+        olang::molecular::ShapeBase::Cylinder => "▮",
+        olang::molecular::ShapeBase::Octahedron => "◆",
+        olang::molecular::ShapeBase::Pyramid => "△",
+        olang::molecular::ShapeBase::HexPrism => "⬡",
+        olang::molecular::ShapeBase::Prism => "▱",
+        olang::molecular::ShapeBase::RoundBox => "▢",
+        olang::molecular::ShapeBase::Link => "∞",
+        olang::molecular::ShapeBase::Revolve => "↻",
+        olang::molecular::ShapeBase::Extrude => "⇧",
+        olang::molecular::ShapeBase::CutSphere => "◐",
+        olang::molecular::ShapeBase::DeathStar => "☆",
     };
     let rel_sym = match mol.relation_base() {
         olang::molecular::RelationBase::Member => "∈",

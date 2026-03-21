@@ -363,10 +363,13 @@ op_push_num:
     b       vm_loop
 
 op_push_mol:
-    // Payload: [s:1][r:1][v:1][a:1][t:1]
+    // ⚠️ v2: Payload = [lo:1][hi:1] = u16 packed molecule
+    // TODO(v2): thay 5B payload bằng 2B u16
+    // LEGACY: Payload: [s:1][r:1][v:1][a:1][t:1]
     bl      stack_check_overflow
 
-    // Allocate 6 bytes on heap (1 mol_count + 5 bytes)
+    // TODO(v2): Allocate 2 bytes (u16 packed molecule)
+    // LEGACY: Allocate 6 bytes on heap (1 mol_count + 5 bytes)
     mov     x3, x23
     mov     w4, #1
     strb    w4, [x3]               // mol_count = 1
@@ -679,16 +682,19 @@ chain_lca:
     // Output: 1 LCA chain
     //
     // Algorithm (simplified for ASM):
-    //   1. min_len = min(len_a, len_b)
-    //   2. Per molecule position:
-    //      result[i] = weighted_avg(a[i], b[i]) per dimension
-    //   3. Hash result chain
+    //   ⚠️ v2: LCA KHÔNG dùng weighted average!
+    //   v2 compose rules:
+    //     S = Union(A,B), R = Compose(fixed),
+    //     V = amplify(Va,Vb,w), A = max(Aa,Ab), T = dominant(Ta,Tb)
+    //   Molecule = u16 packed [S:4][R:4][V:3][A:3][T:2] = 2 bytes
+    //   Chain = Vec<u16> (codepoint refs, not inline molecules)
     //
-    // Full LCA (mode detection, variance) = too complex for ASM
-    // → Giữ core weighted average, defer full LCA to bytecode
+    // TODO(v2): Implement v2 LCA rules
+    // LEGACY: weighted_avg per dimension
     ret
 
-// mol_encode: raw 5 bytes → tagged format
+// ⚠️ v2: mol_encode thay đổi — Molecule = u16 (2B), không phải 5B
+// mol_encode: raw 5 bytes → tagged format (LEGACY)
 mol_encode:
     // Check defaults, build presence mask
     // ... compact encoding ...
@@ -916,7 +922,7 @@ ld4     {v0.8b, v1.8b, v2.8b, v3.8b}, [x0]
 | Linux vs macOS syscall khác hoàn toàn | Phase 1: Linux only. macOS = phase sau hoặc file riêng |
 | Không có fsin/fcos instruction | Taylor polynomial (~30 instructions), hoặc lookup table |
 | Crypto extensions optional | Runtime detect via HWCAP, software fallback |
-| Full LCA quá phức tạp cho ASM | Core weighted avg trong ASM, full LCA defer to bytecode |
+| Full LCA quá phức tạp cho ASM | Core weighted avg trong ASM, full LCA defer to bytecode | ⚠️ v2: LCA = amplify/Union/max/dominant, KHÔNG avg |
 | 60+ builtins = nhiều code | Hash-based dispatch table, mỗi builtin ~10-20 instructions |
 | Android SELinux restrictions | JNI wrapper, không ảnh hưởng VM core |
 | Testing trên ARM64 hardware | QEMU user-mode emulation cho CI, real hardware cho perf test |
@@ -1005,7 +1011,7 @@ Cùng bytecode chạy trên vm_x86_64 và vm_arm64:
 
 ```
 HIỆN TẠI (Phase 1): CPU-only là ĐÚNG.
-  - 5400 L0 nodes → mọi thứ sequential, microseconds
+  - 9,584 L0 nodes (v2, was 5400) → mọi thứ sequential, microseconds
   - Dream cluster vài trăm observations → trivial
   - Silk walk vài nghìn edges → instant
 

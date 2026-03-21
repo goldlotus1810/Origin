@@ -539,4 +539,45 @@ INTG (song song với tất cả):
             New: var_table 256→1024 entries, emit newlines, array/dict len.
             Greeting: "○ HomeOS v0.05". Fallback: echo if repl_eval not registered.
             55 .ol files (was 54). All workspace tests + audit pass.
+2026-03-21  V2 AUDIT hoàn tất (session 2pN6F):
+            AUDIT_OLANG_VS_V2.md: 9 issues (2 CRITICAL, 3 HIGH)
+            AUDIT_L0_ERRORS.md: 27 errors traced root→leaf
+            AUDIT_TONG_HOP.md: 51 issues total (27 code + 24 plan files)
+            PLAN_V2_MIGRATION.md: 12 tasks, 6 layers, dependency graph
+            Tất cả plan files annotated with v2 discrepancies (⚠️ markers)
+            check-logic: PASS 19, WARN 3, FAIL 28 — all FAILs in migration scope
+```
+
+---
+
+## V2 Migration — BIG BANG (PLAN_V2_MIGRATION.md)
+
+> **⚠️ TOÀN BỘ Phase 0-12 output xây trên cấu trúc CŨ (Molecule 5B, LCA avg, 5400 L0).**
+> **Cần migration BIG BANG sang v2 trước khi tiếp tục phát triển.**
+> **Ref:** `plans/AUDIT_TONG_HOP.md`, `plans/PLAN_V2_MIGRATION.md`
+
+| ID | Task | Plan | Depends | Status | Branch | Session | Notes |
+|----|------|------|---------|--------|--------|---------|-------|
+| T1 | UCD build.rs rebuild (58 blocks, 9584 entries) | `PLAN_V2_MIGRATION` | — | FREE | | | Đọc udc.json thay heuristic, UcdEntry=u16 |
+| T2 | ShapeBase 8→18 SDF primitives | `PLAN_V2_MIGRATION` | — | FREE | | | Tách CSG ops, sync agents SdfPrimitive |
+| T3 | Molecule 5B→2B packed u16 | `PLAN_V2_MIGRATION` | T1,T2 | FREE | | | [S:4][R:4][V:3][A:3][T:2], xóa CompactQR |
+| T4 | Chain Vec\<Mol\>→Vec\<u16\> | `PLAN_V2_MIGRATION` | T3 | FREE | | | Codepoint refs, not inline values |
+| T5 | LCA v2 compose rules | `PLAN_V2_MIGRATION` | T3 | FREE | | | amplify/Union/max/dominant, KILL avg |
+| T6 | KnowTree array 65536×2B | `PLAN_V2_MIGRATION` | T3 | FREE | | | O(1) lookup, 128KB, 9584 L0 seeds |
+| T7 | Writer/Reader v2 format | `PLAN_V2_MIGRATION` | T4 | FREE | | | Serialize Vec<u16>, add Curve 0x09 |
+| T8 | Registry codepoint-based | `PLAN_V2_MIGRATION` | T4,T6 | FREE | | | Index by u16, not hash |
+| T9 | VM PushMol 2B | `PLAN_V2_MIGRATION` | T3 | FREE | | | PushMol(u16), 3B bytecode |
+| T10 | Downstream crates update | `PLAN_V2_MIGRATION` | T3-T8 | FREE | | | silk/agents/memory/vsdf/runtime/context |
+| T11 | .ol files update (15 files) | `PLAN_V2_MIGRATION` | T9 | FREE | | | mol.ol/chain.ol/hash.ol + HomeOS + bootstrap |
+| T12 | Tests rebuild | `PLAN_V2_MIGRATION` | T10,T11 | FREE | | | 1198 tests = false positive, rewrite all |
+
+### Execution Layers (song song trong cùng layer)
+
+```
+Layer 0: T1 + T2          ← bắt đầu từ đây, song song
+Layer 1: T3               ← blocked by T1+T2
+Layer 2: T4 + T5 + T6     ← song song, blocked by T3
+Layer 3: T7 + T8 + T9     ← song song, blocked by T4/T6
+Layer 4: T10 + T11         ← song song, blocked by T3-T9
+Layer 5: T12               ← cuối cùng
 ```
