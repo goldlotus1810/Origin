@@ -185,24 +185,67 @@ CONFLICT  — 2 session cùng claim → cần người quyết định
 | 12 | Response Intelligence | `PLAN_12_RESPONSE_INTELLIGENCE` | Phase 0 | CLAIMED | `claude/update-audit-context-2MKRJ` | 2MKRJ | Wire 5 mắt xích bị đứt: walk_emotion, STM recall, intent v2, response composer, lang fix. ~560 LOC Rust. Song song với Phase 8-11. |
 | 13 | Entropy Control Algorithm | `docs/CHECK_TO_PASS_LOGIC_HANDBOOK.md` | — | DONE | `claude/entropy-control-algorithm-T7Obp` | T7Obp | 6 logic bugs fixed (compose amplify, self-correct rollback, quality weights, entropy floor, HNSW tie-breaking, SecurityGate 3-layer) + 5 invariant checkpoints. CLAUDE.md updated: Vietnamese + observable + handbook ref. |
 
+## Phase 14 — KnowTree + Silk Vertical (CRITICAL — kiến trúc)
+
+> **T14 + T15 trong V2 Migration đã cover KnowTree + Alias. Phase này thêm Silk Vertical.**
+> **Spec v3 §2.3:** "parent_map 8,846 pointers = ~71 KB (CHƯA implement)"
+
+| ID | Task | Spec ref | Depends | Status | Branch | Session | Notes |
+|----|------|----------|---------|--------|--------|---------|-------|
+| 14.1 | → Xem T14 (V2 Migration) KnowTree cây phân tầng | §1.7 | T12 | FREE | | | Đã có task T14 ở V2 Migration section. |
+| 14.2 | → Xem T15 (V2 Migration) Alias table tách riêng | §1.7 | T14 | FREE | | | Đã có task T15 ở V2 Migration section. |
+| 14.3 | Silk vertical: parent_map 8,846 pointers | §2.3 | T14 | FREE | | | Silk dọc cho phép đi từ lá lên gốc. register_parent() hook đã có ở 7.1 nhưng chưa full impl. ~71 KB. Cần KnowTree tree xong trước. |
+
+## Phase 15 — Chain Optimization (Spec §IX — 6 thuật toán)
+
+> Spec v3 liệt kê 8 thuật toán tối ưu. 2 đã implicit (Lazy Eval, Bloom Filter).
+> 6 còn lại CHƯA CÓ TASK nào. Chia thành 3 nhóm nhỏ.
+
+| ID | Task | Spec ref | Depends | Status | Branch | Session | Notes |
+|----|------|----------|---------|--------|--------|---------|-------|
+| 15.1 | Copy-on-Write chains | §IX.B | — | FREE | | | `cow_splice(chain_A, pos, new_link)`: 1 chain 1000 links × 100 variants: Copy 200KB vs CoW 400B (500× hiệu quả). Thêm CoW pointer type vào MolecularChain. |
+| 15.2 | Generational QR | §IX.D | — | FREE | | | 4 generations: gen0 (8,846 UDC bất tử), gen1 (nền read-mostly), gen2 (chuyên môn), gen3 (mới write-optimized). Dream promote: gen3→gen2→gen1. |
+| 15.3 | Chain Compression | §IX.E | — | FREE | | | Detect repeats → ref + count. Tỉ lệ nén 40-60%. Append-only compatible. |
+| 15.4 | Strand Complementarity | §IX.F | — | FREE | | | `complement(chain)`: invert Valence → anti-chain. Dùng cho: kiểm tra nhất quán, suy luận ngược, error detection. |
+| 15.5 | Telomere — giới hạn sao chép | §IX.G | — | FREE | | | `chain_age += 1` mỗi lần reference. `age > threshold` → re-evaluate. Tránh stale knowledge. |
+| 15.6 | Intron/Exon marking | §IX.H | — | FREE | | | `mark_intron(chain, range)`: đánh dấu noise. Evaluate skip intron → chỉ đọc exon. Chain gốc không xóa. Có thể bật lại (alternative splicing). |
+
+## Phase 16 — Fusion + Pipeline Gaps
+
+> Fusion hiện chỉ có text modality. Spec yêu cầu 4 modalities + checkpoint 2,3,5 đầy đủ.
+
+| ID | Task | Spec ref | Depends | Status | Branch | Session | Notes |
+|----|------|----------|---------|--------|--------|---------|-------|
+| 16.1 | Fusion multi-modal stub (audio+image+bio) | §V.5 | 12 | FREE | | | Bio=0.50 > Audio=0.40 > Text=0.30 > Image=0.25. Tạo trait/interface cho 4 modalities. Conflict resolution: modality weight cao nhất thắng, confidence < 0.40 → im lặng. |
+| 16.2 | Checkpoint 2 (ENCODE) enforcement | §X CP2 | 12 | FREE | | | entities≥1, chain_hash≠0, Σc>ε_floor(0.01), compose() consistency≥0.75. Vi phạm → Honesty instinct. |
+| 16.3 | Checkpoint 3 (INFER) enforcement | §X CP3 | 12 | FREE | | | ≥1 nhánh valid≥0.75, quality≥0, rollback quality_final≥quality_backup, H(best)<2.32. Vi phạm → BlackCurtain. |
+| 16.4 | Checkpoint 5 (RESPONSE) enforcement | §X CP5 | 12 | FREE | | | SecurityGate.check(response)=Safe, tone phù hợp V hiện tại, |response|>0, confidence<0.40→im lặng. |
+
 ---
 
 ## Dependency Graph (visual)
 
 ```
-Phase 0-7: ALL DONE ✅ (trừ 7.2 Mobile đang làm)
+Phase 0-7: ALL DONE ✅
   0.1 → ... → 0.6 → 1.x → 2.x → 3.x → 4.x → 5.x → 6.x → 7.x ✅
 
-Phase 8-11: End-to-End (MỚI)
+Phase 8-11: ALL DONE ✅ (trừ Task 12 CLAIMED)
 
-  8 (parser upgrade)  ← PHẢI xong trước 9, 10
-       ↓
-  9 (native REPL) ←→ 10 (browser E2E)    ← song song được
-       ↓                    ↓
-  11 (E2E verify + demo + CI)             ← tổng kết
+Phase 14 (KnowTree — CRITICAL):
+  14.1 (tree refactor) → 14.2 (alias table) → 14.3 (silk vertical)
 
-  11.3 (server --eval) có thể làm NGAY, song song với 8
-  7.2 (mobile, Kira) song song với tất cả
+Phase 15 (Chain Optimization — song song được):
+  15.1 (CoW) | 15.2 (GenQR) | 15.3 (Compress) | 15.4 (Complement) | 15.5 (Telomere) | 15.6 (Intron/Exon)
+
+Phase 16 (Fusion + Checkpoints — cần Task 12 xong):
+  12 (Response Intelligence) → 16.1 (Fusion) | 16.2 (CP2) | 16.3 (CP3) | 16.4 (CP5)
+
+Ưu tiên:
+  P0: Task 12 (đang CLAIMED)
+  P1: 14.1 → 14.2 → 14.3  (kiến trúc sai = nợ lớn nhất)
+  P2: 15.1 + 15.2          (CoW + GenQR = hiệu năng quan trọng)
+  P3: 16.2 + 16.3 + 16.4   (checkpoint = an toàn pipeline)
+  P4: 15.3-15.6 + 16.1     (nice to have)
 ```
 
 ---
@@ -584,4 +627,22 @@ Layer 2: T4 + T5 + T6     ← song song, blocked by T3
 Layer 3: T7 + T8 + T9     ← song song, blocked by T4/T6
 Layer 4: T10 + T11         ← song song, blocked by T3-T9
 Layer 5: T12               ← cuối cùng
+```
+
+---
+
+### Spec v3 Audit Log (2026-03-21)
+
+```
+Rà soát TASKBOARD vs HomeOS_SPEC_v3.md:
+  ✅ 12/14 cơ chế DNA đã DONE
+  ⏳ 2/14 cơ chế (⑪ Immune Selection + ⑭ DNA Repair) = Task 12 CLAIMED
+  ✅ 2/5 checkpoint hoàn chỉnh (CP1 GATE, CP4 PROMOTE)
+  ⏳ 3/5 checkpoint chờ Task 12 (CP2 ENCODE, CP3 INFER, CP5 RESPONSE)
+  ❌ 6/8 thuật toán tối ưu §IX chưa có task → thêm Phase 15
+  ❌ Silk vertical chưa impl → thêm Phase 14.3
+  ❌ Fusion chỉ text → thêm Phase 16.1
+  ℹ️ KnowTree + Alias đã có T14/T15 trong V2 Migration
+
+Thêm 13 task mới: Phase 14 (3) + Phase 15 (6) + Phase 16 (4)
 ```
