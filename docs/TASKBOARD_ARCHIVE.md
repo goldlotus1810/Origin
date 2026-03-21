@@ -646,3 +646,50 @@ Rà soát TASKBOARD vs HomeOS_SPEC_v3.md:
 
 Thêm 13 task mới: Phase 14 (3) + Phase 15 (6) + Phase 16 (4)
 ```
+
+---
+
+## Session 2pN6F — Phase 12, 15, 16, V2 Migration (2026-03-21)
+
+### Task 12 — Response Intelligence (DONE)
+Wire compose_response() thay render() (3 call sites), context-aware intent override
+(causality→skip AddClarify, repetition→EmpathizeFirst), detect_language tiếng Việt không dấu.
+Branch: `claude/project-audit-review-2pN6F`
+
+### Phase 15 — Chain Optimization (ALL DONE)
+
+| ID | Task | Notes |
+|----|------|-------|
+| 15.1 | Copy-on-Write chains | `cow_splice()` + `cow_splice_many()` trên MolecularChain. |
+| 15.2 | Generational QR | `QrGeneration` enum (Gen0..Gen3) + `promote()` + NodeState integration. |
+| 15.3 | Chain Compression | `compress_rle()` + `decompress_rle()` + `compression_ratio()`. |
+| 15.4 | Strand Complementarity | `complement()` + `is_complement_of()` — invert Valence. |
+| 15.5 | Telomere | `ref_age` field + `touch()` + `needs_reevaluation()` trên NodeState. |
+| 15.6 | Intron/Exon marking | `extract_exons(intron_ranges)` trên MolecularChain. |
+
+### Phase 16 — Fusion + Checkpoints (ALL DONE)
+
+| ID | Task | Notes |
+|----|------|-------|
+| 16.1 | Fusion multi-modal | recent_modalities buffer + fuse() wired in process_input. FUSION_WINDOW_MS=2s. |
+| 16.2 | CP2 ENCODE | chain_hash≠0, entities≥1, consistency≥0.75. Vi phạm → Blocked. |
+| 16.3 | CP3 INFER | Chain density≥0.75 (chains≥5 links), knowledge quality≥0. Vi phạm → BlackCurtain. |
+| 16.4 | CP5 RESPONSE | SecurityGate.check(response), tone vs V consistency. |
+
+### Phase 14 — KnowTree (14.1 DONE)
+
+| ID | Task | Notes |
+|----|------|-------|
+| 14.1 | KnowTree cây phân tầng | T14 merged #217 (session khác). |
+
+### V2 Migration T13-T16
+
+| ID | Task | Notes |
+|----|------|-------|
+| T13 | check_logic bit_shifts | Đã pass sẵn — v2 layout correct. |
+| T14 | KnowTree → cây | Flat → hierarchical tree. Merged #217. |
+| T16 | olang_handbook v0.06 | Molecule 5B→2B, Chain Vec<u16>, Shape 16, 8846 L0 nodes. |
+
+### Test Results
+- Runtime: 310/310 pass (0 failures) — sau merge main fix 2 pre-existing.
+- Olang: 1044 pass / 169 fail (all pre-existing VM/semantic tests).
