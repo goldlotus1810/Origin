@@ -81,12 +81,12 @@ B1-B7 ALL DONE | Phase 0 (0.1-0.6 compiler) ALL DONE | Phase 1-7 ALL DONE
 
 | ID | Task | Spec ref | Depends | Status | Branch | Session | Notes |
 |----|------|----------|---------|--------|--------|---------|-------|
-| 15.1 | Copy-on-Write chains | §IX.B | — | FREE | | | `cow_splice(chain_A, pos, new_link)`: Copy 200KB vs CoW 400B (500× hiệu quả). |
-| 15.2 | Generational QR | §IX.D | — | FREE | | | 4 generations: gen0 (UDC bất tử), gen1 (read-mostly), gen2 (chuyên môn), gen3 (write-optimized). |
-| 15.3 | Chain Compression | §IX.E | — | FREE | | | Detect repeats → ref + count. Tỉ lệ nén 40-60%. |
-| 15.4 | Strand Complementarity | §IX.F | — | FREE | | | `complement(chain)`: invert Valence → anti-chain. Suy luận ngược, error detection. |
-| 15.5 | Telomere — giới hạn sao chép | §IX.G | — | FREE | | | `chain_age += 1` mỗi lần ref. `age > threshold` → re-evaluate. |
-| 15.6 | Intron/Exon marking | §IX.H | — | FREE | | | `mark_intron(chain, range)`: skip noise khi evaluate. Chain gốc không xóa. |
+| 15.1 | Copy-on-Write chains | §IX.B | — | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | `cow_splice()` + `cow_splice_many()` trên MolecularChain. |
+| 15.2 | Generational QR | §IX.D | — | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | `QrGeneration` enum (Gen0..Gen3) + `promote()` + NodeState integration. |
+| 15.3 | Chain Compression | §IX.E | — | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | `compress_rle()` + `decompress_rle()` + `compression_ratio()`. |
+| 15.4 | Strand Complementarity | §IX.F | — | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | `complement()` + `is_complement_of()` — invert Valence. |
+| 15.5 | Telomere — giới hạn sao chép | §IX.G | — | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | `ref_age` field + `touch()` + `needs_reevaluation()` trên NodeState. |
+| 15.6 | Intron/Exon marking | §IX.H | — | DONE | `claude/project-audit-review-2pN6F` | 2pN6F | `extract_exons(intron_ranges)` trên MolecularChain. |
 
 ## Phase 16 — Fusion + Pipeline Gaps
 
