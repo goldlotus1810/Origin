@@ -648,9 +648,11 @@ op_load_local:
     # Hash the name for lookup
     lea     (%r12, %r13), %rdi         # name ptr
     mov     %ecx, %edx                  # name len
-    push    %rcx                        # save name_len
+    sub     $8, %rsp                    # align stack to 16 bytes
+    push    %rcx                        # save name_len (stack now 16-aligned for call)
     call    hash_name                   # → rax = hash
     pop     %rcx
+    add     $8, %rsp                    # restore alignment
     add     %rcx, %r13                  # PC += name_len
     # Search var table by hash
     call    var_load_hash               # rax=hash → rax=ptr, rdx=len
@@ -2670,35 +2672,6 @@ memcpy_small:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_unknown:
-    # Debug: print r13 (PC) as hex
-    push    %rax
-    mov     %r13, %rax
-    sub     $20, %rsp
-    lea     hex_chars(%rip), %rsi
-    lea     19(%rsp), %rdi
-    movb    $0x0A, (%rdi)
-    dec     %rdi
-    mov     $16, %rcx
-.Lhex_pc:
-    mov     %rax, %rdx
-    and     $0xF, %edx
-    movzbl  (%rsi,%rdx), %edx
-    movb    %dl, (%rdi)
-    shr     $4, %rax
-    dec     %rdi
-    test    %rax, %rax
-    jnz     .Lhex_pc
-    inc     %rdi
-    mov     %rdi, %rsi
-    lea     20(%rsp), %rax
-    sub     %rdi, %rax
-    mov     %eax, %edx
-    mov     $2, %edi
-    mov     $1, %eax
-    syscall
-    add     $20, %rsp
-    pop     %rax
-    # Debug: print opcode value as hex before error message
     # al still has the opcode byte
     push    %rax
     movzbl  %al, %eax
