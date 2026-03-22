@@ -322,7 +322,7 @@ DoD:     make verify → ALL PASS
 | FE.4 | T SplineKnot accumulation | PLAN_FORMULA_ENGINE | 411 LOC | DONE ✅ | SplineKnot 24B, observe_text/sensor, TimeHistory |
 | FE.5 | T Spline interpolation | PLAN_FORMULA_ENGINE | (in spline.rs) | DONE ✅ | amplitude_at(), predict(), detect_periodicity() |
 | FE.6 | Wire formula engine vào pipeline | PLAN_FORMULA_ENGINE | — | DONE ✅ | FormulaState wired into T6b2: urgency→arousal, approach→valence amplify. |
-| FE.7 | Test: đọc P → reconstruct formula | PLAN_FORMULA_ENGINE | — | FREE | End-to-end verify |
+| FE.7 | Test: đọc P → reconstruct formula | PLAN_FORMULA_ENGINE | — | DONE ✅ | t17_formula_engine.rs: 9/9 pass. R/V/A/T roundtrip + urgency + approach. |
 | **FE.8** | **T×S: T làm tham số cho SDF** | **PLAN_FORMULA_ENGINE** | **285 LOC** | **DONE ✅** | **ParametricSdf, sdf_union, snowman() ⛄** |
 | 7.2 | Mobile (Android + iOS) | PLAN_7_2 | 2-3 tuần | FREE | ARM64 native + WASM iOS. |
 
