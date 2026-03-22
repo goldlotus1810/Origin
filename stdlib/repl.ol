@@ -11,8 +11,8 @@
 // ════════════════════════════════════════════════════════
 
 pub fn repl_eval(input) {
-  // Strip trailing newline if present
-  let src = str_trim(input);
+  // Strip trailing newline if present (use ASM builtin __str_trim)
+  let src = __str_trim(input);
   if len(src) == 0 { return ""; }
 
   // Check for REPL commands
@@ -56,7 +56,7 @@ pub fn repl_eval(input) {
 // ════════════════════════════════════════════════════════
 
 pub fn is_olang_code(input) {
-  let src = str_trim(input);
+  let src = __str_trim(input);
   if len(src) == 0 { return false; }
 
   // Check first token — if it's a keyword, it's code
@@ -96,23 +96,4 @@ pub fn repl_format_output(text) {
   return text;
 }
 
-fn str_trim(s) {
-  let n = len(s);
-  if n == 0 { return s; }
-  // Trim trailing whitespace (newline, space, tab, CR)
-  let end = n;
-  while end > 0 {
-    let c = char_at(s, end - 1);
-    if c != 10 && c != 13 && c != 32 && c != 9 { break; }
-    end = end - 1;
-  }
-  // Trim leading whitespace
-  let start = 0;
-  while start < end {
-    let c = char_at(s, start);
-    if c != 10 && c != 13 && c != 32 && c != 9 { break; }
-    start = start + 1;
-  }
-  if start == 0 && end == n { return s; }
-  return substr(s, start, end);
-}
+// str_trim: now uses ASM builtin __str_trim directly (see call sites above)
