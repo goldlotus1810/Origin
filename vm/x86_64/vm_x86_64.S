@@ -238,6 +238,11 @@ _start:
     mov     %r15, %r12                  # r12 = bytecode base
     xor     %r13d, %r13d               # r13 = PC = 0
     add     %rbx, %r15                  # bump heap past bytecode
+    # Save boot bytecode base + size for nested calls
+    lea     boot_bc_base(%rip), %rax
+    mov     %r12, (%rax)
+    lea     boot_bc_size(%rip), %rax
+    mov     %rbx, (%rax)
 
     # Close file
     mov     %rbp, %rdi
@@ -469,8 +474,13 @@ cg_call_closure:
     # Extract body_pc
     mov     %rax, %rdi                  # body_pc
 
-    # Save return address on CPU stack
+    # Save return context on CPU stack
+    push    %r12                        # save current bytecode base
     push    %r13                        # save current PC (return point)
+
+    # Switch to boot bytecode base (closure bodies compiled there)
+    lea     boot_bc_base(%rip), %rax
+    mov     (%rax), %r12                # r12 = boot bytecode base
 
     # Jump to body
     mov     %edi, %r13d                 # PC = body_pc
@@ -874,7 +884,11 @@ op_call:
 
     # Found closure in var_table — call it
     add     %rcx, %r13                  # PC past name bytes
+    push    %r12                        # save bytecode base
     push    %r13                        # save return address
+    # Switch to boot bytecode base
+    lea     boot_bc_base(%rip), %rdx
+    mov     (%rdx), %r12
     mov     %eax, %r13d                 # PC = body_pc
     jmp     vm_loop
 
@@ -1954,7 +1968,7 @@ op_call:
     # Set up nested execution
     mov     %r8, %r12                   # new bytecode base
     xor     %r13d, %r13d               # PC = 0
-    mov     %rcx, %rbx                  # bytecode size
+    mov     $0x100000, %rbx             # 1MB bounds — op_ret accepts boot PCs
     add     %rcx, %r15                  # bump heap past bytecode buffer
 
     jmp     vm_loop                     # execute!
@@ -1976,13 +1990,9 @@ op_ret:
     # Check if we have a return address (rsp points to saved PC).
     # If the top of CPU stack looks like a valid PC (< bytecode size),
     # restore it. Otherwise treat as no-op.
-    pop     %rax                        # potential saved PC
-    cmp     %rbx, %rax                  # compare with bc_size
-    jae     .ret_noop                   # not a valid PC → push back and continue
+    pop     %rax                        # saved PC
+    pop     %r12                        # saved bytecode base
     mov     %eax, %r13d                 # PC = saved return address
-    jmp     vm_loop
-.ret_noop:
-    push    %rax                        # restore stack (wasn't a return addr)
     jmp     vm_loop
 
 op_try_begin:
@@ -2930,7 +2940,10 @@ op_halt:
 
     mov     %r8, %r12                   # bytecode base = trampoline
     xor     %r13d, %r13d               # PC = 0
-    mov     %rcx, %rbx                  # bytecode size
+    # Set rbx to large value so op_ret accepts boot bytecode PCs
+    # (trampoline CallClosure jumps into boot bytecode bodies where
+    # Ret pops saved PCs that are >> trampoline size)
+    mov     $0x100000, %rbx             # 1MB — larger than any bytecode
     jmp     vm_loop                     # execute trampoline!
     # Flow: Push input → CallClosure repl_eval → (run compiler) → Emit → Halt
     # Halt (nested) → .halt_nested → restore → vm_loop → op_halt → REPL loop
@@ -3092,7 +3105,7 @@ op_halt:
 
     mov     %r8, %r12                   # bytecode base = trampoline
     xor     %r13d, %r13d               # PC = 0
-    mov     %rcx, %rbx                  # bytecode size
+    mov     $0x100000, %rbx             # 1MB bounds — op_ret accepts boot PCs
     jmp     vm_loop
     # Flow: trampoline → Halt(nested) → .halt_nested → restore r12/r13/rbx
     #       → vm_loop → boot bytecode Halt → op_halt → not nested
@@ -3217,6 +3230,11 @@ var_table_base:
     .space 8                            # pointer to variable table on heap
 bc_format:
     .space 1                            # 0 = ir.rs format, 1 = codegen.ol format
+    .align 8
+boot_bc_base:
+    .space 8                            # boot bytecode base address (for nested calls)
+boot_bc_size:
+    .space 8                            # boot bytecode size
 eval_mode:
     .space 1                            # 0 = REPL mode, 1 = --eval mode (stdin)
     .align 8
