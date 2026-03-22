@@ -320,11 +320,83 @@ vm_loop:
 
 # ── codegen.ol format dispatch (tags 0x01-0x24) ─────────────────────────
 dispatch_codegen:
-    # 0x3A = CallBuiltin: skip builtin_id byte (1 byte)
+    # 0x3A = CallBuiltin(id) — dispatch to builtin by ID
     cmp     $0x3A, %al
     jne     .cg_not_builtin
-    inc     %r13                        # skip builtin_id
+    movzbl  (%r12, %r13), %eax         # read builtin ID
+    inc     %r13                        # skip ID byte
+    # Dispatch by builtin ID (matches BID_* constants from ir.rs)
+    cmp     $6, %al                     # BID_HYP_ADD
+    je      .call_add
+    cmp     $7, %al                     # BID_HYP_SUB
+    je      .call_sub
+    cmp     $8, %al                     # BID_HYP_MUL
+    je      .call_mul
+    cmp     $9, %al                     # BID_HYP_DIV
+    je      .call_div
+    cmp     $0, %al                     # BID_EQ
+    je      .bid_eq
+    cmp     $1, %al                     # BID_CMP_LT
+    je      .bid_lt
+    cmp     $2, %al                     # BID_CMP_GT
+    je      .bid_gt
+    cmp     $3, %al                     # BID_CMP_LE
+    je      .bid_le
+    cmp     $4, %al                     # BID_CMP_GE
+    je      .bid_ge
+    cmp     $5, %al                     # BID_CMP_NE
+    je      .bid_ne
+    cmp     $10, %al                    # BID_LOGIC_NOT
+    je      .bid_logic_not
+    cmp     $11, %al                    # BID_ASSERT_TRUTH
+    je      .bid_eq
+    # All others: noop
     jmp     vm_loop
+
+.bid_eq:
+    xor     %ecx, %ecx
+    jmp     .call_eq
+.bid_lt:
+    xor     %ecx, %ecx
+    jmp     .call_lt
+.bid_gt:
+    xor     %ecx, %ecx
+    jmp     .call_gt
+.bid_le:
+    xor     %ecx, %ecx
+    jmp     .call_le
+.bid_ge:
+    xor     %ecx, %ecx
+    jmp     .call_ge
+.bid_ne:
+    xor     %ecx, %ecx
+    jmp     .call_ne
+.bid_logic_not:
+    # Invert: empty → 1.0, non-empty → empty
+    mov     8(%r14), %rax
+    test    %rax, %rax
+    jz      .bid_not_was_empty
+    # Was non-empty → make empty
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.bid_not_was_empty:
+    # Was empty → make 1.0
+    mov     $0x3FF0000000000000, %rax   # 1.0 as f64
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_is_keyword:
+    # __str_is_keyword: pop string, check against keyword list
+    # For now: push false (not a keyword) — stub
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
 .cg_not_builtin:
     lea     codegen_table(%rip), %rcx
     movzbl  %al, %eax
@@ -958,16 +1030,17 @@ op_call:
     jmp     .eq_false_chain
 
 .eq_chain:
-    # Compare chains byte-by-byte
-    mov     8(%r14), %rax              # b len
-    mov     24(%r14), %rcx             # a len
+    # Compare chains by u16 molecules (each mol = 2 bytes)
+    mov     8(%r14), %rax              # b mol_count
+    mov     24(%r14), %rcx             # a mol_count
     cmp     %rax, %rcx
-    jne     .eq_false                   # different lengths → not equal
-    # Same length — compare bytes
+    jne     .eq_false                   # different mol_count → not equal
+    # Same mol_count — compare mol_count × 2 bytes
     mov     (%r14), %rsi               # b ptr
     mov     16(%r14), %rdi             # a ptr
     add     $16, %r14                  # pop 1
-    mov     %rax, %rcx                  # count
+    shl     $1, %rax                    # byte_count = mol_count × 2
+    mov     %rax, %rcx                  # count in bytes
     test    %rcx, %rcx
     jz      .eq_true_chain              # both empty → equal
     repe    cmpsb
@@ -1112,25 +1185,25 @@ op_call:
     jmp     vm_loop
 
 .call_char_at:
-    # Pop index (f64), pop string, push char
+    # Pop index (f64), pop string (molecule chain), push single char molecule
     add     %rcx, %r13
     movsd   (%r14), %xmm0             # index
     cvttsd2si %xmm0, %rax             # index as int
-    mov     16(%r14), %rsi            # string ptr
-    mov     24(%r14), %rcx            # string len
+    mov     16(%r14), %rsi            # string ptr (u16 molecules)
+    mov     24(%r14), %rcx            # string mol_count
     add     $32, %r14                 # pop 2
 
-    # Bounds check
+    # Bounds check (index < mol_count)
     cmp     %rcx, %rax
     jae     .char_at_empty
 
-    # Get char (1 byte)
-    movzbl  (%rsi, %rax), %edx
-    movb    %dl, (%r15)
+    # Get char molecule (u16 at rsi + rax*2)
+    movzwl  (%rsi, %rax, 2), %edx     # read u16 molecule
+    movw    %dx, (%r15)                # write u16 molecule
     sub     $16, %r14
-    mov     %r15, (%r14)
-    movq    $1, 8(%r14)
-    inc     %r15
+    mov     %r15, (%r14)               # ptr to molecule
+    movq    $1, 8(%r14)                # mol_count = 1
+    add     $2, %r15                   # bump heap by 2 (u16)
     jmp     vm_loop
 
 .char_at_empty:
@@ -1159,21 +1232,22 @@ op_call:
     jbe     .substr_ok
     mov     %rcx, %rdx
 .substr_ok:
-    sub     %rax, %rdx                 # actual length
-    lea     (%rsi, %rax), %rsi        # start ptr
+    sub     %rax, %rdx                 # mol_count of substring
+    lea     (%rsi, %rax, 2), %rsi     # start ptr (×2 for u16 molecules)
 
-    # Copy to heap
-    mov     %r15, %rax
+    # Copy molecules to heap (rdx molecules × 2 bytes each)
+    mov     %r15, %rax                 # save heap ptr
     mov     %r15, %rdi
     mov     %edx, %ecx
+    shl     $1, %ecx                   # byte_count = mol_count × 2
     push    %rdx
     rep     movsb
     mov     %rdi, %r15
     pop     %rdx
 
     sub     $16, %r14
-    mov     %rax, (%r14)
-    mov     %rdx, 8(%r14)
+    mov     %rax, (%r14)               # ptr
+    mov     %rdx, 8(%r14)              # mol_count
     jmp     vm_loop
 
 # ── Not-equal builtin ───────────────────────────────────────────────────
