@@ -317,7 +317,7 @@ DoD:     make verify → ALL PASS
 | P2.3 | Knowledge layer (.ol) | PLAN_PHASE2 | ~150 LOC | P2.0 ✅ | DONE ✅ | silk_ops 166 + dream 181 + instinct 197 + learning 160 LOC. Đã có sẵn. |
 | P2.4 | Agent behavior (.ol) | PLAN_PHASE2 | ~300 LOC | P2.0 ✅ | DONE ✅ | response 100 + leo 41 + chief 36 + worker 42 + gate 51 LOC. |
 | P2.5 | E2E integration test | PLAN_PHASE2 | ~50 LOC | P2.2-4 | BLOCKED | 5 test cases end-to-end. Chờ P2.2-4. |
-| 9 | Native REPL | PLAN_9 | ~600 LOC | 8.1-8.3 ✅ | FREE | ./origin → REPL. Parser đã fix. |
+| 9 | Native REPL | PLAN_9 | ~600 LOC | 8.1-8.3 ✅ | FREE | ASM REPL skeleton có, repl.ol compile sẵn. Boot fails — cần debug ASM. |
 | 10 | Browser E2E | PLAN_10 | ~500 LOC | 9 | BLOCKED | origin.html, WASM. Chờ REPL. |
 | 11.1 | Demo script (10 scenarios) | PLAN_11 | ~300 LOC | 8 ✅, 9 | BLOCKED | Chờ REPL. |
 | 11.4 | Native binary --eval | PLAN_11 | ~50 LOC | 9 | BLOCKED | Chờ REPL. |
