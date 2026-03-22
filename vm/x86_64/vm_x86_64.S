@@ -1430,16 +1430,16 @@ op_call:
 
 .call_str_trim:
     add     %rcx, %r13
-    mov     (%r14), %rsi               # string ptr
-    mov     8(%r14), %rcx              # string len
+    mov     (%r14), %rsi               # string ptr (u16 molecules)
+    mov     8(%r14), %rcx              # string mol_count
     add     $16, %r14                  # pop
-    # Trim leading spaces
-    mov     %rsi, %rdi                  # start
-    add     %rcx, %rsi                  # end
+    # Trim leading whitespace (u16 molecules, low byte = char value)
+    mov     %rsi, %rdi                  # start (byte ptr)
+    lea     (%rsi, %rcx, 2), %rsi      # end = ptr + mol_count × 2
 .trim_lead:
     cmp     %rsi, %rdi
     jae     .trim_empty
-    movzbl  (%rdi), %eax
+    movzbl  (%rdi), %eax               # low byte of u16 LE molecule = char
     cmp     $32, %eax                   # space
     je      .trim_lead_next
     cmp     $9, %eax                    # tab
@@ -1450,14 +1450,14 @@ op_call:
     je      .trim_lead_next
     jmp     .trim_trail
 .trim_lead_next:
-    inc     %rdi
+    add     $2, %rdi                    # next molecule (2 bytes per u16)
     jmp     .trim_lead
 .trim_trail:
-    # rdi = trimmed start, rsi = past end
+    # rdi = trimmed start (byte ptr), rsi = past end (byte ptr)
 .trim_trail_loop:
     cmp     %rdi, %rsi
     jbe     .trim_done
-    movzbl  -1(%rsi), %eax
+    movzbl  -2(%rsi), %eax             # low byte of last u16 molecule
     cmp     $32, %eax
     je      .trim_trail_dec
     cmp     $9, %eax
@@ -1468,20 +1468,21 @@ op_call:
     je      .trim_trail_dec
     jmp     .trim_done
 .trim_trail_dec:
-    dec     %rsi
+    sub     $2, %rsi                    # prev molecule (2 bytes per u16)
     jmp     .trim_trail_loop
 .trim_done:
     mov     %rsi, %rcx
-    sub     %rdi, %rcx                  # new length
-    # Copy to heap
+    sub     %rdi, %rcx                  # byte count of trimmed region
+    # Copy to heap (rcx bytes = mol_count × 2)
     mov     %r15, %rax
     push    %rcx
     mov     %r15, %rsi
     xchg    %rsi, %rdi                  # rdi=dest=heap, rsi=src=trimmed
     mov     %ecx, %ecx
     rep     movsb
-    mov     %rdi, %r15                  # bump
+    mov     %rdi, %r15                  # bump heap
     pop     %rcx
+    shr     $1, %rcx                    # mol_count = byte_count / 2
     sub     $16, %r14
     mov     %rax, (%r14)
     mov     %rcx, 8(%r14)
@@ -1753,11 +1754,11 @@ op_call:
     mov     %rdx, %rcx
 
 .dict_new_copy:
-    # key at (%rsi), val at 16(%rsi)
-    mov     (%rsi), %rax               # key ptr
-    mov     8(%rsi), %r8               # key len
-    mov     16(%rsi), %r9              # val ptr
-    mov     24(%rsi), %r10             # val len
+    # Stack pair: val at (%rsi), key at 16(%rsi) (key pushed first = deeper)
+    mov     16(%rsi), %rax             # key ptr (deeper on stack)
+    mov     24(%rsi), %r8              # key len
+    mov     (%rsi), %r9                # val ptr (top of pair)
+    mov     8(%rsi), %r10              # val len
     mov     %rax, (%r15)               # store key ptr
     mov     %r8, 8(%r15)               # store key len
     mov     %r9, 16(%r15)              # store val ptr
@@ -1809,13 +1810,14 @@ op_call:
     cmp     %rax, %rdx                  # same length?
     jne     .dict_get_next
 
-    # Same length — compare bytes
+    # Same mol_count — compare all bytes (mol_count × 2 for u16 molecules)
     push    %rcx
     push    %rsi
     push    %rdx
     push    %r8
     mov     (%r8), %rdi                # entry key ptr
-    mov     %rdx, %rcx                 # byte count
+    mov     %rdx, %rcx                 # mol_count
+    shl     $1, %rcx                   # byte_count = mol_count × 2
     repe    cmpsb
     pop     %r8
     pop     %rdx
@@ -1880,6 +1882,7 @@ op_call:
     push    %r8
     mov     (%r8), %rdi
     mov     %rdx, %rcx
+    shl     $1, %rcx                   # byte_count = mol_count × 2
     repe    cmpsb
     pop     %r8
     pop     %rdx
@@ -2477,36 +2480,120 @@ op_cmp_eq:
     jmp     .cmp_false
 
 op_cmp_lt:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
+    movb    $0, %al                     # op_id = 0 (LT)
+    jmp     .cmp_dispatch
+op_cmp_gt:
+    movb    $1, %al                     # op_id = 1 (GT)
+    jmp     .cmp_dispatch
+op_cmp_le:
+    movb    $2, %al                     # op_id = 2 (LE)
+    jmp     .cmp_dispatch
+op_cmp_ge:
+    movb    $3, %al                     # op_id = 3 (GE)
+
+.cmp_dispatch:
+    # Check if both are f64
+    push    %rax                        # save op_id
+    mov     8(%r14), %rax              # b len
+    mov     24(%r14), %rcx             # a len
+    cmp     $F64_MARKER, %rax
+    jne     .cmp_chain
+    cmp     $F64_MARKER, %rcx
+    jne     .cmp_chain
+
+    # Both f64 — compare as floating point
+    movsd   16(%r14), %xmm0           # a
+    movsd   (%r14), %xmm1             # b
+    add     $16, %r14                  # pop 1
+    pop     %rax                       # restore op_id
     ucomisd %xmm1, %xmm0
+    # Dispatch based on op_id
+    test    %al, %al
+    jz      .cmp_f64_lt
+    cmp     $1, %al
+    je      .cmp_f64_gt
+    cmp     $2, %al
+    je      .cmp_f64_le
+    # op_id == 3: GE
+    jae     .cmp_true
+    jmp     .cmp_false
+.cmp_f64_lt:
     jb      .cmp_true
     jmp     .cmp_false
-
-op_cmp_gt:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
-    ucomisd %xmm1, %xmm0
+.cmp_f64_gt:
     ja      .cmp_true
     jmp     .cmp_false
-
-op_cmp_le:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
-    ucomisd %xmm1, %xmm0
+.cmp_f64_le:
     jbe     .cmp_true
     jmp     .cmp_false
 
-op_cmp_ge:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
-    ucomisd %xmm1, %xmm0
+.cmp_chain:
+    # At least one is a chain — compare by low bytes of molecules
+    # a: 16(%r14)=ptr, 24(%r14)=mol_count
+    # b: (%r14)=ptr, 8(%r14)=mol_count
+    mov     (%r14), %rsi               # b ptr
+    mov     8(%r14), %rdx              # b mol_count (might be F64_MARKER)
+    mov     16(%r14), %rdi             # a ptr
+    mov     24(%r14), %rcx             # a mol_count (might be F64_MARKER)
+    add     $16, %r14                  # pop 1
+
+    # If either has F64_MARKER, treat as len=0 for comparison (type mismatch)
+    cmp     $F64_MARKER, %rdx
+    jne     .cmp_chain_b_ok
+    xor     %edx, %edx                 # b len = 0
+.cmp_chain_b_ok:
+    cmp     $F64_MARKER, %rcx
+    jne     .cmp_chain_a_ok
+    xor     %ecx, %ecx                 # a len = 0
+.cmp_chain_a_ok:
+    # Compare molecule by molecule (low byte = char value)
+    # Use min(a_len, b_len) for loop count
+    mov     %rcx, %r8                  # save a_len
+    mov     %rdx, %r9                  # save b_len
+    cmp     %rdx, %rcx
+    jbe     .cmp_chain_use_a
+    mov     %rdx, %rcx                 # min_len = b_len
+.cmp_chain_use_a:
+    # rcx = min_len, rdi = a_ptr, rsi = b_ptr
+    test    %rcx, %rcx
+    jz      .cmp_chain_len             # both empty prefix → compare lengths
+.cmp_chain_loop:
+    movzbl  (%rdi), %eax               # a low byte (char value)
+    movzbl  (%rsi), %edx               # b low byte (char value)
+    cmp     %edx, %eax
+    jb      .cmp_chain_a_less
+    ja      .cmp_chain_a_greater
+    add     $2, %rdi                   # next molecule (u16)
+    add     $2, %rsi
+    dec     %rcx
+    jnz     .cmp_chain_loop
+
+.cmp_chain_len:
+    # All compared bytes equal — compare lengths
+    cmp     %r9, %r8                   # a_len vs b_len
+    jb      .cmp_chain_a_less
+    ja      .cmp_chain_a_greater
+    # Equal: a_len == b_len and all bytes match
+    pop     %rax                       # op_id
+    cmp     $2, %al                    # LE or GE → true for equal
     jae     .cmp_true
-    jmp     .cmp_false
+    jmp     .cmp_false                 # LT or GT → false for equal
+
+.cmp_chain_a_less:
+    pop     %rax                       # op_id
+    test    %al, %al                   # LT (0)?
+    jz      .cmp_true
+    cmp     $2, %al                    # LE (2)?
+    je      .cmp_true
+    jmp     .cmp_false                 # GT (1) or GE (3) → false
+
+.cmp_chain_a_greater:
+    pop     %rax                       # op_id
+    cmp     $1, %al                    # GT (1)?
+    je      .cmp_true
+    cmp     $3, %al                    # GE (3)?
+    je      .cmp_true
+    jmp     .cmp_false                 # LT (0) or LE (2) → false
 
 .cmp_true:
     # Rust VM returns non-empty chain (1.0) for true
@@ -2931,16 +3018,32 @@ op_halt:
 
     # Check for "exit\n" or "quit\n"
     cmp     $5, %rcx
-    jne     .repl_try_eval
+    jne     .repl_check_help
     cmpl    $0x74697865, (%rdi)         # "exit" little-endian
     jne     .repl_check_quit
     cmpb    $0x0A, 4(%rdi)
     je      .repl_exit
 .repl_check_quit:
     cmpl    $0x74697571, (%rdi)         # "quit" little-endian
-    jne     .repl_try_eval
+    jne     .repl_check_help
     cmpb    $0x0A, 4(%rdi)
     je      .repl_exit
+
+.repl_check_help:
+    # Check for "help\n" (5 bytes)
+    cmp     $5, %rcx
+    jne     .repl_try_eval
+    cmpl    $0x706C6568, (%rdi)         # "help" little-endian
+    jne     .repl_try_eval
+    cmpb    $0x0A, 4(%rdi)
+    jne     .repl_try_eval
+    # Print help message
+    lea     msg_help(%rip), %rsi
+    mov     $msg_help_len, %edx
+    mov     $1, %edi                    # stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .repl_loop
 
 .repl_try_eval:
     # Construct trampoline bytecode on heap that:
@@ -3283,6 +3386,11 @@ msg_greeting_len:
 
 msg_prompt:
     .ascii "\xe2\x97\x8b > "             # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
+
+msg_help:
+    .ascii "Commands: let, fn, emit, if, while, match, exit\n"
+    .ascii "Type Olang code or natural text.\n"
+.equ msg_help_len, . - msg_help
 
 msg_bye:
     .ascii "bye\n"
