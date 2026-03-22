@@ -1948,7 +1948,8 @@ op_call:
     push    %r12                        # save bytecode base
     push    %r13                        # save PC
     push    %rbx                        # save bytecode size
-    pushq   $1                          # nested flag marker
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     # Set up nested execution
     mov     %r8, %r12                   # new bytecode base
@@ -2746,13 +2747,20 @@ err_read_bc:
 
 op_halt:
     # Check if this is a nested halt (from __eval_bytecode)
-    # CPU stack: [nested_flag=1][saved_rbx][saved_r13][saved_r12]
-    pop     %rax                        # potential nested flag
-    cmp     $1, %rax
-    je      .halt_nested
+    # Use unique sentinel 0xDEAD_BEEF_CAFE_0001 to avoid collision with
+    # argc (1) or other stack values.
+    .equ NESTED_SENTINEL, 0xDEADBEEFCAFE0001
+    mov     (%rsp), %rax               # PEEK (not pop)
+    movabs  $NESTED_SENTINEL, %rdx
+    cmp     %rdx, %rax
+    jne     .halt_boot                  # not nested → boot completion
 
+    # Nested: pop the flag + saved context
+    add     $8, %rsp                    # skip nested flag
+    jmp     .halt_nested_restore
+
+.halt_boot:
     # Not nested — this is the boot completion.
-    push    %rax                        # restore CPU stack
 
     # Check eval_mode: if set, process stdin and exit (no REPL)
     cmpb    $0, eval_mode(%rip)
@@ -2876,7 +2884,8 @@ op_halt:
     push    %r12                        # save boot bytecode base
     push    %r13                        # save boot PC
     push    %rbx                        # save boot bytecode size
-    pushq   $1                          # nested flag marker
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     mov     %r8, %r12                   # bytecode base = trampoline
     xor     %r13d, %r13d               # PC = 0
@@ -2895,6 +2904,7 @@ op_halt:
     jmp     .repl_loop
 
 .halt_nested:
+.halt_nested_restore:
     # Returning from nested __eval_bytecode execution
     # CPU stack now has: [saved_rbx][saved_r13][saved_r12]
     pop     %rbx                        # restore bytecode size
@@ -3029,7 +3039,8 @@ op_halt:
     push    %r12
     push    %r13
     push    %rbx
-    pushq   $1                          # nested flag
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     mov     %r8, %r12                   # bytecode base = trampoline
     xor     %r13d, %r13d               # PC = 0
