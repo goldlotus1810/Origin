@@ -3707,4 +3707,34 @@ fn is_digit(ch) {
         let stmts = parse(source).unwrap();
         assert!(!stmts.is_empty(), "string.ol should parse");
     }
+
+    #[test]
+    fn parse_repl_ol() {
+        let source = include_str!("../../../../stdlib/repl.ol");
+        let result = parse(source);
+        match result {
+            Ok(stmts) => assert!(!stmts.is_empty(), "repl.ol should produce statements"),
+            Err(e) => panic!("repl.ol parse failed: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn parse_gate_ol() {
+        let source = include_str!("../../../../stdlib/homeos/gate.ol");
+        let result = parse(source);
+        match result {
+            Ok(stmts) => assert!(!stmts.is_empty(), "gate.ol should produce statements"),
+            Err(e) => panic!("gate.ol parse failed: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn parse_bytes_ol() {
+        let source = include_str!("../../../../stdlib/bytes.ol");
+        let result = parse(source);
+        match result {
+            Ok(stmts) => assert!(!stmts.is_empty(), "bytes.ol should produce statements"),
+            Err(e) => panic!("bytes.ol parse failed: {:?}", e),
+        }
+    }
 }

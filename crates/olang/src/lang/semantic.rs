@@ -1077,10 +1077,10 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
         }
     }
 
-    // Phase 1.5: Pre-compile function bodies if there are potentially recursive functions
-    // Detect if any function calls another function that could create cycles
-    let has_complex_fns = ctx.fns.len() > 10; // heuristic: many functions = likely recursion
-    if has_complex_fns {
+    // Phase 1.5: Pre-compile function bodies
+    // Always compile if there are any functions (removed > 10 heuristic
+    // that was causing files with ≤10 functions to silently drop all fn definitions)
+    if !ctx.fns.is_empty() {
         // Emit a Jmp to skip all compiled function bodies
         let skip_all = ctx.prog.ops.len();
         ctx.prog.push_op(Op::Jmp(0)); // placeholder
