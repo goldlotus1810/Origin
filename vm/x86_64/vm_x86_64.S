@@ -350,7 +350,13 @@ dispatch_codegen:
     je      .bid_logic_not
     cmp     $11, %al                    # BID_ASSERT_TRUTH
     je      .bid_eq
-    # All others: noop
+    # All others: pop 2 args, push empty result
+    # (most builtins are binary ops: pop 2, push 1)
+    add     $16, %r14                   # pop arg 2
+    # Replace top (arg 1) with empty
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
     jmp     vm_loop
 
 .bid_eq:
@@ -546,13 +552,13 @@ cg_call_closure:
     # Extract body_pc
     mov     %rax, %rdi                  # body_pc
 
-    # Save return context on CPU stack
-    push    %r12                        # save current bytecode base
-    push    %r13                        # save current PC (return point)
+    # Save return context: PC + bytecode base
+    push    %r12                        # save current r12
+    push    %r13                        # save return PC
 
-    # Switch to boot bytecode base (closure bodies compiled there)
+    # Switch r12 to boot bytecode (closure bodies live there)
     lea     boot_bc_base(%rip), %rax
-    mov     (%rax), %r12                # r12 = boot bytecode base
+    mov     (%rax), %r12
 
     # Jump to body
     mov     %edi, %r13d                 # PC = body_pc
@@ -1775,18 +1781,24 @@ op_call:
 .call_dict_get:
     # Stack: [dict, key] → pop both, push dict[key]
     add     %rcx, %r13
+    # Check dict marker BEFORE popping: 24(%r14) = dict len field
+    mov     24(%r14), %rax
+    cmp     $DICT_MARKER, %rax
+    jne     .dict_get_not_dict
     # Pop key
     mov     (%r14), %rsi               # key ptr
     mov     8(%r14), %rdx              # key len
     # Pop dict
-    mov     16(%r14), %rdi              # dict base
+    mov     16(%r14), %rdi              # dict base ptr
     add     $32, %r14                   # pop 2
 
     test    %rdi, %rdi
     jz      .dict_get_empty
-
-    # Search entries
     mov     (%rdi), %rcx               # entry count
+    cmp     $10000, %rcx
+    ja      .dict_get_empty
+    test    %rcx, %rcx
+    jz      .dict_get_empty
     lea     8(%rdi), %r8               # first entry
 .dict_get_search:
     test    %rcx, %rcx
@@ -1825,6 +1837,9 @@ op_call:
     mov     %rdx, 8(%r14)
     jmp     vm_loop
 
+.dict_get_not_dict:
+    # Not a dict — pop both args, push empty
+    add     $32, %r14
 .dict_get_empty:
     sub     $16, %r14
     xor     %eax, %eax
@@ -2066,7 +2081,7 @@ op_ret:
     # restore it. Otherwise treat as no-op.
     pop     %rax                        # saved PC
     pop     %r12                        # saved bytecode base
-    mov     %eax, %r13d                 # PC = saved return address
+    mov     %eax, %r13d                 # PC = return address
     jmp     vm_loop
 
 op_try_begin:
@@ -3012,7 +3027,9 @@ op_halt:
     movabs  $0xDEADBEEFCAFE0001, %rax
     push    %rax                        # nested flag sentinel
 
-    mov     %r8, %r12                   # bytecode base = trampoline
+    # Use boot bytecode base as r12 (not trampoline)
+    # Trampoline is at %r8 — save it, set r12 = boot base
+    mov     %r8, %r12                   # bytecode base = trampoline (for Push/CallClosure)
     xor     %r13d, %r13d               # PC = 0
     # Set rbx to large value so op_ret accepts boot bytecode PCs
     # (trampoline CallClosure jumps into boot bytecode bodies where

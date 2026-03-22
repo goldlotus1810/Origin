@@ -71,31 +71,13 @@ pub(crate) const BID_CHAIN_LEN: u8 = 29;
 pub(crate) const BID_TYPE_OF: u8 = 30;
 
 /// Map builtin name → ID. Returns None for non-builtin or user functions.
-/// Only maps builtins that have INLINED handlers in CallBuiltin dispatch.
-pub fn builtin_name_to_id(name: &str) -> Option<u8> {
-    match name {
-        // Arithmetic — inlined
-        "__hyp_add" | "__phys_add" => Some(BID_HYP_ADD),
-        "__hyp_sub" | "__phys_sub" => Some(BID_HYP_SUB),
-        "__hyp_mul" => Some(BID_HYP_MUL),
-        "__hyp_div" => Some(BID_HYP_DIV),
-        // "__hyp_mod" not mapped — ASM doesn't handle it
-        // Comparison — inlined
-        "__eq" => Some(BID_EQ),
-        "__cmp_lt" => Some(BID_CMP_LT),
-        "__cmp_gt" => Some(BID_CMP_GT),
-        "__cmp_le" => Some(BID_CMP_LE),
-        "__cmp_ge" => Some(BID_CMP_GE),
-        "__cmp_ne" => Some(BID_CMP_NE),
-        // Logic — inlined
-        "__logic_not" => Some(BID_LOGIC_NOT),
-        "__assert_truth" => Some(BID_ASSERT_TRUTH),
-        // String ops stay as Op::Call(String) — ASM handles them via op_call hash dispatch
-        // "__str_char_at" / "__str_substr" / "__str_is_keyword" NOT mapped here
-        // because ASM CallBuiltin noop-skips unhandled IDs → stack corruption
-        // Everything else stays as Op::Call(String) for now
-        _ => None,
-    }
+///
+/// DISABLED for now: ASM VM handles all builtins via op_call hash dispatch.
+/// CallBuiltin causes stack corruption when ASM doesn't handle the ID
+/// (unary vs binary arity mismatch in default fallback).
+/// Re-enable when ASM has full CallBuiltin dispatch table.
+pub fn builtin_name_to_id(_name: &str) -> Option<u8> {
+    None // All builtins go through Op::Call(String) → ASM op_call hash dispatch
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
