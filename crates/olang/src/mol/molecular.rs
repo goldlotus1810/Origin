@@ -1235,6 +1235,10 @@ impl MolecularChain {
         if self.0.len() != 4 {
             return None;
         }
+        // Reject string chains: 4-char strings must not be misinterpreted as f64
+        if self.0.iter().all(|&bits| bits & 0xFF00 == 0x2100) {
+            return None;
+        }
         let mut bytes = [0u8; 8];
         for (i, &bits) in self.0.iter().enumerate() {
             let raw = bits.to_le_bytes();
