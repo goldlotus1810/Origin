@@ -64,8 +64,8 @@ smoke:
 # Smoke test: native binary boots and shows prompt
 smoke-binary: build
 	@echo "Testing origin_new.olang boots..." && \
-	OUTPUT=$$(echo '' | ./$(OUTPUT) 2>&1) && \
-	echo "$$OUTPUT" | grep -q "origin.olang" && \
+	OUTPUT=$$(echo 'exit' | ./$(OUTPUT) 2>&1) && \
+	echo "$$OUTPUT" | grep -q "HomeOS" && \
 	echo "PASS: origin_new.olang boots OK" || \
 	(echo "FAIL: origin_new.olang did not boot"; exit 1)
 

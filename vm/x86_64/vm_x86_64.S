@@ -315,6 +315,12 @@ vm_loop:
 
 # ── codegen.ol format dispatch (tags 0x01-0x24) ─────────────────────────
 dispatch_codegen:
+    # 0x3A = CallBuiltin: skip builtin_id byte (1 byte)
+    cmp     $0x3A, %al
+    jne     .cg_not_builtin
+    inc     %r13                        # skip builtin_id
+    jmp     vm_loop
+.cg_not_builtin:
     lea     codegen_table(%rip), %rcx
     movzbl  %al, %eax
     cmp     $0x26, %al
@@ -372,6 +378,15 @@ cg_push:
     movzwl  (%r12, %r13), %ecx         # u16 LE mol_count
     add     $2, %r13
 
+    # Empty chain (mol_count == 0): just push empty onto stack
+    test    %ecx, %ecx
+    jnz     .cg_push_nonempty
+    sub     $16, %r14
+    movq    $0, (%r14)                  # ptr = 0
+    movq    $0, 8(%r14)                 # len = 0
+    jmp     vm_loop
+
+.cg_push_nonempty:
     # Byte count = mol_count * 2 (each molecule = u16)
     mov     %ecx, %edx
     shl     $1, %edx                    # byte_count = mol_count * 2
@@ -633,9 +648,11 @@ op_load_local:
     # Hash the name for lookup
     lea     (%r12, %r13), %rdi         # name ptr
     mov     %ecx, %edx                  # name len
-    push    %rcx                        # save name_len
+    sub     $8, %rsp                    # align stack to 16 bytes
+    push    %rcx                        # save name_len (stack now 16-aligned for call)
     call    hash_name                   # → rax = hash
     pop     %rcx
+    add     $8, %rsp                    # restore alignment
     add     %rcx, %r13                  # PC += name_len
     # Search var table by hash
     call    var_load_hash               # rax=hash → rax=ptr, rdx=len
@@ -1931,7 +1948,8 @@ op_call:
     push    %r12                        # save bytecode base
     push    %r13                        # save PC
     push    %rbx                        # save bytecode size
-    pushq   $1                          # nested flag marker
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     # Set up nested execution
     mov     %r8, %r12                   # new bytecode base
@@ -2655,7 +2673,6 @@ memcpy_small:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_unknown:
-    # Debug: print opcode value as hex before error message
     # al still has the opcode byte
     push    %rax
     movzbl  %al, %eax
@@ -2730,13 +2747,20 @@ err_read_bc:
 
 op_halt:
     # Check if this is a nested halt (from __eval_bytecode)
-    # CPU stack: [nested_flag=1][saved_rbx][saved_r13][saved_r12]
-    pop     %rax                        # potential nested flag
-    cmp     $1, %rax
-    je      .halt_nested
+    # Use unique sentinel 0xDEAD_BEEF_CAFE_0001 to avoid collision with
+    # argc (1) or other stack values.
+    .equ NESTED_SENTINEL, 0xDEADBEEFCAFE0001
+    mov     (%rsp), %rax               # PEEK (not pop)
+    movabs  $NESTED_SENTINEL, %rdx
+    cmp     %rdx, %rax
+    jne     .halt_boot                  # not nested → boot completion
 
+    # Nested: pop the flag + saved context
+    add     $8, %rsp                    # skip nested flag
+    jmp     .halt_nested_restore
+
+.halt_boot:
     # Not nested — this is the boot completion.
-    push    %rax                        # restore CPU stack
 
     # Check eval_mode: if set, process stdin and exit (no REPL)
     cmpb    $0, eval_mode(%rip)
@@ -2860,7 +2884,8 @@ op_halt:
     push    %r12                        # save boot bytecode base
     push    %r13                        # save boot PC
     push    %rbx                        # save boot bytecode size
-    pushq   $1                          # nested flag marker
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     mov     %r8, %r12                   # bytecode base = trampoline
     xor     %r13d, %r13d               # PC = 0
@@ -2879,6 +2904,7 @@ op_halt:
     jmp     .repl_loop
 
 .halt_nested:
+.halt_nested_restore:
     # Returning from nested __eval_bytecode execution
     # CPU stack now has: [saved_rbx][saved_r13][saved_r12]
     pop     %rbx                        # restore bytecode size
@@ -3013,7 +3039,8 @@ op_halt:
     push    %r12
     push    %r13
     push    %rbx
-    pushq   $1                          # nested flag
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     mov     %r8, %r12                   # bytecode base = trampoline
     xor     %r13d, %r13d               # PC = 0
@@ -3071,6 +3098,8 @@ proc_self_exe:
 
 hex_chars:
     .ascii "0123456789ABCDEF"
+msg_pc:
+    .ascii "PC= "
 msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0

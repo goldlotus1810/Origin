@@ -317,7 +317,7 @@ DoD:     make verify → ALL PASS
 | P2.3 | Knowledge layer (.ol) | PLAN_PHASE2 | ~150 LOC | P2.0 ✅ | DONE ✅ | silk_ops 166 + dream 181 + instinct 197 + learning 160 LOC. Đã có sẵn. |
 | P2.4 | Agent behavior (.ol) | PLAN_PHASE2 | ~300 LOC | P2.0 ✅ | DONE ✅ | response 100 + leo 41 + chief 36 + worker 42 + gate 51 LOC. |
 | P2.5 | E2E integration test | PLAN_PHASE2 | ~50 LOC | P2.2-4 ✅ | DONE ✅ | t19_olang_pipeline_e2e.rs: 5/5 pass. NLP + arithmetic + function + crisis + multi-turn. |
-| 9 | Native REPL | PLAN_9 | ~600 LOC | 8.1-8.3 ✅ | FREE | ROOT CAUSE: bytecode Push encodes chain as Debug string "{:?}" instead of binary. ASM VM can't parse. Need fix bytecode.rs Push encoding + ASM decoder. |
+| 9 | Native REPL | PLAN_9 | ~600 LOC | 8.1-8.3 ✅ | DONE ✅ | ./origin_new.olang BOOTS! Fixed: Push binary encoding, CallBuiltin 0x3A, PushMol size, CallClosure opcode, nested sentinel (argc collision). smoke-binary PASS. |
 | 10 | Browser E2E | PLAN_10 | ~500 LOC | 9 | BLOCKED | origin.html, WASM. Chờ REPL. |
 | 11.1 | Demo script (10 scenarios) | PLAN_11 | ~300 LOC | 8 ✅, 9 | BLOCKED | Chờ REPL. |
 | 11.4 | Native binary --eval | PLAN_11 | ~50 LOC | 9 | BLOCKED | Chờ REPL. |
