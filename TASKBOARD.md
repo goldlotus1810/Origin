@@ -77,7 +77,7 @@ Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Mi
 | 12.5 | Language detection + instinct wire | PLAN_12 | ~60 LOC | 12.4 | DONE ✅ | detect_language tiếng Việt không dấu. |
 | 11.3 | Server --eval mode | PLAN_11 | ~80 LOC | — | DONE ✅ | --eval "expr" inline + stdin mode. PR claude/server-eval-mode. |
 | 11.2 | Rust E2E test suite | PLAN_11 | ~300 LOC | 11.3 | DONE ✅ | t16_e2e_demo.rs: 9/9 pass. Đã có sẵn. |
-| 11.5 | Makefile targets (demo/verify) | PLAN_11 | ~50 LOC | 11.2 | FREE | make demo, make verify. |
+| 11.5 | Makefile targets (demo/verify) | PLAN_11 | ~50 LOC | 11.2 | DONE ✅ | make demo + make verify đã có sẵn, verify 9/9 pass. |
 
 ### Tier 1 — Chi tiết kỹ thuật (để CLI tự thực hiện)
 
