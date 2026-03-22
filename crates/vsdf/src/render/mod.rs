@@ -2,4 +2,5 @@
 
 pub mod ffr;
 pub mod occlusion;
+pub mod parametric;
 pub mod scene;
