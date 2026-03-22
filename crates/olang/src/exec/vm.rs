@@ -18,6 +18,14 @@ use crate::molecular::{Molecule, MolecularChain};
 // VmEvent — side effects VM muốn thực hiện
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Fast check: is this chain a string-encoded chain? (shape=2, rel=1 for all molecules)
+/// String molecules have top byte = 0x21 (shape=2 in bits[15:12], rel=1 in bits[11:8]).
+/// Used to prevent 4-char strings being misinterpreted as f64 numbers in comparisons.
+#[inline]
+fn is_string_chain(chain: &MolecularChain) -> bool {
+    !chain.is_empty() && chain.0.iter().all(|&bits| bits & 0xFF00 == 0x2100)
+}
+
 /// Extract readable text from a string-encoded MolecularChain.
 /// String chains use shape=0x02, relation=0x01, with each byte stored in valence.
 /// Returns None if the chain doesn't look like a string encoding.
@@ -678,39 +686,31 @@ fn call_closure_inline(
                     "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                         let b = local_stack.pop().unwrap_or_default();
                         let a = local_stack.pop().unwrap_or_default();
-                        let result = if let (Some(sa), Some(sb)) =
-                            (chain_to_string(&a), chain_to_string(&b))
-                        {
-                            if a.to_number().is_none() || b.to_number().is_none() {
-                                match fname.as_str() {
-                                    "__cmp_lt" => sa < sb,
-                                    "__cmp_gt" => sa > sb,
-                                    "__cmp_le" => sa <= sb,
-                                    "__cmp_ge" => sa >= sb,
-                                    "__cmp_ne" => sa != sb,
-                                    _ => false,
-                                }
-                            } else {
-                                let fa = a.to_number().unwrap_or(0.0);
-                                let fb = b.to_number().unwrap_or(0.0);
-                                match fname.as_str() {
-                                    "__cmp_lt" => fa < fb,
-                                    "__cmp_gt" => fa > fb,
-                                    "__cmp_le" => fa <= fb,
-                                    "__cmp_ge" => fa >= fb,
-                                    "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
-                                    _ => false,
-                                }
+                        let result = if is_string_chain(&a) || is_string_chain(&b) {
+                            let sa = chain_to_string(&a).unwrap_or_default();
+                            let sb = chain_to_string(&b).unwrap_or_default();
+                            match fname.as_str() {
+                                "__cmp_lt" => sa < sb,
+                                "__cmp_gt" => sa > sb,
+                                "__cmp_le" => sa <= sb,
+                                "__cmp_ge" => sa >= sb,
+                                "__cmp_ne" => sa != sb,
+                                _ => false,
                             }
-                        } else {
-                            let fa = a.to_number().unwrap_or(0.0);
-                            let fb = b.to_number().unwrap_or(0.0);
+                        } else if let (Some(fa), Some(fb)) =
+                            (a.to_number(), b.to_number())
+                        {
                             match fname.as_str() {
                                 "__cmp_lt" => fa < fb,
                                 "__cmp_gt" => fa > fb,
                                 "__cmp_le" => fa <= fb,
                                 "__cmp_ge" => fa >= fb,
                                 "__cmp_ne" => (fa - fb).abs() >= f64::EPSILON,
+                                _ => false,
+                            }
+                        } else {
+                            match fname.as_str() {
+                                "__cmp_ne" => a != b,
                                 _ => false,
                             }
                         };
@@ -988,42 +988,33 @@ impl OlangVM {
                         "__cmp_lt" | "__cmp_gt" | "__cmp_le" | "__cmp_ge" | "__cmp_ne" => {
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
-                            // Try string comparison first (both must be string chains)
-                            let truthy = if let (Some(sa), Some(sb)) =
-                                (chain_to_string(&a), chain_to_string(&b))
-                            {
-                                // Both are strings AND at least one is non-numeric
-                                // (avoid treating "42" as string when comparing numbers)
-                                if a.to_number().is_none() || b.to_number().is_none() {
-                                    match name.as_str() {
-                                        "__cmp_lt" => sa < sb,
-                                        "__cmp_gt" => sa > sb,
-                                        "__cmp_le" => sa <= sb,
-                                        "__cmp_ge" => sa >= sb,
-                                        "__cmp_ne" => sa != sb,
-                                        _ => false,
-                                    }
-                                } else {
-                                    let na = a.to_number().unwrap_or(0.0);
-                                    let nb = b.to_number().unwrap_or(0.0);
-                                    match name.as_str() {
-                                        "__cmp_lt" => na < nb,
-                                        "__cmp_gt" => na > nb,
-                                        "__cmp_le" => na <= nb,
-                                        "__cmp_ge" => na >= nb,
-                                        "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
-                                        _ => false,
-                                    }
+                            // String-first: check encoding BEFORE to_number() to prevent
+                            // 4-char strings from being miscompared as denormalized f64.
+                            let truthy = if is_string_chain(&a) || is_string_chain(&b) {
+                                let sa = chain_to_string(&a).unwrap_or_default();
+                                let sb = chain_to_string(&b).unwrap_or_default();
+                                match name.as_str() {
+                                    "__cmp_lt" => sa < sb,
+                                    "__cmp_gt" => sa > sb,
+                                    "__cmp_le" => sa <= sb,
+                                    "__cmp_ge" => sa >= sb,
+                                    "__cmp_ne" => sa != sb,
+                                    _ => false,
                                 }
-                            } else {
-                                let na = a.to_number().unwrap_or(0.0);
-                                let nb = b.to_number().unwrap_or(0.0);
+                            } else if let (Some(na), Some(nb)) =
+                                (a.to_number(), b.to_number())
+                            {
                                 match name.as_str() {
                                     "__cmp_lt" => na < nb,
                                     "__cmp_gt" => na > nb,
                                     "__cmp_le" => na <= nb,
                                     "__cmp_ge" => na >= nb,
                                     "__cmp_ne" => (na - nb).abs() >= f64::EPSILON,
+                                    _ => false,
+                                }
+                            } else {
+                                match name.as_str() {
+                                    "__cmp_ne" => a != b,
                                     _ => false,
                                 }
                             };
@@ -1047,8 +1038,10 @@ impl OlangVM {
                         "__assert_truth" => {
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
-                            // Truth: chains equal OR numeric values equal
-                            let is_true = if let (Some(na), Some(nb)) =
+                            // Truth: string-first check to avoid 4-char string/f64 collision
+                            let is_true = if is_string_chain(&a) || is_string_chain(&b) {
+                                a == b
+                            } else if let (Some(na), Some(nb)) =
                                 (a.to_number(), b.to_number())
                             {
                                 (na - nb).abs() < f64::EPSILON
@@ -1679,12 +1672,16 @@ impl OlangVM {
                             let _ = stack.push(MolecularChain::from_number(result));
                         }
                         "__eq" => {
-                            // Equality: numeric comparison with epsilon, or deep chain compare
-                            // Returns non-empty (1.0) for true, empty for false
-                            // (consistent with __cmp_* builtins — Jz checks is_empty())
+                            // Equality: string-first, then numeric, then deep chain compare.
+                            // IMPORTANT: Check string encoding BEFORE to_number() because
+                            // 4-char strings have exactly 4 u16 molecules which to_number()
+                            // interprets as f64 bits, causing false equality between
+                            // different strings of the same length.
                             let b = vm_pop!(stack, events);
                             let a = vm_pop!(stack, events);
-                            let is_equal = if let (Some(na), Some(nb)) =
+                            let is_equal = if is_string_chain(&a) || is_string_chain(&b) {
+                                a.0 == b.0
+                            } else if let (Some(na), Some(nb)) =
                                 (a.to_number(), b.to_number())
                             {
                                 (na - nb).abs() < f64::EPSILON
@@ -4166,7 +4163,12 @@ impl OlangVM {
                                 let params_to_write: Vec<(String, MolecularChain)> =
                                     scopes[fn_scope_idx][..write_count].to_vec();
                                 for (pname, val) in &params_to_write {
-                                    // Only write back to the immediate caller scope
+                                    // Only write back heap refs (dict/array) to avoid
+                                    // corrupting caller variables that share names with
+                                    // function locals (e.g., match bindings named 'name').
+                                    if as_dict_ref(val).is_none() && as_array_ref(val).is_none() {
+                                        continue;
+                                    }
                                     if let Some(entry) = scopes[caller_scope_idx].iter_mut().rev()
                                         .find(|(n, _)| n == pname) {
                                         entry.1 = val.clone();
