@@ -65,8 +65,8 @@ Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Mi
 | VM.4 | Scope variable cache | PLAN_VM_OPT | ~100 LOC | VM.1 | DONE ✅ | FNV-1a hash, 8 entries, auto-invalidate. PR #239. |
 | VM.5 | Builtin dispatch table | PLAN_VM_OPT | ~200 LOC | VM.1 | DONE ✅ | Op::CallBuiltin(u8), 16 builtins inlined. PR #239. |
 | VM.6 | Small-chain SSO | PLAN_VM_OPT | ~300 LOC | VM.1-5 | FREE | Inline [u16;4] cho numbers/1-char. |
-| VM.7 | KnowTree sampling | PLAN_VM_OPT | ~150 LOC | FE.6 | FREE | Adaptive Fib-sized sampling, 3-tier fallback. |
-| VM.8 | Bellman path optimization | PLAN_VM_OPT | ~100 LOC | VM.7 | FREE | Q-table 55 entries, φ⁻¹ discount. |
+| VM.7 | KnowTree sampling | PLAN_VM_OPT | ~150 LOC | FE.6 | DONE ✅ | eval_valence/arousal_from_table, Fib-sized sampling, 3-tier fallback. |
+| VM.8 | Bellman path optimization | PLAN_VM_OPT | ~100 LOC | VM.7 | DONE ✅ | BellmanPathCache 55 entries, φ⁻¹ decay, Q-table eviction. 7/7 tests. |
 | 8.1 | Parser: hex literals (0xFF) | PLAN_8 | ~80 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
 | 8.2 | Parser: == trong match/struct | PLAN_8 | ~200 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
 | 8.3 | Parser: keywords as ident + struct colon | PLAN_8 | ~100 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
