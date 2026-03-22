@@ -943,6 +943,40 @@ op_call:
     cmp     %rdx, %rax
     je      .call_bit_xor
 
+    # ── Struct/enum builtins ──
+    movabs  $0x46B6739DEFF894A5, %rdx   # __struct_tag
+    cmp     %rdx, %rax
+    je      .call_struct_tag
+    movabs  $0x1D937C1FCA5461FD, %rdx   # __enum_unit
+    cmp     %rdx, %rax
+    je      .call_enum_unit
+    movabs  $0x58F6E86D37FAFB4F, %rdx   # __enum_payload
+    cmp     %rdx, %rax
+    je      .call_enum_payload
+    movabs  $0x6EFB31ABBB6698FC, %rdx   # __match_enum
+    cmp     %rdx, %rax
+    je      .call_match_enum
+    movabs  $0x385DDAACD4BF03A1, %rdx   # __enum_field
+    cmp     %rdx, %rax
+    je      .call_enum_field
+    movabs  $0x0275ACD27913EF29, %rdx   # __logic_not
+    cmp     %rdx, %rax
+    je      .call_logic_not
+
+    # ── No-op builtins (pop correct arg count) ──
+    movabs  $0xC7631FF0030A6033, %rdx   # __use_module (1 arg)
+    cmp     %rdx, %rax
+    je      .call_noop_pop1
+    movabs  $0x49DF59EEA723E9FA, %rdx   # __use_module_selective (count+N+1)
+    cmp     %rdx, %rax
+    je      .call_use_module_selective
+    movabs  $0xBA79129DA012260E, %rdx   # __struct_def (2 args)
+    cmp     %rdx, %rax
+    je      .call_noop_pop2
+    movabs  $0xC3FD4316C34B889E, %rdx   # __enum_def (2 args)
+    cmp     %rdx, %rax
+    je      .call_noop_pop2
+
     # ── Eval bytecode (nested execution) ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
     cmp     %rdx, %rax
@@ -2012,6 +2046,266 @@ op_call:
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Struct tag (no-op: pop tag name, keep dict underneath)
+.call_struct_tag:
+    add     %rcx, %r13
+    # Stack: [dict, tag_name] → pop tag_name, leave dict
+    add     $16, %r14                  # pop tag name (discard)
+    jmp     vm_loop
+
+# Enum unit variant (no-op: tag is already on stack)
+.call_enum_unit:
+    add     %rcx, %r13
+    # Stack: [tag] → leave tag as-is (tag IS the enum representation)
+    jmp     vm_loop
+
+# Enum payload variant: concatenate tag + separator + args into one chain
+.call_enum_payload:
+    add     %rcx, %r13
+    # Stack (top to bottom): [count, argN-1, ..., arg0, tag]
+    # Result: tag | 0x0000 | arg0 | 0x0000 | arg1 | ...
+
+    # Pop count
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax             # count = number of args
+    add     $16, %r14                  # pop count
+
+    push    %rax                       # save arg_count on CPU stack
+    mov     %r15, %rbp                 # save result_base (rbp is free here)
+    xor     %r8d, %r8d                 # total_mol_count = 0
+
+    # Tag is deepest: at r14 + count*16
+    mov     %rax, %rcx
+    shl     $4, %rcx                   # count * 16
+    mov     (%r14, %rcx), %rsi         # tag ptr
+    mov     8(%r14, %rcx), %rcx        # tag mol_count
+    add     %rcx, %r8                  # total += tag_mol_count
+
+    # Copy tag to heap
+    shl     $1, %rcx                   # byte_count
+    mov     %r15, %rdi
+    rep     movsb                      # copy (rcx becomes 0, rdi = r15 + bytes)
+    mov     %rdi, %r15                 # bump heap
+
+    # Append each arg with separator
+    pop     %rax                       # restore arg_count
+    test    %rax, %rax
+    jz      .enum_payload_done
+    # Args on stack: arg0 at r14+(count-1)*16, argN-1 at r14+0
+    xor     %edx, %edx                 # i = 0
+.enum_payload_loop:
+    cmp     %rax, %rdx
+    jae     .enum_payload_done
+
+    # Separator: 0x0000
+    movw    $0, (%r15)
+    add     $2, %r15
+    inc     %r8                        # total_mol_count++
+
+    # arg[i] at r14 + (count-1-i)*16
+    push    %rax
+    push    %rdx
+    mov     %rax, %rcx
+    dec     %rcx
+    sub     %rdx, %rcx                 # count-1-i
+    shl     $4, %rcx
+    mov     (%r14, %rcx), %rsi         # arg ptr
+    mov     8(%r14, %rcx), %rcx        # arg mol_count
+    add     %rcx, %r8                  # total += arg_mol_count
+    shl     $1, %rcx                   # byte_count
+    mov     %r15, %rdi
+    rep     movsb
+    mov     %rdi, %r15                 # bump heap
+    pop     %rdx
+    pop     %rax
+    inc     %edx
+    jmp     .enum_payload_loop
+
+.enum_payload_done:
+    # Pop all entries: count args + 1 tag
+    inc     %rax                       # count + 1
+    shl     $4, %rax                   # (count+1) * 16
+    add     %rax, %r14
+
+    # Push result chain
+    sub     $16, %r14
+    mov     %rbp, (%r14)              # result ptr (saved at start)
+    mov     %r8, 8(%r14)              # total mol_count
+    jmp     vm_loop
+
+# Logic not: empty → 1.0, non-empty → empty
+.call_logic_not:
+    add     %rcx, %r13
+    mov     8(%r14), %rax              # len/marker
+    # Check if value is empty (ptr=0 and len=0) or f64 0.0
+    cmp     $F64_MARKER, %rax
+    je      .logic_not_f64
+    # Chain: empty (len==0) → true, non-empty → false
+    test    %rax, %rax
+    jz      .logic_not_is_empty
+    # Non-empty chain → push empty (false)
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.logic_not_f64:
+    # f64: 0.0 → true, non-zero → false
+    mov     (%r14), %rax               # f64 bits
+    test    %rax, %rax
+    jz      .logic_not_is_empty
+    # Non-zero f64 → push empty (false)
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.logic_not_is_empty:
+    # Empty/zero → push 1.0 (true)
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# Match enum: compare tag prefix of subject with expected tag
+.call_match_enum:
+    add     %rcx, %r13
+    # Stack: [subject, expected_tag]
+    mov     (%r14), %rsi               # expected_tag ptr
+    mov     8(%r14), %rdx              # expected_tag mol_count
+    mov     16(%r14), %rdi             # subject ptr
+    mov     24(%r14), %rcx             # subject mol_count
+    add     $16, %r14                  # pop 1 (keep result slot)
+
+    # Extract tag from subject: molecules before first 0x0000 separator
+    xor     %r8d, %r8d                 # tag_mol_count = 0
+    test    %rcx, %rcx
+    jz      .match_enum_compare
+.match_enum_scan:
+    cmp     %rcx, %r8
+    jae     .match_enum_compare
+    movzwl  (%rdi, %r8, 2), %eax       # read u16 molecule
+    test    %eax, %eax                  # 0x0000 separator?
+    jz      .match_enum_compare
+    inc     %r8
+    jmp     .match_enum_scan
+
+.match_enum_compare:
+    # Compare tag_mol_count with expected mol_count
+    cmp     %rdx, %r8
+    jne     .match_enum_false
+    # Compare bytes: tag (rdi) vs expected (rsi), mol_count*2 bytes
+    mov     %r8, %rcx
+    shl     $1, %rcx                   # byte_count
+    push    %rsi
+    push    %rdi
+    repe    cmpsb
+    pop     %rdi
+    pop     %rsi
+    je      .match_enum_true
+
+.match_enum_false:
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.match_enum_true:
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# Enum field: extract nth payload field from enum variant chain
+.call_enum_field:
+    add     %rcx, %r13
+    # Stack: [enum_chain, index]
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax             # index
+    mov     16(%r14), %rsi             # enum chain ptr
+    mov     24(%r14), %rcx             # enum chain mol_count
+    add     $16, %r14                  # pop 1 (keep result slot)
+
+    # Skip past tag (before first 0x0000 separator)
+    xor     %edx, %edx                 # position
+.enum_field_skip_tag:
+    cmp     %rcx, %rdx
+    jae     .enum_field_empty
+    movzwl  (%rsi, %rdx, 2), %edi
+    inc     %rdx
+    test    %edi, %edi                  # 0x0000 separator?
+    jnz     .enum_field_skip_tag
+    # rdx now points past the first separator
+
+    # Skip 'index' more fields (each field ends with 0x0000 or end of chain)
+    xor     %r8d, %r8d                 # current_field = 0
+.enum_field_find:
+    cmp     %rax, %r8
+    jae     .enum_field_extract
+    # Skip to next separator
+.enum_field_skip:
+    cmp     %rcx, %rdx
+    jae     .enum_field_empty
+    movzwl  (%rsi, %rdx, 2), %edi
+    inc     %rdx
+    test    %edi, %edi
+    jnz     .enum_field_skip
+    inc     %r8
+    jmp     .enum_field_find
+
+.enum_field_extract:
+    # Extract field: from current rdx to next separator or end
+    mov     %rdx, %r8                  # field_start
+.enum_field_count:
+    cmp     %rcx, %rdx
+    jae     .enum_field_copy
+    movzwl  (%rsi, %rdx, 2), %edi
+    test    %edi, %edi
+    jz      .enum_field_copy
+    inc     %rdx
+    jmp     .enum_field_count
+
+.enum_field_copy:
+    # Field molecules from r8 to rdx
+    mov     %rdx, %r9
+    sub     %r8, %r9                   # field_mol_count
+    # Copy to heap
+    lea     (%rsi, %r8, 2), %rsi       # source ptr
+    mov     %r15, %rdi                 # dest
+    mov     %r15, %rax                 # save result ptr
+    mov     %r9, %rcx
+    shl     $1, %rcx                   # byte_count
+    rep     movsb
+    mov     %rdi, %r15                 # bump heap
+    mov     %rax, (%r14)               # result ptr
+    mov     %r9, 8(%r14)               # result mol_count
+    jmp     vm_loop
+
+.enum_field_empty:
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# No-op builtins: pop args and discard
+.call_noop_pop1:
+    add     %rcx, %r13
+    add     $16, %r14                  # pop 1
+    jmp     vm_loop
+
+.call_noop_pop2:
+    add     %rcx, %r13
+    add     $32, %r14                  # pop 2
+    jmp     vm_loop
+
+# __use_module_selective: pop count, then count imports, then module name
+.call_use_module_selective:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax             # count
+    add     $16, %r14                  # pop count
+    inc     %rax                       # +1 for module name
+    shl     $4, %rax                   # (count+1) * 16
+    add     %rax, %r14                 # pop all imports + module name
+    jmp     vm_loop
+
 # Eval bytecode (nested execution)
 # ═══════════════════════════════════════════════════════════════════════════
 
