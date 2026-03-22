@@ -2800,8 +2800,7 @@ op_cmp_ge:
     movsd   (%r14), %xmm1             # b
     add     $16, %r14                  # pop 1
     pop     %rax                       # restore op_id
-    ucomisd %xmm1, %xmm0
-    # Dispatch based on op_id
+    # Dispatch op_id FIRST, then ucomisd (to avoid clobbering flags)
     test    %al, %al
     jz      .cmp_f64_lt
     cmp     $1, %al
@@ -2809,15 +2808,19 @@ op_cmp_ge:
     cmp     $2, %al
     je      .cmp_f64_le
     # op_id == 3: GE
+    ucomisd %xmm1, %xmm0
     jae     .cmp_true
     jmp     .cmp_false
 .cmp_f64_lt:
+    ucomisd %xmm1, %xmm0
     jb      .cmp_true
     jmp     .cmp_false
 .cmp_f64_gt:
+    ucomisd %xmm1, %xmm0
     ja      .cmp_true
     jmp     .cmp_false
 .cmp_f64_le:
+    ucomisd %xmm1, %xmm0
     jbe     .cmp_true
     jmp     .cmp_false
 
