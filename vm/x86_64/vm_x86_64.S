@@ -2018,10 +2018,43 @@ op_emit:
     test    %rdx, %rdx
     jz      vm_loop
 
-    # Write chain bytes to stdout
+    # Check if this is a string chain (molecules with 0x21xx pattern)
+    # First molecule top byte = 0x21 → string encoded
+    movzwl  (%rsi), %eax
+    and     $0xFF00, %eax
+    cmp     $0x2100, %eax
+    jne     .emit_raw
+
+    # String chain: decode molecules to ASCII bytes on heap, then print
+    push    %rsi
+    push    %rdx
+    mov     %r15, %rdi                  # decode buffer = heap
+    mov     %rdx, %rcx                  # mol_count
+.emit_decode_loop:
+    test    %rcx, %rcx
+    jz      .emit_decode_done
+    movzwl  (%rsi), %eax               # read u16 molecule
+    movb    %al, (%rdi)                 # store lower byte (ASCII value)
+    add     $2, %rsi                    # next molecule
+    inc     %rdi                        # next output byte
+    dec     %rcx
+    jmp     .emit_decode_loop
+.emit_decode_done:
+    pop     %rdx                        # mol_count = string length
+    pop     %rsi
+    mov     %r15, %rsi                  # buf = decoded bytes
+    mov     $1, %edi                    # stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .emit_newline
+
+.emit_raw:
+    # Raw chain bytes — write directly
     mov     $1, %edi                   # fd = stdout
     mov     $SYS_WRITE, %eax
     syscall
+
+.emit_newline:
     # Print newline after emit
     lea     str_newline(%rip), %rsi
     mov     $1, %edx
