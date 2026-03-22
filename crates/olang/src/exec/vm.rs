@@ -18,9 +18,24 @@ use crate::molecular::{Molecule, MolecularChain};
 // VmEvent — side effects VM muốn thực hiện
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Fast check: is this chain a string-encoded chain? (shape=2, rel=1 for all molecules)
+/// Zero-allocation string ordering comparison.
+/// Compares lower 8 bits (byte values) of each molecule lexicographically.
+#[inline]
+fn chain_cmp_bytes(a: &MolecularChain, b: &MolecularChain) -> core::cmp::Ordering {
+    for (ma, mb) in a.0.iter().zip(b.0.iter()) {
+        let ba = (ma & 0xFF) as u8;
+        let bb = (mb & 0xFF) as u8;
+        match ba.cmp(&bb) {
+            core::cmp::Ordering::Equal => continue,
+            ord => return ord,
+        }
+    }
+    a.0.len().cmp(&b.0.len())
+}
+
+/// Fast check: is this chain a string-encoded chain? (shape=2, rel=1 marker)
 /// String molecules have top byte = 0x21 (shape=2 in bits[15:12], rel=1 in bits[11:8]).
-/// Used to prevent 4-char strings being misinterpreted as f64 numbers in comparisons.
+/// Must check ALL molecules to reject mixed chains (string+separator arrays).
 #[inline]
 fn is_string_chain(chain: &MolecularChain) -> bool {
     !chain.is_empty() && chain.0.iter().all(|&bits| bits & 0xFF00 == 0x2100)
@@ -717,14 +732,13 @@ fn call_closure_inline(
                         let b = local_stack.pop().unwrap_or_default();
                         let a = local_stack.pop().unwrap_or_default();
                         let result = if is_string_chain(&a) || is_string_chain(&b) {
-                            let sa = chain_to_string(&a).unwrap_or_default();
-                            let sb = chain_to_string(&b).unwrap_or_default();
+                            let ord = chain_cmp_bytes(&a, &b);
                             match fname.as_str() {
-                                "__cmp_lt" => sa < sb,
-                                "__cmp_gt" => sa > sb,
-                                "__cmp_le" => sa <= sb,
-                                "__cmp_ge" => sa >= sb,
-                                "__cmp_ne" => sa != sb,
+                                "__cmp_lt" => ord == core::cmp::Ordering::Less,
+                                "__cmp_gt" => ord == core::cmp::Ordering::Greater,
+                                "__cmp_le" => ord != core::cmp::Ordering::Greater,
+                                "__cmp_ge" => ord != core::cmp::Ordering::Less,
+                                "__cmp_ne" => ord != core::cmp::Ordering::Equal,
                                 _ => false,
                             }
                         } else if let (Some(fa), Some(fb)) =
@@ -1021,14 +1035,14 @@ impl OlangVM {
                             // String-first: check encoding BEFORE to_number() to prevent
                             // 4-char strings from being miscompared as denormalized f64.
                             let truthy = if is_string_chain(&a) || is_string_chain(&b) {
-                                let sa = chain_to_string(&a).unwrap_or_default();
-                                let sb = chain_to_string(&b).unwrap_or_default();
+                                // Zero-alloc string comparison via raw u16 byte values
+                                let ord = chain_cmp_bytes(&a, &b);
                                 match name.as_str() {
-                                    "__cmp_lt" => sa < sb,
-                                    "__cmp_gt" => sa > sb,
-                                    "__cmp_le" => sa <= sb,
-                                    "__cmp_ge" => sa >= sb,
-                                    "__cmp_ne" => sa != sb,
+                                    "__cmp_lt" => ord == core::cmp::Ordering::Less,
+                                    "__cmp_gt" => ord == core::cmp::Ordering::Greater,
+                                    "__cmp_le" => ord != core::cmp::Ordering::Greater,
+                                    "__cmp_ge" => ord != core::cmp::Ordering::Less,
+                                    "__cmp_ne" => ord != core::cmp::Ordering::Equal,
                                     _ => false,
                                 }
                             } else if let (Some(na), Some(nb)) =
@@ -3753,14 +3767,13 @@ impl OlangVM {
                         }
                         "__str_char_at" => {
                             // Stack: [string, index] → single char string or empty
+                            // Zero-allocation: direct index into molecule array
                             let idx = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_str = chain_to_string(&s).unwrap_or_default();
                             let i = idx.to_number().unwrap_or(0.0) as usize;
-                            if let Some(ch) = s_str.chars().nth(i) {
-                                let mut buf = [0u8; 4];
-                                let c_str = ch.encode_utf8(&mut buf);
-                                let _ = stack.push(string_to_chain(c_str));
+                            if i < s.0.len() && is_string_chain(&s) {
+                                // Direct O(1) access — no String allocation
+                                let _ = stack.push(MolecularChain(alloc::vec![s.0[i]]));
                             } else {
                                 let _ = stack.push(MolecularChain::empty());
                             }
