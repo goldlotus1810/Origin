@@ -88,6 +88,9 @@ fn compile_dir(dir: &Path, output: &mut Vec<u8>) -> Result<(), CompileError> {
         eprintln!("  Compiling: {}", path.display());
         match compile_file(&path) {
             Ok(mut bytecode) => {
+                if bytecode.len() <= 1 {
+                    eprintln!("    ⚠ {} bytes (empty — parse failed?)", bytecode.len());
+                }
                 // B7: Strip trailing Halt (0x0F) from each file's bytecode
                 // so execution continues to the next file. The final Halt
                 // is appended by compile_all() after all files.
