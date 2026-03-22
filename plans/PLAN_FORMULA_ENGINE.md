@@ -1,8 +1,64 @@
 # PLAN — Formula Engine: Gia tri = Cong thuc = Hinh dang
 
 **Ngay:** 2026-03-22
-**Cap nhat:** 2026-03-22 (ban chi tiet)
+**Cap nhat:** 2026-03-22 (ban chi tiet + T×S insight)
 **Van de:** 3/5 chieu (R, V, A) co cong thuc trong UDC_DOC nhung code KHONG dung.
+
+---
+
+## ⚠️ CRITICAL INSIGHT: T × S = Vo han hinh dang
+
+```
+T KHONG CHI LA "thoi gian" — T LA THAM SO CHO SDF.
+
+  S = WHAT shape (sphere, box, cylinder...)
+  T = HOW BIG, WHERE, HOW FAST (amplitude, frequency, phase)
+  S × T = hinh dang CU THE voi kich thuoc, vi tri, chuyen dong
+
+Vi du:
+  S=SPHERE, T={amp=3.0, phase=0}           → qua cau lon (r=3.0)
+  S=SPHERE, T={amp=1.5, phase=π}           → qua cau nho (r=1.5), dich len tren
+  compose(L, N) = union(f_L, f_N)          → ⛄ NGUOI TUYET
+
+  S=BOX, T={amp=2.0, freq=0.1}            → hop rung (size=2, oscillate)
+  S=TORUS, T={amp=0.5, freq=1.0}          → donut xoay
+  S=CYLINDER, T={amp=5, phase=π/2}        → ong nghieng
+
+18 SDF primitives × T spline knots = VO HAN hinh dang tu HUU HAN nguyen lieu.
+
+SDF formula co san:
+  f(p) = |p| - r         SPHERE    nhung r = T.amplitude
+  f(p) = max(|p|-b, 0)   BOX       nhung b = T.amplitude × (1,1,1)
+  f(p) = p.y - h         PLANE     nhung h = T.amplitude
+  ... moi SDF primitive co THAM SO ma T cung cap.
+
+T.frequency → chuyen dong (oscillation, rotation)
+T.phase → vi tri/goc (offset, orientation)
+T.amplitude → kich thuoc (radius, width, height)
+T.duration → thoi gian ton tai (lifetime)
+
+V du phuc tap:
+  "nha" = compose(
+    BOX   + T{amp=(4,3,4)}     → than nha (4×3×4)
+    PYRAMID + T{amp=(5,2,5)}   → mai nha (tam giac tren)
+    BOX   + T{amp=(1,2,0.1)}   → cua (hop nho)
+  )
+
+  "nguoi" = compose(
+    SPHERE   + T{amp=1.0}      → dau
+    CYLINDER + T{amp=(0.5,3)}  → than
+    CYLINDER + T{amp=(0.3,2)}  → tay ×2
+    CYLINDER + T{amp=(0.4,3)}  → chan ×2
+  )
+
+  BAT KY concept nao cung co the RENDER thanh hinh 3D
+  vi S cho hinh dang, T cho kich thuoc, R cho cach ghep,
+  V cho mau sac (gradient tu potential), A cho chuyen dong.
+
+  5D → 1 vat the hoan chinh: hinh + quan he + cam xuc + nang luong + thoi gian.
+```
+
+---
 Gia tri chi la so tinh — khong evaluate, khong reconstruct, khong render.
 
 **Nguyen tac:** Doc gia tri → biet cong thuc → biet hinh dang. KHONG can ai giai thich.
