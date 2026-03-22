@@ -2172,6 +2172,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "str_substr" => Some("__str_substr"),
                 "substr" => Some("__str_substr"),      // freestanding alias for bootstrap
                 "char_at" => Some("__str_char_at"),    // freestanding alias for bootstrap
+                "is_keyword" => Some("__str_is_keyword"), // O(1) keyword check for lexer.ol
                 // Math builtins
                 "floor" => Some("__hyp_floor"),
                 "ceil" => Some("__hyp_ceil"),

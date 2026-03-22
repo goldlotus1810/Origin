@@ -856,7 +856,9 @@ impl OlangVM {
         let mut lower_cache: Option<crate::exec::ir::OlangProgram> = None;
 
         while pc < prog.ops.len() {
-            if steps >= self.max_steps {
+            // Batch step check: only compare max_steps every 256 iterations
+            steps += 1;
+            if steps & 0xFF == 0 && steps >= self.max_steps {
                 // If in try block, jump to catch instead of halting
                 if let Some(catch_pc) = try_stack.pop() {
                     pc = catch_pc;
@@ -865,7 +867,6 @@ impl OlangVM {
                 events.push(VmEvent::Error(VmError::MaxStepsExceeded));
                 break;
             }
-            steps += 1;
 
             let op = &prog.ops[pc];
             pc += 1;
@@ -3774,6 +3775,25 @@ impl OlangVM {
                             if i < s.0.len() && is_string_chain(&s) {
                                 // Direct O(1) access — no String allocation
                                 let _ = stack.push(MolecularChain(alloc::vec![s.0[i]]));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+
+                        "__str_is_keyword" => {
+                            // O(1) keyword check — replaces is_keyword() loop in lexer.ol
+                            let s = vm_pop!(stack, events);
+                            let bytes: Vec<u8> = s.0.iter().map(|&b| (b & 0xFF) as u8).collect();
+                            let is_kw = matches!(&bytes[..],
+                                b"let" | b"fn" | b"if" | b"else" | b"loop" | b"while" |
+                                b"for" | b"in" | b"return" | b"break" | b"continue" |
+                                b"emit" | b"type" | b"union" | b"impl" | b"trait" |
+                                b"match" | b"try" | b"catch" | b"spawn" | b"select" |
+                                b"timeout" | b"from" | b"use" | b"mod" | b"pub" |
+                                b"true" | b"false"
+                            );
+                            if is_kw {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
                             } else {
                                 let _ = stack.push(MolecularChain::empty());
                             }

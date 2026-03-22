@@ -713,7 +713,11 @@ Quy trình:
   ① Cần tính eval_valence(v=6)?
   ② Lấy tất cả nodes có V=6 từ KnowTree (hoặc json fallback)
   ③ Thay vì scan hết → lấy K mẫu (K = Fib(n), adaptive)
-  ④ Tính trung bình từ mẫu → ước lượng potential, force, barrier
+  ④ Tính từ mẫu:
+     - Structural lookup (ValenceState, ArousalState): trung bình OK
+       (đây là P_weight gốc, không phải runtime emotion)
+     - Emotion pipeline (V/A/D/I runtime): KHÔNG trung bình — AMPLIFY qua Silk walk
+       (Rule CLAUDE.md: "KHÔNG trung bình cảm xúc")
   ⑤ Kết quả feed back vào KnowTree (Hebbian strengthen)
 
 Tại sao KHÔNG xung đột spec:
