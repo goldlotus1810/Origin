@@ -36,6 +36,69 @@ use alloc::vec::Vec;
 
 use crate::molecular::MolecularChain;
 
+/// Builtin IDs for Op::CallBuiltin — O(1) dispatch table.
+/// Each ID maps to an inlined handler in the VM main loop.
+pub(crate) const BID_EQ: u8 = 0;
+pub(crate) const BID_CMP_LT: u8 = 1;
+pub(crate) const BID_CMP_GT: u8 = 2;
+pub(crate) const BID_CMP_LE: u8 = 3;
+pub(crate) const BID_CMP_GE: u8 = 4;
+pub(crate) const BID_CMP_NE: u8 = 5;
+pub(crate) const BID_HYP_ADD: u8 = 6;
+pub(crate) const BID_HYP_SUB: u8 = 7;
+pub(crate) const BID_HYP_MUL: u8 = 8;
+pub(crate) const BID_HYP_DIV: u8 = 9;
+pub(crate) const BID_LOGIC_NOT: u8 = 10;
+pub(crate) const BID_ASSERT_TRUTH: u8 = 11;
+pub(crate) const BID_ARRAY_NEW: u8 = 12;
+pub(crate) const BID_ARRAY_GET: u8 = 13;
+pub(crate) const BID_ARRAY_LEN: u8 = 14;
+pub(crate) const BID_ARRAY_PUSH: u8 = 15;
+pub(crate) const BID_DICT_NEW: u8 = 16;
+pub(crate) const BID_DICT_GET: u8 = 17;
+pub(crate) const BID_DICT_SET: u8 = 18;
+pub(crate) const BID_STR_CHAR_AT: u8 = 19;
+pub(crate) const BID_STR_SUBSTR: u8 = 20;
+pub(crate) const BID_STR_LEN: u8 = 21;
+pub(crate) const BID_STR_CONCAT: u8 = 22;
+pub(crate) const BID_TO_STRING: u8 = 23;
+pub(crate) const BID_TO_NUM: u8 = 24;
+pub(crate) const BID_STR_IS_KEYWORD: u8 = 25;
+pub(crate) const BID_PHYS_ADD: u8 = 26;
+pub(crate) const BID_PHYS_SUB: u8 = 27;
+pub(crate) const BID_HYP_MOD: u8 = 28;
+pub(crate) const BID_CHAIN_LEN: u8 = 29;
+pub(crate) const BID_TYPE_OF: u8 = 30;
+
+/// Map builtin name → ID. Returns None for non-builtin or user functions.
+/// Only maps builtins that have INLINED handlers in CallBuiltin dispatch.
+pub fn builtin_name_to_id(name: &str) -> Option<u8> {
+    match name {
+        // Arithmetic — inlined
+        "__hyp_add" | "__phys_add" => Some(BID_HYP_ADD),
+        "__hyp_sub" | "__phys_sub" => Some(BID_HYP_SUB),
+        "__hyp_mul" => Some(BID_HYP_MUL),
+        "__hyp_div" => Some(BID_HYP_DIV),
+        "__hyp_mod" => Some(BID_HYP_MOD),
+        // Comparison — inlined
+        "__eq" => Some(BID_EQ),
+        "__cmp_lt" => Some(BID_CMP_LT),
+        "__cmp_gt" => Some(BID_CMP_GT),
+        "__cmp_le" => Some(BID_CMP_LE),
+        "__cmp_ge" => Some(BID_CMP_GE),
+        "__cmp_ne" => Some(BID_CMP_NE),
+        // Logic — inlined
+        "__logic_not" => Some(BID_LOGIC_NOT),
+        "__assert_truth" => Some(BID_ASSERT_TRUTH),
+        // String — inlined
+        "__str_char_at" => Some(BID_STR_CHAR_AT),
+        "__str_substr" => Some(BID_STR_SUBSTR),
+        "__str_is_keyword" => Some(BID_STR_IS_KEYWORD),
+        // Everything else stays as Op::Call(String) for now
+        _ => None,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Opcode
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +120,9 @@ pub enum Op {
     Emit,
     /// Call named block
     Call(String),
+    /// Call builtin by ID — O(1) dispatch instead of string matching.
+    /// Top 32 most frequent builtins use this for performance.
+    CallBuiltin(u8),
     /// Return từ block hiện tại
     Ret,
     /// Jump đến label (index trong program)
@@ -201,6 +267,7 @@ impl Op {
             Self::Query(_) => "QUERY",
             Self::Emit => "EMIT",
             Self::Call(_) => "CALL",
+            Self::CallBuiltin(_) => "CALL_BUILTIN",
             Self::Ret => "RET",
             Self::Jmp(_) => "JMP",
             Self::Jz(_) => "JZ",
@@ -294,6 +361,7 @@ impl Op {
                 b.extend_from_slice(sb);
                 b
             }
+            Self::CallBuiltin(id) => alloc::vec![0x3A, *id],
             Self::Store(s) => {
                 let sb = s.as_bytes();
                 let mut b = alloc::vec![0x33, sb.len() as u8];

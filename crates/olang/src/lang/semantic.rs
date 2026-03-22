@@ -1236,6 +1236,15 @@ impl LowerCtx {
         self.prog.push_op(op);
     }
 
+    /// Emit a function call — uses CallBuiltin for known builtins (O(1) dispatch).
+    fn emit_call(&mut self, name: &str) {
+        if let Some(id) = crate::exec::ir::builtin_name_to_id(name) {
+            self.prog.push_op(Op::CallBuiltin(id));
+        } else {
+            self.prog.push_op(Op::Call(name.into()));
+        }
+    }
+
     fn current_pos(&self) -> usize {
         self.prog.ops.len()
     }
@@ -1323,7 +1332,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             for name in names {
                 ctx.emit(Op::LoadLocal("__destructure_tmp".into()));
                 ctx.emit(Op::Push(string_to_key_chain(name)));
-                ctx.emit(Op::Call("__dict_get".into()));
+                ctx.emit_call("__dict_get");
                 ctx.emit(Op::Store(name.clone()));
                 ctx.locals.push(name.clone());
             }
@@ -1472,7 +1481,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 }
                 // Increment counter on stack
                 ctx.emit(Op::PushNum(1.0));
-                ctx.emit(Op::Call("__hyp_add".into()));
+                ctx.emit_call("__hyp_add");
                 ctx.emit(Op::ScopeEnd);
                 let end_pos = ctx.current_pos();
                 // Patch break → past loop
@@ -1492,7 +1501,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             lower_expr(iter, ctx);
             // Store arr as local
             ctx.emit(Op::Dup);                   // dup for len
-            ctx.emit(Op::Call("__array_len".into()));
+            ctx.emit_call("__array_len");
             ctx.emit(Op::Store("__foreach_len".into()));
             ctx.locals.push("__foreach_len".into());
             ctx.emit(Op::Store("__foreach_arr".into()));
@@ -1504,7 +1513,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             // Check idx >= len → break
             ctx.emit(Op::Dup);                   // [..., idx, idx]
             ctx.emit(Op::LoadLocal("__foreach_len".into()));
-            ctx.emit(Op::Call("__cmp_ge".into())); // idx >= len → truthy
+            ctx.emit_call("__cmp_ge"); // idx >= len → truthy
             let jz_pos = ctx.current_pos();
             ctx.emit(Op::Jz(0));                 // if falsy (idx < len) → continue
             ctx.emit(Op::Pop);                   // pop cmp result (truthy)
@@ -1519,7 +1528,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::Dup);                   // [..., idx, idx]
             ctx.emit(Op::LoadLocal("__foreach_arr".into())); // [..., idx, idx, arr]
             ctx.emit(Op::Swap);                  // [..., idx, arr, idx]
-            ctx.emit(Op::Call("__array_get".into())); // [..., idx, elem]
+            ctx.emit_call("__array_get"); // [..., idx, elem]
             ctx.emit(Op::Store(var.clone()));
             ctx.locals.push(var.clone());
 
@@ -1542,7 +1551,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
             // Increment index
             ctx.emit(Op::PushNum(1.0));
-            ctx.emit(Op::Call("__hyp_add".into()));
+            ctx.emit_call("__hyp_add");
             ctx.emit(Op::ScopeEnd);
 
             let end_pos = ctx.current_pos();
@@ -1581,7 +1590,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 }
                 ctx.emit(Op::Push(string_to_key_chain(&fields[0])));
                 lower_expr(value, ctx);
-                ctx.emit(Op::Call("__dict_set".into()));
+                ctx.emit_call("__dict_set");
                 ctx.emit(Op::StoreUpdate(object.clone()));
             } else {
                 // Nested: obj.a.b.c = value
@@ -1601,12 +1610,12 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                     ctx.emit(Op::Store(local_name.clone()));
                     ctx.locals.push(local_name);
                     ctx.emit(Op::Push(string_to_key_chain(field)));
-                    ctx.emit(Op::Call("__dict_get".into()));
+                    ctx.emit_call("__dict_get");
                 }
                 // Set the last field on the innermost dict
                 ctx.emit(Op::Push(string_to_key_chain(&fields[depth - 1])));
                 lower_expr(value, ctx);
-                ctx.emit(Op::Call("__dict_set".into()));
+                ctx.emit_call("__dict_set");
                 // Rebuild path from inside out
                 for i in (0..depth - 1).rev() {
                     let local_name: String = alloc::format!("__nested_{}", i);
@@ -1614,7 +1623,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                     ctx.emit(Op::Swap); // [parent, modified_child]
                     ctx.emit(Op::Push(string_to_key_chain(&fields[i])));
                     ctx.emit(Op::Swap); // [parent, key, modified_child]
-                    ctx.emit(Op::Call("__dict_set".into()));
+                    ctx.emit_call("__dict_set");
                 }
                 ctx.emit(Op::StoreUpdate(object.clone()));
             }
@@ -1625,7 +1634,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             lower_expr(object, ctx);
             lower_expr(index, ctx);
             lower_expr(value, ctx);
-            ctx.emit(Op::Call("__array_set".into()));
+            ctx.emit_call("__array_set");
             // __array_set pushes modified array back — store it if object is a simple ident
             if let Expr::Ident(name) = object {
                 ctx.emit(Op::StoreUpdate(name.clone()));
@@ -1638,21 +1647,21 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             // Emit a Load for the module name — runtime can intercept and load the module
             ctx.emit(Op::Load(module.clone()));
             if imports.is_empty() {
-                ctx.emit(Op::Call("__use_module".into()));
+                ctx.emit_call("__use_module");
             } else {
                 // Selective imports: push import names, then call with count
                 for imp in imports {
                     ctx.emit(Op::Load(imp.clone()));
                 }
                 ctx.emit(Op::PushNum(imports.len() as f64));
-                ctx.emit(Op::Call("__use_module_selective".into()));
+                ctx.emit_call("__use_module_selective");
             }
         }
 
         Stmt::ModDecl(path) => {
             // Module declaration — register module path
             ctx.emit(Op::Load(path.clone()));
-            ctx.emit(Op::Call("__mod_decl".into()));
+            ctx.emit_call("__mod_decl");
         }
 
         Stmt::Pub(inner) => {
@@ -1803,7 +1812,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::LoadLocal(subj_var.clone()));
                         ctx.emit(Op::TypeOf);
                         ctx.emit(Op::Load(name.clone()));
-                        ctx.emit(Op::Call("__match_type".into()));
+                        ctx.emit_call("__match_type");
                         let jz_pos = ctx.current_pos();
                         ctx.emit(Op::Jz(0)); // skip body if no match
                         ctx.emit(Op::Pop); // pop match result
@@ -1829,7 +1838,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::LoadLocal(subj_var.clone()));
                         let tag = alloc::format!("{}::{}", enum_name, variant);
                         ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
-                        ctx.emit(Op::Call("__match_enum".into()));
+                        ctx.emit_call("__match_enum");
                         let jz_pos = ctx.current_pos();
                         ctx.emit(Op::Jz(0));
                         ctx.emit(Op::Pop);
@@ -1840,7 +1849,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         for (bi, binding_name) in bindings.iter().enumerate() {
                             ctx.emit(Op::LoadLocal(subj_var.clone()));
                             ctx.emit(Op::PushNum(bi as f64));
-                            ctx.emit(Op::Call("__enum_field".into()));
+                            ctx.emit_call("__enum_field");
                             ctx.emit(Op::Store(binding_name.clone()));
                             ctx.locals.push(binding_name.clone());
                         }
@@ -1867,7 +1876,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         let t = time.unwrap_or(3) as u8;
                         let packed = crate::molecular::Molecule::pack(s, r, v, a, t).bits;
                         ctx.emit(Op::PushMol(packed));
-                        ctx.emit(Op::Call("__match_mol".into()));
+                        ctx.emit_call("__match_mol");
                         let jz_pos = ctx.current_pos();
                         ctx.emit(Op::Jz(0));
                         ctx.emit(Op::Pop);
@@ -1905,7 +1914,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                             ctx.emit(Op::PushMol(packed));
                         }
                         ctx.emit(Op::PushNum(count as f64));
-                        ctx.emit(Op::Call("__match_mol_constraint".into()));
+                        ctx.emit_call("__match_mol_constraint");
                         let jz_pos = ctx.current_pos();
                         ctx.emit(Op::Jz(0));
                         ctx.emit(Op::Pop);
@@ -1950,9 +1959,9 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 ctx.emit(Op::Push(crate::vm::string_to_chain(&f.name)));
             }
             ctx.emit(Op::PushNum(fields.len() as f64));
-            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit_call("__array_new");
             ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
-            ctx.emit(Op::Call("__struct_def".into()));
+            ctx.emit_call("__struct_def");
         }
 
         Stmt::EnumDef { name, variants, .. } => {
@@ -1961,9 +1970,9 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 ctx.emit(Op::Push(crate::vm::string_to_chain(&v.name)));
             }
             ctx.emit(Op::PushNum(variants.len() as f64));
-            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit_call("__array_new");
             ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
-            ctx.emit(Op::Call("__enum_def".into()));
+            ctx.emit_call("__enum_def");
         }
 
         Stmt::ImplBlock { target, methods } => {
@@ -2000,7 +2009,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             // Emit runtime trait→type registration
             ctx.emit(Op::Push(crate::vm::string_to_chain(trait_name)));
             ctx.emit(Op::Push(crate::vm::string_to_chain(target)));
-            ctx.emit(Op::Call("__trait_impl_register".into()));
+            ctx.emit_call("__trait_impl_register");
         }
 
         Stmt::TraitDef { name, methods, .. } => {
@@ -2010,9 +2019,9 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 ctx.emit(Op::Push(crate::vm::string_to_chain(&m.name)));
             }
             ctx.emit(Op::PushNum(methods.len() as f64));
-            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit_call("__array_new");
             ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
-            ctx.emit(Op::Call("__trait_def".into()));
+            ctx.emit_call("__trait_def");
         }
 
         Stmt::Spawn { body } => {
@@ -2302,7 +2311,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                         lower_expr(arg, ctx);
                     }
                 }
-                ctx.emit(Op::Call(builtin_name.into()));
+                ctx.emit_call(builtin_name);
                 // Mutating builtins: store result back into the first arg
                 // push(arr, elem) → arr = __array_push(arr, elem)
                 if builtin_name == "__array_push" {
@@ -2436,7 +2445,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                         }
                         // Push constraint count
                         ctx.emit(Op::PushNum(constraint.dims.len() as f64));
-                        ctx.emit(Op::Call("__check_constraint".into()));
+                        ctx.emit_call("__check_constraint");
                     }
                 }
 
@@ -2558,7 +2567,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             // QT3: == = proven truth
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
-            ctx.emit(Op::Call("__assert_truth".into()));
+            ctx.emit_call("__assert_truth");
         }
 
         Expr::Compare { lhs, op, rhs } => {
@@ -2574,7 +2583,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 CmpOp::Ne => "__cmp_ne",
                 CmpOp::Eq => "__eq",
             };
-            ctx.emit(Op::Call(builtin.into()));
+            ctx.emit_call(builtin);
         }
 
         Expr::LogicAnd(a, b) => {
@@ -2609,7 +2618,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         Expr::LogicNot(inner) => {
             // !expr: empty → non-empty (1.0), non-empty → empty
             lower_expr(inner, ctx);
-            ctx.emit(Op::Call("__logic_not".into()));
+            ctx.emit_call("__logic_not");
         }
 
         Expr::Str(s) => {
@@ -2628,14 +2637,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 lower_expr(e, ctx);
             }
             ctx.emit(Op::PushNum(elements.len() as f64));
-            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit_call("__array_new");
         }
 
         Expr::Index { array, index } => {
             // Push array, push index, call __array_get
             lower_expr(array, ctx);
             lower_expr(index, ctx);
-            ctx.emit(Op::Call("__array_get".into()));
+            ctx.emit_call("__array_get");
         }
 
         Expr::Slice { object, start, end } => {
@@ -2651,7 +2660,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
             } else {
                 ctx.emit(Op::PushNum(u32::MAX as f64));
             }
-            ctx.emit(Op::Call("__str_slice".into()));
+            ctx.emit_call("__str_slice");
         }
 
         Expr::Dict(fields) => {
@@ -2663,14 +2672,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 lower_expr(value, ctx);
             }
             ctx.emit(Op::PushNum(fields.len() as f64)); // number of pairs
-            ctx.emit(Op::Call("__dict_new".into()));
+            ctx.emit_call("__dict_new");
         }
 
         Expr::FieldAccess { object, field } => {
             // obj.field → load obj, push field key chain, __dict_get
             lower_expr(object, ctx);
             ctx.emit(Op::Push(string_to_key_chain(field)));
-            ctx.emit(Op::Call("__dict_get".into()));
+            ctx.emit_call("__dict_get");
         }
 
         Expr::Pipe(left, right) => {
@@ -2772,7 +2781,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 _ => {
                     // Fallback: evaluate right, treat as function call
                     lower_expr(right, ctx);
-                    ctx.emit(Op::Call("__pipe_apply".into()));
+                    ctx.emit_call("__pipe_apply");
                 }
             }
         }
@@ -2841,10 +2850,10 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 lower_expr(value, ctx);
             }
             ctx.emit(Op::PushNum(fields.len() as f64));
-            ctx.emit(Op::Call("__dict_new".into()));
+            ctx.emit_call("__dict_new");
             // Tag with struct type name
             ctx.emit(Op::Push(crate::vm::string_to_chain(name)));
-            ctx.emit(Op::Call("__struct_tag".into()));
+            ctx.emit_call("__struct_tag");
         }
 
         Expr::EnumVariantExpr { enum_name, variant, args } => {
@@ -2899,14 +2908,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
                 if args.is_empty() {
                     // Unit variant: just the tag
-                    ctx.emit(Op::Call("__enum_unit".into()));
+                    ctx.emit_call("__enum_unit");
                 } else {
                     // Variant with payload
                     for arg in args {
                         lower_expr(arg, ctx);
                     }
                     ctx.emit(Op::PushNum(args.len() as f64));
-                    ctx.emit(Op::Call("__enum_payload".into()));
+                    ctx.emit_call("__enum_payload");
                 }
             }
         }
@@ -3097,7 +3106,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     }
                     ctx.emit(Op::PushNum(args.len() as f64 + 1.0)); // +1 for self
                     ctx.emit(Op::Push(crate::vm::string_to_chain(method)));
-                    ctx.emit(Op::Call("__method_call".into()));
+                    ctx.emit_call("__method_call");
                 }
             }
         }
@@ -3107,7 +3116,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         }
 
         Expr::ChannelCreate => {
-            ctx.emit(Op::Call("__channel_new".into()));
+            ctx.emit_call("__channel_new");
         }
 
         Expr::UnwrapOr { value, default } => {
@@ -3132,7 +3141,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         Expr::TryPropagate(inner) => {
             // ? operator: evaluate inner, check if Err/None → early return, else unwrap Ok/Some payload
             lower_expr(inner, ctx);
-            ctx.emit(Op::Call("__try_unwrap".into()));
+            ctx.emit_call("__try_unwrap");
         }
 
         Expr::Tuple(elements) => {
@@ -3141,7 +3150,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 lower_expr(e, ctx);
             }
             ctx.emit(Op::PushNum(elements.len() as f64));
-            ctx.emit(Op::Call("__array_new".into()));
+            ctx.emit_call("__array_new");
         }
 
         // ── Phase 3 B5: f-string interpolation ─────────────────────────────
@@ -3156,10 +3165,10 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     }
                     FStrPart::Expr(expr) => {
                         lower_expr(expr, ctx);
-                        ctx.emit(Op::Call("__to_string".into()));
+                        ctx.emit_call("__to_string");
                     }
                 }
-                ctx.emit(Op::Call("__str_concat".into()));
+                ctx.emit_call("__str_concat");
             }
         }
 
@@ -3167,31 +3176,31 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
         Expr::BitShl(lhs, rhs) => {
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
-            ctx.emit(Op::Call("__bit_shl".into()));
+            ctx.emit_call("__bit_shl");
         }
         Expr::BitShr(lhs, rhs) => {
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
-            ctx.emit(Op::Call("__bit_shr".into()));
+            ctx.emit_call("__bit_shr");
         }
         Expr::BitAnd(lhs, rhs) => {
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
-            ctx.emit(Op::Call("__bit_and".into()));
+            ctx.emit_call("__bit_and");
         }
         Expr::BitXor(lhs, rhs) => {
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
-            ctx.emit(Op::Call("__bit_xor".into()));
+            ctx.emit_call("__bit_xor");
         }
         Expr::BitOr(lhs, rhs) => {
             lower_expr(lhs, ctx);
             lower_expr(rhs, ctx);
-            ctx.emit(Op::Call("__bit_or".into()));
+            ctx.emit_call("__bit_or");
         }
         Expr::BitNot(inner) => {
             lower_expr(inner, ctx);
-            ctx.emit(Op::Call("__bit_not".into()));
+            ctx.emit_call("__bit_not");
         }
     }
 }

@@ -59,11 +59,11 @@ Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Mi
 |----|------|------|--------|---------|--------|-------|
 | P2.0 | Fix VM builtin test failures | PLAN_PHASE2 | ~200 LOC | — | DONE ✅ | VM 90/90 pass. Heap refs + string encoding bypass quantization. PR #228 #229. |
 | P2.0b | Fix 37 remaining olang test failures | — | ~300 LOC | P2.0 | DONE ✅ | 28→6 failures fixed (string cmp, closure marker, enum split, to_number). PR #239. 6 còn lại = VM perf timeout. |
-| VM.1 | String compare không allocate | PLAN_VM_OPT | ~60 LOC | — | CLAIMED | char_at/substr zero-alloc + chain_cmp_order. Session lupin-pc 2026-03-22. |
-| VM.2 | Keyword hash builtin | PLAN_VM_OPT | ~40 LOC | — | FREE | __str_is_keyword O(1) thay loop 28. |
-| VM.3 | Micro-opts (step batch + flags) | PLAN_VM_OPT | ~30 LOC | — | FREE | Batch step check /256, EarlyReturn bool flag. |
-| VM.4 | Scope variable cache | PLAN_VM_OPT | ~100 LOC | VM.1 | FREE | Inline cache 8 entries (Fib(6)), FNV-1a hash. |
-| VM.5 | Builtin dispatch table | PLAN_VM_OPT | ~200 LOC | VM.1 | FREE | Op::CallBuiltin(u8), top 32 builtins. |
+| VM.1 | String compare không allocate | PLAN_VM_OPT | ~60 LOC | — | DONE ✅ | char_at O(1) direct index, chain_cmp_bytes zero-alloc. PR #239. |
+| VM.2 | Keyword hash builtin | PLAN_VM_OPT | ~40 LOC | — | DONE ✅ | __str_is_keyword O(1) matches!() builtin. PR #239. |
+| VM.3 | Micro-opts (step batch + flags) | PLAN_VM_OPT | ~30 LOC | — | DONE ✅ | Step check mỗi 256 iterations. PR #239. |
+| VM.4 | Scope variable cache | PLAN_VM_OPT | ~100 LOC | VM.1 | DONE ✅ | FNV-1a hash, 8 entries, auto-invalidate. PR #239. |
+| VM.5 | Builtin dispatch table | PLAN_VM_OPT | ~200 LOC | VM.1 | DONE ✅ | Op::CallBuiltin(u8), 16 builtins inlined. PR #239. |
 | VM.6 | Small-chain SSO | PLAN_VM_OPT | ~300 LOC | VM.1-5 | FREE | Inline [u16;4] cho numbers/1-char. |
 | VM.7 | KnowTree sampling | PLAN_VM_OPT | ~150 LOC | FE.6 | FREE | Adaptive Fib-sized sampling, 3-tier fallback. |
 | VM.8 | Bellman path optimization | PLAN_VM_OPT | ~100 LOC | VM.7 | FREE | Q-table 55 entries, φ⁻¹ discount. |
