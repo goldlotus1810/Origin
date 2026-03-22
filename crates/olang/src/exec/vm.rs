@@ -348,10 +348,10 @@ fn glob_match(text: &str, pattern: &str) -> bool {
     pi == p.len()
 }
 
-/// Iterator-level separator molecule (shape=0xFE) — distinct from array element separator.
-/// Used to delimit sections within an iterator encoding (__ITER__ tag, source, transforms).
+/// Iterator-level separator molecule — distinct from array element separator AND closure markers.
+/// Uses raw u16 0xFE01 to avoid collision with closure marker tag (0xF000) and array sep (0xF000).
 fn iter_sep() -> Molecule {
-    Molecule::raw(0xFE, 0, 0, 0, 0)
+    Molecule::from_u16(0xFE01)
 }
 
 /// Split an iterator-encoded MolecularChain by iterator separator molecules (shape=0xFE).
@@ -501,6 +501,36 @@ pub fn split_array_chain(chain: &MolecularChain) -> Vec<MolecularChain> {
     // Last element (no trailing separator)
     result.push(MolecularChain(current));
     result
+}
+
+/// Split an enum-tagged chain (Option/Result) into [tag, payload].
+/// The tag is always a string chain (all molecules have bits & 0xFF00 == 0x2100).
+/// After the tag there is one null separator, then the payload (arbitrary encoding).
+/// Unlike split_array_chain, this finds the FIRST null separator that immediately
+/// follows a string molecule, so it won't be confused by 0x0000 inside numeric payloads.
+fn split_enum_parts(chain: &MolecularChain) -> Vec<MolecularChain> {
+    if chain.is_empty() {
+        return Vec::new();
+    }
+    // Find the boundary: last string molecule followed by null separator
+    let mut boundary = None;
+    for i in 0..chain.0.len() {
+        if chain.0[i] == 0x0000 {
+            // Check that everything before this is a string molecule
+            if i > 0 && chain.0[..i].iter().all(|&b| b & 0xFF00 == 0x2100) {
+                boundary = Some(i);
+                break;
+            }
+        }
+    }
+    if let Some(sep_idx) = boundary {
+        let tag = MolecularChain(chain.0[..sep_idx].to_vec());
+        let payload = MolecularChain(chain.0[sep_idx + 1..].to_vec());
+        alloc::vec![tag, payload]
+    } else {
+        // No separator found — return whole chain as single element (e.g. Option::None with no payload)
+        alloc::vec![chain.clone()]
+    }
 }
 
 /// Split a chain by null separators only (for dict key-value extraction).
@@ -1341,9 +1371,7 @@ impl OlangVM {
                                 // Tagged array (from push): count is stored in tag molecule
                                 let count = Molecule::from_u16(arr.0[0]).valence_u8() as f64;
                                 let _ = stack.push(MolecularChain::from_number(count));
-                            } else if !arr.0.is_empty()
-                                && Molecule::from_u16(arr.0[0]).shape() == (0x02 >> 4) && Molecule::from_u16(arr.0[0]).relation() == (0x01 >> 4)
-                                && arr.0.iter().all(|&bits| { let m = Molecule::from_u16(bits); m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4) })
+                            } else if is_string_chain(&arr)
                             {
                                 // Pure string chain: length = number of characters
                                 let _ = stack.push(MolecularChain::from_number(arr.0.len() as f64));
@@ -1553,7 +1581,7 @@ impl OlangVM {
                             // Convert value to string chain
                             let val = vm_pop!(stack, events);
                             // If already a string chain, keep as-is
-                            if !val.is_empty() && val.0.iter().all(|&bits| { let m = Molecule::from_u16(bits); m.shape() == (0x02 >> 4) && m.relation() == (0x01 >> 4) }) {
+                            if is_string_chain(&val) {
                                 let _ = stack.push(val);
                             } else {
                                 // Number → string chain
@@ -3301,7 +3329,7 @@ impl OlangVM {
                             // Stack: [option_value, closure]
                             let closure_marker = vm_pop!(stack, events);
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
                             if tag.ends_with("::None") || tag == "None" || val.is_empty() {
                                 let _ = stack.push(string_to_chain("Option::None"));
@@ -3323,7 +3351,7 @@ impl OlangVM {
                             // Stack: [result_value, closure]
                             let closure_marker = vm_pop!(stack, events);
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { String::new() };
                             if tag.ends_with("::Ok") || tag == "Ok" {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
@@ -3348,7 +3376,7 @@ impl OlangVM {
                             // If tag starts with "Result::Ok" or "Option::Some" → unwrap payload
                             // Otherwise → leave value as-is (non-enum passthrough)
                             let value = vm_pop!(stack, events);
-                            let parts = split_array_chain(&value);
+                            let parts = split_enum_parts(&value);
                             let tag_str = if !parts.is_empty() {
                                 chain_to_string(&parts[0]).unwrap_or_default()
                             } else {
@@ -3422,28 +3450,28 @@ impl OlangVM {
                         }
                         "__opt_is_some" => {
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
                             let is = tag.ends_with("::Some") || tag == "Some";
                             let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
                         }
                         "__opt_is_none" => {
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
                             let is = tag.ends_with("::None") || tag == "None" || val.is_empty();
                             let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
                         }
                         "__res_is_ok" => {
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
                             let is = tag.ends_with("::Ok") || tag == "Ok";
                             let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
                         }
                         "__res_is_err" => {
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
                             let is = tag.ends_with("::Err") || tag == "Err";
                             let _ = stack.push(MolecularChain::from_number(if is { 1.0 } else { 0.0 }));
@@ -3451,7 +3479,7 @@ impl OlangVM {
                         "__opt_unwrap" => {
                             // Unwrap Some payload, panic on None
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
                             if tag.ends_with("::None") || tag == "None" || val.is_empty() {
                                 events.push(VmEvent::Error(VmError::StackUnderflow));
@@ -3465,7 +3493,7 @@ impl OlangVM {
                             // Stack: [option_value, default_value]
                             let default = vm_pop!(stack, events);
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { chain_to_string(&val).unwrap_or_default() };
                             if tag.ends_with("::None") || tag == "None" || val.is_empty()
                                 || tag.ends_with("::Err") || tag == "Err"
@@ -3482,7 +3510,7 @@ impl OlangVM {
                             // If Err → apply closure to error payload, re-wrap as Err; if Ok → passthrough
                             let closure_marker = vm_pop!(stack, events);
                             let val = vm_pop!(stack, events);
-                            let parts = split_array_chain(&val);
+                            let parts = split_enum_parts(&val);
                             let tag = if !parts.is_empty() { chain_to_string(&parts[0]).unwrap_or_default() } else { String::new() };
                             if tag.ends_with("::Err") || tag == "Err" {
                                 let payload = if parts.len() >= 2 { parts[1].clone() } else { MolecularChain::empty() };
@@ -3873,7 +3901,8 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i < buf.0.len() {
-                                let _ = stack.push(MolecularChain::from_number(Molecule::from_u16(buf.0[i]).shape() as f64));
+                                // Raw byte stored in low 8 bits of u16
+                                let _ = stack.push(MolecularChain::from_number((buf.0[i] & 0xFF) as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
                             }
@@ -3886,7 +3915,8 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u8;
                             if i < buf.0.len() {
-                                buf.0[i] = Molecule::raw(v, 0, 0, 0, 0).bits;
+                                // Store raw byte in low 8 bits, mark high byte to avoid confusion with string/number
+                                buf.0[i] = 0x0100 | (v as u16);
                             }
                             let _ = stack.push(buf);
                         }
@@ -3896,8 +3926,8 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i + 1 < buf.0.len() {
-                                let hi = Molecule::from_u16(buf.0[i]).shape() as u16;
-                                let lo = Molecule::from_u16(buf.0[i + 1]).shape() as u16;
+                                let hi = (buf.0[i] & 0xFF) as u16;
+                                let lo = (buf.0[i + 1] & 0xFF) as u16;
                                 let _ = stack.push(MolecularChain::from_number(((hi << 8) | lo) as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
@@ -3911,8 +3941,8 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u16;
                             if i + 1 < buf.0.len() {
-                                buf.0[i] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0).bits;
-                                buf.0[i + 1] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0).bits;
+                                buf.0[i] = 0x0100 | ((v >> 8) as u16);
+                                buf.0[i + 1] = 0x0100 | ((v & 0xFF) as u16);
                             }
                             let _ = stack.push(buf);
                         }
@@ -3922,10 +3952,10 @@ impl OlangVM {
                             let buf = vm_pop!(stack, events);
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             if i + 3 < buf.0.len() {
-                                let v = (Molecule::from_u16(buf.0[i]).shape() as u32) << 24
-                                    | (Molecule::from_u16(buf.0[i + 1]).shape() as u32) << 16
-                                    | (Molecule::from_u16(buf.0[i + 2]).shape() as u32) << 8
-                                    | (Molecule::from_u16(buf.0[i + 3]).shape() as u32);
+                                let v = ((buf.0[i] & 0xFF) as u32) << 24
+                                    | ((buf.0[i + 1] & 0xFF) as u32) << 16
+                                    | ((buf.0[i + 2] & 0xFF) as u32) << 8
+                                    | ((buf.0[i + 3] & 0xFF) as u32);
                                 let _ = stack.push(MolecularChain::from_number(v as f64));
                             } else {
                                 let _ = stack.push(MolecularChain::from_number(0.0));
@@ -3939,10 +3969,10 @@ impl OlangVM {
                             let i = idx.to_number().unwrap_or(0.0) as usize;
                             let v = val.to_number().unwrap_or(0.0) as u32;
                             if i + 3 < buf.0.len() {
-                                buf.0[i] = Molecule::raw((v >> 24) as u8, 0, 0, 0, 0).bits;
-                                buf.0[i + 1] = Molecule::raw((v >> 16) as u8, 0, 0, 0, 0).bits;
-                                buf.0[i + 2] = Molecule::raw((v >> 8) as u8, 0, 0, 0, 0).bits;
-                                buf.0[i + 3] = Molecule::raw((v & 0xFF) as u8, 0, 0, 0, 0).bits;
+                                buf.0[i] = 0x0100 | ((v >> 24) & 0xFF) as u16;
+                                buf.0[i + 1] = 0x0100 | ((v >> 16) & 0xFF) as u16;
+                                buf.0[i + 2] = 0x0100 | ((v >> 8) & 0xFF) as u16;
+                                buf.0[i + 3] = 0x0100 | (v & 0xFF) as u16;
                             }
                             let _ = stack.push(buf);
                         }

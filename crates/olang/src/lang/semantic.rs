@@ -2374,11 +2374,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     };
 
                     // Emit: push closure marker, push args, CallClosure
-                    let pc_lo = (body_pc & 0xFF) as u8;
-                    let pc_hi = ((body_pc >> 8) & 0xFF) as u8;
-                    ctx.emit(Op::Push(crate::molecular::MolecularChain(
-                        alloc::vec![crate::molecular::Molecule::raw(0xFF, 0, pc_lo, pc_hi, 0).bits]
-                    )));
+                    // Closure marker must match make_closure_marker() format:
+                    // [tag_molecule, pc_low_u16, pc_high_u16] — 3 raw u16 words
+                    // so closure_body_pc() can extract body_pc correctly.
+                    let tag = crate::molecular::Molecule::raw(0xFF, param_count as u8, 0, 0, 1);
+                    let mut marker = crate::molecular::MolecularChain::single(tag);
+                    marker.push_raw(body_pc as u16);
+                    marker.push_raw((body_pc >> 16) as u16);
+                    ctx.emit(Op::Push(marker));
                     for arg in args {
                         lower_expr(arg, ctx);
                     }
@@ -8381,47 +8384,6 @@ mod tests {
         assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
         let token_count = outputs[0].to_number().expect("should be number") as usize;
         assert!(token_count > 100, "lexer.ol should produce >100 tokens, got {}", token_count);
-    }
-
-    #[test]
-    fn debug_parser_breaks_tokenize() {
-        // Binary search: which lines of parser.ol break tokenize()?
-        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
-        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
-        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
-        let parser_lines: alloc::vec::Vec<&str> = parser_src_clean.lines().collect();
-        let total = parser_lines.len();
-
-        let mut results = alloc::vec::Vec::new();
-        let checkpoints = [0usize, 10, 28, 45, 66, 67, 70, 74, 75, 77, 80, 90, 100, 150, 200, 300, 400, 500, 600, 694];
-        for &end in checkpoints.iter() {
-            if end > total { break; }
-            let chunk: alloc::string::String = if end == 0 {
-                alloc::string::String::new()
-            } else {
-                parser_lines[..end].join("\n")
-            };
-            let test_src = alloc::format!(
-                "{}\n{}\nlet toks = tokenize(\"let x = 1;\");\nemit len(toks);\n",
-                lexer_src, chunk
-            );
-            let stmts = parse(&test_src).expect("parse");
-            let prog = lower(&stmts);
-            let mut vm = crate::vm::OlangVM::new();
-            vm.max_steps = 10_000_000;
-            vm.max_call_depth = 16_384;
-            let result = vm.execute(&prog);
-            let outputs = result.outputs();
-            let errors = result.errors();
-            let token_count = outputs.iter().find_map(|o| o.to_number()).unwrap_or(-1.0) as i64;
-            let err_strs: alloc::vec::Vec<_> = errors.iter().map(|e| alloc::format!("{}", e)).collect();
-            results.push(alloc::format!(
-                "parser[0..{}]: tokens={}, errors={:?}",
-                end, token_count, err_strs
-            ));
-        }
-        panic!("\n=== BINARY SEARCH ===\ntotal parser lines: {}\n{}\n===",
-            total, results.join("\n"));
     }
 
     #[test]
