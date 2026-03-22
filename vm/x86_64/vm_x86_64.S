@@ -2839,19 +2839,27 @@ op_halt:
     jne     .repl_fallback_echo
 
     # Build trampoline bytecode
+    # Push opcode with binary molecule encoding:
+    # [0x01][mol_count:u16][str_byte_mol(b0):u16][str_byte_mol(b1):u16]...
+    # str_byte_mol(b) = 0x2100 | b  (shape=2, rel=1, lower 8 bits = byte value)
     movb    $0x01, (%r15)               # Push opcode
-    movw    %cx, 1(%r15)                # string length (u16 LE)
+    movw    %cx, 1(%r15)                # mol_count = string length (1 mol per byte)
     add     $3, %r15
 
-    # Copy input bytes into trampoline
+    # Encode each input byte as string molecule (u16 LE)
     push    %rcx
     push    %rdi
-    mov     %r15, %rax
-    mov     %rdi, %rsi                  # src = input buffer
-    mov     %r15, %rdi                  # dest = trampoline
-    mov     %ecx, %ecx
-    rep     movsb
-    mov     %rdi, %r15
+.repl_encode_loop:
+    test    %ecx, %ecx
+    jz      .repl_encode_done
+    movzbl  (%rdi), %eax                # read input byte
+    or      $0x2100, %eax               # str_byte_mol: shape=2, rel=1
+    movw    %ax, (%r15)                 # write u16 LE molecule
+    add     $2, %r15                    # 2 bytes per molecule
+    inc     %rdi
+    dec     %ecx
+    jmp     .repl_encode_loop
+.repl_encode_done:
     pop     %rdi
     pop     %rcx
 
@@ -2998,18 +3006,25 @@ op_halt:
 
     # Build trampoline: Push string → CallClosure repl_eval → Emit → Halt
     mov     %r15, %r8                   # trampoline base
+    # Push with binary molecule encoding (same as REPL trampoline)
     movb    $0x01, (%r15)               # Push opcode
-    movw    %cx, 1(%r15)                # string length (u16 LE)
+    movw    %cx, 1(%r15)                # mol_count = string length
     add     $3, %r15
 
-    # Copy line bytes into trampoline
+    # Encode each byte as string molecule (0x2100 | byte)
     push    %rcx
     push    %rdi
-    mov     %rdi, %rsi                  # src = line ptr
-    mov     %r15, %rdi                  # dest = trampoline
-    mov     %ecx, %ecx
-    rep     movsb
-    mov     %rdi, %r15
+.eval_encode_loop:
+    test    %ecx, %ecx
+    jz      .eval_encode_done
+    movzbl  (%rdi), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %rdi
+    dec     %ecx
+    jmp     .eval_encode_loop
+.eval_encode_done:
     pop     %rdi
     pop     %rcx
 
