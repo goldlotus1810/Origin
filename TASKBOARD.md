@@ -314,7 +314,7 @@ DoD:     make verify → ALL PASS
 | V2 | V2 Migration BIG BANG | PLAN_V2 | RẤT LỚN | DONE ✅ | T1-T16 ALL DONE. |
 | UDC | UDC Rebuild (59 blocks) | PLAN_UDC | Nhiều sessions | DONE ✅ | 8,846 entries, build pipeline v3.1, KT31 format. |
 | TLC | Test Logic Check (6 patterns) | PLAN_TEST_LOGIC | Trung bình | FREE | 6 test files cần viết theo CHECK_TO_PASS_LOGIC_HANDBOOK.md. |
-| AUTH | First-run Auth setup | PLAN_AUTH_first_run | ~200 LOC | FREE | Terms screen + Master Key (Ed25519) + Biometric option. Độc lập. |
+| AUTH | First-run Auth setup | PLAN_AUTH_first_run | ~200 LOC | DONE ✅ | Terms screen + Master Key (Ed25519) wired into server boot. PR claude/fe6. |
 | **FE** | **Formula Engine — Giá trị = Công thức** | **PLAN_FORMULA_ENGINE** | **1547 LOC** | **DONE ✅** | **PR #237. formula.rs + spline.rs + parametric.rs** |
 | FE.1 | R dispatch (16 relation → operations) | PLAN_FORMULA_ENGINE | 848 LOC | DONE ✅ | RelationOp, compose(), is_symmetric/transitive |
 | FE.2 | V dispatch (8 levels → ValenceState) | PLAN_FORMULA_ENGINE | (in formula.rs) | DONE ✅ | Potential energy, approach_tendency() |

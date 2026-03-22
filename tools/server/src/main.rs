@@ -79,6 +79,79 @@ fn main() {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // Phase 2b: AUTH — First-run setup or login
+    // ══════════════════════════════════════════════════════════════════════════
+    {
+        use runtime::auth::AuthState;
+
+        // Virgin = no origin.olang file yet
+        let auth_state = if file_bytes.is_none() {
+            AuthState::Virgin
+        } else {
+            AuthState::Locked
+        };
+
+        match auth_state {
+            AuthState::Virgin => {
+                // First-run: show terms, create master key
+                println!("═══════════════════════════════════════════");
+                println!("  Chào mừng đến HomeOS — Lần đầu khởi động");
+                println!("═══════════════════════════════════════════");
+                println!();
+                println!("{}", runtime::auth::terms::TERMS_TEXT);
+                println!();
+                print!("Bạn đồng ý? (y/n): ");
+                io::stdout().flush().unwrap();
+
+                let mut answer = String::new();
+                io::stdin().lock().read_line(&mut answer).unwrap();
+                if !answer.trim().eq_ignore_ascii_case("y") {
+                    println!("Chưa đồng ý. Thoát.");
+                    return;
+                }
+
+                print!("Tên người dùng: ");
+                io::stdout().flush().unwrap();
+                let mut username = String::new();
+                io::stdin().lock().read_line(&mut username).unwrap();
+                let username = username.trim();
+
+                print!("Mật khẩu (≥8 ký tự): ");
+                io::stdout().flush().unwrap();
+                let mut password = String::new();
+                io::stdin().lock().read_line(&mut password).unwrap();
+                let password = password.trim();
+
+                match runtime::auth::setup::create_auth_header(username, password, now_ns()) {
+                    Ok(header) => {
+                        // Write auth header to origin.olang
+                        let auth_bytes = header.to_bytes();
+                        let mut file = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(OLANG_FILE)
+                            .expect("Cannot open origin.olang");
+                        file.write_all(&auth_bytes).expect("Cannot write auth");
+                        println!("[auth] Master key created ✓");
+                        println!("[auth] BACKUP: dùng `key.ol export` để sao lưu khóa");
+                    }
+                    Err(e) => {
+                        eprintln!("[auth] Lỗi: {:?}", e);
+                        return;
+                    }
+                }
+            }
+            AuthState::Locked => {
+                println!("[auth] Master key found — session locked");
+                // TODO: password prompt to unlock
+            }
+            AuthState::Unlocked { .. } => {
+                // Already unlocked (shouldn't happen at boot)
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // Phase 3: LOAD registry + QT axioms
     // ══════════════════════════════════════════════════════════════════════════
     let desktop_bridge = Box::new(hal::ffi::DesktopBridge::new());
