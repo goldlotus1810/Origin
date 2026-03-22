@@ -18,9 +18,35 @@ use crate::molecular::{Molecule, MolecularChain};
 // VmEvent — side effects VM muốn thực hiện
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Fast check: is this chain a string-encoded chain? (shape=2, rel=1 for all molecules)
+/// Zero-allocation string ordering comparison.
+/// Compares lower 8 bits (byte values) of each molecule lexicographically.
+#[inline]
+fn chain_cmp_bytes(a: &MolecularChain, b: &MolecularChain) -> core::cmp::Ordering {
+    for (ma, mb) in a.0.iter().zip(b.0.iter()) {
+        let ba = (ma & 0xFF) as u8;
+        let bb = (mb & 0xFF) as u8;
+        match ba.cmp(&bb) {
+            core::cmp::Ordering::Equal => continue,
+            ord => return ord,
+        }
+    }
+    a.0.len().cmp(&b.0.len())
+}
+
+/// FNV-1a hash for variable name strings — fast, no_std compatible.
+#[inline]
+fn fnv1a_hash(name: &str) -> u32 {
+    let mut h: u32 = 0x811c9dc5;
+    for &b in name.as_bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
+}
+
+/// Fast check: is this chain a string-encoded chain? (shape=2, rel=1 marker)
 /// String molecules have top byte = 0x21 (shape=2 in bits[15:12], rel=1 in bits[11:8]).
-/// Used to prevent 4-char strings being misinterpreted as f64 numbers in comparisons.
+/// Must check ALL molecules to reject mixed chains (string+separator arrays).
 #[inline]
 fn is_string_chain(chain: &MolecularChain) -> bool {
     !chain.is_empty() && chain.0.iter().all(|&bits| bits & 0xFF00 == 0x2100)
@@ -717,14 +743,13 @@ fn call_closure_inline(
                         let b = local_stack.pop().unwrap_or_default();
                         let a = local_stack.pop().unwrap_or_default();
                         let result = if is_string_chain(&a) || is_string_chain(&b) {
-                            let sa = chain_to_string(&a).unwrap_or_default();
-                            let sb = chain_to_string(&b).unwrap_or_default();
+                            let ord = chain_cmp_bytes(&a, &b);
                             match fname.as_str() {
-                                "__cmp_lt" => sa < sb,
-                                "__cmp_gt" => sa > sb,
-                                "__cmp_le" => sa <= sb,
-                                "__cmp_ge" => sa >= sb,
-                                "__cmp_ne" => sa != sb,
+                                "__cmp_lt" => ord == core::cmp::Ordering::Less,
+                                "__cmp_gt" => ord == core::cmp::Ordering::Greater,
+                                "__cmp_le" => ord != core::cmp::Ordering::Greater,
+                                "__cmp_ge" => ord != core::cmp::Ordering::Less,
+                                "__cmp_ne" => ord != core::cmp::Ordering::Equal,
                                 _ => false,
                             }
                         } else if let (Some(fa), Some(fb)) =
@@ -841,8 +866,16 @@ impl OlangVM {
         let mut parse_cache: Option<Vec<crate::lang::syntax::Stmt>> = None;
         let mut lower_cache: Option<crate::exec::ir::OlangProgram> = None;
 
+        // VM.4: Scope variable inline cache (Fib(6)=8 entries)
+        // Each entry: (name_hash, scope_idx, slot_idx) — O(1) variable lookup
+        // Invalidated on Store/ScopeEnd/ScopeBegin
+        let mut var_cache: [(u32, usize, usize); 8] = [(0, 0, 0); 8];
+        let mut var_cache_gen: u32 = 0; // generation counter for bulk invalidation
+
         while pc < prog.ops.len() {
-            if steps >= self.max_steps {
+            // Batch step check: only compare max_steps every 256 iterations
+            steps += 1;
+            if steps & 0xFF == 0 && steps >= self.max_steps {
                 // If in try block, jump to catch instead of halting
                 if let Some(catch_pc) = try_stack.pop() {
                     pc = catch_pc;
@@ -851,7 +884,6 @@ impl OlangVM {
                 events.push(VmEvent::Error(VmError::MaxStepsExceeded));
                 break;
             }
-            steps += 1;
 
             let op = &prog.ops[pc];
             pc += 1;
@@ -1021,14 +1053,14 @@ impl OlangVM {
                             // String-first: check encoding BEFORE to_number() to prevent
                             // 4-char strings from being miscompared as denormalized f64.
                             let truthy = if is_string_chain(&a) || is_string_chain(&b) {
-                                let sa = chain_to_string(&a).unwrap_or_default();
-                                let sb = chain_to_string(&b).unwrap_or_default();
+                                // Zero-alloc string comparison via raw u16 byte values
+                                let ord = chain_cmp_bytes(&a, &b);
                                 match name.as_str() {
-                                    "__cmp_lt" => sa < sb,
-                                    "__cmp_gt" => sa > sb,
-                                    "__cmp_le" => sa <= sb,
-                                    "__cmp_ge" => sa >= sb,
-                                    "__cmp_ne" => sa != sb,
+                                    "__cmp_lt" => ord == core::cmp::Ordering::Less,
+                                    "__cmp_gt" => ord == core::cmp::Ordering::Greater,
+                                    "__cmp_le" => ord != core::cmp::Ordering::Greater,
+                                    "__cmp_ge" => ord != core::cmp::Ordering::Less,
+                                    "__cmp_ne" => ord != core::cmp::Ordering::Equal,
                                     _ => false,
                                 }
                             } else if let (Some(na), Some(nb)) =
@@ -3753,14 +3785,32 @@ impl OlangVM {
                         }
                         "__str_char_at" => {
                             // Stack: [string, index] → single char string or empty
+                            // Zero-allocation: direct index into molecule array
                             let idx = vm_pop!(stack, events);
                             let s = vm_pop!(stack, events);
-                            let s_str = chain_to_string(&s).unwrap_or_default();
                             let i = idx.to_number().unwrap_or(0.0) as usize;
-                            if let Some(ch) = s_str.chars().nth(i) {
-                                let mut buf = [0u8; 4];
-                                let c_str = ch.encode_utf8(&mut buf);
-                                let _ = stack.push(string_to_chain(c_str));
+                            if i < s.0.len() && is_string_chain(&s) {
+                                // Direct O(1) access — no String allocation
+                                let _ = stack.push(MolecularChain(alloc::vec![s.0[i]]));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+
+                        "__str_is_keyword" => {
+                            // O(1) keyword check — replaces is_keyword() loop in lexer.ol
+                            let s = vm_pop!(stack, events);
+                            let bytes: Vec<u8> = s.0.iter().map(|&b| (b & 0xFF) as u8).collect();
+                            let is_kw = matches!(&bytes[..],
+                                b"let" | b"fn" | b"if" | b"else" | b"loop" | b"while" |
+                                b"for" | b"in" | b"return" | b"break" | b"continue" |
+                                b"emit" | b"type" | b"union" | b"impl" | b"trait" |
+                                b"match" | b"try" | b"catch" | b"spawn" | b"select" |
+                                b"timeout" | b"from" | b"use" | b"mod" | b"pub" |
+                                b"true" | b"false"
+                            );
+                            if is_kw {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
                             } else {
                                 let _ = stack.push(MolecularChain::empty());
                             }
@@ -4233,9 +4283,10 @@ impl OlangVM {
 
                 Op::Store(name) => {
                     let val = vm_pop!(stack, events);
+                    // Invalidate cache for this variable
+                    let h = fnv1a_hash(name);
+                    var_cache[(h as usize) & 7] = (0, 0, 0);
                     // Store in current (innermost) scope.
-                    // Update existing in current scope, else insert new.
-                    // SAFETY: scopes always has root scope (initialized above)
                     let Some(scope) = scopes.last_mut() else { break };
                     if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
                         entry.1 = val;
@@ -4246,8 +4297,10 @@ impl OlangVM {
 
                 Op::StoreUpdate(name) => {
                     let val = vm_pop!(stack, events);
+                    // Invalidate cache for this variable
+                    let h = fnv1a_hash(name);
+                    var_cache[(h as usize) & 7] = (0, 0, 0);
                     // Search ALL scopes from innermost outward; update first match.
-                    // If not found anywhere, store in current scope (fallback).
                     let mut found = false;
                     for scope in scopes.iter_mut().rev() {
                         if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
@@ -4264,14 +4317,45 @@ impl OlangVM {
                 }
 
                 Op::LoadLocal(name) => {
-                    // Search from innermost scope outward (lexical scoping)
-                    let val = scopes
-                        .iter()
-                        .rev()
-                        .find_map(|scope| {
-                            scope.iter().rev().find(|(n, _)| n == name).map(|(_, c)| c.clone())
-                        })
-                        .unwrap_or_else(MolecularChain::empty);
+                    // VM.4: Check inline cache first (O(1))
+                    let h = fnv1a_hash(name);
+                    let cache_slot = (h as usize) & 7; // & 7 = mod 8
+                    let val = if var_cache[cache_slot].0 == h
+                        && var_cache[cache_slot].1 < scopes.len()
+                    {
+                        let si = var_cache[cache_slot].1;
+                        let vi = var_cache[cache_slot].2;
+                        if vi < scopes[si].len() && scopes[si][vi].0 == *name {
+                            // Cache HIT
+                            scopes[si][vi].1.clone()
+                        } else {
+                            // Hash collision or stale — fallback
+                            let mut found = MolecularChain::empty();
+                            for (si2, scope) in scopes.iter().enumerate().rev() {
+                                if let Some((vi2, (_, c))) = scope.iter().enumerate().rev()
+                                    .find(|(_, (n, _))| n == name)
+                                {
+                                    var_cache[cache_slot] = (h, si2, vi2);
+                                    found = c.clone();
+                                    break;
+                                }
+                            }
+                            found
+                        }
+                    } else {
+                        // Cache MISS — linear scan + populate cache
+                        let mut found = MolecularChain::empty();
+                        for (si, scope) in scopes.iter().enumerate().rev() {
+                            if let Some((vi, (_, c))) = scope.iter().enumerate().rev()
+                                .find(|(_, (n, _))| n == name)
+                            {
+                                var_cache[cache_slot] = (h, si, vi);
+                                found = c.clone();
+                                break;
+                            }
+                        }
+                        found
+                    };
                     if let Err(e) = stack.push(val) {
                         events.push(VmEvent::Error(e));
                         break;
@@ -4285,6 +4369,9 @@ impl OlangVM {
                         break;
                     }
                     scopes.push(Vec::new());
+                    // Bump cache generation — entries pointing to old scope indices
+                    // will miss on next lookup (scope_idx check fails)
+                    var_cache_gen = var_cache_gen.wrapping_add(1);
                 }
 
                 Op::ScopeEnd => {
@@ -4294,6 +4381,7 @@ impl OlangVM {
                         scopes.pop();
                         call_depth = call_depth.saturating_sub(1);
                     }
+                    var_cache_gen = var_cache_gen.wrapping_add(1);
                     // Check loop stack: if we're at end of a loop body, jump back
                     if let Some(entry) = loop_stack.last_mut() {
                         if entry.1 > 0 {

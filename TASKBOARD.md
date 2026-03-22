@@ -58,7 +58,15 @@ Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Mi
 | ID | Task | Plan | Effort | Depends | Status | Notes |
 |----|------|------|--------|---------|--------|-------|
 | P2.0 | Fix VM builtin test failures | PLAN_PHASE2 | ~200 LOC | — | DONE ✅ | VM 90/90 pass. Heap refs + string encoding bypass quantization. PR #228 #229. |
-| P2.0b | Fix 37 remaining olang test failures | — | ~300 LOC | P2.0 | CLAIMED | Closure dispatch, bytes builtins, self-compile, iter. Session lupin-pc 2026-03-22. |
+| P2.0b | Fix 37 remaining olang test failures | — | ~300 LOC | P2.0 | DONE ✅ | 28→6 failures fixed (string cmp, closure marker, enum split, to_number). PR #239. 6 còn lại = VM perf timeout. |
+| VM.1 | String compare không allocate | PLAN_VM_OPT | ~60 LOC | — | CLAIMED | char_at/substr zero-alloc + chain_cmp_order. Session lupin-pc 2026-03-22. |
+| VM.2 | Keyword hash builtin | PLAN_VM_OPT | ~40 LOC | — | FREE | __str_is_keyword O(1) thay loop 28. |
+| VM.3 | Micro-opts (step batch + flags) | PLAN_VM_OPT | ~30 LOC | — | FREE | Batch step check /256, EarlyReturn bool flag. |
+| VM.4 | Scope variable cache | PLAN_VM_OPT | ~100 LOC | VM.1 | FREE | Inline cache 8 entries (Fib(6)), FNV-1a hash. |
+| VM.5 | Builtin dispatch table | PLAN_VM_OPT | ~200 LOC | VM.1 | FREE | Op::CallBuiltin(u8), top 32 builtins. |
+| VM.6 | Small-chain SSO | PLAN_VM_OPT | ~300 LOC | VM.1-5 | FREE | Inline [u16;4] cho numbers/1-char. |
+| VM.7 | KnowTree sampling | PLAN_VM_OPT | ~150 LOC | FE.6 | FREE | Adaptive Fib-sized sampling, 3-tier fallback. |
+| VM.8 | Bellman path optimization | PLAN_VM_OPT | ~100 LOC | VM.7 | FREE | Q-table 55 entries, φ⁻¹ discount. |
 | 8.1 | Parser: hex literals (0xFF) | PLAN_8 | ~80 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
 | 8.2 | Parser: == trong match/struct | PLAN_8 | ~200 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
 | 8.3 | Parser: keywords as ident + struct colon | PLAN_8 | ~100 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
@@ -182,6 +190,73 @@ Vấn đề:  "xin chào" → tiếng Anh response (sai)
 Cách fix: (1) Detect: chứa dấu/từ Việt → vi, else en
          (2) Wire: honesty/causality/contradiction flags → ResponseContext
 DoD:     "xin chào" → tiếng Việt response
+```
+
+#### VM.1 — String compare không allocate (5-10x speedup)
+```
+File:    crates/olang/src/exec/vm.rs
+Vấn đề:  char_at() gọi chain_to_string() → allocate String mỗi lần
+         200 dòng × 25 chars = 5000 allocations chỉ cho tokenize
+Cách fix:
+  1. __str_char_at: truy cập trực tiếp source.0[i] → O(1), zero alloc
+     TRƯỚC: chain_to_string(&s).chars().nth(i)  // allocate String
+     SAU:   s.0[i] & 0xFF → str_byte_mol(byte)  // zero alloc
+  2. __str_substr: slice source.0[start..end].to_vec() thay vì decode+re-encode
+  3. __cmp_lt/gt/le/ge cho strings: compare u16 slices trực tiếp
+     fn chain_cmp_order(a, b) → Ordering  // zero alloc
+  4. is_string_chain_fast: check first molecule only (uniform encoding)
+     TRƯỚC: chain.0.iter().all(|&b| b & 0xFF00 == 0x2100)  // O(N)
+     SAU:   chain.0.first().map_or(false, |&b| b & 0xFF00 == 0x2100)  // O(1)
+DoD:     roundtrip_lexer_ol_self_tokenize < 3s (hiện 10s+)
+         cargo test -p olang -- vm::tests → 0 FAILED
+```
+
+#### VM.2 — Keyword hash builtin (1.5x speedup)
+```
+File:    crates/olang/src/exec/vm.rs + stdlib/bootstrap/lexer.ol
+Vấn đề:  is_keyword() loop 28 entries × full string compare
+         500 identifiers × 28 = 14,000 comparisons mỗi tokenize
+Cách fix:
+  1. Thêm builtin "__str_is_keyword" trong vm.rs:
+     match &bytes[..] { b"let"|b"fn"|b"if"|... → true, _ → false }
+  2. Sửa lexer.ol: thay is_keyword(text) bằng __is_keyword(text) hoặc
+     lowering intercept tự động
+DoD:     is_keyword() = O(1) thay O(28)
+```
+
+#### VM.3 — Micro-optimizations (1.2x speedup)
+```
+File:    crates/olang/src/exec/vm.rs
+Cách fix:
+  1. Step batch: if steps & 0xFF == 0 && steps >= max → check mỗi 256 steps
+  2. EarlyReturn flag: bool thay vì events.iter().any(|e| matches!(EarlyReturn))
+  3. Pop optimization: stack.data.last().cloned() cho Dup
+DoD:     Không regression, overall 1.2x faster
+```
+
+#### VM.4 — Scope variable cache (2-4x speedup)
+```
+File:    crates/olang/src/exec/vm.rs
+Vấn đề:  LoadLocal("pos") scan 3-4 scopes × 10-15 vars = 45 string cmps
+Cách fix:
+  struct ScopeCache { entries: [(u32, usize, usize); 8] }  // Fib(6)=8
+  LoadLocal: hash(name) → cache hit? → O(1) : linear scan → update cache
+  Store/ScopeEnd: invalidate cache entries
+DoD:     Tokenize inner loop 2-4x faster
+         Không regression
+```
+
+#### VM.5 — Builtin dispatch table (2-3x speedup)
+```
+File:    crates/olang/src/exec/ir.rs + vm.rs + semantic.rs
+Vấn đề:  Op::Call("__eq") match 207+ string arms tuần tự
+Cách fix:
+  1. Thêm Op::CallBuiltin(u8) vào ir.rs
+  2. BuiltinId enum: EQ=0, CMP_LT=1, CHAR_AT=2, ARRAY_GET=3, ...
+  3. Lowering: detect __eq → emit CallBuiltin(BID_EQ)
+  4. VM: BUILTIN_TABLE[id](...) → jump table O(1)
+DoD:     Builtin calls O(1) thay O(100)
+         cargo test -p olang → 0 regression
 ```
 
 #### 11.3 — Server --eval mode

@@ -214,9 +214,12 @@ Op::CallBuiltin(id) => {
 
 **Lowering:** semantic.rs detect `__eq` etc. → emit `CallBuiltin(BID_EQ)`.
 
+**⚠️ IR Format Break:** Thêm Op::CallBuiltin vào enum sẽ break .olc binary format.
+Cần: IR version bump (bytecode header version 2 → 3) + backward compat decoder.
+
 **Files:** `crates/olang/src/exec/ir.rs`, `crates/olang/src/exec/vm.rs`, `crates/olang/src/lang/semantic.rs`
 **LOC:** ~200
-**Risk:** Trung bình
+**Risk:** Trung bình (IR format change)
 
 ---
 
