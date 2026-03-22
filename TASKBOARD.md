@@ -313,9 +313,9 @@ DoD:     make verify → ALL PASS
 
 | ID | Task | Plan | Effort | Depends | Status | Notes |
 |----|------|------|--------|---------|--------|-------|
-| P2.2 | Emotion pipeline (.ol) | PLAN_PHASE2 | ~200 LOC | P2.0 ✅ | FREE | emotion/curve/intent .ol — chuyển từ Rust sang Olang. |
-| P2.3 | Knowledge layer (.ol) | PLAN_PHASE2 | ~150 LOC | P2.0 ✅ | FREE | silk_ops/dream/instinct/learning .ol. |
-| P2.4 | Agent behavior (.ol) | PLAN_PHASE2 | ~300 LOC | P2.0 ✅ | FREE | response/leo/chief/worker .ol. |
+| P2.2 | Emotion pipeline (.ol) | PLAN_PHASE2 | ~200 LOC | P2.0 ✅ | DONE ✅ | emotion.ol 156 LOC + intent.ol 127 LOC + curve.ol 110 LOC. |
+| P2.3 | Knowledge layer (.ol) | PLAN_PHASE2 | ~150 LOC | P2.0 ✅ | DONE ✅ | silk_ops 166 + dream 181 + instinct 197 + learning 160 LOC. Đã có sẵn. |
+| P2.4 | Agent behavior (.ol) | PLAN_PHASE2 | ~300 LOC | P2.0 ✅ | DONE ✅ | response 100 + leo 41 + chief 36 + worker 42 + gate 51 LOC. |
 | P2.5 | E2E integration test | PLAN_PHASE2 | ~50 LOC | P2.2-4 | BLOCKED | 5 test cases end-to-end. Chờ P2.2-4. |
 | 9 | Native REPL | PLAN_9 | ~600 LOC | 8.1-8.3 ✅ | FREE | ./origin → REPL. Parser đã fix. |
 | 10 | Browser E2E | PLAN_10 | ~500 LOC | 9 | BLOCKED | origin.html, WASM. Chờ REPL. |
