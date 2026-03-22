@@ -3189,6 +3189,28 @@ impl HomeRuntime {
                     let entry = self.body_store.get_or_create(hash);
                     *entry = body;
                 }
+
+                // ── FE.6: Wire formula engine — eval R/V/A from P_weight ──
+                // FormulaState: đọc P_weight → biết công thức → biết hành vi
+                let formula = olang::mol::formula::FormulaState::from_molecule(&mol);
+
+                // FE.6 Wire 1: Urgency check → refine T5 crisis detection
+                // Spec: A≥6 (Resonance/Supercritical) → urgent
+                if formula.needs_urgent() && est.primary != IntentKind::Crisis {
+                    // Nâng arousal cho high-urgency molecules
+                    raw_tag.arousal = raw_tag.arousal.max(formula.urgency());
+                }
+
+                // FE.6 Wire 2: Approach/avoid tendency → emotion refinement
+                // V physics → refine valence (NOT replace — amplify per CLAUDE.md rule)
+                let approach = formula.approach_tendency();
+                if approach.abs() > 0.2 {
+                    // Amplify: positive approach strengthens positive valence
+                    let boost = approach * 0.1;
+                    if (raw_tag.valence > 0.0 && boost > 0.0) || (raw_tag.valence < 0.0 && boost < 0.0) {
+                        raw_tag.valence = (raw_tag.valence + boost).clamp(-1.0, 1.0);
+                    }
+                }
             }
 
             // ── T6b3: Evolution — detect & create evolved nodes ──────────
