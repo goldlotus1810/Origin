@@ -4,6 +4,7 @@
 
 pub mod encoder;
 pub mod formula;
+pub mod formula_adaptive;
 pub mod hash;
 pub mod lca;
 pub mod molecular;
