@@ -37,11 +37,16 @@ pub fn compile_source(source: &str) -> Result<Vec<u8>, CompileError> {
     let stmts = olang::lang::syntax::parse(source)
         .map_err(|e| CompileError::Parse(format!("{:?}", e)))?;
 
+    eprintln!("      parse: {} stmts", stmts.len());
+
     // Lower to IR
     let program = olang::lang::semantic::lower(&stmts);
+    eprintln!("      lower: {} ops", program.ops.len());
 
     // Encode to bytecode
-    Ok(olang::exec::bytecode::encode_bytecode(&program.ops))
+    let bc = olang::exec::bytecode::encode_bytecode(&program.ops);
+    eprintln!("      encode: {} bytes", bc.len());
+    Ok(bc)
 }
 
 /// Compile all .ol files in a directory (and bootstrap/ subdirectory).
@@ -89,7 +94,7 @@ fn compile_dir(dir: &Path, output: &mut Vec<u8>) -> Result<(), CompileError> {
         match compile_file(&path) {
             Ok(mut bytecode) => {
                 if bytecode.len() <= 1 {
-                    eprintln!("    ⚠ {} bytes (empty — parse failed?)", bytecode.len());
+                    eprintln!("    ⚠ {} EMPTY (parse failed?)", path.display());
                 }
                 // B7: Strip trailing Halt (0x0F) from each file's bytecode
                 // so execution continues to the next file. The final Halt
