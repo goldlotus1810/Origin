@@ -2655,6 +2655,40 @@ memcpy_small:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_unknown:
+    # Debug: print PC value (r13) and step count before opcode
+    push    %rax
+    # Print "PC=" then r13 as decimal
+    lea     msg_pc(%rip), %rsi
+    mov     $4, %edx
+    mov     $2, %edi
+    mov     $1, %eax
+    syscall
+    # Print r13 as simple decimal (max 6 digits)
+    mov     %r13, %rax
+    sub     $16, %rsp
+    mov     $10, %rcx
+    lea     15(%rsp), %rdi
+    movb    $0x0A, (%rdi)              # newline
+    dec     %rdi
+.Lpc_loop:
+    xor     %edx, %edx
+    div     %rcx
+    add     $0x30, %dl
+    movb    %dl, (%rdi)
+    dec     %rdi
+    test    %rax, %rax
+    jnz     .Lpc_loop
+    inc     %rdi
+    mov     %rdi, %rsi
+    lea     16(%rsp), %rax
+    sub     %rdi, %rax
+    mov     %eax, %edx
+    mov     $2, %edi
+    mov     $1, %eax
+    syscall
+    add     $16, %rsp
+    pop     %rax
+
     # Debug: print opcode value as hex before error message
     # al still has the opcode byte
     push    %rax
@@ -3071,6 +3105,8 @@ proc_self_exe:
 
 hex_chars:
     .ascii "0123456789ABCDEF"
+msg_pc:
+    .ascii "PC= "
 msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0
