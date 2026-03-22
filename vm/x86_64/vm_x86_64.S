@@ -289,6 +289,15 @@ vm_loop:
     cmp     $0x3A, %al
     jb      dispatch_data
 
+    # 0x3A: CallBuiltin(u8) — skip builtin_id byte, treat as no-op
+    # ASM VM delegates to boot bytecode functions instead.
+    # Format: [0x3A][builtin_id:1] = 2 bytes
+    cmp     $0x3A, %al
+    jne     .Lnot_call_builtin
+    inc     %r13                        # skip builtin_id byte
+    jmp     vm_loop
+.Lnot_call_builtin:
+
     # Range 0x40-0x42: device ops (stub)
     cmp     $0x40, %al
     jb      op_unknown
@@ -2641,6 +2650,33 @@ memcpy_small:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_unknown:
+    # Debug: print opcode value as hex before error message
+    # al still has the opcode byte
+    push    %rax
+    movzbl  %al, %eax
+    # Convert to 2-char hex string on stack
+    mov     %eax, %ecx
+    shr     $4, %ecx
+    and     $0xF, %ecx
+    lea     hex_chars(%rip), %rdx
+    movzbl  (%rdx, %rcx), %ecx
+    and     $0xF, %eax
+    movzbl  (%rdx, %rax), %eax
+    # Write "0xNN\n"
+    sub     $8, %rsp
+    movb    $0x30, (%rsp)           # '0'
+    movb    $0x78, 1(%rsp)          # 'x'
+    movb    %cl, 2(%rsp)            # high nibble
+    movb    %al, 3(%rsp)            # low nibble
+    movb    $0x0A, 4(%rsp)          # newline
+    mov     %rsp, %rsi
+    mov     $5, %edx
+    mov     $2, %edi                # stderr
+    mov     $1, %eax                # SYS_WRITE
+    syscall
+    add     $8, %rsp
+    pop     %rax
+
     lea     msg_unknown(%rip), %rsi
     mov     $18, %edx
     mov     $2, %edi                    # stderr
@@ -3028,6 +3064,8 @@ op_halt_err:
 proc_self_exe:
     .asciz "/proc/self/exe"
 
+hex_chars:
+    .ascii "0123456789ABCDEF"
 msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0
