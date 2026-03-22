@@ -701,6 +701,77 @@ mark_intron(chain, range): đánh dấu noise. Evaluate skip intron → chỉ đ
 Chain gốc không xóa (giữ history). Có thể bật lại (alternative splicing).
 ```
 
+### I. KnowTree Sampling — Lấy mẫu từ cây tri thức đã học
+
+```
+Thay vì quét toàn bộ KnowTree (O(N)), lấy mẫu thông minh:
+
+  Source hiện tại:  json/udc.json (8,846 entries)     ← KnowTree chưa mature
+  Source tương lai: KnowTree L0→L3 (đã học, đã promote) ← KnowTree mature
+
+Quy trình:
+  ① Cần tính eval_valence(v=6)?
+  ② Lấy tất cả nodes có V=6 từ KnowTree (hoặc json fallback)
+  ③ Thay vì scan hết → lấy K mẫu (K = Fib(n), adaptive)
+  ④ Tính trung bình từ mẫu → ước lượng potential, force, barrier
+  ⑤ Kết quả feed back vào KnowTree (Hebbian strengthen)
+
+Tại sao KHÔNG xung đột spec:
+  - Mẫu lấy từ DỮ LIỆU ĐÃ HỌC (KnowTree), không phải random
+  - KnowTree = Hebbian + φ⁻¹ threshold (Spec III, line 374)
+  - Kết quả deterministic: cùng KnowTree state → cùng mẫu → cùng kết quả
+  - Fibonacci sizing: K = Fib(n) theo maturity level
+
+Adaptive sampling size (theo Fibonacci):
+  KnowTree gen0 (UDC gốc):    K = Fib(3) = 2   (ít mẫu, stable)
+  KnowTree gen1 (nền):         K = Fib(5) = 5   (vừa đủ)
+  KnowTree gen2 (chuyên môn):  K = Fib(7) = 13  (chính xác hơn)
+  KnowTree gen3 (mới học):     K = Fib(10) = 55 (nhiều mẫu, chưa stable)
+
+Fallback: KnowTree rỗng → dùng json/udc.json scan full → cache kết quả
+```
+
+### J. Bellman Path — Tối ưu đường tìm kiếm trong KnowTree
+
+```
+KnowTree là cây phân tầng L0→L1→L2→L3. Tìm node = traverse cây.
+Bellman tối ưu ĐƯỜNG ĐI, không thay đổi CƠ CHẾ HỌC.
+
+  Q(node, direction) = reward + φ⁻¹ × max Q(child, direction')
+
+  state     = node hiện tại trong KnowTree
+  action    = chọn child nào để đi tiếp (left/right/skip)
+  reward    = 1 nếu tìm đúng target, 0 nếu miss
+  discount  = φ⁻¹ ≈ 0.618 (Golden Ratio — Spec III, line 384)
+  policy    = chọn child có Q cao nhất trước
+
+Tại sao KHÔNG xung đột spec:
+  - Hebbian vẫn là cơ chế HỌC (tạo edges, tăng weight)
+  - Bellman chỉ tối ưu ĐƯỜNG TÌM KIẾM (infrastructure)
+  - Discount factor = φ⁻¹ (đã trong spec)
+  - Kết quả tìm kiếm GIỐNG NHAU, chỉ NHANH HƠN
+
+Ví dụ:
+  Tìm "love" (V=6) trong KnowTree:
+  Trước: scan L0 (8,846 nodes) → O(N)
+  Sau:   Q-table chỉ đường L0→L1[emotion]→L2[positive]→L3[deep] → O(4)
+
+Cache Q-table: Fib(6) = 8 entries per node (Spec IX.D, Generational QR)
+Invalidation: khi KnowTree evolve → decay Q *= φ⁻¹ (giống Hebbian decay)
+```
+
+### K. String Fingerprinting — Hash-based equality O(1)
+
+```
+String equality dùng FNV-1a hash fingerprint:
+  h(A) ≠ h(B) → A ≠ B  (O(1), deterministic, không random)
+  h(A) = h(B) → compare full bytes (fallback, collision < 0.001%)
+
+Tương thích Bloom Filter (Section IX.C).
+Dùng cho: VM builtins (__eq, __cmp_*, keyword lookup)
+Không ảnh hưởng knowledge model.
+```
+
 ---
 
 ## X. INVARIANT CHECKS — 5 Cell Cycle Checkpoints
