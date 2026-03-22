@@ -23,9 +23,19 @@ const OLANG_FILE: &str = "origin.olang";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let eval_mode = args.contains(&"--eval".to_string());
 
-    if eval_mode {
+    // --eval "expression" → evaluate inline and exit
+    if let Some(pos) = args.iter().position(|a| a == "--eval") {
+        if let Some(expr) = args.get(pos + 1) {
+            run_eval_inline(expr);
+        } else {
+            // --eval without arg → read from stdin
+            run_eval();
+        }
+        return;
+    }
+    // --eval at end without arg → stdin mode
+    if args.contains(&"--eval".to_string()) {
         run_eval();
         return;
     }
@@ -256,6 +266,31 @@ fn main() {
 /// --eval mode: đọc stdin → process → output → exit.
 /// Không banner, không REPL prompt, không persist.
 /// Dùng cho scripting và automated testing.
+fn run_eval_inline(expr: &str) {
+    let session_id = now_ns() as u64;
+    let file_bytes = std::fs::read(OLANG_FILE).ok();
+    let mut rt = if let Some(ref bytes) = file_bytes {
+        HomeRuntime::with_file(session_id, Some(bytes))
+    } else {
+        HomeRuntime::new(session_id)
+    };
+
+    let ts = now_ns();
+    let response = if expr.starts_with("○{") || expr.starts_with("> ") {
+        let source = expr.strip_prefix("> ").unwrap_or(expr);
+        rt.run_program(source, ts)
+    } else {
+        rt.process_text(expr, ts)
+    };
+
+    if !response.text.is_empty() {
+        println!("{}", response.text);
+    }
+
+    // Flush pending writes
+    flush_pending(&mut rt);
+}
+
 fn run_eval() {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input).expect("failed to read stdin");
