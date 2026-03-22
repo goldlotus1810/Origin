@@ -8384,6 +8384,215 @@ mod tests {
     }
 
     #[test]
+    fn debug_parser_breaks_tokenize() {
+        // Binary search: which lines of parser.ol break tokenize()?
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+        let parser_lines: alloc::vec::Vec<&str> = parser_src_clean.lines().collect();
+        let total = parser_lines.len();
+
+        let mut results = alloc::vec::Vec::new();
+        let checkpoints = [0usize, 10, 28, 45, 66, 67, 70, 74, 75, 77, 80, 90, 100, 150, 200, 300, 400, 500, 600, 694];
+        for &end in checkpoints.iter() {
+            if end > total { break; }
+            let chunk: alloc::string::String = if end == 0 {
+                alloc::string::String::new()
+            } else {
+                parser_lines[..end].join("\n")
+            };
+            let test_src = alloc::format!(
+                "{}\n{}\nlet toks = tokenize(\"let x = 1;\");\nemit len(toks);\n",
+                lexer_src, chunk
+            );
+            let stmts = parse(&test_src).expect("parse");
+            let prog = lower(&stmts);
+            let mut vm = crate::vm::OlangVM::new();
+            vm.max_steps = 10_000_000;
+            vm.max_call_depth = 16_384;
+            let result = vm.execute(&prog);
+            let outputs = result.outputs();
+            let errors = result.errors();
+            let token_count = outputs.iter().find_map(|o| o.to_number()).unwrap_or(-1.0) as i64;
+            let err_strs: alloc::vec::Vec<_> = errors.iter().map(|e| alloc::format!("{}", e)).collect();
+            results.push(alloc::format!(
+                "parser[0..{}]: tokens={}, errors={:?}",
+                end, token_count, err_strs
+            ));
+        }
+        panic!("\n=== BINARY SEARCH ===\ntotal parser lines: {}\n{}\n===",
+            total, results.join("\n"));
+    }
+
+    #[test]
+    #[ignore] // Heavy debug test — run manually with `cargo test -- --ignored`
+    fn debug_remaining_parse_errors() {
+        // Debug: find exactly which constructs in lexer.ol cause parse errors
+        // by testing progressively larger fragments
+        let lexer_src = include_str!("../../../../stdlib/bootstrap/lexer.ol");
+        let parser_src = include_str!("../../../../stdlib/bootstrap/parser.ol");
+        let parser_src_clean = parser_src.replace("use olang.bootstrap.lexer;", "");
+
+        let fragments: alloc::vec::Vec<(&str, &str)> = alloc::vec![
+            ("union+type+let+fn_basic",
+             "union TokenKind {\n    Keyword { name: Str },\n    Ident { name: Str },\n    Number { value: Num },\n    StringLit { value: Str },\n    Symbol { ch: Str },\n    Eof,\n}\ntype Token {\n    kind: TokenKind,\n    text: Str,\n    line: Num,\n    col: Num,\n}\nlet KEYWORDS = [\"let\", \"fn\", \"if\"];\nfn is_keyword(name) {\n    let i = 0;\n    while i < len(KEYWORDS) {\n        if KEYWORDS[i] == name {\n            return true;\n        };\n        let i = i + 1;\n    };\n    return false;\n}"),
+            ("logical_or", "fn t() { let x = 1 || 0; return x; }"),
+            ("logical_and", "fn t() { let x = 1 && 1; return x; }"),
+            ("continue", "fn t() { let i = 0; while i < 3 { let i = i + 1; continue; }; return i; }"),
+            ("break", "fn t() { let i = 0; while i < 10 { if i == 5 { break; }; let i = i + 1; }; return i; }"),
+            ("string_escape", "fn t() { let s = \"hello\\nworld\\t\\\\end\\\"\"; return s; }"),
+            ("pub_fn", "pub fn my_func(x) { return x + 1; }"),
+            ("and_or_combined", "fn is_alpha(ch) { return (ch >= \"a\" && ch <= \"z\") || (ch >= \"A\" && ch <= \"Z\") || ch == \"_\"; }"),
+            ("nested_if_while_continue",
+             "fn tok(source) {\n    let pos = 0;\n    let line = 1;\n    let col = 1;\n    let src_len = len(source);\n    while pos < src_len {\n        let ch = char_at(source, pos);\n        if ch == \" \" || ch == \"\\n\" {\n            if ch == \"\\n\" {\n                let line = line + 1;\n                let col = 1;\n            } else {\n                let col = col + 1;\n            };\n            let pos = pos + 1;\n            continue;\n        };\n        let pos = pos + 1;\n    };\n    return pos;\n}"),
+            ("multi_char_symbols",
+             "fn chk() {\n    let two = \"==\";\n    if two == \"==\" || two == \"!=\" || two == \"<=\" || two == \">=\" || two == \"=>\" || two == \"->\" || two == \"::\" || two == \"&&\" || two == \"||\" {\n        return 1;\n    };\n    return 0;\n}"),
+            ("string_escape_in_cond",
+             "fn skip(source, pos) {\n    let src_len = len(source);\n    while pos < src_len && char_at(source, pos) != \"\\\"\" {\n        if char_at(source, pos) == \"\\\\\" {\n            let pos = pos + 1;\n        };\n        let pos = pos + 1;\n    };\n    return pos;\n}"),
+            ("if_expr_assignment",
+             "fn t(text) {\n    let kind = if true { TokenKind::Keyword { name: text } } else { TokenKind::Ident { name: text } };\n    return kind;\n}"),
+            ("push_struct",
+             "fn t() {\n    let tokens = [];\n    push(tokens, Token { kind: TokenKind::Eof, text: \"\", line: 0, col: 0 });\n    return tokens;\n}"),
+        ];
+
+        let mut results_log = alloc::vec::Vec::new();
+        let mut any_fail = false;
+        for (label, frag) in fragments.iter() {
+            let escaped = escape_olang_str(frag);
+            let test_src = alloc::format!(
+                "{}\n{}\n\
+                let my_source = \"{}\";\n\
+                let tokens = tokenize(my_source);\n\
+                let program = parse(tokens);\n\
+                emit len(program);\n",
+                lexer_src, parser_src_clean, escaped
+            );
+            let stmts = parse(&test_src).expect("parse combined");
+            let prog = lower(&stmts);
+            let mut vm = crate::vm::OlangVM::new();
+            vm.max_steps = 10_000_000;
+            vm.max_call_depth = 16_384;
+            let result = vm.execute(&prog);
+            let errors = result.errors();
+            let outputs = result.outputs();
+            let parse_errors: alloc::vec::Vec<_> = outputs.iter()
+                .filter_map(|o| crate::vm::chain_to_string(o))
+                .filter(|s| s.contains("Parse error"))
+                .collect();
+            let stmt_count = outputs.iter()
+                .rev()
+                .find_map(|o| o.to_number())
+                .unwrap_or(-1.0) as i64;
+            let error_strs: alloc::vec::Vec<_> = errors.iter().map(|e| alloc::format!("{}", e)).collect();
+            let hit_limit = error_strs.iter().any(|e| e.contains("step limit") || e.contains("Step limit"));
+            let status = if hit_limit { "LIMIT" }
+                else if !parse_errors.is_empty() || !error_strs.is_empty() { any_fail = true; "FAIL" }
+                else { "OK" };
+            results_log.push(alloc::format!(
+                "[{}] {}: stmts={}, parse_errs={}, vm_errs={}, samples={:?}",
+                status, label, stmt_count, parse_errors.len(), error_strs.len(),
+                &parse_errors[..parse_errors.len().min(3)]
+            ));
+        }
+
+        // Test: tokenize without parser.ol included (should work)
+        {
+            let simple_frag = "let x = 1;";
+            let escaped = escape_olang_str(simple_frag);
+            let test_src_no_parser = alloc::format!(
+                "{}\n\
+                let my_source = \"{}\";\n\
+                let tokens = tokenize(my_source);\n\
+                emit len(tokens);\n",
+                lexer_src, escaped
+            );
+            let stmts_a = parse(&test_src_no_parser).expect("parse");
+            let prog_a = lower(&stmts_a);
+            let mut vm_a = crate::vm::OlangVM::new();
+            vm_a.max_steps = 10_000_000;
+            vm_a.max_call_depth = 16_384;
+            let result_a = vm_a.execute(&prog_a);
+            let out_a: alloc::vec::Vec<_> = result_a.outputs().iter().map(|o| {
+                if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+                else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+                else { alloc::format!("chain:{:?}", o) }
+            }).collect();
+
+            // Same test WITH parser.ol
+            let test_src_with_parser = alloc::format!(
+                "{}\n{}\n\
+                let my_source = \"{}\";\n\
+                let tokens = tokenize(my_source);\n\
+                emit len(tokens);\n",
+                lexer_src, parser_src_clean, escaped
+            );
+            let stmts_b = parse(&test_src_with_parser).expect("parse");
+            let prog_b = lower(&stmts_b);
+            let mut vm_b = crate::vm::OlangVM::new();
+            vm_b.max_steps = 10_000_000;
+            vm_b.max_call_depth = 16_384;
+            let result_b = vm_b.execute(&prog_b);
+            let out_b: alloc::vec::Vec<_> = result_b.outputs().iter().map(|o| {
+                if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+                else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+                else { alloc::format!("chain:{:?}", o) }
+            }).collect();
+            let err_b: alloc::vec::Vec<_> = result_b.errors().iter().map(|e| alloc::format!("{}", e)).collect();
+
+            results_log.push(alloc::format!(
+                "\n[TOKENIZE ONLY] without parser: {:?}\n[TOKENIZE ONLY] with parser: {:?}\n  vm_errors: {:?}",
+                out_a, out_b, err_b
+            ));
+        }
+
+        // Now test FULL lexer.ol with 500M steps
+        let full_escaped = escape_olang_str(lexer_src);
+        let test_src = alloc::format!(
+            "{}\n{}\n\
+            let my_source = \"{}\";\n\
+            let tokens = tokenize(my_source);\n\
+            emit len(tokens);\n\
+            let program = parse(tokens);\n\
+            emit len(program);\n",
+            lexer_src, parser_src_clean, full_escaped
+        );
+        let stmts = parse(&test_src).expect("parse combined");
+        let prog = lower(&stmts);
+        let mut vm = crate::vm::OlangVM::new();
+        vm.max_steps = 500_000_000;
+        vm.max_call_depth = 16_384;
+        let result = vm.execute(&prog);
+        let errors = result.errors();
+        let outputs = result.outputs();
+        let parse_errors: alloc::vec::Vec<_> = outputs.iter()
+            .filter_map(|o| crate::vm::chain_to_string(o))
+            .filter(|s| s.contains("Parse error"))
+            .collect();
+        let stmt_count = outputs.iter()
+            .rev()
+            .find_map(|o| o.to_number())
+            .unwrap_or(-1.0) as i64;
+        let error_strs: alloc::vec::Vec<_> = errors.iter().map(|e| alloc::format!("{}", e)).collect();
+        let all_output_strs: alloc::vec::Vec<_> = outputs.iter().map(|o| {
+            if let Some(n) = o.to_number() { alloc::format!("num:{}", n) }
+            else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
+            else { alloc::format!("chain:{:?}", o) }
+        }).collect();
+        results_log.push(alloc::format!(
+            "\n[FULL] lexer.ol: stmts={}, parse_errs={}, vm_errs={}\nFirst 20 parse errors: {:?}\nVM errors: {:?}\nAll outputs ({} total): {:?}",
+            stmt_count, parse_errors.len(), error_strs.len(),
+            &parse_errors[..parse_errors.len().min(20)],
+            &error_strs[..error_strs.len().min(5)],
+            all_output_strs.len(),
+            &all_output_strs[..all_output_strs.len().min(30)]
+        ));
+
+        // Always panic to show all results
+        panic!("\n=== DEBUG PARSE RESULTS ===\n{}\n===========================",
+            results_log.join("\n"));
+    }
+
+    #[test]
     fn roundtrip_lexer_ol_self_parse() {
         // Task 0.3.2: parser.ol parses lexer.ol tokens
         // DoD: parse(tokenize(lexer_source)) → AST với 1 union, 1 type, 1 let, 6 fn
@@ -8402,7 +8611,7 @@ mod tests {
         let stmts = parse(&test_src).expect("should parse");
         let prog = lower(&stmts);
         let mut vm = crate::vm::OlangVM::new();
-        vm.max_steps = 50_000_000;
+        vm.max_steps = 500_000_000;
         vm.max_call_depth = 16_384;
         let result = vm.execute(&prog);
         let errors = result.errors();
@@ -8412,11 +8621,13 @@ mod tests {
             else if let Some(s) = crate::vm::chain_to_string(o) { alloc::format!("str:{}", s) }
             else { alloc::format!("chain:{:?}", o) }
         }).collect();
+        // Check for parse errors in output
+        let parse_errors: alloc::vec::Vec<_> = output_strs.iter()
+            .filter(|s| s.contains("Parse error"))
+            .collect();
+        assert!(parse_errors.is_empty(), "Parse errors: {:?}\nAll outputs: {:?}", parse_errors, output_strs);
         assert!(errors.is_empty(), "VM errors: {:?}\nOutputs: {:?}", errors, output_strs);
         // DoD: parse(tokenize(lexer_source)) → AST with 1 union, 1 type, 1 let, 5 fn = 8+
-        // Note: parser.ol may emit recovery errors for some edge cases but still
-        // produces valid top-level AST entries. DoD "no Unknown/Error" refers to
-        // token kinds, not parse recovery messages.
         let len = outputs.last().unwrap().to_number().expect("should be number") as usize;
         assert!(len >= 8, "lexer.ol should have ≥8 top-level stmts (1 union + 1 type + 1 let + 5 fn), got {}: {:?}", len, output_strs);
     }
