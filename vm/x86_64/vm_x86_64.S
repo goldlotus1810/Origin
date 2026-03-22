@@ -368,24 +368,29 @@ codegen_table:
 
 # codegen Push: [chain_len:2 u16 LE][chain_bytes:N] → push raw bytes as chain
 cg_push:
-    # Read u16 len
-    movzwl  (%r12, %r13), %ecx         # u16 LE chain_len
+    # Read u16 molecule count
+    movzwl  (%r12, %r13), %ecx         # u16 LE mol_count
     add     $2, %r13
 
-    # Copy chain bytes to heap
+    # Byte count = mol_count * 2 (each molecule = u16)
+    mov     %ecx, %edx
+    shl     $1, %edx                    # byte_count = mol_count * 2
+
+    # Copy molecule bytes to heap
     mov     %r15, %rdi                  # dest = heap
     lea     (%r12, %r13), %rsi         # src = bytecode
-    mov     %ecx, %edx
     push    %rcx
+    push    %rdx
     call    memcpy_small
+    pop     %rdx
     pop     %rcx
 
-    # Push (ptr, len) onto VM stack
+    # Push (ptr, mol_count) onto VM stack
     sub     $16, %r14
-    mov     %r15, (%r14)                # ptr
-    mov     %rcx, 8(%r14)               # len
-    add     %rcx, %r15                  # bump heap
-    add     %rcx, %r13                  # PC += chain_len
+    mov     %r15, (%r14)                # ptr to molecule data
+    mov     %rcx, 8(%r14)               # mol_count (NOT byte count)
+    add     %rdx, %r15                  # bump heap by byte_count
+    add     %rdx, %r13                  # PC += byte_count
     jmp     vm_loop
 
 # codegen Closure: [param_count:1][body_len:4]

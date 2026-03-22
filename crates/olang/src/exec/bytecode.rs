@@ -275,8 +275,7 @@ pub fn encode_bytecode(ops: &[Op]) -> Vec<u8> {
 fn op_byte_size(op: &Op) -> usize {
     match op {
         Op::Push(chain) => {
-            let name = alloc::format!("{:?}", chain);
-            1 + 2 + name.len()          // tag + u16_len + data
+            1 + 2 + chain.0.len() * 2   // tag + u16_count + u16_molecules
         }
         Op::Load(name) | Op::Call(name) | Op::Store(name) | Op::LoadLocal(name) => {
             1 + 1 + name.len()          // tag + u8_len + name
@@ -358,9 +357,15 @@ fn encode_op(out: &mut Vec<u8>, op: &Op) {
     match op {
         Op::Push(chain) => {
             emit_byte(out, 0x01);
-            // Push uses the chain's alias/display as the name
-            let name = alloc::format!("{:?}", chain);
-            emit_str_u16(out, &name);
+            // Push: encode chain as binary [0x01][u16 mol_count][u16 mol0][u16 mol1]...
+            let mols = &chain.0;
+            let count = mols.len() as u16;
+            out.push((count & 0xFF) as u8);
+            out.push((count >> 8) as u8);
+            for &mol in mols {
+                out.push((mol & 0xFF) as u8);
+                out.push((mol >> 8) as u8);
+            }
         }
         Op::Load(name) => {
             emit_byte(out, 0x02);
