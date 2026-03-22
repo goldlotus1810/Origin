@@ -79,7 +79,7 @@ pub fn builtin_name_to_id(name: &str) -> Option<u8> {
         "__hyp_sub" | "__phys_sub" => Some(BID_HYP_SUB),
         "__hyp_mul" => Some(BID_HYP_MUL),
         "__hyp_div" => Some(BID_HYP_DIV),
-        "__hyp_mod" => Some(BID_HYP_MOD),
+        // "__hyp_mod" not mapped — ASM doesn't handle it
         // Comparison — inlined
         "__eq" => Some(BID_EQ),
         "__cmp_lt" => Some(BID_CMP_LT),
@@ -90,10 +90,9 @@ pub fn builtin_name_to_id(name: &str) -> Option<u8> {
         // Logic — inlined
         "__logic_not" => Some(BID_LOGIC_NOT),
         "__assert_truth" => Some(BID_ASSERT_TRUTH),
-        // String — inlined
-        "__str_char_at" => Some(BID_STR_CHAR_AT),
-        "__str_substr" => Some(BID_STR_SUBSTR),
-        "__str_is_keyword" => Some(BID_STR_IS_KEYWORD),
+        // String ops stay as Op::Call(String) — ASM handles them via op_call hash dispatch
+        // "__str_char_at" / "__str_substr" / "__str_is_keyword" NOT mapped here
+        // because ASM CallBuiltin noop-skips unhandled IDs → stack corruption
         // Everything else stays as Op::Call(String) for now
         _ => None,
     }
