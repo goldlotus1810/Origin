@@ -12,10 +12,33 @@ use alloc::vec::Vec;
 
 use super::formula::{ValenceState, ValenceKind, ArousalState, ArousalKind};
 use super::molecular::Molecule;
+use crate::storage::knowtree::KnowTree;
 
 /// Fibonacci sample sizes by maturity generation.
 /// gen0 (UDC gốc): Fib(3)=2, gen1: Fib(5)=5, gen2: Fib(7)=13, gen3: Fib(10)=55
 const FIB_SAMPLES: [usize; 4] = [2, 5, 13, 55];
+
+/// Compute ValenceState by sampling from KnowTree L1 (Tầng 1 — preferred).
+///
+/// Spec IX.I: Lấy mẫu trực tiếp từ cây đã học.
+/// Trung bình CHỈ cho structural lookup, KHÔNG cho emotion pipeline.
+pub fn eval_valence_from_knowtree(v: u8, kt: &KnowTree) -> Option<ValenceState> {
+    let samples = kt.sample_by_dim(2, v, FIB_SAMPLES[0]); // dim=2 = V
+    if samples.is_empty() {
+        // Fallback to full L3 scan
+        return eval_valence_from_table(v, kt.l3_weights());
+    }
+    compute_valence_from_samples(v, &samples)
+}
+
+/// Compute ArousalState by sampling from KnowTree L1.
+pub fn eval_arousal_from_knowtree(a: u8, kt: &KnowTree) -> Option<ArousalState> {
+    let samples = kt.sample_by_dim(3, a, FIB_SAMPLES[0]); // dim=3 = A
+    if samples.is_empty() {
+        return eval_arousal_from_table(a, kt.l3_weights());
+    }
+    compute_arousal_from_samples(a, &samples)
+}
 
 /// Compute ValenceState from UCD P_weight table (Tầng 2 fallback).
 ///
@@ -36,23 +59,23 @@ pub fn eval_valence_from_table(v: u8, p_table: &[u16]) -> Option<ValenceState> {
         return None;
     }
 
-    // Sample K entries (Fib-sized, gen0 = UDC gốc)
     let k = FIB_SAMPLES[0].min(matching.len());
-    let samples = &matching[..k];
+    compute_valence_from_samples(v, &matching[..k])
+}
 
-    // Compute average S dimension from samples → estimate shape complexity
+/// Shared computation: ValenceState from P_weight samples.
+fn compute_valence_from_samples(v: u8, samples: &[u16]) -> Option<ValenceState> {
+    if samples.is_empty() { return None; }
+
+    let k = samples.len() as f32;
     let avg_s: f32 = samples.iter()
         .map(|&pw| ((pw >> 12) & 0x0F) as f32)
-        .sum::<f32>() / k as f32;
+        .sum::<f32>() / k;
 
-    // Map V to potential using actual distribution
-    // V low (0-2) → high potential (barrier), V high (5-7) → low potential (well)
-    let v_norm = v as f32 / 7.0; // 0.0 = most negative, 1.0 = most positive
-    let potential = 0.85 - v_norm * 1.80; // range [+0.85, -0.95]
-    let force = -potential; // F = -dU/dx
-
-    // Adjust by shape complexity (more complex shapes → slightly deeper wells)
-    let shape_factor = 1.0 + (avg_s - 7.5) * 0.01; // slight adjustment
+    let v_norm = v as f32 / 7.0;
+    let potential = 0.85 - v_norm * 1.80;
+    let force = -potential;
+    let shape_factor = 1.0 + (avg_s - 7.5) * 0.01;
 
     let kind = match v {
         0 => ValenceKind::HighBarrier,
@@ -73,6 +96,27 @@ pub fn eval_valence_from_table(v: u8, p_table: &[u16]) -> Option<ValenceState> {
     })
 }
 
+/// Shared computation: ArousalState from P_weight samples.
+fn compute_arousal_from_samples(a: u8, _samples: &[u16]) -> Option<ArousalState> {
+    let a_norm = a as f32 / 7.0;
+    let energy = a_norm;
+    let gamma = (1.0 - a_norm) * 3.0;
+
+    let kind = match a {
+        0 => ArousalKind::GroundState,
+        1 => ArousalKind::HeatDeath,
+        2 => ArousalKind::Overdamped,
+        3 => ArousalKind::Equilibrium,
+        4 => ArousalKind::MildEquilibrium,
+        5 => ArousalKind::ExcitedLow,
+        6 => ArousalKind::ExcitedHigh,
+        7 => ArousalKind::Supercritical,
+        _ => ArousalKind::Equilibrium,
+    };
+
+    Some(ArousalState { kind, energy, damping: gamma })
+}
+
 /// Compute ArousalState from UCD P_weight table.
 pub fn eval_arousal_from_table(a: u8, p_table: &[u16]) -> Option<ArousalState> {
     if p_table.is_empty() {
@@ -89,31 +133,7 @@ pub fn eval_arousal_from_table(a: u8, p_table: &[u16]) -> Option<ArousalState> {
     }
 
     let k = FIB_SAMPLES[0].min(matching.len());
-    let _samples = &matching[..k];
-
-    // Map A to energy regime
-    let a_norm = a as f32 / 7.0;
-    let energy = a_norm; // 0.0 = ground state, 1.0 = supercritical
-    let gamma = (1.0 - a_norm) * 3.0; // high A = low damping
-    let lambda = if a >= 7 { 2.0 } else { 0.0 };
-
-    let kind = match a {
-        0 => ArousalKind::GroundState,
-        1 => ArousalKind::HeatDeath,
-        2 => ArousalKind::Overdamped,
-        3 => ArousalKind::Equilibrium,
-        4 => ArousalKind::MildEquilibrium,
-        5 => ArousalKind::ExcitedLow,
-        6 => ArousalKind::ExcitedHigh,
-        7 => ArousalKind::Supercritical,
-        _ => ArousalKind::Equilibrium,
-    };
-
-    Some(ArousalState {
-        kind,
-        energy,
-        damping: gamma,
-    })
+    compute_arousal_from_samples(a, &matching[..k])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -295,6 +315,46 @@ mod tests {
         // 56th entry should evict lowest Q
         cache.update(999, 0, 0, true);
         assert_eq!(cache.len(), 55); // still 55
+    }
+
+    #[test]
+    fn valence_from_knowtree() {
+        // Test sampling from actual KnowTree
+        let kt = KnowTree::bootstrap_from_ucd();
+        let state = eval_valence_from_knowtree(6, &kt);
+        assert!(state.is_some(), "V=6 should have samples in KnowTree");
+        let s = state.unwrap();
+        assert!(s.potential < 0.0, "V=6 DeepWell should have negative potential");
+        assert_eq!(s.kind, ValenceKind::DeepWell);
+    }
+
+    #[test]
+    fn arousal_from_knowtree() {
+        let kt = KnowTree::bootstrap_from_ucd();
+        // A=4 (Equilibrium) is common, should have entries
+        let state = eval_arousal_from_knowtree(4, &kt);
+        assert!(state.is_some(), "A=4 should have samples in KnowTree");
+        let s = state.unwrap();
+        assert_eq!(s.kind, ArousalKind::MildEquilibrium);
+        // A=7 may not have entries — test fallback path
+        let state7 = eval_arousal_from_knowtree(7, &kt);
+        // Either from samples or fallback — both OK
+        if let Some(s7) = state7 {
+            assert_eq!(s7.kind, ArousalKind::Supercritical);
+        }
+    }
+
+    #[test]
+    fn knowtree_sample_by_dim() {
+        let kt = KnowTree::bootstrap_from_ucd();
+        // V=6 should have entries
+        let samples = kt.sample_by_dim(2, 6, 10);
+        assert!(!samples.is_empty(), "KnowTree should have V=6 entries");
+        // All samples should have V=6
+        for &pw in &samples {
+            let v = ((pw >> 5) & 0x07) as u8;
+            assert_eq!(v, 6, "sample P_weight should have V=6");
+        }
     }
 
     #[test]
