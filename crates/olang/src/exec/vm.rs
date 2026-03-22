@@ -33,6 +33,17 @@ fn chain_cmp_bytes(a: &MolecularChain, b: &MolecularChain) -> core::cmp::Orderin
     a.0.len().cmp(&b.0.len())
 }
 
+/// FNV-1a hash for variable name strings — fast, no_std compatible.
+#[inline]
+fn fnv1a_hash(name: &str) -> u32 {
+    let mut h: u32 = 0x811c9dc5;
+    for &b in name.as_bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
+}
+
 /// Fast check: is this chain a string-encoded chain? (shape=2, rel=1 marker)
 /// String molecules have top byte = 0x21 (shape=2 in bits[15:12], rel=1 in bits[11:8]).
 /// Must check ALL molecules to reject mixed chains (string+separator arrays).
@@ -854,6 +865,12 @@ impl OlangVM {
         // Compiler pipeline caches (for __parse → __lower → __encode_bytecode)
         let mut parse_cache: Option<Vec<crate::lang::syntax::Stmt>> = None;
         let mut lower_cache: Option<crate::exec::ir::OlangProgram> = None;
+
+        // VM.4: Scope variable inline cache (Fib(6)=8 entries)
+        // Each entry: (name_hash, scope_idx, slot_idx) — O(1) variable lookup
+        // Invalidated on Store/ScopeEnd/ScopeBegin
+        let mut var_cache: [(u32, usize, usize); 8] = [(0, 0, 0); 8];
+        let mut var_cache_gen: u32 = 0; // generation counter for bulk invalidation
 
         while pc < prog.ops.len() {
             // Batch step check: only compare max_steps every 256 iterations
@@ -4266,9 +4283,10 @@ impl OlangVM {
 
                 Op::Store(name) => {
                     let val = vm_pop!(stack, events);
+                    // Invalidate cache for this variable
+                    let h = fnv1a_hash(name);
+                    var_cache[(h as usize) & 7] = (0, 0, 0);
                     // Store in current (innermost) scope.
-                    // Update existing in current scope, else insert new.
-                    // SAFETY: scopes always has root scope (initialized above)
                     let Some(scope) = scopes.last_mut() else { break };
                     if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
                         entry.1 = val;
@@ -4279,8 +4297,10 @@ impl OlangVM {
 
                 Op::StoreUpdate(name) => {
                     let val = vm_pop!(stack, events);
+                    // Invalidate cache for this variable
+                    let h = fnv1a_hash(name);
+                    var_cache[(h as usize) & 7] = (0, 0, 0);
                     // Search ALL scopes from innermost outward; update first match.
-                    // If not found anywhere, store in current scope (fallback).
                     let mut found = false;
                     for scope in scopes.iter_mut().rev() {
                         if let Some(entry) = scope.iter_mut().find(|(n, _)| n == name) {
@@ -4297,14 +4317,45 @@ impl OlangVM {
                 }
 
                 Op::LoadLocal(name) => {
-                    // Search from innermost scope outward (lexical scoping)
-                    let val = scopes
-                        .iter()
-                        .rev()
-                        .find_map(|scope| {
-                            scope.iter().rev().find(|(n, _)| n == name).map(|(_, c)| c.clone())
-                        })
-                        .unwrap_or_else(MolecularChain::empty);
+                    // VM.4: Check inline cache first (O(1))
+                    let h = fnv1a_hash(name);
+                    let cache_slot = (h as usize) & 7; // & 7 = mod 8
+                    let val = if var_cache[cache_slot].0 == h
+                        && var_cache[cache_slot].1 < scopes.len()
+                    {
+                        let si = var_cache[cache_slot].1;
+                        let vi = var_cache[cache_slot].2;
+                        if vi < scopes[si].len() && scopes[si][vi].0 == *name {
+                            // Cache HIT
+                            scopes[si][vi].1.clone()
+                        } else {
+                            // Hash collision or stale — fallback
+                            let mut found = MolecularChain::empty();
+                            for (si2, scope) in scopes.iter().enumerate().rev() {
+                                if let Some((vi2, (_, c))) = scope.iter().enumerate().rev()
+                                    .find(|(_, (n, _))| n == name)
+                                {
+                                    var_cache[cache_slot] = (h, si2, vi2);
+                                    found = c.clone();
+                                    break;
+                                }
+                            }
+                            found
+                        }
+                    } else {
+                        // Cache MISS — linear scan + populate cache
+                        let mut found = MolecularChain::empty();
+                        for (si, scope) in scopes.iter().enumerate().rev() {
+                            if let Some((vi, (_, c))) = scope.iter().enumerate().rev()
+                                .find(|(_, (n, _))| n == name)
+                            {
+                                var_cache[cache_slot] = (h, si, vi);
+                                found = c.clone();
+                                break;
+                            }
+                        }
+                        found
+                    };
                     if let Err(e) = stack.push(val) {
                         events.push(VmEvent::Error(e));
                         break;
@@ -4318,6 +4369,9 @@ impl OlangVM {
                         break;
                     }
                     scopes.push(Vec::new());
+                    // Bump cache generation — entries pointing to old scope indices
+                    // will miss on next lookup (scope_idx check fails)
+                    var_cache_gen = var_cache_gen.wrapping_add(1);
                 }
 
                 Op::ScopeEnd => {
@@ -4327,6 +4381,7 @@ impl OlangVM {
                         scopes.pop();
                         call_depth = call_depth.saturating_sub(1);
                     }
+                    var_cache_gen = var_cache_gen.wrapping_add(1);
                     // Check loop stack: if we're at end of a loop body, jump back
                     if let Some(entry) = loop_stack.last_mut() {
                         if entry.1 > 0 {
