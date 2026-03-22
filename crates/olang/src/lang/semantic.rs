@@ -1718,11 +1718,20 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         }
 
         Stmt::FnDef { name, params, body, .. } => {
-            // If Phase 1.5 handled this (use_call_closure = true), skip —
-            // already compiled via CallClosure dispatch.
             if ctx.use_call_closure {
-                // Phase 1.5 files: functions already in compiled_fns table.
-                // Don't emit inline — would cause stack overflow for recursive fns.
+                // Phase 1.5: body already compiled. Emit trampoline closure
+                // so function registers in var_table (for REPL/external lookup).
+                // Trampoline body: Jmp(pre_compiled_body) + Ret = 2 ops.
+                if let Some((_fn_name, body_pc, _fn_params)) = ctx.compiled_fns.iter()
+                    .find(|(n, _, _)| n == name)
+                    .cloned()
+                {
+                    ctx.emit(Op::Closure(params.len() as u8, 2));
+                    ctx.emit(Op::Jmp(body_pc));
+                    ctx.emit(Op::Ret);
+                    ctx.emit(Op::Store(name.clone()));
+                    ctx.locals.push(name.clone());
+                }
                 return;
             }
             // Small files: emit Closure + body + Store inline.
