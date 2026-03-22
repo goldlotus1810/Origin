@@ -1077,10 +1077,12 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
         }
     }
 
-    // Phase 1.5: Pre-compile function bodies
-    // Always compile if there are any functions (removed > 10 heuristic
-    // that was causing files with ≤10 functions to silently drop all fn definitions)
-    if !ctx.fns.is_empty() {
+    // Phase 1.5: Pre-compile function bodies for CallClosure dispatch.
+    // Only for files with many functions (likely recursive/mutual calls).
+    // Files with ≤ functions use inline Closure+Store in lower_stmt instead.
+    // Use Phase 1.5 for files with 2+ functions (prevents recursive inline Closure
+    // stack overflow and ensures all functions visible via CallClosure).
+    if ctx.fns.len() >= 2 {
         // Emit a Jmp to skip all compiled function bodies
         let skip_all = ctx.prog.ops.len();
         ctx.prog.push_op(Op::Jmp(0)); // placeholder
@@ -1134,28 +1136,10 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
         let after_fns = ctx.prog.ops.len();
         ctx.prog.ops[skip_all] = Op::Jmp(after_fns);
 
-        // Emit Closure + Store for each function so they register in var_table.
-        // This makes functions findable by name (e.g., repl_eval in REPL).
-        for fi in 0..fn_count {
-            let fn_def = &ctx.fns[fi];
-            let body_start = fn_body_starts[fi];
-            let body_end = if fi + 1 < fn_count {
-                fn_body_starts[fi + 1]
-            } else {
-                after_fns
-            };
-            let body_len = body_end - body_start;
-            // Emit Closure marker pointing to pre-compiled body
-            ctx.prog.push_op(Op::Closure(fn_def.params.len() as u8, body_len));
-            // Copy body ops inline (Closure expects body immediately after)
-            let body_ops: Vec<Op> = ctx.prog.ops[body_start..body_end].to_vec();
-            for op in body_ops {
-                ctx.prog.push_op(op);
-            }
-            // Store closure with function name
-            ctx.prog.push_op(Op::Store(fn_def.name.clone()));
-            ctx.locals.push(fn_def.name.clone());
-        }
+        // TODO: Phase 1.5 functions need var_table registration for ASM REPL.
+        // Current blocker: Closure body can't just be a stub (REPL calls it).
+        // Can't duplicate body (jump offsets wrong). Can't inline (stack overflow).
+        // Need: ASM CallClosure to use compiled_fns table like Rust VM does.
     }
 
     // Second pass: lower statements
@@ -1733,8 +1717,36 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             }
         }
 
-        Stmt::FnDef { .. } => {
-            // Function definitions are collected in first pass, not emitted inline
+        Stmt::FnDef { name, params, body, .. } => {
+            // If Phase 1.5 handled this (use_call_closure = true), skip —
+            // already compiled via CallClosure dispatch.
+            if ctx.use_call_closure {
+                // Phase 1.5 files: functions already in compiled_fns table.
+                // Don't emit inline — would cause stack overflow for recursive fns.
+                return;
+            }
+            // Small files: emit Closure + body + Store inline.
+            let body_start_placeholder = ctx.current_pos();
+            ctx.emit(Op::Closure(params.len() as u8, 0));
+
+            let body_start = ctx.current_pos();
+            for p in params.iter().rev() {
+                ctx.emit(Op::Store(p.clone()));
+            }
+            let saved_locals = ctx.locals.clone();
+            ctx.locals = params.clone();
+            for s in body {
+                lower_stmt(s, ctx);
+            }
+            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+            ctx.emit(Op::Ret);
+            ctx.locals = saved_locals;
+
+            let body_len = ctx.current_pos() - body_start;
+            ctx.ops_mut()[body_start_placeholder] = Op::Closure(params.len() as u8, body_len);
+
+            ctx.emit(Op::Store(name.clone()));
+            ctx.locals.push(name.clone());
         }
 
         Stmt::Expr(expr) => {
