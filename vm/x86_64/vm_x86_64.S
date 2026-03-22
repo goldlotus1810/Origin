@@ -315,6 +315,12 @@ vm_loop:
 
 # ── codegen.ol format dispatch (tags 0x01-0x24) ─────────────────────────
 dispatch_codegen:
+    # 0x3A = CallBuiltin: skip builtin_id byte (1 byte)
+    cmp     $0x3A, %al
+    jne     .cg_not_builtin
+    inc     %r13                        # skip builtin_id
+    jmp     vm_loop
+.cg_not_builtin:
     lea     codegen_table(%rip), %rcx
     movzbl  %al, %eax
     cmp     $0x26, %al
@@ -372,6 +378,15 @@ cg_push:
     movzwl  (%r12, %r13), %ecx         # u16 LE mol_count
     add     $2, %r13
 
+    # Empty chain (mol_count == 0): just push empty onto stack
+    test    %ecx, %ecx
+    jnz     .cg_push_nonempty
+    sub     $16, %r14
+    movq    $0, (%r14)                  # ptr = 0
+    movq    $0, 8(%r14)                 # len = 0
+    jmp     vm_loop
+
+.cg_push_nonempty:
     # Byte count = mol_count * 2 (each molecule = u16)
     mov     %ecx, %edx
     shl     $1, %edx                    # byte_count = mol_count * 2
@@ -2655,40 +2670,34 @@ memcpy_small:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_unknown:
-    # Debug: print PC value (r13) and step count before opcode
+    # Debug: print r13 (PC) as hex
     push    %rax
-    # Print "PC=" then r13 as decimal
-    lea     msg_pc(%rip), %rsi
-    mov     $4, %edx
-    mov     $2, %edi
-    mov     $1, %eax
-    syscall
-    # Print r13 as simple decimal (max 6 digits)
     mov     %r13, %rax
-    sub     $16, %rsp
-    mov     $10, %rcx
-    lea     15(%rsp), %rdi
-    movb    $0x0A, (%rdi)              # newline
+    sub     $20, %rsp
+    lea     hex_chars(%rip), %rsi
+    lea     19(%rsp), %rdi
+    movb    $0x0A, (%rdi)
     dec     %rdi
-.Lpc_loop:
-    xor     %edx, %edx
-    div     %rcx
-    add     $0x30, %dl
+    mov     $16, %rcx
+.Lhex_pc:
+    mov     %rax, %rdx
+    and     $0xF, %edx
+    movzbl  (%rsi,%rdx), %edx
     movb    %dl, (%rdi)
+    shr     $4, %rax
     dec     %rdi
     test    %rax, %rax
-    jnz     .Lpc_loop
+    jnz     .Lhex_pc
     inc     %rdi
     mov     %rdi, %rsi
-    lea     16(%rsp), %rax
+    lea     20(%rsp), %rax
     sub     %rdi, %rax
     mov     %eax, %edx
     mov     $2, %edi
     mov     $1, %eax
     syscall
-    add     $16, %rsp
+    add     $20, %rsp
     pop     %rax
-
     # Debug: print opcode value as hex before error message
     # al still has the opcode byte
     push    %rax

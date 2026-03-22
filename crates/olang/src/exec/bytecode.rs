@@ -288,6 +288,7 @@ fn op_byte_size(op: &Op) -> usize {
         Op::Closure(_, _) => 1 + 1 + 4,  // tag + u8_param_count + u32_body_len
         Op::CallClosure(_) => 1 + 1 + 1, // tag + empty_name_len(0x00) + u8_arity
         Op::Ffi(name, _) => 1 + 1 + name.len() + 1, // tag + name_len + name + arity
+        Op::CallBuiltin(_) => 1 + 1,     // tag + u8_id
         _ => 1,                          // single-byte ops
     }
 }
@@ -462,8 +463,11 @@ fn encode_op(out: &mut Vec<u8>, op: &Op) {
         | Op::FileRead | Op::FileWrite | Op::FileAppend
         | Op::SpawnBegin | Op::SpawnEnd
         | Op::ChanNew | Op::ChanSend | Op::ChanRecv
-        | Op::Select(_)
-        | Op::CallBuiltin(_) => {}
+        | Op::Select(_) => {}
+        Op::CallBuiltin(id) => {
+            emit_byte(out, 0x3A);
+            emit_byte(out, *id);
+        }
     }
 }
 
