@@ -1133,6 +1133,29 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
         // Patch the skip jump
         let after_fns = ctx.prog.ops.len();
         ctx.prog.ops[skip_all] = Op::Jmp(after_fns);
+
+        // Emit Closure + Store for each function so they register in var_table.
+        // This makes functions findable by name (e.g., repl_eval in REPL).
+        for fi in 0..fn_count {
+            let fn_def = &ctx.fns[fi];
+            let body_start = fn_body_starts[fi];
+            let body_end = if fi + 1 < fn_count {
+                fn_body_starts[fi + 1]
+            } else {
+                after_fns
+            };
+            let body_len = body_end - body_start;
+            // Emit Closure marker pointing to pre-compiled body
+            ctx.prog.push_op(Op::Closure(fn_def.params.len() as u8, body_len));
+            // Copy body ops inline (Closure expects body immediately after)
+            let body_ops: Vec<Op> = ctx.prog.ops[body_start..body_end].to_vec();
+            for op in body_ops {
+                ctx.prog.push_op(op);
+            }
+            // Store closure with function name
+            ctx.prog.push_op(Op::Store(fn_def.name.clone()));
+            ctx.locals.push(fn_def.name.clone());
+        }
     }
 
     // Second pass: lower statements
