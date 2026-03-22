@@ -787,7 +787,7 @@ op_jz:
     movl    (%r12, %r13), %eax          # target
     add     $4, %r13                    # PC past target bytes
 
-    # Check top of stack: is it zero/empty?
+    # Pop condition from stack
     mov     8(%r14), %rcx              # len
     mov     (%r14), %rdx               # ptr/value
     add     $16, %r14                  # pop
@@ -870,7 +870,13 @@ op_call:
     movabs  $0x9FC9B1482B01D5E9, %rdx   # __char_at
     cmp     %rdx, %rax
     je      .call_char_at
+    movabs  $0x463483AB25CAB22D, %rdx   # __str_char_at (alias)
+    cmp     %rdx, %rax
+    je      .call_char_at
     movabs  $0xE386A6329E2424BE, %rdx   # __substr
+    cmp     %rdx, %rax
+    je      .call_substr
+    movabs  $0xEA1BDD6D065BF46A, %rdx   # __str_substr (alias)
     cmp     %rdx, %rax
     je      .call_substr
     movabs  $0xFBE159BD1C6EBFA7, %rdx   # __str_trim
@@ -3733,6 +3739,8 @@ boot_bc_size:
     .space 8                            # boot bytecode size
 eval_mode:
     .space 1                            # 0 = REPL mode, 1 = --eval mode (stdin)
+jz_did_pop:
+    .space 1                            # 1 = Jz already popped, next Pop is no-op
     .align 8
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
