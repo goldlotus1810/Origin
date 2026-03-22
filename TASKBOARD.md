@@ -240,15 +240,15 @@ DoD:     make verify → ALL PASS
 | UDC | UDC Rebuild (59 blocks) | PLAN_UDC | Nhiều sessions | DONE ✅ | 8,846 entries, build pipeline v3.1, KT31 format. |
 | TLC | Test Logic Check (6 patterns) | PLAN_TEST_LOGIC | Trung bình | FREE | 6 test files cần viết theo CHECK_TO_PASS_LOGIC_HANDBOOK.md. |
 | AUTH | First-run Auth setup | PLAN_AUTH_first_run | ~200 LOC | FREE | Terms screen + Master Key (Ed25519) + Biometric option. Độc lập. |
-| **FE** | **Formula Engine — Giá trị = Công thức** | **PLAN_FORMULA_ENGINE** | **~1250 LOC** | **FREE** | **CRITICAL: 3/5 chiều (R,V,A) không dùng công thức. T chỉ 2 bit tĩnh. Cần: formula dispatch + T spline accumulation.** |
-| FE.1 | R dispatch (16 relation → operations) | PLAN_FORMULA_ENGINE | ~200 LOC | FREE | Category theory, algebraic structures → compose rules |
-| FE.2 | V dispatch (8 levels → ValenceState) | PLAN_FORMULA_ENGINE | ~100 LOC | FREE | Potential energy → approach/avoidance behavior |
-| FE.3 | A dispatch (8 levels → ArousalState) | PLAN_FORMULA_ENGINE | ~100 LOC | FREE | Damped oscillator → energy regime behavior |
-| FE.4 | T SplineKnot accumulation | PLAN_FORMULA_ENGINE | ~300 LOC | FREE | Mỗi observe → append knot (duration, freq, amp, phase) |
-| FE.5 | T Spline interpolation | PLAN_FORMULA_ENGINE | ~200 LOC | FE.4 | History → curve → temporal behavior |
-| FE.6 | Wire formula engine vào pipeline | PLAN_FORMULA_ENGINE | ~200 LOC | FE.1-5 | encode → eval → store |
-| FE.7 | Test: đọc P → reconstruct formula | PLAN_FORMULA_ENGINE | ~150 LOC | FE.6 | Verify giá trị tự mô tả |
-| **FE.8** | **T×S: T làm tham số cho SDF** | **PLAN_FORMULA_ENGINE** | **~300 LOC** | **FE.4** | **T.amp→radius, T.phase→position, T.freq→motion. 18 SDF × T params = vô hạn hình. compose(SPHERE+T₁, SPHERE+T₂)=⛄** |
+| **FE** | **Formula Engine — Giá trị = Công thức** | **PLAN_FORMULA_ENGINE** | **~1550 LOC** | **CLAIMED** | **CRITICAL. Session lupin-pc 2026-03-22. FE.1-8 implementing.** |
+| FE.1 | R dispatch (16 relation → operations) | PLAN_FORMULA_ENGINE | ~200 LOC | CLAIMED | Category theory, algebraic structures → compose rules |
+| FE.2 | V dispatch (8 levels → ValenceState) | PLAN_FORMULA_ENGINE | ~100 LOC | CLAIMED | Potential energy → approach/avoidance behavior |
+| FE.3 | A dispatch (8 levels → ArousalState) | PLAN_FORMULA_ENGINE | ~100 LOC | CLAIMED | Damped oscillator → energy regime behavior |
+| FE.4 | T SplineKnot accumulation | PLAN_FORMULA_ENGINE | ~300 LOC | CLAIMED | Mỗi observe → append knot (duration, freq, amp, phase) |
+| FE.5 | T Spline interpolation | PLAN_FORMULA_ENGINE | ~200 LOC | CLAIMED | History → curve → temporal behavior |
+| FE.6 | Wire formula engine vào pipeline | PLAN_FORMULA_ENGINE | ~200 LOC | CLAIMED | encode → eval → store |
+| FE.7 | Test: đọc P → reconstruct formula | PLAN_FORMULA_ENGINE | ~150 LOC | CLAIMED | Verify giá trị tự mô tả |
+| **FE.8** | **T×S: T làm tham số cho SDF** | **PLAN_FORMULA_ENGINE** | **~300 LOC** | **CLAIMED** | **T.amp→radius, T.phase→position, T.freq→motion. 18 SDF × T params = vô hạn hình.** |
 | 7.2 | Mobile (Android + iOS) | PLAN_7_2 | 2-3 tuần | FREE | ARM64 native + WASM iOS. |
 
 ### Tier 4 — Cắt dây rốn (Rust → 0%)
