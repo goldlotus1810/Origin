@@ -40,6 +40,22 @@ KHI BỊ BLOCKED:
 Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Migration T1-T14, T16 | INTG
 → Chi tiết: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
 
+### Tier 1 — DONE (session 2026-03-22)
+
+| ID | Status | Summary |
+|----|--------|---------|
+| P2.0, P2.0b | DONE ✅ | VM builtins + 28 test failures fixed. PR #228 #229 #239. |
+| VM.1-5,7,8 | DONE ✅ | VM optimization 10.73s→2.91s (3.7x). String no-alloc, keyword hash, CallBuiltin, scope cache, KnowTree sampling, Bellman path. |
+| VM.6 | SKIP | SSO không cần — risk cao, performance đủ. |
+| 8.1-8.3 | DONE ✅ | Parser: hex, ==, keywords as ident. |
+| 11.2,11.3,11.5 | DONE ✅ | Server --eval + E2E tests 9/9 + Makefile. |
+| 12.1-12.5 | DONE ✅ | Emotion pipeline + context + intent + response + language. |
+| FE.1-8 | DONE ✅ | Formula Engine: R/V/A/T dispatch + T×S + pipeline wire. |
+| TLC | DONE ✅ | 15 logic tests (6 patterns + 5 checkpoints). |
+| AUTH | DONE ✅ | First-run auth: terms + Ed25519 master key. |
+| UTF32→L1 | DONE ✅ | Import udc_utf32.json → origin.olang (41K chars + aliases). |
+| Spec IX.I-K | DONE ✅ | KnowTree Sampling + Bellman Path + String Fingerprint. |
+
 ---
 
 ## Recently DONE (Phase 14)
@@ -64,7 +80,7 @@ Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Mi
 | VM.3 | Micro-opts (step batch + flags) | PLAN_VM_OPT | ~30 LOC | — | DONE ✅ | Step check mỗi 256 iterations. PR #239. |
 | VM.4 | Scope variable cache | PLAN_VM_OPT | ~100 LOC | VM.1 | DONE ✅ | FNV-1a hash, 8 entries, auto-invalidate. PR #239. |
 | VM.5 | Builtin dispatch table | PLAN_VM_OPT | ~200 LOC | VM.1 | DONE ✅ | Op::CallBuiltin(u8), 16 builtins inlined. PR #239. |
-| VM.6 | Small-chain SSO | PLAN_VM_OPT | ~300 LOC | VM.1-5 | FREE | Inline [u16;4] cho numbers/1-char. |
+| VM.6 | Small-chain SSO | PLAN_VM_OPT | ~300 LOC | VM.1-5 | SKIP | Không cần sửa — risk cao, 189 callsites. Performance đủ với VM.1-5. |
 | VM.7 | KnowTree sampling | PLAN_VM_OPT | ~150 LOC | FE.6 | DONE ✅ | eval_valence/arousal_from_table, Fib-sized sampling, 3-tier fallback. |
 | VM.8 | Bellman path optimization | PLAN_VM_OPT | ~100 LOC | VM.7 | DONE ✅ | BellmanPathCache 55 entries, φ⁻¹ decay, Q-table eviction. 7/7 tests. |
 | 8.1 | Parser: hex literals (0xFF) | PLAN_8 | ~80 LOC | — | DONE ✅ | Đã implement (session 2pN6F). |
@@ -293,18 +309,18 @@ DoD:     make verify → ALL PASS
 
 ---
 
-### Tier 2 — Cần Tier 1 xong trước
+### Tier 2 — UNBLOCKED (Tier 1 DONE) → Chuẩn bị cắt Rust
 
 | ID | Task | Plan | Effort | Depends | Status | Notes |
 |----|------|------|--------|---------|--------|-------|
-| P2.2 | Emotion pipeline (.ol) | PLAN_PHASE2 | ~200 LOC | P2.0 | BLOCKED | emotion/curve/intent .ol hoàn thiện. |
-| P2.3 | Knowledge layer (.ol) | PLAN_PHASE2 | ~150 LOC | P2.0 | BLOCKED | silk_ops/dream/instinct/learning .ol. |
-| P2.4 | Agent behavior (.ol) | PLAN_PHASE2 | ~300 LOC | P2.0 | BLOCKED | response/leo/chief/worker .ol. |
-| P2.5 | E2E integration test | PLAN_PHASE2 | ~50 LOC | P2.2-4 | BLOCKED | 5 test cases end-to-end. |
-| 9 | Native REPL | PLAN_9 | ~600 LOC | 8.1-8.3 | BLOCKED | ./origin → REPL. Cần parser fix trước. |
-| 10 | Browser E2E | PLAN_10 | ~500 LOC | 9 | BLOCKED | origin.html, WASM compile+execute. |
-| 11.1 | Demo script (10 scenarios) | PLAN_11 | ~300 LOC | 8, 9 | BLOCKED | Cần parser + REPL. |
-| 11.4 | Native binary --eval | PLAN_11 | ~50 LOC | 9 | BLOCKED | Cần native REPL. |
+| P2.2 | Emotion pipeline (.ol) | PLAN_PHASE2 | ~200 LOC | P2.0 ✅ | FREE | emotion/curve/intent .ol — chuyển từ Rust sang Olang. |
+| P2.3 | Knowledge layer (.ol) | PLAN_PHASE2 | ~150 LOC | P2.0 ✅ | FREE | silk_ops/dream/instinct/learning .ol. |
+| P2.4 | Agent behavior (.ol) | PLAN_PHASE2 | ~300 LOC | P2.0 ✅ | FREE | response/leo/chief/worker .ol. |
+| P2.5 | E2E integration test | PLAN_PHASE2 | ~50 LOC | P2.2-4 | BLOCKED | 5 test cases end-to-end. Chờ P2.2-4. |
+| 9 | Native REPL | PLAN_9 | ~600 LOC | 8.1-8.3 ✅ | FREE | ./origin → REPL. Parser đã fix. |
+| 10 | Browser E2E | PLAN_10 | ~500 LOC | 9 | BLOCKED | origin.html, WASM. Chờ REPL. |
+| 11.1 | Demo script (10 scenarios) | PLAN_11 | ~300 LOC | 8 ✅, 9 | BLOCKED | Chờ REPL. |
+| 11.4 | Native binary --eval | PLAN_11 | ~50 LOC | 9 | BLOCKED | Chờ REPL. |
 
 ### Tier 3 — Lớn, cần kế hoạch riêng
 
