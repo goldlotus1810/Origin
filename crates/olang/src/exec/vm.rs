@@ -1000,7 +1000,7 @@ impl OlangVM {
                 }
 
                 Op::Jz(target) => {
-                    let is_empty = stack.peek().map(|c| c.is_empty()).unwrap_or(true);
+                    let is_empty = stack.pop().map(|c| c.is_empty()).unwrap_or(true);
                     if is_empty {
                         if *target >= prog.ops.len() {
                             events.push(VmEvent::Error(VmError::InvalidJump(*target)));

@@ -1357,10 +1357,9 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         } => {
             // lower cond
             lower_expr(cond, ctx);
-            // JZ → else (or end)
+            // JZ → else (or end) — Jz pops the condition
             let jz_pos = ctx.current_pos();
             ctx.emit(Op::Jz(0)); // placeholder
-            ctx.emit(Op::Pop); // pop cond from stack
 
             // then block
             let saved = ctx.locals.len();
@@ -1377,7 +1376,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 // else target
                 let else_target = ctx.current_pos();
                 ctx.patch_jump(jz_pos, else_target);
-                ctx.emit(Op::Pop); // pop cond
 
                 let saved2 = ctx.locals.len();
                 for s in else_stmts {
@@ -1389,16 +1387,9 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 let end_target = ctx.current_pos();
                 ctx.patch_jump(jmp_pos, end_target);
             } else {
-                // no else: JZ jumps to pop_cond, then block falls to end
-                let jmp_pos = ctx.current_pos();
-                ctx.emit(Op::Jmp(0)); // skip the Pop (then-block completed)
-
-                let pop_target = ctx.current_pos();
-                ctx.patch_jump(jz_pos, pop_target);
-                ctx.emit(Op::Pop); // pop cond (only reached via Jz)
-
+                // no else: Jz pops cond and jumps to end
                 let end_target = ctx.current_pos();
-                ctx.patch_jump(jmp_pos, end_target);
+                ctx.patch_jump(jz_pos, end_target);
             }
         }
 
@@ -1415,15 +1406,15 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
         Stmt::While { cond, body } => {
             // while cond { body }
-            // Layout: [start:] ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd Jmp(start) [end:] Pop
+            // Layout: [start:] ScopeBegin [cond] Jz(end) [body] ScopeEnd Jmp(start) [end:]
             // No Loop opcode — uses explicit Jmp for back-jump to avoid
             // loop_stack corruption with nested while loops.
+            // Jz pops the condition value.
             let start = ctx.current_pos();
             ctx.emit(Op::ScopeBegin);
             lower_expr(cond, ctx);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // placeholder — patched to end
-            ctx.emit(Op::Pop); // pop cond result (true path continues)
+            ctx.emit(Op::Jz(0)); // placeholder — patched to end (Jz pops cond)
             // Set up break/continue context (forward jump placeholders)
             ctx.break_jumps.push(Vec::new());
             ctx.continue_jumps.push(Vec::new());
@@ -1443,12 +1434,10 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::Jmp(start)); // explicit back-jump
             let end = ctx.current_pos();
             ctx.patch_jump(jz_pos, end);
-            ctx.emit(Op::Pop); // pop cond result (false path, Jz jumped here)
-            let after_pop = ctx.current_pos();
-            // Patch break → after the Pop (break happens after cond was already popped)
+            // Patch break → end (Jz already popped cond)
             if let Some(breaks) = ctx.break_jumps.pop() {
                 for bp in breaks {
-                    ctx.patch_jump(bp, after_pop);
+                    ctx.patch_jump(bp, end);
                 }
             }
         }
@@ -1522,14 +1511,12 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::LoadLocal("__foreach_len".into()));
             ctx.emit_call("__cmp_ge"); // idx >= len → truthy
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0));                 // if falsy (idx < len) → continue
-            ctx.emit(Op::Pop);                   // pop cmp result (truthy)
+            ctx.emit(Op::Jz(0));                 // if falsy (idx < len) → continue (Jz pops cmp result)
             let break_jmp = ctx.current_pos();
             ctx.emit(Op::Jmp(0));                // break out
 
             let cont_target = ctx.current_pos();
             ctx.patch_jump(jz_pos, cont_target);
-            ctx.emit(Op::Pop);                   // pop cmp result (falsy)
 
             // Get element: arr[idx] → store as var
             ctx.emit(Op::Dup);                   // [..., idx, idx]
@@ -1858,8 +1845,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::Load(name.clone()));
                         ctx.emit_call("__match_type");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0)); // skip body if no match
-                        ctx.emit(Op::Pop); // pop match result
+                        ctx.emit(Op::Jz(0)); // skip body if no match (Jz pops match result)
 
                         // Execute body
                         let saved = ctx.locals.len();
@@ -1875,7 +1861,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         // Patch Jz → next arm
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop); // pop match result on no-match path
                     }
                     crate::syntax::MatchPattern::EnumPattern { enum_name, variant, bindings } => {
                         // Match enum variant: compare tag string
@@ -1884,8 +1869,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
                         ctx.emit_call("__match_enum");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0));
-                        ctx.emit(Op::Pop);
+                        ctx.emit(Op::Jz(0)); // Jz pops match result
 
                         let saved = ctx.locals.len();
 
@@ -1908,7 +1892,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop);
                     }
                     crate::syntax::MatchPattern::MolLiteral { shape, relation, valence, arousal, time } => {
                         // Load subject, push expected mol, compare
@@ -1922,8 +1905,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::PushMol(packed));
                         ctx.emit_call("__match_mol");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0));
-                        ctx.emit(Op::Pop);
+                        ctx.emit(Op::Jz(0)); // Jz pops match result
 
                         let saved = ctx.locals.len();
                         for s_stmt in &arm.body {
@@ -1936,7 +1918,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop);
                     }
                     crate::syntax::MatchPattern::MolConstraintPattern { constraint } => {
                         // Phase 6: ○{ V>0x80 } constraint pattern matching
@@ -1960,8 +1941,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::PushNum(count as f64));
                         ctx.emit_call("__match_mol_constraint");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0));
-                        ctx.emit(Op::Pop);
+                        ctx.emit(Op::Jz(0)); // Jz pops match result
 
                         let saved = ctx.locals.len();
                         for s_stmt in &arm.body {
@@ -1974,7 +1954,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop);
                     }
                 }
             }
@@ -2632,10 +2611,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::LogicAnd(a, b) => {
             // Short-circuit: if a is empty, result is empty; else result is b
+            // eval a → Dup → Jz(end) → Pop → eval b → end
+            // Jz pops the dup'd copy; if falsy, original a remains on stack.
+            // If truthy, Pop discards original a, then eval b replaces it.
             lower_expr(a, ctx);
+            ctx.emit(Op::Dup);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // if a falsy → jump to end (leave empty on stack)
-            ctx.emit(Op::Pop); // pop a (truthy)
+            ctx.emit(Op::Jz(0)); // if a falsy → jump to end (Jz pops dup, original stays)
+            ctx.emit(Op::Pop); // discard original a (truthy path)
             lower_expr(b, ctx);
             let end = ctx.current_pos();
             ctx.patch_jump(jz_pos, end);
@@ -2643,17 +2626,20 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::LogicOr(a, b) => {
             // Short-circuit: if a is non-empty, result is a; else result is b
+            // eval a → Dup → Jz(false) → Jmp(end) → false: Pop → eval b → end
+            // Jz pops the dup'd copy; if falsy, original a still on stack.
             lower_expr(a, ctx);
-            // Jz: if a empty → eval b
+            ctx.emit(Op::Dup);
+            // Jz: if a empty → false branch (Jz pops dup)
             let jz_pos = ctx.current_pos();
             ctx.emit(Op::Jz(0));
-            // a truthy: jump past b
+            // a truthy: jump past b (original a remains on stack)
             let jmp_pos = ctx.current_pos();
             ctx.emit(Op::Jmp(0));
-            // a falsy: pop empty, eval b
+            // a falsy: pop original empty a, eval b
             let false_branch = ctx.current_pos();
             ctx.patch_jump(jz_pos, false_branch);
-            ctx.emit(Op::Pop);
+            ctx.emit(Op::Pop); // discard original empty a
             lower_expr(b, ctx);
             let end = ctx.current_pos();
             ctx.patch_jump(jmp_pos, end);
@@ -2860,16 +2846,15 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::IfExpr { cond, then_expr, else_expr } => {
             // if cond { then } else { else } as expression
+            // Jz pops the condition
             lower_expr(cond, ctx);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // if falsy → else branch
-            ctx.emit(Op::Pop); // pop cond (truthy)
+            ctx.emit(Op::Jz(0)); // if falsy → else branch (Jz pops cond)
             lower_expr(then_expr, ctx);
             let jmp_pos = ctx.current_pos();
             ctx.emit(Op::Jmp(0)); // skip else
             let else_target = ctx.current_pos();
             ctx.patch_jump(jz_pos, else_target);
-            ctx.emit(Op::Pop); // pop cond (falsy)
             lower_expr(else_expr, ctx);
             let end = ctx.current_pos();
             ctx.patch_jump(jmp_pos, end);
@@ -3165,17 +3150,19 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::UnwrapOr { value, default } => {
             // value ?? default → if value is non-empty, use value; else use default
-            // This is the Option/Result unwrap-or-default operator
+            // eval value → Dup → Jz(default) → Jmp(end) → default: Pop → eval default → end
+            // Jz pops the dup'd copy; if empty, original value still on stack.
             lower_expr(value, ctx);
+            ctx.emit(Op::Dup);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // if empty → jump to default
-            // Value is non-empty — it's already on stack, jump to end
+            ctx.emit(Op::Jz(0)); // if empty → jump to default (Jz pops dup)
+            // Value is non-empty — original on stack, jump to end
             let jmp_pos = ctx.current_pos();
             ctx.emit(Op::Jmp(0)); // skip default
             // Default path
             let default_start = ctx.current_pos();
             ctx.patch_jump(jz_pos, default_start);
-            ctx.emit(Op::Pop); // pop the empty value
+            ctx.emit(Op::Pop); // pop the original empty value
             lower_expr(default, ctx);
             // End
             let end = ctx.current_pos();
