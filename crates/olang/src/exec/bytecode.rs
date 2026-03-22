@@ -457,7 +457,8 @@ fn encode_op(out: &mut Vec<u8>, op: &Op) {
         | Op::FileRead | Op::FileWrite | Op::FileAppend
         | Op::SpawnBegin | Op::SpawnEnd
         | Op::ChanNew | Op::ChanSend | Op::ChanRecv
-        | Op::Select(_) => {}
+        | Op::Select(_)
+        | Op::CallBuiltin(_) => {}
     }
 }
 

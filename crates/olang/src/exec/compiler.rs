@@ -253,6 +253,7 @@ fn c_op(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::ChanNew => "{ uint64_t _id = olang_chan_new(); push(&s, _id); }".into(),
         Op::ChanSend => "{ Chain v = pop(&s); Chain ch = pop(&s); olang_chan_send(ch, v); push(&s, 1); }".into(),
         Op::ChanRecv => "{ Chain ch = pop(&s); push(&s, olang_chan_recv(ch)); }".into(),
+        Op::CallBuiltin(id) => format!("olang_call_builtin({});", id),
         Op::Select(n) => format!(
             "{{ int _n = {n}; Chain _chs[{n}]; \
              for(int _i={n}-1;_i>=0;_i--) _chs[_i]=pop(&s); \
@@ -410,6 +411,7 @@ fn rust_op_linear(op: &Op, _idx: usize) -> Result<String, CompileError> {
         Op::ChanNew => "stack.push(unsafe { olang_chan_new() });".into(),
         Op::ChanSend => "{ let v = stack.pop().unwrap_or(0); let ch = stack.pop().unwrap_or(0); unsafe { olang_chan_send(ch, v); } stack.push(1); }".into(),
         Op::ChanRecv => "{ let ch = stack.pop().unwrap_or(0); stack.push(unsafe { olang_chan_recv(ch) }); }".into(),
+        Op::CallBuiltin(id) => format!("olang_call_builtin({});", id),
         Op::Select(n) => format!(
             "{{ let mut _chs: Vec<u64> = Vec::new(); \
              for _ in 0..{n}u8 {{ _chs.push(stack.pop().unwrap_or(0)); }} \
@@ -515,6 +517,7 @@ fn rust_op_jump(op: &Op, idx: usize, has_try: bool) -> Result<String, CompileErr
         Op::ChanNew => format!("stack.push(unsafe {{ olang_chan_new() }}); _pc = {};", next),
         Op::ChanSend => format!("{{ let v = stack.pop().unwrap_or(0); let ch = stack.pop().unwrap_or(0); unsafe {{ olang_chan_send(ch, v); }} stack.push(1); }} _pc = {};", next),
         Op::ChanRecv => format!("{{ let ch = stack.pop().unwrap_or(0); stack.push(unsafe {{ olang_chan_recv(ch) }}); }} _pc = {};", next),
+        Op::CallBuiltin(id) => format!("olang_call_builtin({});", id),
         Op::Select(n) => format!(
             "{{ let mut _chs: Vec<u64> = (0..{n}u8).map(|_| stack.pop().unwrap_or(0)).collect(); \
              _chs.reverse(); \
@@ -703,6 +706,7 @@ fn wat_op_linear(op: &Op, _idx: usize, str_offset: &mut u32) -> Result<String, C
         Op::ChanNew => "(call $chan_new)  ;; chan_new".into(),
         Op::ChanSend => "(local.set $b) (local.set $a) (local.get $a) (local.get $b) (call $chan_send) (drop)  ;; chan_send".into(),
         Op::ChanRecv => "(local.set $a) (local.get $a) (call $chan_recv)  ;; chan_recv".into(),
+        Op::CallBuiltin(id) => format!("olang_call_builtin({});", id),
         Op::Select(n) => format!("(i32.const {}) (call $select)  ;; select({})", n, n),
     })
 }
@@ -797,6 +801,8 @@ fn wat_op_jump(op: &Op, idx: usize, _str_offset: &mut u32, _total: usize) -> Res
             format!("(local.set $a) (local.get $a) (call $chan_recv) (local.set $pc (i32.const {})) (br $dispatch) ;; chan_recv", next),
         Op::Select(n) =>
             format!("(i32.const {}) (call $select) (local.set $pc (i32.const {})) (br $dispatch) ;; select({})", n, next, n),
+        Op::CallBuiltin(id) =>
+            format!("(i32.const {}) (call $call_builtin) (local.set $pc (i32.const {})) (br $dispatch) ;; builtin({})", id, next, id),
     })
 }
 

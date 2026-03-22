@@ -1023,6 +1023,159 @@ impl OlangVM {
                     // First iteration starts immediately (fall through)
                 }
 
+                Op::CallBuiltin(id) => {
+                    // O(1) dispatch — maps to the same code as Op::Call but via jump table
+                    use crate::ir::*;
+                    match *id {
+                        BID_HYP_ADD | BID_PHYS_ADD => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let _ = stack.push(MolecularChain::from_number(
+                                a.to_number().unwrap_or(0.0) + b.to_number().unwrap_or(0.0)));
+                        }
+                        BID_HYP_SUB | BID_PHYS_SUB => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let _ = stack.push(MolecularChain::from_number(
+                                a.to_number().unwrap_or(0.0) - b.to_number().unwrap_or(0.0)));
+                        }
+                        BID_HYP_MUL => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let _ = stack.push(MolecularChain::from_number(
+                                a.to_number().unwrap_or(0.0) * b.to_number().unwrap_or(0.0)));
+                        }
+                        BID_HYP_DIV => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            if nb.abs() < f64::EPSILON {
+                                events.push(VmEvent::Error(VmError::DivisionByZero));
+                                break;
+                            }
+                            let _ = stack.push(MolecularChain::from_number(
+                                a.to_number().unwrap_or(0.0) / nb));
+                        }
+                        BID_HYP_MOD => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let nb = b.to_number().unwrap_or(0.0);
+                            let _ = stack.push(MolecularChain::from_number(
+                                if nb.abs() < f64::EPSILON { 0.0 } else { a.to_number().unwrap_or(0.0) % nb }));
+                        }
+                        BID_EQ => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let is_equal = if is_string_chain(&a) || is_string_chain(&b) {
+                                a.0 == b.0
+                            } else if let (Some(na), Some(nb)) = (a.to_number(), b.to_number()) {
+                                (na - nb).abs() < f64::EPSILON
+                            } else {
+                                a.0 == b.0
+                            };
+                            if is_equal {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        BID_CMP_LT | BID_CMP_GT | BID_CMP_LE | BID_CMP_GE | BID_CMP_NE => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let truthy = if is_string_chain(&a) || is_string_chain(&b) {
+                                let ord = chain_cmp_bytes(&a, &b);
+                                match *id {
+                                    BID_CMP_LT => ord == core::cmp::Ordering::Less,
+                                    BID_CMP_GT => ord == core::cmp::Ordering::Greater,
+                                    BID_CMP_LE => ord != core::cmp::Ordering::Greater,
+                                    BID_CMP_GE => ord != core::cmp::Ordering::Less,
+                                    _ => ord != core::cmp::Ordering::Equal, // NE
+                                }
+                            } else if let (Some(na), Some(nb)) = (a.to_number(), b.to_number()) {
+                                match *id {
+                                    BID_CMP_LT => na < nb,
+                                    BID_CMP_GT => na > nb,
+                                    BID_CMP_LE => na <= nb,
+                                    BID_CMP_GE => na >= nb,
+                                    _ => (na - nb).abs() >= f64::EPSILON, // NE
+                                }
+                            } else {
+                                *id == BID_CMP_NE && a != b
+                            };
+                            if truthy {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        BID_LOGIC_NOT => {
+                            let a = vm_pop!(stack, events);
+                            if a.is_empty() {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        BID_ASSERT_TRUTH => {
+                            let b = vm_pop!(stack, events);
+                            let a = vm_pop!(stack, events);
+                            let is_true = if is_string_chain(&a) || is_string_chain(&b) {
+                                a == b
+                            } else if let (Some(na), Some(nb)) = (a.to_number(), b.to_number()) {
+                                (na - nb).abs() < f64::EPSILON
+                            } else {
+                                a == b
+                            };
+                            if is_true {
+                                let _ = stack.push(a);
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        BID_STR_CHAR_AT => {
+                            let idx = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let i = idx.to_number().unwrap_or(0.0) as usize;
+                            if i < s.0.len() && is_string_chain(&s) {
+                                let _ = stack.push(MolecularChain(alloc::vec![s.0[i]]));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        BID_STR_SUBSTR => {
+                            let end_c = vm_pop!(stack, events);
+                            let start_c = vm_pop!(stack, events);
+                            let s = vm_pop!(stack, events);
+                            let start = start_c.to_number().unwrap_or(0.0) as usize;
+                            let end = (end_c.to_number().unwrap_or(0.0) as usize).min(s.0.len());
+                            let start = start.min(end);
+                            let _ = stack.push(MolecularChain(s.0[start..end].to_vec()));
+                        }
+                        BID_STR_IS_KEYWORD => {
+                            let s = vm_pop!(stack, events);
+                            let bytes: Vec<u8> = s.0.iter().map(|&b| (b & 0xFF) as u8).collect();
+                            let is_kw = matches!(&bytes[..],
+                                b"let" | b"fn" | b"if" | b"else" | b"loop" | b"while" |
+                                b"for" | b"in" | b"return" | b"break" | b"continue" |
+                                b"emit" | b"type" | b"union" | b"impl" | b"trait" |
+                                b"match" | b"try" | b"catch" | b"spawn" | b"select" |
+                                b"timeout" | b"from" | b"use" | b"mod" | b"pub" |
+                                b"true" | b"false"
+                            );
+                            if is_kw {
+                                let _ = stack.push(MolecularChain::from_number(1.0));
+                            } else {
+                                let _ = stack.push(MolecularChain::empty());
+                            }
+                        }
+                        _ => {
+                            // IDs not yet inlined — should not happen if lowering is correct.
+                            // Emit empty as safe fallback.
+                            let _ = stack.push(MolecularChain::empty());
+                        }
+                    }
+                }
+
                 Op::Call(name) => {
                     // Dispatch built-in functions first, otherwise emit lookup
                     match name.as_str() {
