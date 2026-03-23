@@ -236,24 +236,15 @@ fn op_size(_os_op) {
 // ── Entry point ────────────────────────────────────────────────
 
 pub fn generate(ops) {
-    // Pass 1: compute byte offset for each op (inline size calc, no function call).
+    // Pass 1: measure actual encoded size by encoding to fresh temp arrays.
     let offsets = [];
     let _gpos = 0;
     let _gi = 0;
     while _gi < len(ops) {
         push(offsets, _gpos);
-        let _gsz = 1;
-        let _got = ops[_gi].tag;
-        if _got == "PushNum" { let _gsz = 9; };
-        if _got == "Jmp" || _got == "Jz" { let _gsz = 5; };
-        if _got == "Push" {
-            let _gsz = 3 + len(str_bytes(ops[_gi].name)) * 2;
-        };
-        if _got == "Load" || _got == "Store" || _got == "LoadLocal"
-            || _got == "StoreUpdate" || _got == "Call" {
-            let _gsz = 2 + len(str_bytes(ops[_gi].name));
-        };
-        let _gpos = _gpos + _gsz;
+        let _gt1 = [];
+        encode_op(_gt1, ops[_gi]);
+        let _gpos = _gpos + len(_gt1);
         let _gi = _gi + 1;
     };
     push(offsets, _gpos);

@@ -34,8 +34,8 @@
 
 # Array heap layout: [count:8][elem_0_ptr:8][elem_0_len:8]...
 # Dict heap layout:  [count:8][entry: key_ptr:8 key_len:8 val_ptr:8 val_len:8]...
-# Max initial capacity: 16 elements (grows on demand)
-.equ ARRAY_INIT_CAP, 16
+# Initial array capacity: 256 elements (bytecode output arrays can be large)
+.equ ARRAY_INIT_CAP, 256
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
 .equ SYS_READ,      0
