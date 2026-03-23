@@ -842,6 +842,11 @@ op_call:
     cmp     %rdx, %rax
     je      .call_div
 
+    # ── Modulo ──
+    movabs  $0x7822B690CBA39C03, %rdx   # __hyp_mod
+    cmp     %rdx, %rax
+    je      .call_mod
+
     # ── Comparison builtins ──
     movabs  $0x59C2494311519859, %rdx   # __eq
     cmp     %rdx, %rax
@@ -1059,6 +1064,21 @@ op_call:
     add     $16, %r14
     divsd   %xmm1, %xmm0              # a / b
     movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+.call_mod:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1              # b (divisor)
+    movsd   16(%r14), %xmm0            # a (dividend)
+    add     $16, %r14
+    # a % b = a - floor(a/b) * b
+    movapd  %xmm0, %xmm2              # save a
+    divsd   %xmm1, %xmm0              # a / b
+    roundsd $1, %xmm0, %xmm0          # floor(a/b) — $1 = round toward -inf
+    mulsd   %xmm1, %xmm0              # floor(a/b) * b
+    subsd   %xmm0, %xmm2              # a - floor(a/b)*b
+    movsd   %xmm2, (%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ── Comparison builtins ──────────────────────────────────────────────────
