@@ -473,13 +473,11 @@ fn compile_expr(state, expr) {
 fn compile_stmt(state, stmt) {
     match stmt {
         Stmt::LetStmt { name, value } => {
+            let _ls_name = name;
+            push(_ce_stack, _ls_name);
             compile_expr(state, value);
-            if is_local(state, name) {
-                emit_op(state, make_op_name("StoreUpdate", name));
-            } else {
-                emit_op(state, make_op_name("Store", name));
-                push_local(state, name);
-            };
+            let _ls_name = pop(_ce_stack);
+            emit_op(state, make_op_name("Store", _ls_name));
         },
         Stmt::FnDef { name, params, body } => {
             // Save name/params before body compilation (body may overwrite "name")
