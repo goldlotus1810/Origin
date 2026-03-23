@@ -202,6 +202,8 @@ _start:
     js      err_mmap
     mov     %rax, %r14                  # r14 = VM stack base
     add     $STACK_SIZE, %r14           # stack grows downward
+    # Save stack top for debug
+    mov     %r14, (%rax)
 
     # Allocate heap
     mov     $SYS_MMAP, %eax
@@ -882,6 +884,9 @@ op_call:
     movabs  $0xFBE159BD1C6EBFA7, %rdx   # __str_trim
     cmp     %rdx, %rax
     je      .call_str_trim
+    movabs  $0x0CA83B022A791B4F, %rdx   # __str_is_keyword
+    cmp     %rdx, %rax
+    je      .call_str_is_keyword
     movabs  $0x74AEDE408DC6787F, %rdx   # __str_slice
     cmp     %rdx, %rax
     je      .call_substr                 # str_slice = substr alias
@@ -1011,8 +1016,8 @@ op_call:
     jmp     vm_loop
 
 .call_skip:
-    # Unknown function — skip
-    add     %rcx, %r13                  # PC += name_len
+    
+    add     %rcx, %r13
     jmp     vm_loop
 
 # ── Math builtins ────────────────────────────────────────────────────────
@@ -2285,6 +2290,48 @@ op_call:
     jmp     vm_loop
 
 .enum_field_empty:
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# String is-keyword: pop string, check if it's an Olang keyword
+.call_str_is_keyword:
+    add     %rcx, %r13
+    # Pop string, hash its low bytes, compare with known keyword hashes
+    mov     (%r14), %rsi               # string ptr
+    mov     8(%r14), %rcx              # mol_count
+    # Hash the low bytes (char values) using FNV-1a
+    movabs  $0xcbf29ce484222325, %rax
+    movabs  $0x100000001b3, %rdx
+    test    %rcx, %rcx
+    jz      .kw_check
+.kw_hash_loop:
+    movzbl  (%rsi), %edi               # low byte of molecule
+    xor     %rdi, %rax
+    imul    %rdx, %rax
+    add     $2, %rsi                   # next molecule
+    dec     %rcx
+    jnz     .kw_hash_loop
+.kw_check:
+    # Compare hash against known keywords
+    # Pre-computed FNV-1a hashes of keyword byte values
+    lea     kw_hashes(%rip), %rsi
+    mov     kw_count(%rip), %ecx
+.kw_scan:
+    test    %ecx, %ecx
+    jz      .kw_false
+    cmp     (%rsi), %rax
+    je      .kw_true
+    add     $8, %rsi
+    dec     %ecx
+    jmp     .kw_scan
+.kw_true:
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.kw_false:
     xor     %eax, %eax
     mov     %rax, (%r14)
     mov     %rax, 8(%r14)
@@ -3697,6 +3744,42 @@ msg_help:
     .ascii "Type Olang code or natural text.\n"
 .equ msg_help_len, . - msg_help
 
+# ── Keyword hash table for __str_is_keyword ────────────────────────────
+.align 4
+kw_count: .long 28
+.align 8
+kw_hashes:
+    .quad 0x127284191DCC577A  # let
+    .quad 0x08985A07B541D4F5  # fn
+    .quad 0x08B73007B55C3E26  # if
+    .quad 0x7F2B6C605332DD30  # else
+    .quad 0xCDECE4AD70D57DEB  # loop
+    .quad 0xCE87A3885811296E  # while
+    .quad 0xDCB27818FED9DA90  # for
+    .quad 0x08B73807B55C4BBE  # in
+    .quad 0xC5C7B983377CAD5F  # return
+    .quad 0x93B7591DEBC7CE38  # break
+    .quad 0xD2BFD5ACCD1966A4  # continue
+    .quad 0x86D29860573F5FCA  # emit
+    .quad 0xA79439EF7BFA9C2D  # type
+    .quad 0x4B2A584E9A909034  # union
+    .quad 0xEE517EC576C9B637  # impl
+    .quad 0xDEE78BA6C508610B  # trait
+    .quad 0xC3BFE3A4FE4C13F6  # match
+    .quad 0x570AC119447423EE  # try
+    .quad 0xC1B2E33B13EC076C  # catch
+    .quad 0x4328F78AB20E1F98  # spawn
+    .quad 0xBD76100BD58C9C0D  # select
+    .quad 0x60827E549DE65488  # timeout
+    .quad 0x7F845078D7A5C0B5  # from
+    .quad 0x4C52B0193DCCE634  # use
+    .quad 0x0808591917670EE3  # mod
+    .quad 0x77F362195699B624  # pub
+    .quad 0x5B5C98EF514DBFA5  # true
+    .quad 0xB5FAE2C14238B978  # false
+
+    .ascii "!"
+
 msg_bye:
     .ascii "bye\n"
 
@@ -3741,6 +3824,8 @@ boot_bc_size:
     .space 8                            # boot bytecode size
 eval_mode:
     .space 1                            # 0 = REPL mode, 1 = --eval mode (stdin)
+    .align 8
+    .space 8                            # saved initial r14 for debug
 jz_did_pop:
     .space 1                            # 1 = Jz already popped, next Pop is no-op
     .align 8
