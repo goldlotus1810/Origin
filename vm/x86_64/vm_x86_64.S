@@ -770,7 +770,6 @@ op_store_upd:
     pop     %r8
     pop     %rcx
     add     %rcx, %r13                 # PC += name_len
-    # Store by hash
     call    var_store_hash              # rax=hash, r8=ptr, r9=len
     jmp     vm_loop
 
@@ -3310,8 +3309,17 @@ var_table_init:
     mov     %rax, (%rcx)               # save table base address
     movq    $0, (%r15)                  # count = 0
     # Reserve 4096 entries × 24 bytes + 8 header = 98312 bytes
-    # (729 stdlib functions + locals + temp vars need >1024 entries)
-    add     $98312, %r15                # bump past reserved var table space
+    add     $98312, %r15
+    # Initialize var shadow stack (for closure scoping)
+    mov     %r15, %rax
+    lea     var_shadow_base(%rip), %rcx
+    mov     %rax, (%rcx)
+    lea     var_shadow_top(%rip), %rcx
+    mov     %rax, (%rcx)
+    lea     closure_depth(%rip), %rcx
+    movq    $0, (%rcx)
+    # Reserve 64KB for shadow stack (enough for deep recursion)
+    add     $65536, %r15
     ret
 
 # ── Hash-based variable table ──
@@ -4028,6 +4036,15 @@ eval_mode:
     .space 8                            # saved initial r14 for debug
 jz_did_pop:
     .space 1                            # 1 = Jz already popped, next Pop is no-op
+    .align 8
+# Var shadow stack: saves [hash, old_ptr, old_len] per modified var in closure.
+# Marker entry: hash=0 separates call frames.
+var_shadow_base:
+    .space 8                            # pointer to shadow stack on heap
+var_shadow_top:
+    .space 8                            # current top of shadow stack
+closure_depth:
+    .space 8                            # nesting depth (0 = not in closure)
     .align 8
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
