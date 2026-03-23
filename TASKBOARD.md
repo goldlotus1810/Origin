@@ -134,4 +134,6 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-23  break/continue for loops. Unary minus. FieldAssign audit. PR #323-324.
 2026-03-23  a[i] desugar, nested Call fix, nested while fix (re-parse). PR #330-335.
 2026-03-23  BUBBLE SORT on native binary: [5,2,8,1,9] → [1,2,5,8,9]. 64MB heap.
+2026-03-24  Heap optimize. map/filter/reduce. Primes+sort+sum in 1 program. PR #337.
+2026-03-24  28 PRs in 1 session. Olang = functional programming language. 844KB.
 ```

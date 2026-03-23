@@ -71,3 +71,75 @@ echo 'fn fib(n) { if n < 2 { return n; }; return fib(n-1) + fib(n-2); }; emit fi
 - **Claude agents** — Implementation across ~100 sessions
 
 > *"Lịch sử của những kẻ điên. 1 con người và hàng trăm Agent viết nên lịch sử."*
+
+---
+
+## Milestone 2: Functional Programming — 2026-03-24
+
+28 PRs trong 1 marathon session. Olang trở thành functional programming language:
+
+```
+844KB native binary, zero dependencies
+
+Algorithms:  bubble sort [9,3,7,1,5] → [1,3,5,7,9]
+             prime finder < 20 → [2,3,5,7,11,13,17,19]
+             fibonacci fib(20) = 6765
+Functional:  map([1,2,3], double) → [2,4,6]
+             filter(range(10), is_odd) → [1,3,5,7,9]
+             reduce([1,2,3,4,5], add, 0) → 15
+Control:     nested while, for-in, break/continue, else-if
+Data:        a[i] variable index, set_at(a,j,a[j+1])
+```
+
+---
+
+## Phát hiện kỹ thuật quan trọng (cho phát triển tiếp)
+
+### 1. VM Heap Overlap — Root cause chính
+
+ASM VM dùng bump allocator (r15 chỉ tăng). `[]` empty array pre-allocate
+ARRAY_INIT_CAP (4096) slots. Subsequent allocs (dicts, strings) có thể
+nằm trong capacity zone → push overwrite.
+
+**Workarounds đã áp dụng:**
+- ArrayLit `[1,2,3]` KHÔNG pre-allocate capacity (chỉ `[]` mới có)
+- Array forward pointers: push relocate khi write >= r15
+- `__eval_bytecode` follow forward pointer
+- `a[i]` desugar thành `__array_get(a, i)` (tránh Index dict)
+- While condition re-parse từ tokens (tránh dict corruption)
+- Direct bytecode emission (tránh IR ops buffer)
+- Global `_g_output` với `set_at` (tránh state dict field corruption)
+
+**Fix triệt để (chưa làm):**
+- Arena allocator: tách heap cho arrays, dicts, strings
+- Hoặc: compact GC khi heap gần đầy
+- Hoặc: AST dùng tagged arrays thay dicts
+
+### 2. Global Variable Pattern — Bug #1 source
+
+ASM VM có global var_table, KHÔNG CÓ block scope. Match bindings, function
+params, loop vars — tất cả global. Inner function/match overwrite outer.
+
+**Rule:** LUÔN save trên explicit stack (_ce_stack, _if_stack, _pb_stack)
+trước recursive/nested call. Restore sau.
+
+### 3. Bytecode Direct Emission
+
+Semantic emit bytes trực tiếp vào `_g_output` (pre-filled 4096 slots)
+thay vì buffer IR ops rồi codegen encode. Jump targets backpatch bằng
+`set_at` + `patch_jump(pos, target)`.
+
+### 4. While Condition Re-parse
+
+Parser lưu `cond_start`, `cond_end`, `tokens` trong WhileStmt.
+Semantic re-parse condition từ token range → fresh AST dicts → không bị
+corrupt bởi body parsing.
+
+### 5. Giới hạn hiện tại
+
+- Programs > ~200 tokens có thể crash (heap exhaustion)
+- `_g_output` pre-filled 4096 bytes — chương trình > 4KB bytecode fail
+- ARRAY_INIT_CAP = 4096 cho empty arrays → 64KB mỗi `[]`
+- Heap 64MB — đủ cho ~1000 arrays
+- set_at(a, 0, a[1]) hoạt động nhưng cần save/restore trong Call handler
+- Module system chưa có — tất cả code trong 1 REPL input
