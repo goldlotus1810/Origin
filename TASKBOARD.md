@@ -119,6 +119,23 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 ---
 
+## Docs Conflicts — Cần fix (phát hiện 2026-03-23)
+
+> **Docs lỗi thời so với code thực tế. AI session mới đọc CLAUDE.md sẽ hiểu sai.**
+
+| # | Mức độ | File | Xung đột |
+|---|--------|------|----------|
+| DC.1 | **NGHIÊM TRỌNG** | `olang_handbook.md:1443` | `WhileStmt { cond, body }` → thực tế có 5 field: `cond, body, cond_start, cond_end, tokens` |
+| DC.2 | **NGHIÊM TRỌNG** | `CLAUDE.md:239` | `ARRAY_INIT_CAP = 256` → thực tế = **4096** (commit `4ea4d55`) |
+| DC.3 | **NGHIÊM TRỌNG** | `CLAUDE.md:53` | `r14 = VM stack (grows DOWN)` → LYRA.md ghi `grows upward`. Cần kiểm ASM. |
+| DC.4 | TRUNG BÌNH | `CLAUDE.md:47` | `generate(state.ops)` → thực tế direct bytecode emission vào `_g_output` |
+| DC.5 | TRUNG BÌNH | `CLAUDE.md:205-212` | Bảng save/restore thiếu 4 vị trí mới: WhileStmt, FieldAssign, Call args loop |
+| DC.6 | TRUNG BÌNH | `CLAUDE.md:248` | `Two-pass codegen` → thực tế direct emission + backpatch |
+| DC.7 | NHẸ | `CLAUDE.md:136` | `a[i]` liệt kê như syntax gốc → thực tế desugar thành `__array_get(a, i)` |
+| DC.8 | NHẸ | `CLAUDE.md:257` | Binary size `806KB` → có thể đã thay đổi sau 64MB heap + fixes |
+
+---
+
 ## Log
 
 ```
@@ -136,4 +153,5 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-23  BUBBLE SORT on native binary: [5,2,8,1,9] → [1,2,5,8,9]. 64MB heap.
 2026-03-24  Heap optimize. map/filter/reduce. Primes+sort+sum in 1 program. PR #337.
 2026-03-24  28 PRs in 1 session. Olang = functional programming language. 844KB.
+2026-03-24  Kira inspector: 8 docs conflicts found (DC.1-DC.8). CLAUDE.md + handbook lỗi thời.
 ```
