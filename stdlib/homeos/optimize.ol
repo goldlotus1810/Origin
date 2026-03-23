@@ -42,7 +42,7 @@ pub fn profile_turn(prof, turn_ms) {
 
 // ── Analysis ────────────────────────────────────────────────────────
 
-pub fn analyze(prof) {
+pub fn optimize_analyze(prof) {
   // Analyze profile data → generate optimization proposals
   let proposals = [];
 

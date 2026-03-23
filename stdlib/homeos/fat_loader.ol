@@ -21,7 +21,7 @@ pub fn make_x86_64_stub(fat_path_bytes) {
 
   // ── Prologue: save stack ──
   // push rbp; mov rbp, rsp
-  emit_byte(code, 0x55);
+  fat_emit_byte(code, 0x55);
   emit_bytes(code, [0x48, 0x89, 0xE5]);
 
   // ── Store fat path on stack ──
@@ -33,14 +33,14 @@ pub fn make_x86_64_stub(fat_path_bytes) {
   while i < len(fat_path_bytes) {
     // mov byte [rsp + i], imm8
     emit_bytes(code, [0xC6, 0x44, 0x24]);
-    emit_byte(code, i);
-    emit_byte(code, fat_path_bytes[i]);
+    fat_emit_byte(code, i);
+    fat_emit_byte(code, fat_path_bytes[i]);
     i = i + 1;
   }
   // null terminator
   emit_bytes(code, [0xC6, 0x44, 0x24]);
-  emit_byte(code, len(fat_path_bytes));
-  emit_byte(code, 0);
+  fat_emit_byte(code, len(fat_path_bytes));
+  fat_emit_byte(code, 0);
 
   // ── syscall: open(path, O_RDONLY) ──
   // rdi = rsp (path), rsi = 0 (O_RDONLY), rax = 2 (SYS_open)
@@ -102,7 +102,7 @@ pub fn make_x86_64_stub(fat_path_bytes) {
   emit_bytes(code, [0x83, 0xE9, 0x01]);       // sub ecx, 1
   // jmp loop_start
   let jmp_off = code_len(code);
-  emit_byte(code, 0xE9);                      // jmp rel32
+  fat_emit_byte(code, 0xE9);                      // jmp rel32
   let rel = loop_start - (code_len(code) + 4);
   emit_i32(code, rel);
 
@@ -263,7 +263,7 @@ fn code_len(code) {
   return len(code.bytes);
 }
 
-fn emit_byte(code, b) {
+fn fat_fat_emit_byte(code, b) {
   push(code.bytes, b % 256);
 }
 

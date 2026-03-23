@@ -43,18 +43,18 @@ pub fn code_new() {
 
 pub fn code_len(code) { return len(code.bytes); }
 
-fn emit_byte(code, b) { push(code.bytes, b % 256); }
+fn arm64_arm64_emit_byte(code, b) { push(code.bytes, b % 256); }
 
-fn emit_u32_le(code, val) {
-  emit_byte(code, val % 256);
-  emit_byte(code, (val / 256) % 256);
-  emit_byte(code, (val / 65536) % 256);
-  emit_byte(code, (val / 16777216) % 256);
+fn arm64_arm64_emit_u32_le(code, val) {
+  arm64_emit_byte(code, val % 256);
+  arm64_emit_byte(code, (val / 256) % 256);
+  arm64_emit_byte(code, (val / 65536) % 256);
+  arm64_emit_byte(code, (val / 16777216) % 256);
 }
 
 // Emit a single 32-bit ARM64 instruction (little-endian)
 fn emit_instr(code, instr) {
-  emit_u32_le(code, instr);
+  arm64_emit_u32_le(code, instr);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -273,7 +273,7 @@ pub fn emit_ldr(code, rt, rn, offset) {
 }
 
 // STR Xt, [Xn, #offset]
-pub fn emit_str(code, rt, rn, offset) {
+pub fn arm64_arm64_emit_str(code, rt, rn, offset) {
   let imm12 = (offset / 8) % 4096;
   let instr = 0xF9000000 + (imm12 * 1024) + ((rn % 32) * 32) + (rt % 32);
   emit_instr(code, instr);
