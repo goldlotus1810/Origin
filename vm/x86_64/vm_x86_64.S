@@ -1903,12 +1903,14 @@ op_call:
     # Pop key
     mov     16(%r14), %rsi             # key ptr
     mov     24(%r14), %rdx             # key len
-    # Pop dict
+    # Pop dict — save dict base in rbp (callee-saved, preserved across cmpsb)
     mov     32(%r14), %rdi             # dict base
+    push    %rbp
+    mov     %rdi, %rbp                 # save dict base in rbp
     add     $48, %r14                  # pop 3
 
     test    %rdi, %rdi
-    jz      .dict_set_push
+    jz      .dict_set_push_rbp
 
     # Search for existing key
     mov     (%rdi), %rcx
@@ -1941,27 +1943,26 @@ op_call:
     jmp     .dict_set_search
 
 .dict_set_update:
-    # Found — update value
+    # Found — update value in-place
     mov     %r9, 16(%r8)
     mov     %r10, 24(%r8)
-    # Reload dict base (rdi may have been clobbered by cmpsb)
-    mov     32(%r14), %rdi             # Actually we already popped...
-    # rdi was saved before loop, let's restore from dict base
-    jmp     .dict_set_push
+    mov     %rbp, %rdi                 # restore dict base from rbp
+    jmp     .dict_set_push_rbp
 
 .dict_set_append:
-    # Append new entry at end of dict
+    # Append new entry at end of dict (at r15, bump heap)
+    mov     %rbp, %rdi                 # restore dict base from rbp
     mov     (%rdi), %rcx               # current count
-    # New entry position: 8 + count*32
-    mov     %rcx, %rax
-    shl     $5, %rax
-    add     $8, %rax
-    mov     %rsi, (%rdi, %rax)         # key ptr
-    mov     %rdx, 8(%rdi, %rax)        # key len
-    mov     %r9, 16(%rdi, %rax)        # val ptr
-    mov     %r10, 24(%rdi, %rax)       # val len
+    # Write new entry at r15 (heap top) — adjacent to dict
+    mov     %rsi, (%r15)               # key ptr
+    mov     %rdx, 8(%r15)              # key len
+    mov     %r9, 16(%r15)              # val ptr
+    mov     %r10, 24(%r15)             # val len
+    add     $32, %r15                   # bump heap
     incq    (%rdi)                      # count++
 
+.dict_set_push_rbp:
+    pop     %rbp                        # restore rbp
 .dict_set_push:
     sub     $16, %r14
     mov     %rdi, (%r14)
@@ -2057,11 +2058,46 @@ op_call:
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Struct tag (no-op: pop tag name, keep dict underneath)
+# Struct tag: create NEW dict with tag entry prepended.
+# Cannot write in-place because Push(tag_name) allocated between dict and r15.
+# New dict layout: [count+1:8][tag_entry:32][old_entries:count*32]
 .call_struct_tag:
     add     %rcx, %r13
-    # Stack: [dict, tag_name] → pop tag_name, leave dict
-    add     $16, %r14                  # pop tag name (discard)
+    # Stack: [dict, tag_name]
+    mov     (%r14), %rsi               # tag ptr
+    mov     8(%r14), %rdx              # tag mol_count
+    mov     16(%r14), %rdi             # old dict base ptr
+    mov     (%rdi), %rcx               # old count
+
+    # Allocate new dict at r15
+    mov     %r15, %r8                   # new dict base = r15
+    lea     1(%rcx), %rax              # new_count = count + 1
+    mov     %rax, (%r15)               # write new count
+    add     $8, %r15                    # past count header
+
+    # Write tag entry first (key_ptr=0, key_len=0, val=tag)
+    movq    $0, (%r15)                 # key_ptr = 0
+    movq    $0, 8(%r15)                # key_len = 0
+    mov     %rsi, 16(%r15)             # val_ptr = tag
+    mov     %rdx, 24(%r15)             # val_len = tag mol_count
+    add     $32, %r15
+
+    # Copy old entries: count * 32 bytes from old_dict+8
+    test    %rcx, %rcx
+    jz      .struct_tag_done
+    lea     8(%rdi), %rsi              # src = old entries
+    mov     %r15, %rdi                 # dst = after tag entry
+    mov     %rcx, %rax
+    shl     $5, %rax                    # count * 32 bytes
+    mov     %rax, %rcx                  # byte count for rep movsb
+    rep     movsb
+    add     %rax, %r15                  # bump heap
+
+.struct_tag_done:
+    # Pop tag, replace dict with new dict on stack
+    add     $16, %r14                  # pop tag_name
+    mov     %r8, (%r14)                # dict ptr = new dict
+    # len stays DICT_MARKER (already there from dict_new)
     jmp     vm_loop
 
 # Enum unit variant (no-op: tag is already on stack)
@@ -2177,16 +2213,21 @@ op_call:
     jmp     vm_loop
 
 # Match enum: compare tag prefix of subject with expected tag
+# Handles both chain format (tag|0x0000|payload) and dict format (DICT_MARKER).
 .call_match_enum:
     add     %rcx, %r13
     # Stack: [subject, expected_tag]
     mov     (%r14), %rsi               # expected_tag ptr
     mov     8(%r14), %rdx              # expected_tag mol_count
     mov     16(%r14), %rdi             # subject ptr
-    mov     24(%r14), %rcx             # subject mol_count
+    mov     24(%r14), %rcx             # subject mol_count/marker
     add     $16, %r14                  # pop 1 (keep result slot)
 
-    # Extract tag from subject: molecules before first 0x0000 separator
+    # Check if subject is a dict (DICT_MARKER)
+    cmp     $DICT_MARKER, %rcx
+    je      .match_enum_dict
+
+    # Chain format: extract tag = molecules before first 0x0000 separator
     xor     %r8d, %r8d                 # tag_mol_count = 0
     test    %rcx, %rcx
     jz      .match_enum_compare
@@ -2213,6 +2254,29 @@ op_call:
     pop     %rsi
     je      .match_enum_true
 
+# Dict format: scan entries for tag (key_ptr=0, key_len=0), compare value
+.match_enum_dict:
+    # rdi = dict base ptr, rsi = expected_tag ptr, rdx = expected_tag mol_count
+    mov     (%rdi), %rcx               # dict entry count
+    lea     8(%rdi), %r9               # first entry: dict_base + 8
+    test    %rcx, %rcx
+    jz      .match_enum_false
+.match_enum_dict_scan:
+    # Check if entry has key_len=0 (tag marker)
+    cmpq    $0, 8(%r9)                 # key_len == 0?
+    jne     .match_enum_dict_next
+    cmpq    $0, (%r9)                  # key_ptr == 0?
+    jne     .match_enum_dict_next
+    # Found tag entry — compare value with expected
+    mov     16(%r9), %rdi              # tag_val_ptr
+    mov     24(%r9), %r8               # tag_val_mol_count
+    jmp     .match_enum_compare
+.match_enum_dict_next:
+    add     $32, %r9                    # next entry
+    dec     %rcx
+    jnz     .match_enum_dict_scan
+    jmp     .match_enum_false           # no tag found
+
 .match_enum_false:
     xor     %eax, %eax
     mov     %rax, (%r14)
@@ -2225,16 +2289,21 @@ op_call:
     jmp     vm_loop
 
 # Enum field: extract nth payload field from enum variant chain
+# Handles both chain format (tag|0x0000|field0|0x0000|...) and dict format.
 .call_enum_field:
     add     %rcx, %r13
     # Stack: [enum_chain, index]
     movsd   (%r14), %xmm0
     cvttsd2si %xmm0, %rax             # index
-    mov     16(%r14), %rsi             # enum chain ptr
-    mov     24(%r14), %rcx             # enum chain mol_count
+    mov     16(%r14), %rsi             # enum chain/dict ptr
+    mov     24(%r14), %rcx             # enum chain mol_count / marker
     add     $16, %r14                  # pop 1 (keep result slot)
 
-    # Skip past tag (before first 0x0000 separator)
+    # Check if subject is a dict (DICT_MARKER)
+    cmp     $DICT_MARKER, %rcx
+    je      .enum_field_dict
+
+    # Chain format: skip past tag (before first 0x0000 separator)
     xor     %edx, %edx                 # position
 .enum_field_skip_tag:
     cmp     %rcx, %rdx
@@ -2287,6 +2356,38 @@ op_call:
     mov     %rdi, %r15                 # bump heap
     mov     %rax, (%r14)               # result ptr
     mov     %r9, 8(%r14)               # result mol_count
+    jmp     vm_loop
+
+# Dict format: get nth non-tag entry's value
+.enum_field_dict:
+    # rsi = dict base, rax = desired index
+    mov     (%rsi), %rcx               # entry count
+    lea     8(%rsi), %r9               # first entry ptr
+    xor     %r8d, %r8d                 # current non-tag index
+    test    %rcx, %rcx
+    jz      .enum_field_empty
+.enum_field_dict_scan:
+    # Skip tag entries (key_ptr=0, key_len=0)
+    cmpq    $0, 8(%r9)                 # key_len == 0?
+    jne     .enum_field_dict_check
+    cmpq    $0, (%r9)                  # key_ptr == 0?
+    je      .enum_field_dict_skip      # tag entry → skip
+.enum_field_dict_check:
+    # Non-tag entry — check if this is the desired index
+    cmp     %rax, %r8
+    je      .enum_field_dict_found
+    inc     %r8
+.enum_field_dict_skip:
+    add     $32, %r9
+    dec     %rcx
+    jnz     .enum_field_dict_scan
+    jmp     .enum_field_empty
+.enum_field_dict_found:
+    # Return this entry's value
+    mov     16(%r9), %rax              # val_ptr
+    mov     24(%r9), %rdx              # val_len
+    mov     %rax, (%r14)
+    mov     %rdx, 8(%r14)
     jmp     vm_loop
 
 .enum_field_empty:

@@ -666,6 +666,16 @@ fn closure_body_pc(chain: &MolecularChain) -> Option<usize> {
     None
 }
 
+/// Extract param_count from a closure marker.
+fn closure_param_count(chain: &MolecularChain) -> usize {
+    if !chain.0.is_empty() {
+        let mol = Molecule::from_u16(chain.0[0]);
+        mol.relation() as usize
+    } else {
+        0
+    }
+}
+
 /// Execute a closure inline with given arguments.
 /// Used by higher-order array methods (map, filter, fold, etc.).
 /// Returns the result left on stack after closure body executes.
@@ -4362,6 +4372,28 @@ impl OlangVM {
                         }
 
                         _ => {
+                            // Check if it's a closure in scope (Phase 1.5 functions)
+                            let found_closure = scopes.iter().rev()
+                                .flat_map(|s| s.iter().rev())
+                                .find(|(n, _)| n.as_str() == name.as_str())
+                                .map(|(_, v)| v.clone());
+
+                            if let Some(ref closure_chain) = found_closure {
+                                if let Some(body_pc) = closure_body_pc(closure_chain) {
+                                    let param_count = closure_param_count(closure_chain);
+                                    let caller_stack_depth = stack.data.len();
+                                    scopes.push(Vec::new());
+                                    closure_call_stack.push((pc, scopes.len(), caller_stack_depth, param_count));
+                                    // Closure stores body_pc = Closure instruction index.
+                                    // Skip past it to the first real body instruction.
+                                    pc = if matches!(prog.ops.get(body_pc), Some(Op::Closure(..))) {
+                                        body_pc + 1
+                                    } else {
+                                        body_pc
+                                    };
+                                    continue;
+                                }
+                            }
                             // Unknown function → emit lookup event
                             events.push(VmEvent::LookupAlias(name.clone()));
                         }
