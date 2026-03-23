@@ -1016,9 +1016,47 @@ op_call:
 
     # Found closure in var_table — call it
     add     %rcx, %r13                  # PC past name bytes
-    push    %r12                        # save bytecode base
-    push    %r13                        # save return address
-    mov     %eax, %r13d                 # PC = body_pc
+    push    %r12                        # save bytecode base (CPU stack)
+    push    %r13                        # save return address (CPU stack)
+    # Scope save: snapshot var_table to heap scope stack.
+    # Only for nested eval closures (boot closures don't need scoping).
+    mov     %eax, %edi                  # save body_pc
+    lea     boot_bc_base(%rip), %rsi
+    cmp     (%rsi), %r12
+    je      .closure_skip_scope
+
+    # Push scope frame to HEAP scope stack
+    lea     var_shadow_top(%rip), %rsi
+    mov     (%rsi), %rdx               # scope top = frame_start
+    # Save frame_start in frame_ptrs[depth]
+    lea     closure_depth(%rip), %rax
+    mov     (%rax), %rcx               # current depth
+    lea     scope_frame_ptrs(%rip), %rax
+    mov     %rdx, (%rax, %rcx, 8)     # frame_ptrs[depth] = frame_start
+    lea     closure_depth(%rip), %rax
+    incq    (%rax)                      # depth++
+    # Copy var_table to frame (save edi=body_pc first!)
+    push    %rdi                        # save body_pc (edi clobbered by rep movsb)
+    lea     var_table_base(%rip), %rsi
+    mov     (%rsi), %rsi               # var_table base
+    mov     (%rsi), %rcx               # count
+    mov     %rcx, (%rdx)               # write count to frame
+    push    %rdx                        # save frame_start
+    lea     8(%rdx), %rdi              # dest
+    lea     8(%rsi), %rsi              # src
+    mov     %rcx, %rax
+    imul    $24, %rax                  # byte count
+    mov     %eax, %ecx
+    rep     movsb
+    pop     %rdx                        # restore frame_start
+    # Update scope top
+    lea     8(%rdx, %rax), %rsi
+    lea     var_shadow_top(%rip), %rdi
+    mov     %rsi, (%rdi)
+    pop     %rdi                        # restore body_pc
+
+.closure_skip_scope:
+    mov     %edi, %r13d                 # PC = body_pc
     jmp     vm_loop
 
 .call_skip:
@@ -2601,6 +2639,31 @@ op_ret:
     pop     %rax                        # saved PC
     pop     %r12                        # saved bytecode base
     mov     %eax, %r13d                 # PC = return address
+    # Scope restore: if depth > 0, restore var_table from heap scope stack
+    lea     closure_depth(%rip), %rsi
+    cmpq    $0, (%rsi)
+    je      vm_loop
+    decq    (%rsi)                      # depth--
+    mov     (%rsi), %rcx               # new depth
+    # Get frame_start from frame_ptrs[depth]
+    lea     scope_frame_ptrs(%rip), %rax
+    mov     (%rax, %rcx, 8), %rdx      # frame_start
+    # Restore var_table entries from snapshot
+    push    %r13                        # save PC (will be clobbered by rep movsb)
+    lea     var_table_base(%rip), %rdi
+    mov     (%rdi), %rdi               # var_table base
+    mov     (%rdx), %rcx               # saved count
+    mov     %rcx, (%rdi)               # restore count
+    lea     8(%rdi), %rdi              # dest = entries
+    lea     8(%rdx), %rsi              # src = snapshot
+    mov     %rcx, %rax
+    imul    $24, %rax
+    mov     %eax, %ecx
+    rep     movsb
+    pop     %r13                        # restore PC
+    # Rewind scope top
+    lea     var_shadow_top(%rip), %rsi
+    mov     %rdx, (%rsi)
     jmp     vm_loop
 
 op_try_begin:
@@ -4038,7 +4101,9 @@ var_shadow_top:
 closure_depth:
     .space 8                            # nesting depth (0 = not in closure)
 _save_rbx:
-    .space 8                            # temp save for rbx during closure scope scan
+    .space 8                            # temp save for rbx
+scope_frame_ptrs:
+    .space 2048                         # 256 frame pointers × 8 bytes (max recursion depth)
     .align 8
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
