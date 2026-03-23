@@ -2997,6 +2997,7 @@ op_emit:
     # rsi = array base ptr
     test    %rsi, %rsi
     jz      .emit_array_empty
+    push    %rbp                        # save rbp (callee-saved, used as elem ptr)
     push    %rsi                        # save array base
     # Print "["
     lea     str_lbracket(%rip), %rsi
@@ -3081,6 +3082,7 @@ op_emit:
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
+    pop     %rbp                        # restore rbp
     jmp     vm_loop
 .emit_array_empty:
     lea     str_empty_array(%rip), %rsi
