@@ -1,9 +1,9 @@
 # Origin — HomeOS & Olang
 
-> "Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức."
+> *"Lịch sử của những kẻ điên. 1 con người và hàng trăm Agent viết nên lịch sử."*
 
+**Olang** = Ngôn ngữ phân tử tự sinh. Self-hosting. 806KB. Zero dependencies.
 **HomeOS** = Sinh linh toán học tự vận hành — hệ điều hành học được, cảm được, nhớ được.
-**Olang** = Ngôn ngữ phân tử duy nhất. Mọi ngôn ngữ tự nhiên là alias.
 
 ```
 ○(x) == x       identity     — ○ không làm hỏng thứ gì
@@ -14,72 +14,92 @@ mọi f == ○[f]   instance     — mọi thứ là instance của ○
 
 ---
 
-## Không Gian 5 Chiều
+## Self-Hosting — 2026-03-23
 
-Mỗi khái niệm = tọa độ trong không gian 5D, từ **8,846 L0 anchors (59 blocks, Unicode 18.0)**:
+Olang tự biên dịch chính mình. Binary 806KB chạy trực tiếp trên Linux x86_64,
+không libc, không dependency, không runtime.
 
-```
-P_weight = [Shape][Relation][Valence][Arousal][Time] = 2 bytes/node
-KnowTree: 65,536 × 2B = 128 KB (working memory, O(1) lookup)
-Chain:    7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)
+```bash
+# Build
+make build
 
-Nhóm       Blocks   Ký tự    Chiều        Ý nghĩa
-────────────────────────────────────────────────────────────
-SDF           14    1,838    Shape        "Trông như thế nào" (18 SDF primitives)
-MATH          21    2,563    Relation     "Liên kết thế nào" (75 kênh quan hệ)
-EMOTICON      17    3,487    Valence+A    "Cảm thế nào" (V+A chia sẻ 17 blocks)
-MUSICAL        7      958    Time         "Thay đổi thế nào" (Static → Instant)
-────────────────────────────────────────────────────────────
-Tổng          59    8,846    5 chiều      = 8,846 L0 anchor points
-```
+# Chạy
+echo 'emit 42' | ./origin_new.olang
 
-### Node = Molecule + Maturity + Origin
+# Fibonacci — tree recursion trên native binary
+echo 'fn fib(n) { if n < 2 { return n; }; return fib(n-1) + fib(n-2); }; emit fib(20)' | ./origin_new.olang
+# ○ > 6765
 
-```
-NodeState {
-    mol: Molecule,               // 5D coordinate (5 bytes)
-    maturity: Maturity,          // Formula → Evaluating → Mature
-    origin: CompositionOrigin,   // Innate | Composed | Evolved
-}
+# Factorial — deep recursion
+echo 'fn fact(n) { if n < 2 { return 1; }; return n * fact(n-1); }; emit fact(10)' | ./origin_new.olang
+# ○ > 3628800
 ```
 
-### Silk = hệ quả tự nhiên của 5D
+### Pipeline
 
 ```
-3 tầng ngang (implicit, 0 bytes):
-  Base:     75 kênh (14S+21R+17V+17A+7T)  → SilkIndex
-  Compound: 31 mẫu C(5,k) k=1..5          → CompoundKind enum
-  Precise:  8,846 kênh (= L0 anchor nodes) → SPEC
-
-Silk dọc (parent pointer, ~71KB):
-  parent_map: BTreeMap<u64, u64>            → 8,846 child→parent pointers
-  register_parent() · parent_of() · children_of() · layer_of()
+User input → tokenize → parse → analyze → generate → eval
+              lexer.ol   parser.ol  semantic.ol  codegen.ol   ASM VM
 ```
 
 ---
 
-## Node & Silk
+## Olang — Ngôn Ngữ
 
-Mỗi byte trong Molecule = **công thức**, không phải giá trị tĩnh:
+```olang
+// Variables & arithmetic
+let x = 42;
+let name = "Origin";
+emit x + 8;              // 50
 
-```
-Molecule [S][R][V][A][T] = 2 bytes = tọa độ trong không gian 5D
-    ├── SDF      → công thức hình dạng (hữu hình — render được)
-    ├── Spline   → công thức biến đổi (vô hình — 6 temporal curves)
-    └── Silk     → công thức quan hệ (kết nối — 0 bytes implicit)
-```
+// Functions
+fn greet(who) {
+    return "Hello, " + who + "!";
+};
+emit greet("World");      // Hello, World!
 
-**Silk** = hệ quả tự nhiên của 5D, không phải edge list:
+// Recursion
+fn fib(n) {
+    if n < 2 { return n; };
+    return fib(n-1) + fib(n-2);
+};
+emit fib(20);             // 6765
 
-| Tầng | Kênh | Ý nghĩa |
-|------|------|---------|
-| Base | 75 (14S+21R+17V+17A+7T) | Cùng "nhóm máu" trên 1 chiều |
-| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều → 2,325 kiểu quan hệ |
-| Vertical | 8,846 pointers = ~71KB | Parent-child giữa các tầng |
+// Types & Unions
+type Token {
+    kind: TokenKind,
+    text: Str,
+    line: Num,
+}
 
-```
-Node lifecycle: Formula → Evaluating → Mature → QR (append-only, signed)
-evolve(dim, val): thay 1/5 chiều → loài mới (e.g. 🔥 → "lửa nhẹ")
+union TokenKind {
+    Keyword { name: Str },
+    Ident { name: Str },
+    Number { value: Num },
+    Eof,
+}
+
+// Arrays & Dicts
+let items = [1, 2, 3];
+push(items, 4);
+emit len(items);          // 4
+
+let config = { name: "HomeOS", version: 5 };
+emit config.name;         // HomeOS
+
+// Pattern matching
+match token.kind {
+    Keyword(k) => emit "keyword: " + k.name,
+    Ident(id) => emit "ident: " + id.name,
+    _ => emit "other",
+}
+
+// While loops
+let i = 0;
+while i < 10 {
+    emit i;
+    let i = i + 1;
+};
 ```
 
 ---
@@ -87,98 +107,96 @@ evolve(dim, val): thay 1/5 chiều → loài mới (e.g. 🔥 → "lửa nhẹ")
 ## Cấu Trúc
 
 ```
-crates/
-├── ucd/         Unicode → P_weight lookup (8,846 L0 entries)      23 tests
-├── olang/       Core: Molecule · LCA · Registry · VM · Compact 1088 tests
-├── silk/        Hebbian learning · Silk 3-layer · parent_map       85 tests
-├── context/     Emotion V/A/D/I · ConversationCurve · Intent    168 tests
-├── agents/      Encoder · Learning · Gate · Instinct · Leo      284 tests
-├── memory/      STM · DreamCycle · Proposals · AAM               32 tests
-├── runtime/     HomeRuntime · ○{} Parser · Router               273 tests
-├── hal/         Hardware Abstraction · Tier · FFI · Security     68 tests
-├── isl/         Inter-System Link (AES-256-GCM)                  31 tests
-├── vsdf/        18 SDF · FFR Fibonacci · Physics · Scene        123 tests
-├── wasm/        WebAssembly · WebSocket-ISL bridge               32 tests
-└── homemath/    Zero-dep pure-Rust math                          18 tests
-
-tools/
-├── seeder/      Seed L0 nodes từ UCD                             15 tests
-├── server/      Terminal REPL (stdin/stdout)                      13 tests
-├── inspector/   Đọc/verify origin.olang                           9 tests
-└── bench/       Performance benchmarks
+origin_new.olang          806KB native binary (ELF64 x86_64)
+│
+├── vm/x86_64/vm_x86_64.S    ASM VM — 4,112 LOC x86_64 assembly
+│   ├── Bytecode interpreter  36 opcodes, push/pop/call/ret
+│   ├── Memory allocator      bump allocator (r15 heap)
+│   ├── Syscall bridge        read/write/exit (no libc)
+│   ├── String ops            u16 molecules, compare, concat
+│   ├── Array/Dict ops        in-place push, hash lookup
+│   ├── REPL loop             read → compile → eval → print
+│   └── Builtins              60+ functions (math, string, array, dict)
+│
+├── stdlib/bootstrap/         Bootstrap compiler — 1,865 LOC Olang
+│   ├── lexer.ol              Tokenizer (30 keywords, strings, numbers)
+│   ├── parser.ol             Recursive descent + precedence climbing
+│   ├── semantic.ol           AST → IR opcodes (Closure+Store+Call)
+│   └── codegen.ol            IR → bytecode (two-pass, jump resolution)
+│
+├── stdlib/repl.ol            REPL entry point — 87 LOC
+│
+├── stdlib/homeos/            HomeOS stdlib — 6,600 LOC Olang
+│   ├── emotion.ol            V/A/D/I pipeline (184 LOC)
+│   ├── silk_ops.ol           Hebbian learning (166 LOC)
+│   ├── dream.ol              STM clustering (181 LOC)
+│   ├── instinct.ol           7 instincts framework (197 LOC)
+│   ├── learning.ol           Learning pipeline (160 LOC)
+│   ├── isl_tcp.ol            TCP codec (333 LOC)
+│   ├── isl_ws.ol             WebSocket codec (232 LOC)
+│   ├── asm_emit.ol           x86_64 binary generation (355 LOC)
+│   ├── asm_emit_arm64.ol     ARM64 binary generation (703 LOC)
+│   ├── wasm_emit.ol          WASM generation (355 LOC)
+│   └── ... (36 files total)
+│
+├── crates/                   Rust legacy — 98,402 LOC (sứ mệnh hoàn thành)
+│   └── EPITAPH.md            Lời mặc niệm
+│
+└── docs/
+    ├── olang_handbook.md      Olang handbook (lexer, parser, IR, VM, opcodes)
+    ├── HomeOS_SPEC_v3.md      HomeOS spec v3.1
+    └── MILESTONE_20260323.md  Self-hosting milestone
 ```
 
-**~82,000 lines Rust · 2,348 tests · 0 clippy warnings · 0 external deps · no_std core**
+**Tổng: ~4,100 LOC ASM + ~8,555 LOC Olang + 98,402 LOC Rust (legacy)**
 
 ---
 
-## Quick Start (60 giây)
+## Không Gian 5 Chiều
 
-```bash
-# 1. Build
-cargo build --workspace
-
-# 2. Chạy REPL
-cargo run -p server
-#   → Gõ "tôi vui" → thấy emotion-aware response
-#   → Gõ "○{stats}" → thấy system info
-#   → Gõ "exit" để thoát
-
-# 3. Chạy demo (10 scenarios, tất cả phải PASS)
-make demo
-
-# 4. Chạy eval mode (scripting)
-echo 'hello' | cargo run -p server -- --eval
-
-# 5. Verify toàn bộ (unit + integration + E2E)
-make check-all
-```
-
-### Tất cả lệnh build/test
-
-```bash
-cargo build --workspace          # Build toàn bộ
-cargo test --workspace           # Test (~2700 tests)
-cargo clippy --workspace         # Clippy (phải 0 warnings)
-cargo run -p server              # REPL interactive
-cargo run -p server -- --eval    # Eval mode (stdin → stdout)
-cargo run -p seeder              # Seed L0 nodes
-make demo                        # 10 E2E scenarios
-make verify                      # Automated E2E tests
-make check-all                   # Unit + intg + E2E
-```
-
-### REPL
+Mỗi khái niệm = tọa độ trong không gian 5D, từ **8,846 L0 anchors (Unicode 18.0)**:
 
 ```
-○ ○{🔥}
-○ 🔥=🔥 [1mol ●×∈ V=180 A=200 #A47B U+1F525]
+P_weight = [Shape][Relation][Valence][Arousal][Time] = 2 bytes/node
 
-○ ○{lửa}
-○ lửa=🔥 [1mol ●×∈ V=180 A=200 #A47B U+1F525]
-
-○ ○{🔥 ∘ 💧}
-○ 🔥=🔥 💧=💧 ∘→○ [1mol ...]
-
-○ ○{1 + 2}
-○ = 3
-
-○ tôi buồn vì mất việc
-Mình hiểu — mất việc khiến bạn buồn. Bạn muốn kể thêm không?
-
-○ ○{stats}
-HomeOS ○
-Registry : 246 nodes, 1706 aliases
-STM      : 2 observations
-Silk     : 134 nodes, 256 edges
+Nhóm       Blocks   Ký tự    Chiều
+────────────────────────────────────────────
+SDF           14    1,838    Shape        "Trông như thế nào"
+MATH          21    2,563    Relation     "Liên kết thế nào"
+EMOTICON      17    3,487    Valence+A    "Cảm thế nào"
+MUSICAL        7      958    Time         "Thay đổi thế nào"
+────────────────────────────────────────────
+Tổng          59    8,846    5 chiều
 ```
 
 ---
 
-## Yêu Cầu
+## Bytecode Format
 
-- **Rust** (stable, edition 2021)
-- `ucd_source/UnicodeData.txt` và `ucd_source/Blocks.txt` từ [Unicode 18.0](https://unicode.org/Public/18.0.0/ucd/)
+```
+Opcode map (codegen format, bc_format=1):
+  0x01 Push(str)      0x09 Jmp(offset)     0x13 Store(name)
+  0x02 Load(name)     0x0A Jz(offset)      0x14 LoadLocal(name)
+  0x06 Emit           0x0B Dup             0x15 PushNum(f64)
+  0x07 Call(name)     0x0C Pop             0x25 Closure(body_len)
+  0x08 Ret            0x0F Halt            0x0D Swap
+
+Strings encoded as u16 molecules: each byte → 0x2100 | byte_value
+Numbers encoded as f64 little-endian (8 bytes)
+```
+
+---
+
+## 23 Quy Tắc Bất Biến
+
+```
+Unicode:  ①-③  4 nhóm Unicode = nền tảng, tên Unicode = tên node, NL = alias
+Chain:    ④-⑦  Molecule từ encode, chain từ LCA/UCD, hash tự sinh
+Node:     ⑧-⑩  Tự động registry, file trước RAM sau, append-only
+Silk:     ⑪-⑬  Cùng tầng, cross-layer qua đại diện, mang EmotionTag
+Kiến trúc: ⑭-⑱  L0≠L1, 3 tiers, Fibonacci, im lặng nếu thiếu evidence
+Skill:    ⑲-㉓  1 trách nhiệm, không biết Agent, stateless
+```
 
 ---
 
@@ -186,27 +204,14 @@ Silk     : 134 nodes, 256 edges
 
 | File | Nội dung |
 |------|---------|
-| [CLAUDE.md](CLAUDE.md) | Hướng dẫn cho AI contributors |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Kiến trúc tổng thể |
-| [MASTER.md](MASTER.md) | Trạng thái dự án + lịch sử phiên |
-| [PLAN.md](PLAN.md) | Kế hoạch phát triển |
-| [REVIEW.md](REVIEW.md) | Đánh giá trung thực |
+| [CLAUDE.md](CLAUDE.md) | Hướng dẫn cho AI contributors (viết Olang) |
+| [docs/olang_handbook.md](docs/olang_handbook.md) | Olang handbook đầy đủ |
+| [docs/HomeOS_SPEC_v3.md](docs/HomeOS_SPEC_v3.md) | HomeOS spec v3.1 |
+| [docs/MILESTONE_20260323.md](docs/MILESTONE_20260323.md) | Self-hosting milestone |
+| [TASKBOARD.md](TASKBOARD.md) | Task hiện tại |
+| [PLAN_REWRITE.md](PLAN_REWRITE.md) | Lộ trình Rust → Olang |
+| [crates/EPITAPH.md](crates/EPITAPH.md) | Lời mặc niệm cho Rust |
 
 ---
 
-## 23 Quy Tắc Bất Biến
-
-```
-Unicode:  QT1-3   5 nhóm Unicode là nền tảng, tên Unicode = tên node, NL = alias
-Chain:    QT4-7   Molecule từ encode_codepoint(), chain từ LCA/UCD, hash tự sinh
-Node:     QT8-10  Tự động registry, file trước RAM sau, append-only
-Silk:     QT11-13 Cùng tầng, cross-layer qua đại diện, mang EmotionTag
-Kiến trúc: QT14-18 L0≠L1, 3 tiers, Fibonacci, im lặng nếu thiếu evidence
-Skill:    QT19-23 1 trách nhiệm, không biết Agent, stateless
-```
-
-Chi tiết: xem [CLAUDE.md](CLAUDE.md).
-
----
-
-*Unicode 18.0 · Rust · no_std core · ~82K LoC · 2,348 tests · 0 external deps · 2026*
+*Olang · x86_64 ASM · 806KB · self-hosting · zero deps · 2026*
