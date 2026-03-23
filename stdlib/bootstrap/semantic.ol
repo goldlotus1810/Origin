@@ -277,8 +277,10 @@ fn compile_expr(state, expr) {
                     patch_jump(state, jmp_pos, current_pos(state));
                 } else {
                     push(_ce_stack, op);
+                    push(_ce_stack, rhs);
                     compile_expr(state, lhs);
-                    compile_expr(state, rhs);
+                    let _bo_rhs = pop(_ce_stack);
+                    compile_expr(state, _bo_rhs);
                     let _binop = pop(_ce_stack);
                     if _binop == "+" { emit_op(state, make_op_name("Call", "__hyp_add")); };
                     if _binop == "-" { emit_op(state, make_op_name("Call", "__hyp_sub")); };
