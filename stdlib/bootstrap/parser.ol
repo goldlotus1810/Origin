@@ -279,9 +279,16 @@ fn parse_primary(p) {
                 };
                 if is_symbol_tok(peek(p), "[") {
                     advance(p);
-                    let index = parse_expr(p);
+                    // Parse index expression
+                    push(_pb_stack, _pp_result);
+                    let _pp_idx_expr = parse_expr(p);
+                    let _pp_saved_obj = pop(_pb_stack);
                     expect_symbol(p, "]");
-                    let _pp_result = Expr::Index { object: _pp_result, index: index };
+                    // Desugar a[i] → __array_get(a, i) — avoids Index dict corruption
+                    let _pp_result = Expr::Call {
+                        callee: Expr::Ident { name: "__array_get" },
+                        args: [_pp_saved_obj, _pp_idx_expr],
+                    };
                 };
                 if is_symbol_tok(peek(p), "(") {
                     advance(p);
