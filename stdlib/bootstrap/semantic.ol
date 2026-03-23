@@ -14,6 +14,8 @@ use olang.bootstrap.parser;
 // Explicit save stack for recursive compile_expr (ASM VM has no scoping)
 let _ce_stack = [];
 let _if_stack = [];
+let _break_patches = [];
+let _continue_patches = [];
 
 // ── IR Opcode representation ────────────────────────────────────
 // We represent opcodes as structs with an "op" tag string + args.
@@ -567,20 +569,38 @@ fn compile_stmt(state, stmt) {
             };
         },
         Stmt::WhileStmt { cond, body } => {
-            emit_op(state, make_op_simple("ScopeBegin"));
+            // Save outer break/continue context
+            let _wl_old_breaks = _break_patches;
+            let _wl_old_conts = _continue_patches;
+            let _break_patches = [];
+            let _continue_patches = [];
             let loop_start = current_pos(state);
             compile_expr(state, cond);
             let jz_pos = current_pos(state);
             emit_op(state, make_op_num("Jz", 0));
-            // Jz pops condition. No extra Pop.
             let bi = 0;
             while bi < len(body) {
                 compile_stmt(state, body[bi]);
                 let bi = bi + 1;
             };
-            emit_op(state, make_op_simple("ScopeEnd"));
+            // Patch continue jumps → loop_start (re-evaluate condition)
+            let _wl_cp = 0;
+            while _wl_cp < len(_continue_patches) {
+                patch_jump(state, _continue_patches[_wl_cp], loop_start);
+                let _wl_cp = _wl_cp + 1;
+            };
             emit_op(state, make_op_num("Jmp", loop_start));
-            patch_jump(state, jz_pos, current_pos(state));
+            // Patch break jumps → after loop
+            let _wl_exit = current_pos(state);
+            patch_jump(state, jz_pos, _wl_exit);
+            let _bp_i = 0;
+            while _bp_i < len(_break_patches) {
+                patch_jump(state, _break_patches[_bp_i], _wl_exit);
+                let _bp_i = _bp_i + 1;
+            };
+            // Restore outer context
+            let _break_patches = _wl_old_breaks;
+            let _continue_patches = _wl_old_conts;
         },
         Stmt::ForStmt { var, iter, body } => {
             // Lower for-in to while loop:
@@ -592,6 +612,12 @@ fn compile_stmt(state, stmt) {
             //       body...
             //       __for_idx = __for_idx + 1;
             //   }
+
+            // Save outer break/continue context
+            let _fl_old_breaks = _break_patches;
+            let _fl_old_conts = _continue_patches;
+            let _break_patches = [];
+            let _continue_patches = [];
 
             // Evaluate and store iterator
             compile_expr(state, iter);
@@ -608,6 +634,7 @@ fn compile_stmt(state, stmt) {
 
             // Loop start: __for_idx < __for_len
             let _fl_start = current_pos(state);
+            let _continue_target = _fl_start;
             emit_op(state, make_op_name("Load", "__for_idx"));
             emit_op(state, make_op_name("Load", "__for_len"));
             emit_op(state, make_op_name("Call", "__cmp_lt"));
@@ -627,6 +654,13 @@ fn compile_stmt(state, stmt) {
                 let _fl_bi = _fl_bi + 1;
             };
 
+            // Patch continue jumps → increment section
+            let _fl_inc = current_pos(state);
+            let _fl_cp = 0;
+            while _fl_cp < len(_continue_patches) {
+                patch_jump(state, _continue_patches[_fl_cp], _fl_inc);
+                let _fl_cp = _fl_cp + 1;
+            };
             // Increment: __for_idx = __for_idx + 1
             emit_op(state, make_op_name("Load", "__for_idx"));
             emit_op(state, make_op_num("PushNum", 1));
@@ -635,16 +669,27 @@ fn compile_stmt(state, stmt) {
 
             // Jump back to loop start
             emit_op(state, make_op_num("Jmp", _fl_start));
-            patch_jump(state, _fl_jz, current_pos(state));
+            // Patch break jumps and loop exit
+            let _fl_exit = current_pos(state);
+            patch_jump(state, _fl_jz, _fl_exit);
+            let _fl_bp = 0;
+            while _fl_bp < len(_break_patches) {
+                patch_jump(state, _break_patches[_fl_bp], _fl_exit);
+                let _fl_bp = _fl_bp + 1;
+            };
+            // Restore outer context
+            let _break_patches = _fl_old_breaks;
+            let _continue_patches = _fl_old_conts;
         },
         Stmt::BreakStmt => {
-            // Simplified: emit Jmp(0) — would need break_jumps tracking
-            // For bootstrap, break inside while is uncommon
+            let _brk_pos = current_pos(state);
             emit_op(state, make_op_num("Jmp", 0));
+            push(_break_patches, _brk_pos);
         },
         Stmt::ContinueStmt => {
-            // Simplified: emit Jmp(0)
+            let _cont_pos = current_pos(state);
             emit_op(state, make_op_num("Jmp", 0));
+            push(_continue_patches, _cont_pos);
         },
         Stmt::TypeDef { name, fields } => {
             // Type metadata — no opcodes needed for bootstrap
