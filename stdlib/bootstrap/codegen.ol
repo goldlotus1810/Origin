@@ -214,11 +214,17 @@ fn encode_op(output, op) {
 // ── Entry point ────────────────────────────────────────────────
 
 pub fn generate(ops) {
+    emit "[GEN]";
+    emit len(ops);
     let output = [];
     let i = 0;
     while i < len(ops) {
+        emit "[OP]";
+        emit i;
         encode_op(output, ops[i]);
         let i = i + 1;
     };
+    emit "[GD]";
+    emit len(output);
     return output;
 }
