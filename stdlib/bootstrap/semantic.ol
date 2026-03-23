@@ -20,7 +20,8 @@ let _if_stack = [];
 // The Rust VM will interpret these when we bridge.
 
 // Op represented as 3-element array: [tag, name, value]
-// Using arrays instead of dicts to avoid field-name aliasing bug
+
+// Explicit save stack for recursive compile_expr (ASM VM has no scoping)
 
 fn make_op(_tag, _name, _value) {
     return [_tag, _name, _value];
@@ -68,9 +69,6 @@ type SemanticState {
 fn new_state() {
     return SemanticState {
         ops: [],
-        op_tags: [],
-        op_names: [],
-        op_values: [],
         locals: [],
         fns: [],
         fn_bodies: [],
@@ -85,22 +83,15 @@ fn new_state() {
 
 fn emit_op(state, _op) {
     push(state.ops, _op);
-    push(state.op_tags, _op[0]);
-    push(state.op_names, _op[1]);
-    push(state.op_values, _op[2]);
 }
 
 fn current_pos(state) {
-    return len(state.op_tags);
+    return len(state.ops);
 }
 
 fn patch_jump(state, pos, target) {
-    // Patch a Jmp/Jz at position pos to jump to target
-    set_at(state.op_values, pos, target);
-    // Also update ops array for compatibility
-    let old_op = state.ops[pos];
-    let new_op = [old_op[0], old_op[1], target];
-    set_at(state.ops, pos, new_op);
+    let _pj_old = state.ops[pos];
+    set_at(state.ops, pos, [_pj_old[0], _pj_old[1], target]);
 }
 
 fn is_local(state, name) {
