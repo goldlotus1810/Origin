@@ -1630,13 +1630,105 @@ loop 100 { ... }
 **Closure:** Closure, CallClosure
 **FFI:** Ffi
 
-### Compile targets
+### Compile targets (hien tai)
 
 ```
-Olang source -> IR (stack-based) -> VM (interpreted)
-                                 -> C (codegen)
-                                 -> Rust (codegen)
-                                 -> WASM/WAT (web)
+Olang source → tokenize → parse → analyze → generate → bytecode
+                lexer.ol   parser.ol  semantic.ol  codegen.ol
+                                                       ↓
+                                                  ASM VM (x86_64)
+                                                  origin_new.olang
+                                                  806KB, no libc
+```
+
+### Bytecode opcodes (codegen format, bc_format=1)
+
+```
+0x01 Push(str)       0x09 Jmp(offset)     0x13 Store(name)
+0x02 Load(name)      0x0A Jz(offset)      0x14 LoadLocal(name)
+0x06 Emit            0x0B Dup             0x15 PushNum(f64)
+0x07 Call(name)      0x0C Pop             0x25 Closure(body_len)
+0x08 Ret             0x0F Halt            0x0D Swap
+
+Strings: u16 molecules (each byte → 0x2100 | byte_value)
+Numbers: f64 little-endian (8 bytes)
+```
+
+---
+
+## 22. HomeOS Stdlib — Code thuc te
+
+### Emotion pipeline (stdlib/homeos/emotion.ol)
+
+```olang
+pub fn emotion_new(v, a, d, i) {
+    return { v: v, a: a, d: d, i: i };
+}
+
+// AMPLIFY — KHONG trung binh, amplify qua Silk weight
+// factor = 1 + w × phi^-1 (Golden Ratio boost)
+pub fn amplify(emo, silk_weight) {
+    let factor = 1.0 + silk_weight * 0.618;
+    return emotion_new(
+        clamp(emo.v * factor, -1.0, 1.0),
+        clamp(emo.a * factor, 0.0, 1.0),
+        emo.d,
+        clamp(emo.i * factor, 0.0, 1.0)
+    );
+}
+
+// Compose 2 emotions — AMPLIFY, NOT average
+pub fn compose(a, b, silk_weight) {
+    let base_v = (a.v + b.v) / 2.0;
+    let boost = abs(a.v - base_v) * silk_weight * 0.5;
+    // ... amplification logic
+}
+```
+
+### 7 Instincts (stdlib/homeos/instinct.ol)
+
+```olang
+pub fn run_instincts(observation, knowledge) {
+    let result = { action: "process", confidence: 0.0 };
+
+    // ① Honesty — confidence < 0.4 → im lang (BlackCurtain)
+    result.confidence = assess_confidence(observation, knowledge);
+    if result.confidence < 0.40 {
+        result.action = "silence";
+        return result;
+    }
+
+    // ② Contradiction detection
+    // ③ Causality — temporal + co-activation
+    // ④ Abstraction — N chains → LCA → categorical
+    // ⑤ Analogy — A:B :: C:? → delta 5D
+    // ⑥ Curiosity — 1 - nearest_similarity
+    // ⑦ Reflection — knowledge quality
+    return result;
+}
+```
+
+### ISL TCP codec (stdlib/homeos/isl_tcp.ol)
+
+```olang
+pub fn isl_connect(host, port) {
+    let socket = __tcp_connect(host, port);
+    return { socket: socket, buffer: [], state: "connected" };
+}
+
+pub fn isl_send(conn, msg) {
+    let frame = encode_isl_frame(msg);
+    __tcp_write(conn.socket, frame);
+}
+
+fn encode_isl_frame(msg) {
+    let out = [];
+    push(out, msg.from);        // ISL address (4 bytes)
+    push(out, msg.to);          // ISL address (4 bytes)
+    push(out, msg.msg_type);    // 1 byte
+    // ... payload encoding
+    return out;
+}
 ```
 
 ---

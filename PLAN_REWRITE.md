@@ -385,101 +385,135 @@ Lợi ích:
 
 ---
 
-## Hiện trạng (cập nhật 2026-03-22)
+## Hiện trạng — SELF-HOSTING (cập nhật 2026-03-23)
 
-### Đã có ✅
+### Milestone: Olang tự biên dịch chính mình
 
 ```
-Giai đoạn 0 ✅ — Bootstrap Compiler
-  lexer.ol        197 LOC   Tokenizer hoàn chỉnh
-  parser.ol       693 LOC   Recursive descent + precedence climbing
-  semantic.ol     664 LOC   Type checker + IR lowering
-  codegen.ol      224 LOC   Bytecode generation
-  Self-compile test: bytecode A == bytecode B ✅
+origin_new.olang = 806KB native binary (ELF64 x86_64)
+  ✅ Bootstrap compiler tự compile chính mình
+  ✅ fib(20) = 6,765 — tree recursion trên native binary
+  ✅ fact(10) = 3,628,800 — deep recursion
+  ✅ 27/27 REPL tests pass
+  ✅ Zero dependencies. No libc. No runtime.
+```
 
-Giai đoạn 1 ✅ — Machine Code VM + Builder
-  vm_x86_64.S     ~3000 LOC  x86_64 assembly VM (Linux syscalls)
-  vm_arm64.S      627 LOC    ARM64 assembly VM
-  vm_wasm.wat     830 LOC    WASM VM (browser/edge)
-  builder (Rust)  ✅         Pack VM + bytecode + knowledge → ELF
+### Ví dụ code Olang thực tế (đang chạy trong binary)
 
-Giai đoạn 2 ✅ — HomeOS logic bằng Olang (59 .ol files, ~6000 LOC)
-  Stdlib (8): result, iter, sort, format, json, hash, mol, chain
-  Emotion (3): emotion, curve, intent
+```olang
+// ═══ stdlib/repl.ol — REPL entry point ═══
+pub fn repl_eval(input) {
+    let src = __str_trim(input);
+    if len(src) == 0 { return ""; }
+    if src == "exit" || src == "quit" { return "__exit__"; }
+
+    let tokens = tokenize(src);        // Phase 1: Tokenize
+    let ast = parse(tokens);           // Phase 2: Parse
+    let state = analyze(ast);          // Phase 3: Semantic
+    let bc = generate(state.ops);      // Phase 4: Codegen
+    return __eval_bytecode(bc);        // Phase 5: Execute
+}
+
+// ═══ stdlib/bootstrap/lexer.ol — Tokenizer ═══
+union TokenKind {
+    Keyword { name: Str },
+    Ident { name: Str },
+    Number { value: Num },
+    StringLit { value: Str },
+    Symbol { ch: Str },
+    Eof,
+}
+
+fn is_keyword(name) {
+    let i = 0;
+    while i < len(KEYWORDS) {
+        if KEYWORDS[i] == name { return true; };
+        let i = i + 1;
+    };
+    return false;
+}
+
+// ═══ stdlib/bootstrap/semantic.ol — Compiler ═══
+// BinOp: save rhs on explicit stack before recursive compile
+let _ce_stack = [];
+
+// In compile_expr BinOp handler:
+push(_ce_stack, rhs);           // save rhs
+compile_expr(state, lhs);       // compile left (may recurse)
+let rhs = pop(_ce_stack);       // restore rhs
+compile_expr(state, rhs);       // compile right
+emit_op(state, make_op_name("Call", op_fn));
+
+// ═══ stdlib/bootstrap/codegen.ol — Bytecode encoder ═══
+// Two-pass: Pass 1 measures size, Pass 2 encodes with resolved jumps
+fn generate(ops) {
+    // Pass 1: encode each op to temp array, measure actual byte size
+    let sizes = [];
+    let si = 0;
+    while si < len(ops) {
+        let tmp = [];
+        encode_op(ops[si], tmp, 0);
+        push(sizes, len(tmp));
+        let si = si + 1;
+    };
+    // Pass 2: encode with jump targets resolved to byte offsets
+    let _gout = [];
+    // ... (jump target = sum of sizes between source and target)
+}
+```
+
+### Đã hoàn thành ✅
+
+```
+Giai đoạn 0 ✅ — Bootstrap Compiler (SELF-HOSTING 2026-03-23)
+  lexer.ol        196 LOC   Tokenizer (30 keywords, strings, numbers)
+  parser.ol       718 LOC   Recursive descent + precedence climbing
+  semantic.ol     649 LOC   AST → IR opcodes (Closure+Store+Call pattern)
+  codegen.ol      302 LOC   Two-pass bytecode encoder, jump resolution
+  repl.ol          87 LOC   REPL pipeline orchestrator
+  TOTAL         1,952 LOC   Olang compiling Olang on native binary
+
+Giai đoạn 1 ✅ — Machine Code VM (ASM, no libc)
+  vm_x86_64.S   4,112 LOC   x86_64 assembly VM (Linux syscalls)
+  60+ builtins: math, string, array, dict, closure, enum, struct
+  FNV-1a hash var_table (4096 entries)
+  Heap scope stack for recursive closures (4MB, 256 max depth)
+  REPL: read → tokenize → parse → analyze → generate → eval
+
+Giai đoạn 2 ✅ — HomeOS logic bằng Olang (40 .ol files, ~8,555 LOC)
+  Bootstrap (4): lexer, parser, semantic, codegen
+  Emotion (3): emotion.ol, curve.ol, intent.ol
   Knowledge (4): silk_ops, dream, instinct, learning
   Agents (5): gate, response, leo, chief, worker
-  Bootstrap compiler (4): lexer, parser, semantic, codegen
-  Advanced (35): arena, asm_emit x86/arm, cache, jit, reproduce, wasm_emit...
+  ISL (4): isl_tcp, isl_ws, isl_ble, isl_discovery
+  Binary gen (4): asm_emit, asm_emit_arm64, elf_emit, wasm_emit
+  System (16): builder, optimize, arena, benchmark, jit, ...
 
-Giai đoạn 3 ✅ — Self-sufficient builder
-  asm_emit.ol     ✅   Emit x86_64 machine code trực tiếp
-  elf_emit.ol     ✅   Create ELF64 executable
-  builder.ol      ✅   Builder thay thế Rust
-
-Giai đoạn 4 ✅ — Multi-architecture
-  Cross-compile   ✅   x86_64 → ARM64
-  Fat binary      ✅   Multi-arch trong 1 file
-  WASM universal  ✅   origin.olang.wasm
-
-Giai đoạn 5 ✅ — Optimization
-  JIT             ✅   Hot loop → native code
-  Inline cache    ✅   Variable/Registry/Silk lookup
-  Memory          ✅   Arena allocator + zero-copy
-  Benchmark       ✅   Micro + macro benchmarks
-
-Giai đoạn 6 ✅ — Living system
-  Self-update     ✅   Append .ol → compile → restart
-  Self-optimize   ✅   LeoAI profile → optimization
-  Reproduce       ✅   Worker clone (~50-100 KB)
-
-VM (Rust — 45+ opcodes):
-  Push, PushNum, PushMol, Load, Store, Call, Ret, Jmp, Jz,
-  Loop, If, Lca, Edge, Query, Dream, Fuse, TryBegin, CatchEnd,
-  Closure, CallClosure, Spawn, ChanNew/Send/Recv, Select,
-  DeviceRead/Write, FileRead/Write, Ffi, Trace, Assert, TypeOf...
+Rust legacy (98,402 LOC — sứ mệnh hoàn thành):
+  12 crates + 10 tools. Clean compilation. 2,348 tests.
+  → xem crates/EPITAPH.md
 
 Knowledge format:
-  origin.olang binary v0.06 — 13 record types (0x01-0x0C)
+  origin.olang binary — 13 record types
   Molecule: 2 bytes (u16) packed [S:4][R:4][V:3][A:3][T:2]
-  Chain: Vec<u16>, 2B/link
-  UCD: 8,846 L0 (59 blocks, Unicode 18.0) + 33K alias entries
-  KnowTree: L0(4)→L1(59)→L3(8,846) hierarchy (~18 KB)
-  AliasTable: 33K entries (~198 KB, tách riêng)
-  Silk parent_map: RT_PARENT 0x0C persistence
-
-UDC Documentation:
-  8 tree files (docs/UDC_DOC/UDC_*_tree.md) — công thức vật lý/toán học
-  Encode pipeline spec (UDC_formulas.md) — bit layout, quantization, NRC-VAD
-  Build pipeline: tools/build_udc/step1-6.py → json/*.json + udc_p_table.bin (KT31)
-
-Spec:
-  HomeOS_SPEC_v3.md (v3.1) — 14 cơ chế DNA, 7 instincts, 5 checkpoints
-  olang_handbook.md — ngôn ngữ Olang đầy đủ
-
-Infra ✅:
-  Phase 0-16 ALL DONE
-  V2 Migration T1-T16 ALL DONE
-  Phase 14 (KnowTree + Silk vertical) DONE
-  Phase 15 (Chain Optimization 6/6) DONE
-  Phase 16 (Fusion + Checkpoints 4/4) DONE
-  1190 tests PASS, 37 remaining (closure/self-compile — đang fix)
+  UCD: 8,846 L0 (Unicode 18.0) + 33K alias entries
+  KnowTree + AliasTable + Silk parent_map
 ```
 
-### Còn thiếu / Cần hoàn thiện
+### Cần làm tiếp
 
 ```
-Code quality:
-  37 test failures (closure dispatch + self-compile + bytes builtins)
-  → Đang fix, target: 0 failures
+Intelligence layer (chưa port từ Rust):
+  - Encoder: text → molecule (1,030 LOC Rust → cần .ol)
+  - Analysis: sentence fusion (2,108 LOC Rust → cần .ol)
+  - Skills: domain execution (2,510 LOC Rust → cần .ol)
+  - Crypto: SHA-256, AES, Ed25519 (2,736 LOC Rust → cần ASM)
 
-Chưa implement trong Rust (chỉ có .ol stubs):
-  PLAN_AUTH_first_run.md — First-run Terms + Master Key + Biometric
-  PLAN_TEST_LOGIC_CHECK.md — Test suite theo 6 bug patterns + 5 checkpoints
+Language features (cần thêm vào parser + VM):
+  - for-in loops, string interpolation, import/module, error handling
 
-Production readiness:
-  172 olang semantic tests → giảm xuống 37, target 0
-  Clippy warnings → cần clean
-  Mobile deployment (Android/iOS) → plan có, chưa test thực tế
+Platform (cần thêm VM targets):
+  - ARM64 ASM VM, WASM target, Browser E2E, Mobile
 ```
 
 ---
