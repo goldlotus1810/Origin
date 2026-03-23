@@ -383,25 +383,27 @@ fn is_binop(tok) {
 }
 
 fn parse_expr_prec(p, min_prec) {
-    let lhs = parse_primary(p);
+    let _pep_lhs = parse_primary(p);
 
     while is_binop(peek(p)) {
-        let op_tok = peek(p);
-        match op_tok.kind {
+        let _pep_tok = peek(p);
+        match _pep_tok.kind {
             TokenKind::Symbol { ch } => {
-                let prec = precedence(ch);
-                if prec < min_prec {
+                let _pep_prec = precedence(ch);
+                if _pep_prec < min_prec {
                     break;
                 };
                 advance(p); // consume operator
-                let rhs = parse_expr_prec(p, prec + 1);
-                let lhs = Expr::BinOp { op: ch, lhs: lhs, rhs: rhs };
+                let _pep_op = ch;
+                let _pep_saved = _pep_lhs;
+                let _pep_rhs = parse_expr_prec(p, _pep_prec + 1);
+                let _pep_lhs = Expr::BinOp { op: _pep_op, lhs: _pep_saved, rhs: _pep_rhs };
             },
             _ => { break; },
         };
     };
 
-    return lhs;
+    return _pep_lhs;
 }
 
 pub fn parse_expr(p) {
