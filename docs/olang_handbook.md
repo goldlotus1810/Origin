@@ -1440,7 +1440,7 @@ union Stmt {
     LetStmt { name: Str, value: Expr },
     FnDef { name: Str, params: Vec[Str], body: Vec[Stmt] },
     IfStmt { cond: Expr, then_block: Vec[Stmt], else_block: Vec[Stmt] },
-    WhileStmt { cond: Expr, body: Vec[Stmt] },
+    WhileStmt { cond: Expr, body: Vec[Stmt], cond_start: Num, cond_end: Num, tokens: Vec[Token] },
     ReturnStmt { value: Expr },
     EmitStmt { expr: Expr },
     TypeDef { name: Str, fields: Vec[Field] },
