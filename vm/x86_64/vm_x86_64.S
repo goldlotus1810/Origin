@@ -1018,10 +1018,6 @@ op_call:
     add     %rcx, %r13                  # PC past name bytes
     push    %r12                        # save bytecode base
     push    %r13                        # save return address
-    # Keep r12 as current bytecode base (works for both boot and nested eval).
-    # body_pc is relative to whichever bytecode defined the closure.
-    # For boot closures: r12 = boot_bc_base (set during boot).
-    # For nested eval closures: r12 = nested buffer (set by eval_bc_run).
     mov     %eax, %r13d                 # PC = body_pc
     jmp     vm_loop
 
@@ -2602,10 +2598,6 @@ op_call:
 
 op_ret:
     # Return from closure call — pop return address from CPU stack.
-    # CPU stack top has the saved PC from cg_call_closure.
-    # Check if we have a return address (rsp points to saved PC).
-    # If the top of CPU stack looks like a valid PC (< bytecode size),
-    # restore it. Otherwise treat as no-op.
     pop     %rax                        # saved PC
     pop     %r12                        # saved bytecode base
     mov     %eax, %r13d                 # PC = return address
@@ -4045,6 +4037,8 @@ var_shadow_top:
     .space 8                            # current top of shadow stack
 closure_depth:
     .space 8                            # nesting depth (0 = not in closure)
+_save_rbx:
+    .space 8                            # temp save for rbx during closure scope scan
     .align 8
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
