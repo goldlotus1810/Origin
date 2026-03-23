@@ -1088,6 +1088,7 @@ op_call:
     add     $16, %r14
     addsd   %xmm1, %xmm0
     movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)       # ensure marker is set!
     jmp     vm_loop
 .call_add_concat:
     # At least one operand is a string — convert both to string and concat
