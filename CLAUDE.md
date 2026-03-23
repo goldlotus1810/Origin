@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = 806KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~824KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -44,7 +44,7 @@ repl_eval(input)                    ← stdlib/repl.ol
   ├── tokenize(src)                 ← stdlib/bootstrap/lexer.ol
   ├── parse(tokens)                 ← stdlib/bootstrap/parser.ol
   ├── analyze(ast)                  ← stdlib/bootstrap/semantic.ol
-  ├── generate(state.ops)           ← stdlib/bootstrap/codegen.ol
+  ├── emit bytecode → _g_output     ← direct emission + backpatch (NOT two-pass)
   └── __eval_bytecode(bc)           ← ASM VM executes compiled bytecode
 
 VM registers:
@@ -100,9 +100,10 @@ push(items, 4);
 emit items[0];           // 1
 emit len(items);          // 4
 
-// Dicts
+// Dicts (dict literal syntax)
 let config = { name: "HomeOS", version: 5 };
-emit config.name;
+emit config.name;         // "HomeOS"
+emit config.version;      // 5
 
 // Types & Unions
 type Point { x: Num, y: Num }
@@ -134,6 +135,7 @@ __str_is_keyword(s) → bool
 
 // Array
 len(a)  push(a, val)  a[i]  set_at(a, i, val)
+// NOTE: a[i] is desugared to __array_get(a, i) by the parser
 
 // Dict
 struct_tag(dict, tag) → new dict with tag
@@ -205,9 +207,16 @@ use(my_var);                   // WRONG VALUE!
 | Vị trí | Biến cần save | Stack | File |
 |--------|-------------|-------|------|
 | BinOp compile | `rhs`, `op` | `_ce_stack` | semantic.ol |
+| Call args compile | `_ce_saved_fname`, `_ce_saved_args`, `_ce_ai` | `_ce_stack` | semantic.ol |
+| LetStmt compile | `_ls_name` | `_ce_stack` | semantic.ol |
 | IfStmt compile | `_if_then`, `_if_else`, `_if_jz`, `_if_ti` | `_if_stack` | semantic.ol |
+| ElseIf compile | `_if_else`, `_if_jmp`, `_if_ei` | `_if_stack` | semantic.ol |
+| WhileStmt compile | `_wl_body`, `_wl_cond_start`, `_wl_cond_end`, `_wl_tokens` | `_ce_stack` | semantic.ol |
+| WhileStmt body | `_wl_body`, `_wl_jz`, `_wl_start`, `_wl_bi` | `_ce_stack` | semantic.ol |
+| FieldAssign compile | `_fa_obj` | `_ce_stack` | semantic.ol |
 | Parser if-else | `_ps_cond`, `_ps_then` | `_pb_stack` | parser.ol |
 | Parser call args | `_pp_result`, `_pp_call_args` | `_pb_stack` | parser.ol |
+| Parser while | `_ps_wc_start`, `_ps_wc_end` | `_pb_stack` | parser.ol |
 | parse_expr_prec | `_pep_lhs`, `ch`, `min_prec` | `_pep_stack` | parser.ol |
 | parse_block | `_pb_stmts` | `_pb_stack` | parser.ol |
 
@@ -236,8 +245,8 @@ use(my_var);                   // WRONG VALUE!
     Stride 2 cho mọi string builtin.
     codegen emit_str_u16: encode từng byte → 0x2100 | byte.
 
-④ ARRAY_INIT_CAP = 256 — Không push quá 256 elements.
-    Vượt quá → heap corruption.
+④ ARRAY_INIT_CAP = 4096 — Empty `[]` pre-allocates 4096 slots (64KB).
+    ArrayLit `[1,2,3]` does NOT pre-allocate. Heap overlap risk with `[]`.
 
 ⑤ Missing builtins → .call_skip → stack leak:
     Nếu thêm function mới cần builtin chưa có → PHẢI implement trong ASM.
@@ -245,7 +254,9 @@ use(my_var);                   // WRONG VALUE!
 ⑥ op_call: KHÔNG switch r12 cho nested eval closures.
     body_pc tương đối theo buffer hiện tại, không phải boot_bc_base.
 
-⑦ Two-pass codegen — Pass 1 đo size thực, Pass 2 encode với jump targets resolved.
+⑦ Direct bytecode emission — Semantic emits bytes trực tiếp vào _g_output.
+    Jump targets resolved bằng backpatch (set_at + patch_jump).
+    KHÔNG dùng two-pass hay IR ops buffer.
 ```
 
 ---
@@ -254,7 +265,7 @@ use(my_var);                   // WRONG VALUE!
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (806KB)
+make build                    # → origin_new.olang (~824KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang

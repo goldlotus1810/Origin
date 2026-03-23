@@ -539,6 +539,18 @@ fn compile_expr(state, expr) {
             emit_op(state, make_op_name("Push", path));
             emit_op(state, make_op_name("Call", "__struct_tag"));
         },
+        Expr::DictLit { fields } => {
+            // Dict literal: { key: value, ... } — no tag
+            let _dl_i = 0;
+            while _dl_i < len(fields) {
+                let _dl_f = fields[_dl_i];
+                emit_op(state, make_op_name("Push", _dl_f.name));
+                compile_expr(state, _dl_f.value);
+                let _dl_i = _dl_i + 1;
+            };
+            emit_op(state, make_op_num("PushNum", len(fields)));
+            emit_op(state, make_op_name("Call", "__dict_new"));
+        },
         Expr::IfExpr { cond, then_expr, else_expr } => {
             compile_expr(state, cond);
             let jz_pos = current_pos(state);

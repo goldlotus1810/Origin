@@ -28,6 +28,11 @@ pub fn repl_eval(input) {
   // Phase 2: Parse
   let ast = parse(tokens);
 
+  // Check for parse errors — abort before analyze/eval to prevent segfault
+  if _g_parse_error == 1 {
+    return "";
+  }
+
   // Phase 3: Semantic analysis
   let state = analyze(ast);
 
