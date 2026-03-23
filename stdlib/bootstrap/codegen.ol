@@ -54,55 +54,55 @@ let TAG_CALLCLOSURE = 36; // 0x24
 
 // ── Byte encoding helpers ──────────────────────────────────────
 
-fn emit_byte(output, b) {
-    push(output, b);
+fn emit_byte(_eb, b) {
+    push(_eb, b);
 }
 
-fn emit_u16_le(output, n) {
-    push(output, n % 256);
-    push(output, (n / 256) % 256);
+fn emit_u16_le(_eb, n) {
+    push(_eb, n % 256);
+    push(_eb, (n / 256) % 256);
 }
 
-fn emit_u32_le(output, n) {
-    push(output, n % 256);
-    push(output, (n / 256) % 256);
-    push(output, (n / 65536) % 256);
-    push(output, (n / 16777216) % 256);
+fn emit_u32_le(_eb, n) {
+    push(_eb, n % 256);
+    push(_eb, (n / 256) % 256);
+    push(_eb, (n / 65536) % 256);
+    push(_eb, (n / 16777216) % 256);
 }
 
-fn emit_f64_le(output, n) {
+fn emit_f64_le(_eb, n) {
     // Use VM builtin to get IEEE 754 LE bytes
-    let bytes = f64_to_le_bytes(n);
+    let _ef_bytes = f64_to_le_bytes(n);
     let fi = 0;
     while fi < 8 {
-        push(output, bytes[fi]);
+        push(_eb, _ef_bytes[fi]);
         let fi = fi + 1;
     };
 }
 
-fn emit_str(output, s) {
+fn emit_str(_eb, s) {
     // Encode string as [len:1][utf8_bytes:N]
-    let bytes = str_bytes(s);
-    let slen = len(bytes);
-    push(output, slen);
+    let _es_bytes = str_bytes(s);
+    let _es_len = len(_es_bytes);
+    push(_eb, _es_len);
     let si = 0;
-    while si < slen {
-        push(output, bytes[si]);
+    while si < _es_len {
+        push(_eb, _es_bytes[si]);
         let si = si + 1;
     };
 }
 
-fn emit_str_u16(output, s) {
+fn emit_str_u16(_eb, s) {
     // Encode Push chain: [mol_count:2 LE][u16_mol_0:2 LE][u16_mol_1:2 LE]...
     // Each char → u16 molecule = 0x2100 | byte_value
-    let bytes = str_bytes(s);
-    let slen = len(bytes);
-    emit_u16_le(output, slen);
+    let _eu_bytes = str_bytes(s);
+    let _eu_len = len(_eu_bytes);
+    emit_u16_le(_eb, _eu_len);
     let su = 0;
-    while su < slen {
-        let mol = bytes[su] + 8448;
-        push(output, mol % 256);
-        push(output, mol / 256);
+    while su < _eu_len {
+        let mol = _eu_bytes[su] + 8448;
+        push(_eb, mol % 256);
+        push(_eb, mol / 256);
         let su = su + 1;
     };
 }
@@ -151,58 +151,58 @@ fn tag_for(op_tag) {
 
 // ── Main encoder ───────────────────────────────────────────────
 
-fn encode_op(output, op) {
+fn encode_op(_eo_out, op) {
     let t = op.tag;
     if t == "PushNum" {
-        emit_byte(output, 21);
-        emit_f64_le(output, op.value);
+        emit_byte(_eo_out, 21);
+        emit_f64_le(_eo_out, op.value);
         return;
     };
-    if t == "Emit" { emit_byte(output, 6); return; };
-    if t == "Halt" { emit_byte(output, 15); return; };
-    if t == "Ret" { emit_byte(output, 8); return; };
-    if t == "Pop" { emit_byte(output, 12); return; };
-    if t == "Dup" { emit_byte(output, 11); return; };
-    if t == "ScopeBegin" { emit_byte(output, 23); return; };
-    if t == "ScopeEnd" { emit_byte(output, 24); return; };
+    if t == "Emit" { emit_byte(_eo_out, 6); return; };
+    if t == "Halt" { emit_byte(_eo_out, 15); return; };
+    if t == "Ret" { emit_byte(_eo_out, 8); return; };
+    if t == "Pop" { emit_byte(_eo_out, 12); return; };
+    if t == "Dup" { emit_byte(_eo_out, 11); return; };
+    if t == "ScopeBegin" { emit_byte(_eo_out, 23); return; };
+    if t == "ScopeEnd" { emit_byte(_eo_out, 24); return; };
     if t == "Push" {
-        emit_byte(output, 1);
-        emit_str_u16(output, op.name);
+        emit_byte(_eo_out, 1);
+        emit_str_u16(_eo_out, op.name);
         return;
     };
     if t == "Load" {
-        emit_byte(output, 2);
-        emit_str(output, op.name);
+        emit_byte(_eo_out, 2);
+        emit_str(_eo_out, op.name);
         return;
     };
     if t == "Store" {
-        emit_byte(output, 19);
-        emit_str(output, op.name);
+        emit_byte(_eo_out, 19);
+        emit_str(_eo_out, op.name);
         return;
     };
     if t == "LoadLocal" {
-        emit_byte(output, 20);
-        emit_str(output, op.name);
+        emit_byte(_eo_out, 20);
+        emit_str(_eo_out, op.name);
         return;
     };
     if t == "StoreUpdate" {
-        emit_byte(output, 28);
-        emit_str(output, op.name);
+        emit_byte(_eo_out, 28);
+        emit_str(_eo_out, op.name);
         return;
     };
     if t == "Call" {
-        emit_byte(output, 7);
-        emit_str(output, op.name);
+        emit_byte(_eo_out, 7);
+        emit_str(_eo_out, op.name);
         return;
     };
     if t == "Jmp" {
-        emit_byte(output, 9);
-        emit_u32_le(output, op.value);
+        emit_byte(_eo_out, 9);
+        emit_u32_le(_eo_out, op.value);
         return;
     };
     if t == "Jz" {
-        emit_byte(output, 10);
-        emit_u32_le(output, op.value);
+        emit_byte(_eo_out, 10);
+        emit_u32_le(_eo_out, op.value);
         return;
     };
 }
@@ -235,27 +235,31 @@ fn op_size(_os_op) {
 
 // ── Entry point ────────────────────────────────────────────────
 
-// Temp array for measuring encoded sizes
-let _gtmp = [];
-
 pub fn generate(ops) {
-    // Pass 1: encode each op to temp, measure actual byte size.
+    // Pass 1: compute byte offset for each op (inline size calc, no function call).
     let offsets = [];
     let _gpos = 0;
     let _gi = 0;
     while _gi < len(ops) {
         push(offsets, _gpos);
-        // Encode to temp, measure size
-        let _gbefore = len(_gtmp);
-        encode_op(_gtmp, ops[_gi]);
-        let _gafter = len(_gtmp);
-        let _gpos = _gpos + _gafter - _gbefore;
+        let _gsz = 1;
+        let _got = ops[_gi].tag;
+        if _got == "PushNum" { let _gsz = 9; };
+        if _got == "Jmp" || _got == "Jz" { let _gsz = 5; };
+        if _got == "Push" {
+            let _gsz = 3 + len(str_bytes(ops[_gi].name)) * 2;
+        };
+        if _got == "Load" || _got == "Store" || _got == "LoadLocal"
+            || _got == "StoreUpdate" || _got == "Call" {
+            let _gsz = 2 + len(str_bytes(ops[_gi].name));
+        };
+        let _gpos = _gpos + _gsz;
         let _gi = _gi + 1;
     };
     push(offsets, _gpos);
 
     // Pass 2: encode for real, resolving Jmp/Jz targets.
-    let output = [];
+    let _gout = [];
     let _gi2 = 0;
     while _gi2 < len(ops) {
         let _gop = ops[_gi2];
@@ -263,25 +267,25 @@ pub fn generate(ops) {
         if _gt == "Jmp" {
             let _gtarget = _gop.value;
             if _gtarget < len(offsets) {
-                emit_byte(output, 9);
-                emit_u32_le(output, offsets[_gtarget]);
+                emit_byte(_gout, 9);
+                emit_u32_le(_gout, offsets[_gtarget]);
             } else {
-                encode_op(output, _gop);
+                encode_op(_gout, _gop);
             };
         } else {
             if _gt == "Jz" {
                 let _gtarget = _gop.value;
                 if _gtarget < len(offsets) {
-                    emit_byte(output, 10);
-                    emit_u32_le(output, offsets[_gtarget]);
+                    emit_byte(_gout, 10);
+                    emit_u32_le(_gout, offsets[_gtarget]);
                 } else {
-                    encode_op(output, _gop);
+                    encode_op(_gout, _gop);
                 };
             } else {
-                encode_op(output, _gop);
+                encode_op(_gout, _gop);
             };
         };
         let _gi2 = _gi2 + 1;
     };
-    return output;
+    return _gout;
 }
