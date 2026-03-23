@@ -3361,7 +3361,9 @@ op_halt:
     #   [0x06]                          — Emit
     #   [0x0F]                          — Halt
 
-    mov     %r15, %r8                   # trampoline base
+    # Bump heap past input data (so trampoline doesn't overwrite input)
+    add     %rcx, %r15                  # r15 += input_len
+    mov     %r15, %r8                   # trampoline base (after input)
     # Check repl_eval exists first
     push    %rcx                        # save input len
     push    %rdi                        # save input ptr
