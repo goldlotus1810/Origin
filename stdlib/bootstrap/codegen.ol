@@ -205,6 +205,14 @@ fn encode_op(_eo_out, op) {
         emit_u32_le(_eo_out, op.value);
         return;
     };
+    if t == "Swap" { emit_byte(_eo_out, 13); return; };
+    if t == "Closure" {
+        // Closure: [0x25][param_count:1][body_len:4]
+        emit_byte(_eo_out, 37);
+        emit_byte(_eo_out, op.value);
+        emit_u32_le(_eo_out, op.name);
+        return;
+    };
 }
 
 // ── Op byte size (for jump target resolution) ─────────────────
@@ -273,7 +281,19 @@ pub fn generate(ops) {
                     encode_op(_gout, _gop);
                 };
             } else {
-                encode_op(_gout, _gop);
+                if _gt == "Closure" {
+                    // Closure: body_len is op-count in name field.
+                    // Convert to byte-count using offsets.
+                    let _gbody_ops = _gop.name;
+                    let _gbody_start = _gi2 + 1;
+                    let _gbody_end = _gbody_start + _gbody_ops;
+                    let _gbyte_len = offsets[_gbody_end] - offsets[_gbody_start];
+                    emit_byte(_gout, 37);
+                    emit_byte(_gout, _gop.value);
+                    emit_u32_le(_gout, _gbyte_len);
+                } else {
+                    encode_op(_gout, _gop);
+                };
             };
         };
         let _gi2 = _gi2 + 1;

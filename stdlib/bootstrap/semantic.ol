@@ -489,46 +489,39 @@ fn compile_stmt(state, stmt) {
             };
         },
         Stmt::FnDef { name, params, body } => {
-            // In CallClosure mode, functions are pre-compiled
-            // Skip function body in main pass
-            if state.use_call_closure == 1 {
-                // Already pre-compiled, nothing to emit
-            } else {
-                // Inline mode: skip body with Jmp, emit body
-                let jmp_pos = current_pos(state);
-                emit_op(state, make_op_num("Jmp", 0));
-                let body_start = current_pos(state);
-                // Store params
-                let saved = save_locals(state);
-                let pi = len(params) - 1;
-                while pi >= 0 {
-                    emit_op(state, make_op_name("Store", params[pi]));
-                    push_local(state, params[pi]);
-                    let pi = pi - 1;
-                };
-                // Compile body
-                let bi = 0;
-                while bi < len(body) {
-                    compile_stmt(state, body[bi]);
-                    let bi = bi + 1;
-                };
-                emit_op(state, make_op_name("Push", ""));
-                emit_op(state, make_op_simple("Ret"));
-                restore_locals(state, saved);
-                patch_jump(state, jmp_pos, current_pos(state));
-                // Update fn entry with body_pc
-                let fi = 0;
-                while fi < len(state.fns) {
-                    if state.fns[fi].name == name {
-                        let entry = state.fns[fi];
-                        set_at(state.fns, fi, FnEntry {
-                            name: name, param_count: entry.param_count,
-                            body_pc: body_start, params: entry.params,
-                        });
-                    };
-                    let fi = fi + 1;
-                };
+            // Emit Closure(param_count, body_len) + body + Store(name).
+            // Closure pushes marker and skips body. Store registers in var_table.
+            // Call(name) at call site finds closure via var_table lookup.
+            let _fn_closure_pos = current_pos(state);
+            // Closure op: value = param_count, name = body_len (patched later)
+            emit_op(state, make_op(
+                "Closure", 0, len(params)
+            ));
+            // Store params (reversed for stack order)
+            let saved = save_locals(state);
+            let pi = len(params) - 1;
+            while pi >= 0 {
+                emit_op(state, make_op_name("Store", params[pi]));
+                push_local(state, params[pi]);
+                let pi = pi - 1;
             };
+            // Compile body
+            let bi = 0;
+            while bi < len(body) {
+                compile_stmt(state, body[bi]);
+                let bi = bi + 1;
+            };
+            // Default return
+            emit_op(state, make_op_name("Push", ""));
+            emit_op(state, make_op_simple("Ret"));
+            restore_locals(state, saved);
+            // Patch Closure body_len (op count from closure+1 to here)
+            let _fn_body_len = current_pos(state) - _fn_closure_pos - 1;
+            set_at(state.ops, _fn_closure_pos, make_op(
+                "Closure", _fn_body_len, len(params)
+            ));
+            // Store closure in var_table
+            emit_op(state, make_op_name("Store", name));
         },
         Stmt::ReturnStmt { value } => {
             compile_expr(state, value);
