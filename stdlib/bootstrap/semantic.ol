@@ -489,39 +489,39 @@ fn compile_stmt(state, stmt) {
             };
         },
         Stmt::FnDef { name, params, body } => {
+            // Save name/params before body compilation (body may overwrite "name")
+            let _fn_name = name;
+            let _fn_params = params;
+            let _fn_body = body;
+            let _fn_pcnt = len(_fn_params);
             // Emit Closure(param_count, body_len) + body + Store(name).
-            // Closure pushes marker and skips body. Store registers in var_table.
-            // Call(name) at call site finds closure via var_table lookup.
             let _fn_closure_pos = current_pos(state);
-            // Closure op: value = param_count, name = body_len (patched later)
-            emit_op(state, make_op(
-                "Closure", 0, len(params)
-            ));
+            emit_op(state, make_op("Closure", 0, _fn_pcnt));
             // Store params (reversed for stack order)
-            let saved = save_locals(state);
-            let pi = len(params) - 1;
-            while pi >= 0 {
-                emit_op(state, make_op_name("Store", params[pi]));
-                push_local(state, params[pi]);
-                let pi = pi - 1;
+            let _fn_saved = save_locals(state);
+            let _fn_pi = _fn_pcnt - 1;
+            while _fn_pi >= 0 {
+                emit_op(state, make_op_name("Store", _fn_params[_fn_pi]));
+                push_local(state, _fn_params[_fn_pi]);
+                let _fn_pi = _fn_pi - 1;
             };
             // Compile body
-            let bi = 0;
-            while bi < len(body) {
-                compile_stmt(state, body[bi]);
-                let bi = bi + 1;
+            let _fn_bi = 0;
+            while _fn_bi < len(_fn_body) {
+                compile_stmt(state, _fn_body[_fn_bi]);
+                let _fn_bi = _fn_bi + 1;
             };
             // Default return
             emit_op(state, make_op_name("Push", ""));
             emit_op(state, make_op_simple("Ret"));
-            restore_locals(state, saved);
-            // Patch Closure body_len (op count from closure+1 to here)
+            restore_locals(state, _fn_saved);
+            // Patch Closure body_len
             let _fn_body_len = current_pos(state) - _fn_closure_pos - 1;
             set_at(state.ops, _fn_closure_pos, make_op(
-                "Closure", _fn_body_len, len(params)
+                "Closure", _fn_body_len, _fn_pcnt
             ));
             // Store closure in var_table
-            emit_op(state, make_op_name("Store", name));
+            emit_op(state, make_op_name("Store", _fn_name));
         },
         Stmt::ReturnStmt { value } => {
             compile_expr(state, value);
