@@ -33,9 +33,10 @@
 # Note: CLOSURE_MARKER = -2 is defined near cg_closure
 
 # Array heap layout: [count:8][elem_0_ptr:8][elem_0_len:8]...
+# When array is relocated by push: old location gets [FORWARD_MARKER:8][new_base:8]
 # Dict heap layout:  [count:8][entry: key_ptr:8 key_len:8 val_ptr:8 val_len:8]...
-# Initial array capacity: 256 elements (bytecode output arrays can be large)
 .equ ARRAY_INIT_CAP, 256
+.equ ARRAY_FORWARD_MARKER, -2      # sentinel: array relocated
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
 .equ SYS_READ,      0
@@ -1368,8 +1369,12 @@ op_call:
     mov     %rax, (%r14)
     jmp     vm_loop
 .call_len_array:
-    # Array: read count from heap
+    # Array: read count from heap (follow forward if relocated)
     mov     (%r14), %rdi               # array base ptr
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .call_len_array_direct
+    mov     8(%rdi), %rdi              # follow forward
+.call_len_array_direct:
     mov     (%rdi), %rax               # count
     cvtsi2sd %rax, %xmm0
     movsd   %xmm0, (%r14)
@@ -1949,6 +1954,11 @@ op_call:
     test    %rdi, %rdi
     jz      .array_get_empty
 
+    # Follow forward pointer if relocated
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_get_direct
+    mov     8(%rdi), %rdi              # follow forward
+.array_get_direct:
     # Read count
     mov     (%rdi), %rcx               # count
     cmp     %rcx, %rax
@@ -1988,6 +1998,11 @@ op_call:
     test    %rdi, %rdi
     jz      .array_set_done
 
+    # Follow forward pointer
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_set_direct
+    mov     8(%rdi), %rdi
+.array_set_direct:
     # Bounds check
     mov     (%rdi), %rcx               # count
     cmp     %rcx, %rax
@@ -2007,11 +2022,7 @@ op_call:
     jmp     vm_loop
 
 .call_array_push:
-    # Stack: [array, value] → append value to array IN-PLACE, push same array
-    # Arrays are pre-allocated with ARRAY_INIT_CAP slots by __array_new.
-    # Push writes to pre-allocated space. If capacity exceeded, elements
-    # are written past the capacity but this is safe with bump allocator
-    # as long as push is the last operation before the next allocation.
+    # Stack: [array, value] → append value to array, push array back
     add     %rcx, %r13
     # Pop value
     mov     (%r14), %r8                # val ptr
@@ -2024,20 +2035,73 @@ op_call:
     test    %rdi, %rdi
     jz      .array_push_create_new
 
-    # In-place push: write element at end of array.
-    # Array layout: [count:8][elem0:16][elem1:16]...
-    # Capacity was pre-reserved at allocation time.
+    # Follow forward pointer if array was relocated
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_push_check
+    mov     8(%rdi), %rdi              # follow forward pointer
+.array_push_check:
+    # Check if write address is still within safe zone (< r15)
     mov     (%rdi), %rcx               # count
-    # Element position: 8 + count*16
     mov     %rcx, %rax
     shl     $4, %rax
-    add     $8, %rax
+    add     $8, %rax                    # write offset = 8 + count*16
+    lea     16(%rdi, %rax), %rdx       # end of write = base + offset + 16
+    cmp     %r15, %rdx
+    ja      .array_push_relocate       # write would go past heap top → relocate
+
+    # Safe: write in-place
     mov     %r8, (%rdi, %rax)          # write val ptr
     mov     %r9, 8(%rdi, %rax)         # write val len
     incq    (%rdi)                      # count++
-    # Push same array back (in-place modification)
     sub     $16, %r14
     mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.array_push_relocate:
+    # Capacity zone overwritten by other allocations.
+    # Copy entire array to r15 (new location) + append new element.
+    mov     %r15, %rsi                  # new base
+    lea     1(%rcx), %rax              # new count
+    mov     %rax, (%rsi)               # write new count
+    # Copy old elements
+    test    %rcx, %rcx
+    jz      .push_reloc_append
+    push    %rcx
+    lea     8(%rdi), %r10              # src
+    lea     8(%rsi), %r11              # dst
+.push_reloc_copy:
+    mov     (%r10), %rax
+    mov     %rax, (%r11)
+    mov     8(%r10), %rax
+    mov     %rax, 8(%r11)
+    add     $16, %r10
+    add     $16, %r11
+    dec     %rcx
+    jnz     .push_reloc_copy
+    pop     %rcx
+    jmp     .push_reloc_write
+.push_reloc_append:
+    lea     8(%rsi), %r11              # dst for first element
+.push_reloc_write:
+    # Write new element
+    mov     %r8, (%r11)
+    mov     %r9, 8(%r11)
+    add     $16, %r11
+    # Bump r15 past new array + capacity
+    lea     8(%rsi), %rax
+    add     $ARRAY_INIT_CAP * 16, %rax
+    cmp     %rax, %r11
+    jae     .push_reloc_bump
+    mov     %rax, %r11
+.push_reloc_bump:
+    mov     %r11, %r15
+    # Write FORWARD POINTER at old location
+    movq    $ARRAY_FORWARD_MARKER, (%rdi)   # mark old as forwarded
+    mov     %rsi, 8(%rdi)                    # pointer to new location
+    # Push NEW array
+    sub     $16, %r14
+    mov     %rsi, (%r14)
     movq    $ARRAY_MARKER, 8(%r14)
     jmp     vm_loop
 
@@ -2063,6 +2127,11 @@ op_call:
 
     test    %rdi, %rdi
     jz      .array_pop_empty
+    # Follow forward
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_pop_direct
+    mov     8(%rdi), %rdi
+.array_pop_direct:
     mov     (%rdi), %rcx               # count
     test    %rcx, %rcx
     jz      .array_pop_empty
@@ -3021,6 +3090,11 @@ op_emit:
     # rsi = array base ptr
     test    %rsi, %rsi
     jz      .emit_array_empty
+    # Follow forward pointer
+    cmpq    $ARRAY_FORWARD_MARKER, (%rsi)
+    jne     .emit_array_start
+    mov     8(%rsi), %rsi
+.emit_array_start:
     push    %rbp                        # save rbp (callee-saved, used as elem ptr)
     push    %rsi                        # save array base
     # Print "["
