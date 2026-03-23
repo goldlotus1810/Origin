@@ -551,13 +551,27 @@ pub fn parse_stmt(p) {
         advance(p);
         let _ps_cond = parse_expr(p);
         let _ps_then = parse_block(p);
-        let _ps_else = [];
         if is_keyword_tok(peek(p), "else") {
             advance(p);
-            let _ps_else = parse_block(p);
+            // Save cond+then before parsing else (inner if-stmt overwrites _ps_*)
+            push(_pb_stack, _ps_cond);
+            push(_pb_stack, _ps_then);
+            if is_keyword_tok(peek(p), "if") {
+                // else if → parse as single-stmt else block
+                let _ps_elif = parse_stmt(p);
+                let _ps_then = pop(_pb_stack);
+                let _ps_cond = pop(_pb_stack);
+                return Stmt::IfStmt { cond: _ps_cond, then_block: _ps_then, else_block: [_ps_elif] };
+            } else {
+                let _ps_else_blk = parse_block(p);
+                let _ps_then = pop(_pb_stack);
+                let _ps_cond = pop(_pb_stack);
+                if is_symbol_tok(peek(p), ";") { advance(p); };
+                return Stmt::IfStmt { cond: _ps_cond, then_block: _ps_then, else_block: _ps_else_blk };
+            };
         };
         if is_symbol_tok(peek(p), ";") { advance(p); };
-        return Stmt::IfStmt { cond: _ps_cond, then_block: _ps_then, else_block: _ps_else };
+        return Stmt::IfStmt { cond: _ps_cond, then_block: _ps_then, else_block: [] };
     };
 
     // while cond { ... }
