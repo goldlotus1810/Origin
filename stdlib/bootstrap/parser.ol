@@ -310,6 +310,12 @@ fn parse_primary(p) {
                 let expr = parse_primary(p);
                 return Expr::UnaryNot { expr: expr };
             };
+            // Unary minus: -expr → 0 - expr
+            if ch == "-" {
+                advance(p);
+                let _ps_neg = parse_primary(p);
+                return Expr::BinOp { op: "-", lhs: Expr::NumLit { value: 0 }, rhs: _ps_neg };
+            };
             // Parenthesized expression
             if ch == "(" {
                 advance(p);
