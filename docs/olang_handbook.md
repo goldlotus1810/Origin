@@ -1,6 +1,6 @@
 # Olang Handbook — So tay Ngon ngu Olang
 
-> **Phien ban:** 0.06 | **Cap nhat:** 2026-03-21
+> **Phien ban:** 0.07 | **Cap nhat:** 2026-03-23
 >
 > Olang = ngon ngu lap trinh + suy luan + sang tao cua HomeOS.
 > Moi thu la MolecularChain. Moi phep toan la bien doi chain.
@@ -1460,7 +1460,67 @@ pub fn parse(tokens) {
 }
 ```
 
-Day la minh chung Olang du manh de viet compiler cho chinh no.
+### Semantic Analyzer (stdlib/bootstrap/semantic.ol)
+
+```olang
+// Bien AST thanh IR opcodes:
+pub fn analyze(ast) {
+    let state = new_state();
+    collect_fns(state, ast);
+    let _si = 0;
+    while _si < len(ast) {
+        compile_stmt(state, ast[_si]);
+        let _si = _si + 1;
+    };
+    emit_op(state, make_op_simple("Halt"));
+    return state;
+}
+```
+
+### Code Generator (stdlib/bootstrap/codegen.ol)
+
+```olang
+// Bien IR ops thanh bytecode nhi phan:
+pub fn generate(ops) {
+    // Pass 1: do kich thuoc thuc te cua moi op
+    // Pass 2: encode voi jump targets da resolve
+    let _gout = [];
+    // ... encode_op cho moi op ...
+    return _gout;
+}
+```
+
+### REPL Pipeline (stdlib/repl.ol)
+
+```olang
+pub fn repl_eval(input) {
+    let src = __str_trim(input);
+    let tokens = tokenize(src);       // lexer.ol
+    let ast = parse(tokens);          // parser.ol
+    let state = analyze(ast);         // semantic.ol
+    let bc = generate(state.ops);     // codegen.ol
+    return __eval_bytecode(bc);       // ASM VM nested eval
+}
+```
+
+### Native Binary — 806KB, zero dependencies
+
+Olang chay tren native binary (x86_64, no libc):
+- ASM VM: `vm/x86_64/vm_x86_64.S` (~4000 LOC assembly)
+- Bootstrap compiler: 4 file Olang tu viet chinh no
+- Full features: arithmetic, strings, variables, if-else, while, functions
+- Deep recursion: `fact(10) = 3,628,800`
+- Tree recursion: `fib(20) = 6,765`
+- VM var_table scoping: snapshot/restore per closure call
+- 27/27 REPL tests pass
+
+```
+$ echo 'fn fib(n) { if n < 2 { return n; }; return fib(n-1) + fib(n-2); }; emit fib(10)' | ./origin_new.olang
+○ HomeOS v0.05
+○ Type code or text · exit to quit
+○ > 55
+○ > bye
+```
 
 ---
 

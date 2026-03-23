@@ -40,6 +40,19 @@ KHI BỊ BLOCKED:
 Phase 0-11 | Task 12 | Phase 14.1-14.3 | Phase 15 (6/6) | Phase 16 (4/4) | V2 Migration T1-T14, T16 | INTG
 → Chi tiết: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
 
+### Native Binary + REPL — DONE (session 2026-03-22 → 2026-03-23)
+
+| ID | Status | Summary |
+|----|--------|---------|
+| ASM.1-5 | DONE ✅ | Native binary boots. ASM VM x86_64, no libc. 806KB. ELF wrap. |
+| REPL.1 | DONE ✅ | REPL loop: read → tokenize → parse → analyze → generate → eval. |
+| REPL.2 | DONE ✅ | Bootstrap compiler pipeline: lexer.ol + parser.ol + semantic.ol + codegen.ol. |
+| REPL.3 | DONE ✅ | Full language: arithmetic, strings, variables, if-else, while, functions. |
+| REPL.4 | DONE ✅ | Deep recursion: fact(10)=3628800. VM var_table scoping (snapshot/restore). |
+| REPL.5 | DONE ✅ | Tree recursion: fib(20)=6765. BinOp rhs save + parser result save. |
+| REPL.6 | DONE ✅ | 30+ ASM VM bugs fixed. 27/27 REPL tests. Clean output. |
+| REPL.7 | DONE ✅ | Namespace collision fixes (45+ fn renames). ARRAY_INIT_CAP=256. |
+
 ### Tier 1 — DONE (session 2026-03-22)
 
 | ID | Status | Summary |
