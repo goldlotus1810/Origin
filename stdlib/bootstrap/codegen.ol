@@ -230,32 +230,46 @@ fn op_size(_os_op) {
 // ── Entry point ────────────────────────────────────────────────
 
 pub fn generate(ops) {
-    // Pass 1: compute byte offset for each op index
+    // Two-pass encoding with jump resolution.
+    // Pass 1: compute byte offset for each op using op_size.
     let offsets = [];
     let _gpos = 0;
     let _gi = 0;
     while _gi < len(ops) {
         push(offsets, _gpos);
-        let _gpos = _gpos + op_size(ops[_gi]);
+        let _gsz = op_size(ops[_gi]);
+        let _gpos = _gpos + _gsz;
         let _gi = _gi + 1;
     };
     push(offsets, _gpos);
 
-    // Pass 2: encode ops, resolving Jmp/Jz targets to byte offsets
+    // Pass 2: encode, replacing Jmp/Jz targets with resolved byte offsets.
     let output = [];
     let _gi2 = 0;
     while _gi2 < len(ops) {
         let _gop = ops[_gi2];
         let _gt = _gop.tag;
-        // For Jmp/Jz: replace op-index target with byte offset
-        if _gt == "Jmp" || _gt == "Jz" {
+        if _gt == "Jmp" {
             let _gtarget = _gop.value;
             if _gtarget < len(offsets) {
-                let _gbyte = offsets[_gtarget];
-                let _gop = Op { tag: _gt, name: _gop.name, value: _gbyte };
+                emit_byte(output, 9);
+                emit_u32_le(output, offsets[_gtarget]);
+            } else {
+                encode_op(output, _gop);
+            };
+        } else {
+            if _gt == "Jz" {
+                let _gtarget = _gop.value;
+                if _gtarget < len(offsets) {
+                    emit_byte(output, 10);
+                    emit_u32_le(output, offsets[_gtarget]);
+                } else {
+                    encode_op(output, _gop);
+                };
+            } else {
+                encode_op(output, _gop);
             };
         };
-        encode_op(output, _gop);
         let _gi2 = _gi2 + 1;
     };
     return output;
