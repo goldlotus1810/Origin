@@ -213,13 +213,19 @@ fn op_size(_os_op) {
     let _os_t = _os_op.tag;
     if _os_t == "PushNum" { return 9; };
     if _os_t == "Push" {
-        let _os_b = str_bytes(_os_op.name);
-        return 3 + len(_os_b) * 2;
+        let _os_name = _os_op.name;
+        let _os_b = str_bytes(_os_name);
+        let _os_len = len(_os_b);
+        let _os_result = 3 + _os_len * 2;
+        return _os_result;
     };
     if _os_t == "Load" || _os_t == "Store" || _os_t == "LoadLocal"
         || _os_t == "StoreUpdate" || _os_t == "Call" {
-        let _os_b = str_bytes(_os_op.name);
-        return 2 + len(_os_b);
+        let _os_name2 = _os_op.name;
+        let _os_b2 = str_bytes(_os_name2);
+        let _os_len2 = len(_os_b2);
+        let _os_result2 = 2 + _os_len2;
+        return _os_result2;
     };
     if _os_t == "Jmp" || _os_t == "Jz" || _os_t == "Loop" || _os_t == "TryBegin" { return 5; };
     if _os_t == "PushMol" { return 3; };
@@ -229,21 +235,26 @@ fn op_size(_os_op) {
 
 // ── Entry point ────────────────────────────────────────────────
 
+// Temp array for measuring encoded sizes
+let _gtmp = [];
+
 pub fn generate(ops) {
-    // Two-pass encoding with jump resolution.
-    // Pass 1: compute byte offset for each op using op_size.
+    // Pass 1: encode each op to temp, measure actual byte size.
     let offsets = [];
     let _gpos = 0;
     let _gi = 0;
     while _gi < len(ops) {
         push(offsets, _gpos);
-        let _gsz = op_size(ops[_gi]);
-        let _gpos = _gpos + _gsz;
+        // Encode to temp, measure size
+        let _gbefore = len(_gtmp);
+        encode_op(_gtmp, ops[_gi]);
+        let _gafter = len(_gtmp);
+        let _gpos = _gpos + _gafter - _gbefore;
         let _gi = _gi + 1;
     };
     push(offsets, _gpos);
 
-    // Pass 2: encode, replacing Jmp/Jz targets with resolved byte offsets.
+    // Pass 2: encode for real, resolving Jmp/Jz targets.
     let output = [];
     let _gi2 = 0;
     while _gi2 < len(ops) {
