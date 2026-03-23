@@ -657,15 +657,18 @@ fn compile_stmt(state, stmt) {
         },
         Stmt::FieldAssign { object, field, value } => {
             // obj.field = value → load obj, set field, store back
-            if is_local(state, object) {
-                emit_op(state, make_op_name("LoadLocal", object));
+            let _fa_obj = object;
+            if is_local(state, _fa_obj) {
+                emit_op(state, make_op_name("LoadLocal", _fa_obj));
             } else {
-                emit_op(state, make_op_name("Load", object));
+                emit_op(state, make_op_name("Load", _fa_obj));
             };
             emit_op(state, make_op_name("Push", field));
+            push(_ce_stack, _fa_obj);
             compile_expr(state, value);
+            let _fa_obj = pop(_ce_stack);
             emit_op(state, make_op_name("Call", "__dict_set"));
-            emit_op(state, make_op_name("StoreUpdate", object));
+            emit_op(state, make_op_name("Store", _fa_obj));
         },
         Stmt::MatchStmt { subject, arms } => {
             // Match as statement: compile subject match expression, discard result
