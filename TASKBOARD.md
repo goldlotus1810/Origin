@@ -131,4 +131,5 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-23  OL.6 for-in loops + range(). OL.7 smart string concat. PR #311 #312.
 2026-03-23  OL.7c else-if. OL.7d pretty-print arrays. OL.7e var assign fix. OL.7f audit. PR #317-321.
 2026-03-23  Nested if-else fixed (parser var save). Variable accumulation in loops fixed.
+2026-03-23  break/continue for loops. Unary minus. FieldAssign audit. PR #323-324.
 ```
