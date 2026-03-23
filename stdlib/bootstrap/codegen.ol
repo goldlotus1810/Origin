@@ -264,6 +264,60 @@ fn encode_flat(_eo_out, _ef_tag, _ef_name, _ef_val) {
     if _ef_tag == "Closure" { emit_byte(_eo_out, 37); emit_byte(_eo_out, _ef_val); emit_u32_le(_eo_out, _ef_name); return; };
 }
 
+pub fn generate_counted(tags, names, values, count) {
+    // Pass 1: measure actual encoded size
+    let offsets = [];
+    let _gpos = 0;
+    let _gi = 0;
+    while _gi < count {
+        push(offsets, _gpos);
+        let _gt1 = [];
+        encode_flat(_gt1, tags[_gi], names[_gi], values[_gi]);
+        let _gpos = _gpos + len(_gt1);
+        let _gi = _gi + 1;
+    };
+    push(offsets, _gpos);
+    // Pass 2: encode with resolved jump targets
+    let _gout = [];
+    let _gi2 = 0;
+    while _gi2 < count {
+        let _gt = tags[_gi2];
+        if _gt == "Jmp" {
+            let _gtarget = values[_gi2];
+            if _gtarget < len(offsets) {
+                emit_byte(_gout, 9);
+                emit_u32_le(_gout, offsets[_gtarget]);
+            } else {
+                encode_flat(_gout, _gt, names[_gi2], values[_gi2]);
+            };
+        } else {
+            if _gt == "Jz" {
+                let _gtarget = values[_gi2];
+                if _gtarget < len(offsets) {
+                    emit_byte(_gout, 10);
+                    emit_u32_le(_gout, offsets[_gtarget]);
+                } else {
+                    encode_flat(_gout, _gt, names[_gi2], values[_gi2]);
+                };
+            } else {
+                if _gt == "Closure" {
+                    let _gbody_ops = names[_gi2];
+                    let _gbody_start = _gi2 + 1;
+                    let _gbody_end = _gbody_start + _gbody_ops;
+                    let _gbyte_len = offsets[_gbody_end] - offsets[_gbody_start];
+                    emit_byte(_gout, 37);
+                    emit_byte(_gout, values[_gi2]);
+                    emit_u32_le(_gout, _gbyte_len);
+                } else {
+                    encode_flat(_gout, _gt, names[_gi2], values[_gi2]);
+                };
+            };
+        };
+        let _gi2 = _gi2 + 1;
+    };
+    return _gout;
+}
+
 pub fn generate_parallel(tags, names, values) {
     // Pass 1: measure actual encoded size
     let offsets = [];
