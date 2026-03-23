@@ -23,20 +23,20 @@ type Op {
     value: Num,     // numeric value (for PushNum, Jmp target, PushMol packed u16, etc.)
 }
 
-fn make_op(tag, name, value) {
-    return Op { tag: tag, name: name, value: value };
+fn make_op(_tag, _name, _value) {
+    return Op { tag: _tag, name: _name, value: _value };
 }
 
-fn make_op_num(tag, value) {
-    return make_op(tag, "", value);
+fn make_op_num(_tag, _value) {
+    return make_op(_tag, "", _value);
 }
 
-fn make_op_name(tag, name) {
-    return make_op(tag, name, 0);
+fn make_op_name(_tag, _name) {
+    return make_op(_tag, _name, 0);
 }
 
-fn make_op_simple(tag) {
-    return make_op(tag, "", 0);
+fn make_op_simple(_tag) {
+    return make_op(_tag, "", 0);
 }
 
 // ── Scope tracking ──────────────────────────────────────────────
@@ -81,8 +81,8 @@ fn new_state() {
     };
 }
 
-fn emit_op(state, op) {
-    push(state.ops, op);
+fn emit_op(state, _op) {
+    push(state.ops, _op);
 }
 
 fn current_pos(state) {
@@ -648,10 +648,10 @@ pub fn analyze(ast) {
     };
 
     // Pass 2: Compile all statements
-    let i = 0;
-    while i < len(ast) {
-        compile_stmt(state, ast[i]);
-        let i = i + 1;
+    let _si = 0;
+    while _si < len(ast) {
+        compile_stmt(state, ast[_si]);
+        let _si = _si + 1;
     };
 
     // End program

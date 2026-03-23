@@ -842,6 +842,11 @@ op_call:
     cmp     %rdx, %rax
     je      .call_div
 
+    # ── f64_to_le_bytes ──
+    movabs  $0x7DC336EFBBA1F85B, %rdx   # __f64_to_le_bytes
+    cmp     %rdx, %rax
+    je      .call_f64_to_le_bytes
+
     # ── Modulo ──
     movabs  $0x7822B690CBA39C03, %rdx   # __hyp_mod
     cmp     %rdx, %rax
@@ -1079,6 +1084,36 @@ op_call:
     subsd   %xmm0, %xmm2              # a - floor(a/b)*b
     movsd   %xmm2, (%r14)
     movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# f64_to_le_bytes: pop f64, push array of 8 f64 byte values
+.call_f64_to_le_bytes:
+    add     %rcx, %r13
+    # Pop f64 value
+    mov     (%r14), %rax               # raw f64 bits
+    add     $16, %r14                  # pop
+    # Create array of 8 elements on heap
+    mov     %r15, %rdi                 # array base
+    movq    $8, (%r15)                 # count = 8
+    add     $8, %r15                    # past count header
+    # Extract each byte and store as f64
+    mov     $8, %ecx
+.f64_bytes_loop:
+    movzbl  %al, %edx                  # low byte
+    shr     $8, %rax                    # shift right 8 bits
+    # Store byte value as f64
+    push    %rax
+    cvtsi2sd %edx, %xmm0
+    movsd   %xmm0, (%r15)             # f64 ptr slot
+    movq    $F64_MARKER, 8(%r15)       # len slot
+    add     $16, %r15
+    pop     %rax
+    dec     %ecx
+    jnz     .f64_bytes_loop
+    # Push array
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ── Comparison builtins ──────────────────────────────────────────────────
@@ -1428,8 +1463,11 @@ op_call:
 .call_to_number:
     add     %rcx, %r13
     # Pop string, parse as decimal number
+    # Strings are u16 molecules: each mol = [low_byte, 0x21] in LE.
+    # Character value is in the LOW byte of each u16.
+    # rcx = mol_count (number of characters)
     mov     (%r14), %rsi               # string ptr
-    mov     8(%r14), %rcx              # string len
+    mov     8(%r14), %rcx              # mol_count (= char count)
     add     $16, %r14                  # pop
 
     # Simple decimal parser: sign + digits + optional '.' + digits
@@ -1437,16 +1475,17 @@ op_call:
     xorpd   %xmm0, %xmm0              # result = 0.0
     test    %rcx, %rcx
     jz      .to_num_done
-    # Check minus sign
-    cmpb    $'-', (%rsi)
+    # Check minus sign (read low byte of first u16 molecule)
+    movzbl  (%rsi), %edx
+    cmp     $'-', %edx
     jne     .to_num_loop
     mov     $1, %eax                    # negative
-    inc     %rsi
+    add     $2, %rsi                    # skip 1 molecule (2 bytes)
     dec     %rcx
 .to_num_loop:
     test    %rcx, %rcx
     jz      .to_num_sign
-    movzbl  (%rsi), %edx
+    movzbl  (%rsi), %edx               # read low byte of u16 molecule
     cmp     $'.', %edx
     je      .to_num_frac
     sub     $'0', %edx
@@ -1457,17 +1496,17 @@ op_call:
     mulsd   %xmm1, %xmm0
     cvtsi2sd %edx, %xmm1
     addsd   %xmm1, %xmm0
-    inc     %rsi
+    add     $2, %rsi                    # next u16 molecule
     dec     %rcx
     jmp     .to_num_loop
 .to_num_frac:
-    inc     %rsi
+    add     $2, %rsi                    # skip '.' molecule
     dec     %rcx
     movsd   const_one(%rip), %xmm2      # divisor = 1.0
 .to_num_frac_loop:
     test    %rcx, %rcx
     jz      .to_num_sign
-    movzbl  (%rsi), %edx
+    movzbl  (%rsi), %edx               # low byte of u16 molecule
     sub     $'0', %edx
     cmp     $10, %edx
     jae     .to_num_sign
@@ -1476,7 +1515,7 @@ op_call:
     cvtsi2sd %edx, %xmm1               # digit
     divsd   %xmm2, %xmm1               # digit / divisor
     addsd   %xmm1, %xmm0               # result += digit/divisor
-    inc     %rsi
+    add     $2, %rsi                    # next u16 molecule
     dec     %rcx
     jmp     .to_num_frac_loop
 .to_num_sign:
@@ -1573,12 +1612,13 @@ op_call:
     mov     %rcx, (%r15)               # count = string length
     add     $8, %r15                    # past count header
 
-    # Each byte → f64 on heap
-    xor     %edx, %edx
+    # Each u16 molecule → extract low byte → f64 on heap
+    # Molecules are 2 bytes each (u16 LE): low byte = char value
+    xor     %edx, %edx                 # molecule index
 .str_bytes_loop:
     cmp     %rcx, %rdx
     jae     .str_bytes_done
-    movzbl  (%rsi, %rdx), %eax
+    movzbl  (%rsi, %rdx, 2), %eax     # read low byte of u16 (stride 2)
     cvtsi2sd %eax, %xmm0
     movsd   %xmm0, (%r15)              # ptr slot = f64 bits
     movq    $F64_MARKER, 8(%r15)       # len slot = F64_MARKER

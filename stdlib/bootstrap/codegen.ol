@@ -73,10 +73,10 @@ fn emit_u32_le(output, n) {
 fn emit_f64_le(output, n) {
     // Use VM builtin to get IEEE 754 LE bytes
     let bytes = f64_to_le_bytes(n);
-    let i = 0;
-    while i < 8 {
-        push(output, bytes[i]);
-        let i = i + 1;
+    let fi = 0;
+    while fi < 8 {
+        push(output, bytes[fi]);
+        let fi = fi + 1;
     };
 }
 
@@ -84,11 +84,11 @@ fn emit_str(output, s) {
     // Encode string as [len:1][utf8_bytes:N]
     let bytes = str_bytes(s);
     let slen = len(bytes);
-    push(output, slen % 256);
-    let i = 0;
-    while i < slen {
-        push(output, bytes[i]);
-        let i = i + 1;
+    push(output, slen);
+    let si = 0;
+    while si < slen {
+        push(output, bytes[si]);
+        let si = si + 1;
     };
 }
 
@@ -97,10 +97,10 @@ fn emit_str_u16(output, s) {
     let bytes = str_bytes(s);
     let slen = len(bytes);
     emit_u16_le(output, slen);
-    let i = 0;
-    while i < slen {
-        push(output, bytes[i]);
-        let i = i + 1;
+    let su = 0;
+    while su < slen {
+        push(output, bytes[su]);
+        let su = su + 1;
     };
 }
 
@@ -149,66 +149,59 @@ fn tag_for(op_tag) {
 // ── Main encoder ───────────────────────────────────────────────
 
 fn encode_op(output, op) {
-    let tag = tag_for(op.tag);
-    if tag == 0 {
-        // Unknown op — skip
+    let t = op.tag;
+    if t == "PushNum" {
+        emit_byte(output, 21);
+        emit_f64_le(output, op.value);
         return;
     };
-
-    emit_byte(output, tag);
-
-    // Encode payload based on opcode type
-    if op.tag == "Push" {
-        // Push: [chain_len:2][chain_bytes:N]
+    if t == "Emit" { emit_byte(output, 6); return; };
+    if t == "Halt" { emit_byte(output, 15); return; };
+    if t == "Ret" { emit_byte(output, 8); return; };
+    if t == "Pop" { emit_byte(output, 12); return; };
+    if t == "Dup" { emit_byte(output, 11); return; };
+    if t == "ScopeBegin" { emit_byte(output, 23); return; };
+    if t == "ScopeEnd" { emit_byte(output, 24); return; };
+    if t == "Push" {
+        emit_byte(output, 1);
         emit_str_u16(output, op.name);
+        return;
     };
-    if op.tag == "Load" || op.tag == "Store" || op.tag == "LoadLocal"
-        || op.tag == "StoreUpdate" {
-        // Name opcodes: [name_len:1][name:N]
+    if t == "Load" {
+        emit_byte(output, 2);
         emit_str(output, op.name);
+        return;
     };
-    if op.tag == "Call" {
-        // Call: [name_len:1][name:N]
+    if t == "Store" {
+        emit_byte(output, 19);
         emit_str(output, op.name);
+        return;
     };
-    if op.tag == "CallClosure" {
-        // CallClosure: [name_len:1][name:N][arity:1]
+    if t == "LoadLocal" {
+        emit_byte(output, 20);
         emit_str(output, op.name);
-        emit_byte(output, op.value);
+        return;
     };
-    if op.tag == "PushNum" {
-        // PushNum: [f64:8]
-        emit_f64_le(output, op.value);
+    if t == "StoreUpdate" {
+        emit_byte(output, 28);
+        emit_str(output, op.name);
+        return;
     };
-    if op.tag == "Jmp" || op.tag == "Jz" {
-        // Jump: [target:4]
+    if t == "Call" {
+        emit_byte(output, 7);
+        emit_str(output, op.name);
+        return;
+    };
+    if t == "Jmp" {
+        emit_byte(output, 9);
         emit_u32_le(output, op.value);
+        return;
     };
-    if op.tag == "Loop" {
-        // Loop: [count:4]
+    if t == "Jz" {
+        emit_byte(output, 10);
         emit_u32_le(output, op.value);
+        return;
     };
-    if op.tag == "TryBegin" {
-        // TryBegin: [catch_pc:4]
-        emit_u32_le(output, op.value);
-    };
-    if op.tag == "PushMol" {
-        // PushMol(u16): bytecode = 3B [0x19][lo][hi]
-        // value = packed u16 [S:4][R:4][V:3][A:3][T:2]
-        emit_u16_le(output, op.value);
-    };
-    if op.tag == "Edge" || op.tag == "Query" {
-        // Edge/Query: [rel:1]
-        emit_byte(output, op.value);
-    };
-    if op.tag == "Ffi" {
-        // Ffi: [name_len:1][name:N][arity:1]
-        emit_str(output, op.name);
-        emit_byte(output, op.value);
-    };
-    // No payload for: Lca, Emit, Ret, Dup, Pop, Swap, Halt, Dream,
-    // Stats, Nop, Fuse, ScopeBegin, ScopeEnd, CatchEnd, Trace,
-    // Inspect, Assert, TypeOf, Why, Explain
 }
 
 // ── Entry point ────────────────────────────────────────────────
