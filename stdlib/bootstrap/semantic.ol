@@ -730,8 +730,23 @@ fn compile_stmt(state, stmt) {
             let _continue_patches = [];
             let _wl_body = body;
             let _wl_start = current_pos(state);
+            // Re-parse condition from tokens (avoids dict corruption)
+            // WhileStmt has cond_start, cond_end, tokens fields
+            let _wl_cond_start = stmt.cond_start;
+            let _wl_cond_end = stmt.cond_end;
+            let _wl_tokens = stmt.tokens;
             push(_ce_stack, _wl_body);
-            compile_expr(state, cond);
+            push(_ce_stack, _wl_cond_start);
+            push(_ce_stack, _wl_cond_end);
+            push(_ce_stack, _wl_tokens);
+            // Fresh parse of condition from saved tokens
+            let _wl_p = new_parser(_wl_tokens);
+            _wl_p.pos = _wl_cond_start;
+            let _wl_fresh_cond = parse_expr(_wl_p);
+            compile_expr(state, _wl_fresh_cond);
+            let _wl_tokens = pop(_ce_stack);
+            let _wl_cond_end = pop(_ce_stack);
+            let _wl_cond_start = pop(_ce_stack);
             let _wl_body = pop(_ce_stack);
             let _wl_jz = current_pos(state);
             emit_op(state, make_op_num("Jz", 0));
