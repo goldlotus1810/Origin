@@ -306,19 +306,7 @@ fn compile_expr(state, expr) {
                 Expr::Ident { name } => { let _ce_fname = name; },
                 _ => {},
             };
-            // Compile args (saves emitted before args for user fns)
-            let _ce_fn_entry = lookup_fn(state, _ce_fname);
-            // Save caller's param values BEFORE args (for closure scoping)
-            if _ce_fn_entry != false {
-                let _ce_si = 0;
-                while _ce_si < _ce_fn_entry.param_count {
-                    let _ce_sn = _ce_fn_entry.params[_ce_si];
-                    if is_local(state, _ce_sn) {
-                        emit_op(state, make_op_name("LoadLocal", _ce_sn));
-                    };
-                    let _ce_si = _ce_si + 1;
-                };
-            };
+            // Compile args
             let ai = 0;
             while ai < len(args) {
                 compile_expr(state, args[ai]);
@@ -346,26 +334,8 @@ fn compile_expr(state, expr) {
                                     if _ce_fname == "set_at" {
                                         emit_op(state, make_op_name("Call", "__array_set"));
                                     } else {
-                                        if _ce_fn_entry != false {
-                                            // Saves already emitted before args
-                                            emit_op(state, make_op_name("Call", _ce_fname));
-                                            // Restore: ret_val on top, saved params below
-                                            if _ce_fn_entry.param_count > 0 {
-                                                emit_op(state, make_op_name("Store", "__ret_tmp"));
-                                                let _ce_ri = _ce_fn_entry.param_count - 1;
-                                                while _ce_ri >= 0 {
-                                                    let _ce_rn = _ce_fn_entry.params[_ce_ri];
-                                                    if is_local(state, _ce_rn) {
-                                                        emit_op(state, make_op_name("Store", _ce_rn));
-                                                    };
-                                                    let _ce_ri = _ce_ri - 1;
-                                                };
-                                                emit_op(state, make_op_name("LoadLocal", "__ret_tmp"));
-                                            };
-                                        } else {
-                                            // Unknown — emit Call for runtime
-                                            emit_op(state, make_op_name("Call", _ce_fname));
-                                        };
+                                        // User-defined or unknown function
+                                        emit_op(state, make_op_name("Call", _ce_fname));
                                     };
                                 };
                             };
