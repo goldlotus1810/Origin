@@ -3416,18 +3416,34 @@ err_read_bc:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_halt:
-    # Check if this is a nested halt (from __eval_bytecode)
-    # Use unique sentinel 0xDEAD_BEEF_CAFE_0001 to avoid collision with
-    # argc (1) or other stack values.
+    # Check if this is a nested halt (from __eval_bytecode or REPL trampoline)
+    # Sentinels: 0xDEAD_BEEF_CAFE_0001 = eval_bytecode, 0002 = REPL trampoline
     .equ NESTED_SENTINEL, 0xDEADBEEFCAFE0001
+    .equ REPL_SENTINEL,   0xDEADBEEFCAFE0002
     mov     (%rsp), %rax               # PEEK (not pop)
+
     movabs  $NESTED_SENTINEL, %rdx
     cmp     %rdx, %rax
-    jne     .halt_boot                  # not nested → boot completion
+    je      .halt_nested                # eval_bytecode → restore + vm_loop
 
-    # Nested: pop the flag + saved context
-    add     $8, %rsp                    # skip nested flag
+    movabs  $REPL_SENTINEL, %rdx
+    cmp     %rdx, %rax
+    je      .halt_repl                  # REPL trampoline → restore + repl_loop
+
+    jmp     .halt_boot                  # not nested → boot completion
+
+.halt_nested:
+    # __eval_bytecode: pop sentinel + saved context, continue caller bytecode
+    add     $8, %rsp                    # skip sentinel
     jmp     .halt_nested_restore
+
+.halt_repl:
+    # REPL trampoline: pop sentinel + saved context, return to REPL loop
+    add     $8, %rsp                    # skip sentinel
+    pop     %rbx                        # restore bytecode size
+    pop     %r13                        # restore PC
+    pop     %r12                        # restore bytecode base
+    jmp     .repl_loop                  # back to REPL prompt
 
 .halt_boot:
     # Not nested — this is the boot completion.
@@ -3580,8 +3596,8 @@ op_halt:
     push    %r12                        # save boot bytecode base
     push    %r13                        # save boot PC
     push    %rbx                        # save boot bytecode size
-    movabs  $0xDEADBEEFCAFE0001, %rax
-    push    %rax                        # nested flag sentinel
+    movabs  $0xDEADBEEFCAFE0002, %rax
+    push    %rax                        # REPL sentinel (0002 = return to repl_loop)
 
     # Use boot bytecode base as r12 (not trampoline)
     # Trampoline is at %r8 — save it, set r12 = boot base
@@ -3592,8 +3608,8 @@ op_halt:
     # Ret pops saved PCs that are >> trampoline size)
     mov     $0x100000, %rbx             # 1MB — larger than any bytecode
     jmp     vm_loop                     # execute trampoline!
-    # Flow: Push input → CallClosure repl_eval → (run compiler) → Emit → Halt
-    # Halt (nested) → .halt_nested → restore → vm_loop → op_halt → REPL loop
+    # Flow: Push input → CallClosure repl_eval → Halt(REPL sentinel)
+    #       → restore → jmp .repl_loop
 
 .repl_fallback_echo:
     # repl_eval not found — echo input back
@@ -3604,7 +3620,6 @@ op_halt:
     syscall
     jmp     .repl_loop
 
-.halt_nested:
 .halt_nested_restore:
     # Returning from nested __eval_bytecode execution
     # CPU stack now has: [saved_rbx][saved_r13][saved_r12]
