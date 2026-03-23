@@ -437,12 +437,22 @@ fn compile_expr(state, expr) {
                 Expr::Ident { name } => { let _ce_fname = name; },
                 _ => {},
             };
+            // Save fname+args before compiling (inner Call overwrites them!)
+            let _ce_saved_fname = _ce_fname;
+            let _ce_saved_args = args;
             // Compile args
-            let ai = 0;
-            while ai < len(args) {
-                compile_expr(state, args[ai]);
-                let ai = ai + 1;
+            let _ce_ai = 0;
+            while _ce_ai < len(_ce_saved_args) {
+                push(_ce_stack, _ce_saved_fname);
+                push(_ce_stack, _ce_saved_args);
+                push(_ce_stack, _ce_ai);
+                compile_expr(state, _ce_saved_args[_ce_ai]);
+                let _ce_ai = pop(_ce_stack);
+                let _ce_saved_args = pop(_ce_stack);
+                let _ce_saved_fname = pop(_ce_stack);
+                let _ce_ai = _ce_ai + 1;
             };
+            let _ce_fname = _ce_saved_fname;
             // Dispatch: builtin, user-defined, or unknown
             if _ce_fname == "len" {
                 emit_op(state, make_op_name("Call", "__array_len"));
