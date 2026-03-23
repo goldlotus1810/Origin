@@ -60,7 +60,10 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | OL.6 | For-in loops + range() | ~120 LOC | DONE ✅ | `for x in items { }`, `for i in range(n) { }`. PR #311. |
 | OL.7 | Smart string concat | ~100 LOC | DONE ✅ | `"Age: " + 25` → auto-convert. `__to_string` builtin. PR #312. |
 | OL.7b | String interpolation `"hello {name}"` | ~200 LOC | FREE | Blocked: lexer self-compile conflict with `{` in source. Needs f-string prefix. |
-| OL.7c | Else-if chains | ~20 LOC | FREE | `else if` syntax. Blocked: jump offset bug in nested IfStmt. |
+| OL.7c | Else-if chains | ~20 LOC | DONE ✅ | `else if` syntax. Parser var save/restore. PR #317. |
+| OL.7d | Pretty-print arrays | ~80 LOC | DONE ✅ | `emit [1,2,3]` instead of `[array 3]`. PR #318. |
+| OL.7e | Variable assignment fix | ~5 LOC | DONE ✅ | `let b = b + a` now works. LetStmt name save. PR #320. |
+| OL.7f | FieldAssign fix + audit | ~10 LOC | DONE ✅ | Full 18-site match binding audit. PR #321. |
 | OL.8 | Import/module system | ~300 LOC | FREE | `use module.func` — resolve at compile time. |
 | OL.9 | Error handling | ~200 LOC | FREE | `try { ... } catch { ... }` — parser + VM. |
 | OL.10 | Array/Dict comprehension | ~150 LOC | FREE | `[x * 2 for x in items]` — sugar. |
@@ -126,4 +129,6 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-23  SELF-HOSTING. fib(20)=6765. 30+ bugs fixed. 27/27 tests.
 2026-03-23  Rust archived. Olang era begins.
 2026-03-23  OL.6 for-in loops + range(). OL.7 smart string concat. PR #311 #312.
+2026-03-23  OL.7c else-if. OL.7d pretty-print arrays. OL.7e var assign fix. OL.7f audit. PR #317-321.
+2026-03-23  Nested if-else fixed (parser var save). Variable accumulation in loops fixed.
 ```
