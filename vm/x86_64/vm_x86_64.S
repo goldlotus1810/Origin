@@ -3310,8 +3310,8 @@ var_table_init:
     mov     %rax, (%rcx)
     lea     closure_depth(%rip), %rcx
     movq    $0, (%rcx)
-    # Reserve 64KB for shadow stack (enough for deep recursion)
-    add     $65536, %r15
+    # Reserve 4MB for shadow stack (deep recursion snapshots)
+    add     $0x400000, %r15
     ret
 
 # ── Hash-based variable table ──
