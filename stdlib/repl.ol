@@ -23,33 +23,20 @@ pub fn repl_eval(input) {
 
   // Phase 1: Tokenize
   let tokens = tokenize(src);
-  emit "[T]";
-  emit len(tokens);
   if len(tokens) == 0 { return ""; }
 
   // Phase 2: Parse
   let ast = parse(tokens);
-  emit "[P]";
-  emit len(ast);
 
   // Phase 3: Semantic analysis
-  let tv = sem_test();
-  emit "[ST]";
-  emit tv;
   let state = analyze(ast);
-  emit "[A]";
-  emit len(state.ops);
 
   // Phase 4: Code generation
   let bc = generate(state.ops);
-  emit "[G]";
-  emit len(bc);
   if len(bc) == 0 { return ""; }
 
   // Phase 5: Execute compiled bytecode
-  let result = __eval_bytecode(bc);
-  emit "[E]";
-  return result;
+  return __eval_bytecode(bc);
 }
 
 // ════════════════════════════════════════════════════════
