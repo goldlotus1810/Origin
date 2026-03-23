@@ -207,14 +207,56 @@ fn encode_op(output, op) {
     };
 }
 
+// ── Op byte size (for jump target resolution) ─────────────────
+
+fn op_size(_os_op) {
+    let _os_t = _os_op.tag;
+    if _os_t == "PushNum" { return 9; };
+    if _os_t == "Push" {
+        let _os_b = str_bytes(_os_op.name);
+        return 3 + len(_os_b) * 2;
+    };
+    if _os_t == "Load" || _os_t == "Store" || _os_t == "LoadLocal"
+        || _os_t == "StoreUpdate" || _os_t == "Call" {
+        let _os_b = str_bytes(_os_op.name);
+        return 2 + len(_os_b);
+    };
+    if _os_t == "Jmp" || _os_t == "Jz" || _os_t == "Loop" || _os_t == "TryBegin" { return 5; };
+    if _os_t == "PushMol" { return 3; };
+    if _os_t == "Edge" || _os_t == "Query" { return 2; };
+    return 1;
+}
+
 // ── Entry point ────────────────────────────────────────────────
 
 pub fn generate(ops) {
+    // Pass 1: compute byte offset for each op index
+    let offsets = [];
+    let _gpos = 0;
+    let _gi = 0;
+    while _gi < len(ops) {
+        push(offsets, _gpos);
+        let _gpos = _gpos + op_size(ops[_gi]);
+        let _gi = _gi + 1;
+    };
+    push(offsets, _gpos);
+
+    // Pass 2: encode ops, resolving Jmp/Jz targets to byte offsets
     let output = [];
-    let i = 0;
-    while i < len(ops) {
-        encode_op(output, ops[i]);
-        let i = i + 1;
+    let _gi2 = 0;
+    while _gi2 < len(ops) {
+        let _gop = ops[_gi2];
+        let _gt = _gop.tag;
+        // For Jmp/Jz: replace op-index target with byte offset
+        if _gt == "Jmp" || _gt == "Jz" {
+            let _gtarget = _gop.value;
+            if _gtarget < len(offsets) {
+                let _gbyte = offsets[_gtarget];
+                let _gop = Op { tag: _gt, name: _gop.name, value: _gbyte };
+            };
+        };
+        encode_op(output, _gop);
+        let _gi2 = _gi2 + 1;
     };
     return output;
 }
