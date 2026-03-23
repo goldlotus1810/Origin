@@ -1903,12 +1903,14 @@ op_call:
     # Pop key
     mov     16(%r14), %rsi             # key ptr
     mov     24(%r14), %rdx             # key len
-    # Pop dict
+    # Pop dict — save dict base in rbp (callee-saved, preserved across cmpsb)
     mov     32(%r14), %rdi             # dict base
+    push    %rbp
+    mov     %rdi, %rbp                 # save dict base in rbp
     add     $48, %r14                  # pop 3
 
     test    %rdi, %rdi
-    jz      .dict_set_push
+    jz      .dict_set_push_rbp
 
     # Search for existing key
     mov     (%rdi), %rcx
@@ -1941,27 +1943,26 @@ op_call:
     jmp     .dict_set_search
 
 .dict_set_update:
-    # Found — update value
+    # Found — update value in-place
     mov     %r9, 16(%r8)
     mov     %r10, 24(%r8)
-    # Reload dict base (rdi may have been clobbered by cmpsb)
-    mov     32(%r14), %rdi             # Actually we already popped...
-    # rdi was saved before loop, let's restore from dict base
-    jmp     .dict_set_push
+    mov     %rbp, %rdi                 # restore dict base from rbp
+    jmp     .dict_set_push_rbp
 
 .dict_set_append:
-    # Append new entry at end of dict
+    # Append new entry at end of dict (at r15, bump heap)
+    mov     %rbp, %rdi                 # restore dict base from rbp
     mov     (%rdi), %rcx               # current count
-    # New entry position: 8 + count*32
-    mov     %rcx, %rax
-    shl     $5, %rax
-    add     $8, %rax
-    mov     %rsi, (%rdi, %rax)         # key ptr
-    mov     %rdx, 8(%rdi, %rax)        # key len
-    mov     %r9, 16(%rdi, %rax)        # val ptr
-    mov     %r10, 24(%rdi, %rax)       # val len
+    # Write new entry at r15 (heap top) — adjacent to dict
+    mov     %rsi, (%r15)               # key ptr
+    mov     %rdx, 8(%r15)              # key len
+    mov     %r9, 16(%r15)              # val ptr
+    mov     %r10, 24(%r15)             # val len
+    add     $32, %r15                   # bump heap
     incq    (%rdi)                      # count++
 
+.dict_set_push_rbp:
+    pop     %rbp                        # restore rbp
 .dict_set_push:
     sub     $16, %r14
     mov     %rdi, (%r14)
