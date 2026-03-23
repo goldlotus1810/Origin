@@ -905,6 +905,9 @@ op_call:
     movabs  $0x3EA9B2DCA6EB46A2, %rdx   # __to_number
     cmp     %rdx, %rax
     je      .call_to_number
+    movabs  $0x3F9867C32BC1B166, %rdx   # __to_string
+    cmp     %rdx, %rax
+    je      .call_to_string
     movabs  $0xE811320261AE416D, %rdx   # __type_of
     cmp     %rdx, %rax
     je      .call_type_of
@@ -1071,11 +1074,129 @@ op_call:
 
 .call_add:
     add     %rcx, %r13
+    # Check if either operand is a string (not f64/array/dict/closure marker)
+    mov     8(%r14), %rdx              # b len/marker
+    mov     24(%r14), %rax             # a len/marker
+    # If both are f64, do numeric add
+    cmp     $F64_MARKER, %rdx
+    jne     .call_add_concat
+    cmp     $F64_MARKER, %rax
+    jne     .call_add_concat
+    # Both f64 — numeric add
     movsd   (%r14), %xmm1              # b
     movsd   16(%r14), %xmm0            # a
     add     $16, %r14
     addsd   %xmm1, %xmm0
     movsd   %xmm0, (%r14)
+    jmp     vm_loop
+.call_add_concat:
+    # At least one operand is a string — convert both to string and concat
+    # First, ensure both are strings: convert f64 if needed
+    # Check b (top of stack)
+    cmp     $F64_MARKER, %rdx
+    jne     .add_check_a
+    # b is f64 — convert to string in place
+    movq    (%r14), %xmm0
+    push    %rax
+    call    f64_to_ascii               # → eax = len, output at r15
+    mov     %r15, %rdi                 # ASCII source
+    add     %rax, %r15
+    mov     %r15, %rsi                 # u16 dest
+    mov     %eax, %ecx
+    push    %rcx
+    # Encode ASCII → u16 molecules
+.add_b_encode:
+    test    %ecx, %ecx
+    jz      .add_b_encode_done
+    movzbl  (%rdi), %edx
+    or      $0x2100, %edx
+    movw    %dx, (%rsi)
+    inc     %rdi
+    add     $2, %rsi
+    dec     %ecx
+    jmp     .add_b_encode
+.add_b_encode_done:
+    pop     %rcx
+    mov     %r15, (%r14)               # replace b ptr
+    mov     %rcx, 8(%r14)              # replace b len
+    mov     %rsi, %r15                 # bump heap
+    pop     %rax
+.add_check_a:
+    # Check a (second on stack)
+    cmp     $F64_MARKER, %rax
+    jne     .add_do_concat
+    # a is f64 — convert to string in place
+    movq    16(%r14), %xmm0
+    call    f64_to_ascii
+    mov     %r15, %rdi
+    add     %rax, %r15
+    mov     %r15, %rsi
+    mov     %eax, %ecx
+    push    %rcx
+.add_a_encode:
+    test    %ecx, %ecx
+    jz      .add_a_encode_done
+    movzbl  (%rdi), %edx
+    or      $0x2100, %edx
+    movw    %dx, (%rsi)
+    inc     %rdi
+    add     $2, %rsi
+    dec     %ecx
+    jmp     .add_a_encode
+.add_a_encode_done:
+    pop     %rcx
+    mov     %r15, 16(%r14)             # replace a ptr
+    mov     %rcx, 24(%r14)             # replace a len
+    mov     %rsi, %r15                 # bump heap
+.add_do_concat:
+    # Now both are strings on stack — do concat
+    # Copy a molecules then b molecules to heap
+    mov     (%r14), %rsi               # b ptr
+    mov     8(%r14), %rdx              # b mol_count
+    mov     16(%r14), %rdi             # a ptr
+    mov     24(%r14), %rcx             # a mol_count
+    add     $32, %r14                  # pop both
+
+    # Copy a molecules (rcx * 2 bytes)
+    mov     %r15, %rax                 # result start
+    push    %rdx
+    push    %rsi
+    push    %rcx
+    mov     %r15, %rdi                 # dest
+    # rdi was a ptr, need to use it as source
+    pop     %rcx                        # a mol_count
+    push    %rcx
+    mov     -32(%r14), %rsi            # re-read a ptr (before pop: was at 16+16=32 offset)
+    # Simpler: use saved values
+    pop     %rcx
+    push    %rcx
+    # a is at: original 16(%r14) → after add $32 → -16(%r14)
+    mov     -16(%r14), %rsi            # a ptr
+    shl     $1, %rcx                   # bytes = mol_count * 2
+    rep     movsb
+    mov     %rdi, %r15
+
+    # Copy b molecules
+    pop     %rcx                        # a mol_count (saved)
+    pop     %rsi                        # b ptr
+    pop     %rdx                        # b mol_count
+    push    %rcx                        # save a count for total
+    push    %rdx                        # save b count for total
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+    shl     $1, %rcx                   # bytes = mol_count * 2
+    rep     movsb
+    mov     %rdi, %r15
+
+    # Total mol_count
+    pop     %rdx                        # b count
+    pop     %rcx                        # a count
+    add     %rdx, %rcx                  # total
+
+    # Push result
+    sub     $16, %r14
+    mov     %rax, (%r14)               # ptr
+    mov     %rcx, 8(%r14)              # mol_count
     jmp     vm_loop
 
 .call_sub:
@@ -1565,6 +1686,65 @@ op_call:
     sub     $16, %r14
     movsd   %xmm0, (%r14)
     movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── To-string builtin: convert any value to string ─────────────────────
+# If already a string (u16 molecules), pass through.
+# If f64, convert to decimal string (u16 molecules).
+# Other types: return empty string.
+
+.call_to_string:
+    add     %rcx, %r13
+    mov     (%r14), %rsi               # ptr
+    mov     8(%r14), %rdx              # len/marker
+
+    # If already a string chain (len > 0 and not a marker), pass through
+    cmp     $F64_MARKER, %rdx
+    je      .to_string_f64
+    cmp     $ARRAY_MARKER, %rdx
+    je      .to_string_other
+    cmp     $DICT_MARKER, %rdx
+    je      .to_string_other
+    cmp     $CLOSURE_MARKER, %rdx
+    je      .to_string_other
+    # It's a string chain — pass through unchanged
+    jmp     vm_loop
+
+.to_string_f64:
+    # Convert f64 to u16 molecule string
+    add     $16, %r14                  # pop
+    movq    %rsi, %xmm0               # rsi has f64 bits
+    call    f64_to_ascii               # → eax = length, output at r15 (ASCII)
+    # Now convert ASCII bytes at r15 to u16 molecules
+    mov     %eax, %ecx                 # save ASCII length
+    mov     %r15, %rsi                 # ASCII source
+    add     %rax, %r15                 # bump past ASCII
+    mov     %r15, %rdi                 # u16 molecule output
+    push    %rcx
+    xor     %edx, %edx
+.to_str_encode:
+    test    %ecx, %ecx
+    jz      .to_str_encode_done
+    movzbl  (%rsi), %edx
+    or      $0x2100, %edx              # u16 molecule = 0x2100 | byte
+    movw    %dx, (%rdi)
+    add     $1, %rsi
+    add     $2, %rdi
+    dec     %ecx
+    jmp     .to_str_encode
+.to_str_encode_done:
+    pop     %rcx                        # mol_count = ASCII length
+    # Push string result
+    sub     $16, %r14
+    mov     %r15, (%r14)               # ptr to u16 molecules
+    mov     %rcx, 8(%r14)              # mol_count
+    mov     %rdi, %r15                  # bump heap past molecules
+    jmp     vm_loop
+
+.to_string_other:
+    # Non-convertible types: return empty string
+    mov     $0, (%r14)
+    mov     $0, 8(%r14)
     jmp     vm_loop
 
 # ── String-trim builtin ─────────────────────────────────────────────────
