@@ -3892,9 +3892,9 @@ op_halt:
 
     # ── REPL loop: read line → compile → execute ─────────────────
 .repl_loop:
-    # Print prompt: "○ > "
+    # Print prompt: "⦿ "
     lea     msg_prompt(%rip), %rsi
-    mov     $6, %edx                    # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
+    mov     $4, %edx                    # "⦿ " (⦿ is 3 bytes UTF-8 + space)
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
@@ -4283,13 +4283,13 @@ msg_divzero:
     .ascii "Division by zero!\n"
 
 msg_greeting:
-    .ascii "\xe2\x97\x8b HomeOS v0.05\n"
+    .ascii "\xe2\xa6\xbf HomeOS v0.05\n"
     .ascii "\xe2\x97\x8b Type code or text \xc2\xb7 exit to quit\n"
 msg_greeting_len:
     .byte 55                            # exact byte count of greeting
 
 msg_prompt:
-    .ascii "\xe2\x97\x8b > "             # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
+    .ascii "\xe2\xa6\xbf "               # "⦿ " (⦿ U+29BF = 3 bytes UTF-8 + space)
 
 msg_help:
     .ascii "Commands: let, fn, emit, if, while, match, exit\n"
