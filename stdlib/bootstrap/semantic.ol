@@ -487,7 +487,7 @@ fn compile_expr(state, expr) {
         Expr::Index { object, index } => {
             compile_expr(state, object);
             compile_expr(state, index);
-            emit_op(state, make_op_name("Call", "__array_get"));
+            emit_call(state, "__array_get");
         },
         Expr::ArrayLit { items } => {
             let ai = 0;
