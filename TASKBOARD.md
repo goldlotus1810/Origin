@@ -132,6 +132,14 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.7 | DONE ✅ | `CLAUDE.md` | `a[i]` noted as desugar to `__array_get(a, i)` |
 | DC.8 | DONE ✅ | `CLAUDE.md` | Binary size 806KB → ~824KB |
 
+### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #2)
+
+| # | Mức độ | File | Xung đột |
+|---|--------|------|----------|
+| DC.9 | NHẸ | `CLAUDE.md:278-282` | LOC counts lỗi thời: parser.ol 718→812, semantic.ol 649→963, repl.ol 87→92 |
+| DC.10 | NHẸ | `olang_handbook.md` | Thiếu `DictLit` AST node (mới thêm PR #343) |
+| DC.11 | NHẸ | `CLAUDE.md:37,268` | Binary size ~824KB → ~826KB (845,573 bytes) sau dict literal fix |
+
 ---
 
 ## Log
@@ -154,4 +162,5 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Kira inspector: 8 docs conflicts found (DC.1-DC.8). CLAUDE.md + handbook lỗi thời.
 2026-03-24  DC.1-DC.8 ALL FIXED. CLAUDE.md + handbook synced with code.
 2026-03-24  BUG #1 FIXED: dict literal { key: value } + parse error recovery. 21/21 Kira tests pass.
+2026-03-24  Inspect #2: 5/5 tests PASS. DC.1-DC.8 confirmed FIXED. 3 new minor conflicts (DC.9-DC.11).
 ```
