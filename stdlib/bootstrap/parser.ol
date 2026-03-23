@@ -33,6 +33,7 @@ union Stmt {
     FnDef { name: Str, params: Vec[Str], body: Vec[Stmt] },
     IfStmt { cond: Expr, then_block: Vec[Stmt], else_block: Vec[Stmt] },
     WhileStmt { cond: Expr, body: Vec[Stmt] },
+    ForStmt { var: Str, iter: Expr, body: Vec[Stmt] },
     ReturnStmt { value: Expr },
     EmitStmt { expr: Expr },
     TypeDef { name: Str, fields: Vec[Field] },
@@ -566,6 +567,19 @@ pub fn parse_stmt(p) {
         let _ps_wbody = parse_block(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::WhileStmt { cond: _ps_wcond, body: _ps_wbody };
+    };
+
+    // for var in expr { ... }
+    if is_keyword_tok(tok, "for") {
+        advance(p);
+        let _ps_fvar = peek(p).text;
+        advance(p);
+        // expect "in" keyword
+        advance(p);
+        let _ps_fiter = parse_expr(p);
+        let _ps_fbody = parse_block(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::ForStmt { var: _ps_fvar, iter: _ps_fiter, body: _ps_fbody };
     };
 
     // return expr;

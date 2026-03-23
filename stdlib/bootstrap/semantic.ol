@@ -335,8 +335,12 @@ fn compile_expr(state, expr) {
                                     if _ce_fname == "set_at" {
                                         emit_op(state, make_op_name("Call", "__array_set"));
                                     } else {
-                                        // User-defined or unknown function
-                                        emit_op(state, make_op_name("Call", _ce_fname));
+                                        if _ce_fname == "range" {
+                                            emit_op(state, make_op_name("Call", "__array_range"));
+                                        } else {
+                                            // User-defined or unknown function
+                                            emit_op(state, make_op_name("Call", _ce_fname));
+                                        };
                                     };
                                 };
                             };
@@ -562,6 +566,61 @@ fn compile_stmt(state, stmt) {
             emit_op(state, make_op_simple("ScopeEnd"));
             emit_op(state, make_op_num("Jmp", loop_start));
             patch_jump(state, jz_pos, current_pos(state));
+        },
+        Stmt::ForStmt { var, iter, body } => {
+            // Lower for-in to while loop:
+            //   let __for_arr = iter;
+            //   let __for_len = len(__for_arr);
+            //   let __for_idx = 0;
+            //   while __for_idx < __for_len {
+            //       let var = __for_arr[__for_idx];
+            //       body...
+            //       __for_idx = __for_idx + 1;
+            //   }
+
+            // Evaluate and store iterator
+            compile_expr(state, iter);
+            emit_op(state, make_op_name("Store", "__for_arr"));
+
+            // Store length: len(__for_arr)
+            emit_op(state, make_op_name("Load", "__for_arr"));
+            emit_op(state, make_op_name("Call", "__array_len"));
+            emit_op(state, make_op_name("Store", "__for_len"));
+
+            // Initialize index = 0
+            emit_op(state, make_op_num("PushNum", 0));
+            emit_op(state, make_op_name("Store", "__for_idx"));
+
+            // Loop start: __for_idx < __for_len
+            let _fl_start = current_pos(state);
+            emit_op(state, make_op_name("Load", "__for_idx"));
+            emit_op(state, make_op_name("Load", "__for_len"));
+            emit_op(state, make_op_name("Call", "__cmp_lt"));
+            let _fl_jz = current_pos(state);
+            emit_op(state, make_op_num("Jz", 0));
+
+            // let var = __for_arr[__for_idx]
+            emit_op(state, make_op_name("Load", "__for_arr"));
+            emit_op(state, make_op_name("Load", "__for_idx"));
+            emit_op(state, make_op_name("Call", "__array_get"));
+            emit_op(state, make_op_name("Store", var));
+
+            // Compile body
+            let _fl_bi = 0;
+            while _fl_bi < len(body) {
+                compile_stmt(state, body[_fl_bi]);
+                let _fl_bi = _fl_bi + 1;
+            };
+
+            // Increment: __for_idx = __for_idx + 1
+            emit_op(state, make_op_name("Load", "__for_idx"));
+            emit_op(state, make_op_num("PushNum", 1));
+            emit_op(state, make_op_name("Call", "__hyp_add"));
+            emit_op(state, make_op_name("Store", "__for_idx"));
+
+            // Jump back to loop start
+            emit_op(state, make_op_num("Jmp", _fl_start));
+            patch_jump(state, _fl_jz, current_pos(state));
         },
         Stmt::BreakStmt => {
             // Simplified: emit Jmp(0) — would need break_jumps tracking
