@@ -180,7 +180,46 @@ echo 'emit 42' | gdb -batch -ex "break .eval_bc_run" -ex run --args ./origin_new
 
 ---
 
-## CRITICAL patterns — Khi sửa bootstrap .ol files
+## CRITICAL — Global Variable Pattern (BUG #1 SOURCE)
+
+ASM VM dùng GLOBAL var_table. KHÔNG CÓ block scope.
+`let x = 1` trong function A, function B cũng `let x = 2` → x bị overwrite.
+Match bindings (`Expr::NumLit { value }`) cũng là global.
+
+### Rule: SAVE trước recursive/nested call, RESTORE sau
+
+```olang
+// ĐÚNG:
+push(_save_stack, my_var);     // save
+some_function();                // có thể overwrite my_var
+let my_var = pop(_save_stack); // restore
+
+// SAI — BUG CHẮC CHẮN:
+let my_var = something;
+some_function();               // overwrite my_var!
+use(my_var);                   // WRONG VALUE!
+```
+
+### Nơi PHẢI save/restore (đã fix, KHÔNG được bỏ):
+
+| Vị trí | Biến cần save | Stack | File |
+|--------|-------------|-------|------|
+| BinOp compile | `rhs`, `op` | `_ce_stack` | semantic.ol |
+| IfStmt compile | `_if_then`, `_if_else`, `_if_jz`, `_if_ti` | `_if_stack` | semantic.ol |
+| Parser if-else | `_ps_cond`, `_ps_then` | `_pb_stack` | parser.ol |
+| Parser call args | `_pp_result`, `_pp_call_args` | `_pb_stack` | parser.ol |
+| parse_expr_prec | `_pep_lhs`, `ch`, `min_prec` | `_pep_stack` | parser.ol |
+| parse_block | `_pb_stmts` | `_pb_stack` | parser.ol |
+
+### Khi thêm code mới — Checklist:
+1. Function gọi function khác? → Save locals trước, restore sau
+2. Match arm gọi function? → Match bindings sẽ bị overwrite bởi inner match
+3. Loop body gọi function? → Loop vars sẽ bị overwrite
+4. Dùng prefix unique: `_ps_*` (parse_stmt), `_ce_*` (compile_expr), `_pep_*`, etc.
+
+---
+
+## Thêm patterns quan trọng
 
 ```
 ① RENAME all locals — Dùng prefix unique cho mỗi function:
