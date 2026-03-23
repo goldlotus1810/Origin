@@ -13,31 +13,29 @@ use olang.bootstrap.parser;
 
 // Explicit save stack for recursive compile_expr (ASM VM has no scoping)
 let _ce_stack = [];
+let _if_stack = [];
 
 // ── IR Opcode representation ────────────────────────────────────
 // We represent opcodes as structs with an "op" tag string + args.
 // The Rust VM will interpret these when we bridge.
 
-type Op {
-    tag: Str,       // opcode name: "Push", "PushNum", "Store", etc.
-    name: Str,      // variable/function name (for Store, Load, Call, etc.)
-    value: Num,     // numeric value (for PushNum, Jmp target, PushMol packed u16, etc.)
-}
+// Op represented as 3-element array: [tag, name, value]
+// Using arrays instead of dicts to avoid field-name aliasing bug
 
 fn make_op(_tag, _name, _value) {
-    return Op { tag: _tag, name: _name, value: _value };
+    return [_tag, _name, _value];
 }
 
 fn make_op_num(_tag, _value) {
-    return make_op(_tag, "", _value);
+    return [_tag, "", _value];
 }
 
 fn make_op_name(_tag, _name) {
-    return make_op(_tag, _name, 0);
+    return [_tag, _name, 0];
 }
 
 fn make_op_simple(_tag) {
-    return make_op(_tag, "", 0);
+    return [_tag, "", 0];
 }
 
 // ── Scope tracking ──────────────────────────────────────────────
@@ -93,7 +91,7 @@ fn current_pos(state) {
 fn patch_jump(state, pos, target) {
     // Patch a Jmp/Jz at position pos to jump to target
     let old_op = state.ops[pos];
-    let new_op = Op { tag: old_op.tag, name: old_op.name, value: target };
+    let new_op = [old_op[0], old_op[1], target];
     set_at(state.ops, pos, new_op);
 }
 
@@ -527,28 +525,47 @@ fn compile_stmt(state, stmt) {
             emit_op(state, make_op_simple("Emit"));
         },
         Stmt::IfStmt { cond, then_block, else_block } => {
+            // Save blocks on _if_stack (separate from _ce_stack to avoid interleave)
+            push(_if_stack, then_block);
+            push(_if_stack, else_block);
             compile_expr(state, cond);
-            let jz_pos = current_pos(state);
+            let _if_jz = current_pos(state);
             emit_op(state, make_op_num("Jz", 0));
-            // Jz pops condition. No extra Pop needed.
+            // Restore after compile_expr
+            let _if_else = pop(_if_stack);
+            let _if_then = pop(_if_stack);
             // Then block
-            let ti = 0;
-            while ti < len(then_block) {
-                compile_stmt(state, then_block[ti]);
-                let ti = ti + 1;
+            let _if_ti = 0;
+            while _if_ti < len(_if_then) {
+                push(_if_stack, _if_then);
+                push(_if_stack, _if_else);
+                push(_if_stack, _if_jz);
+                push(_if_stack, _if_ti);
+                compile_stmt(state, _if_then[_if_ti]);
+                let _if_ti = pop(_if_stack);
+                let _if_jz = pop(_if_stack);
+                let _if_else = pop(_if_stack);
+                let _if_then = pop(_if_stack);
+                let _if_ti = _if_ti + 1;
             };
-            if len(else_block) > 0 {
-                let jmp_pos = current_pos(state);
+            if len(_if_else) > 0 {
+                let _if_jmp = current_pos(state);
                 emit_op(state, make_op_num("Jmp", 0));
-                patch_jump(state, jz_pos, current_pos(state));
-                let ei = 0;
-                while ei < len(else_block) {
-                    compile_stmt(state, else_block[ei]);
-                    let ei = ei + 1;
+                patch_jump(state, _if_jz, current_pos(state));
+                let _if_ei = 0;
+                while _if_ei < len(_if_else) {
+                    push(_if_stack, _if_else);
+                    push(_if_stack, _if_jmp);
+                    push(_if_stack, _if_ei);
+                    compile_stmt(state, _if_else[_if_ei]);
+                    let _if_ei = pop(_if_stack);
+                    let _if_jmp = pop(_if_stack);
+                    let _if_else = pop(_if_stack);
+                    let _if_ei = _if_ei + 1;
                 };
-                patch_jump(state, jmp_pos, current_pos(state));
+                patch_jump(state, _if_jmp, current_pos(state));
             } else {
-                patch_jump(state, jz_pos, current_pos(state));
+                patch_jump(state, _if_jz, current_pos(state));
             };
         },
         Stmt::WhileStmt { cond, body } => {
