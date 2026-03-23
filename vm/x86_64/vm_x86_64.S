@@ -35,7 +35,7 @@
 # Array heap layout: [count:8][elem_0_ptr:8][elem_0_len:8]...
 # When array is relocated by push: old location gets [FORWARD_MARKER:8][new_base:8]
 # Dict heap layout:  [count:8][entry: key_ptr:8 key_len:8 val_ptr:8 val_len:8]...
-.equ ARRAY_INIT_CAP, 256
+.equ ARRAY_INIT_CAP, 1024
 .equ ARRAY_FORWARD_MARKER, -2      # sentinel: array relocated
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
@@ -2904,6 +2904,11 @@ op_call:
     cmp     $ARRAY_MARKER, %rax
     jne     .eval_bc_raw
 
+    # Follow forward pointer if array was relocated
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .eval_bc_array
+    mov     8(%rdi), %rdi              # follow forward
+.eval_bc_array:
     # Array of bytes: convert to contiguous bytecode buffer
     # Array: [count:8][elem_0_ptr:8][elem_0_len:8]...
     # Each element is a f64 representing a byte value
