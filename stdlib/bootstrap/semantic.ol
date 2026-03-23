@@ -16,6 +16,7 @@ let _ce_stack = [];
 let _if_stack = [];
 let _break_patches = [];
 let _continue_patches = [];
+let _g_output = [];
 
 // ── IR Opcode representation ────────────────────────────────────
 // We represent opcodes as structs with an "op" tag string + args.
@@ -69,9 +70,9 @@ type SemanticState {
 }
 
 fn new_state() {
+    let _g_output = [];
     return SemanticState {
         ops: [],
-        output: [],
         locals: [],
         fns: [],
         fn_bodies: [],
@@ -86,21 +87,21 @@ fn new_state() {
 
 // Direct bytecode emission — no IR buffer, no heap corruption
 fn _emit_byte(state, _eb_val) {
-    push(state.output, _eb_val);
+    push(_g_output, _eb_val);
 }
 
 fn _emit_u32_le(state, _eu_val) {
-    push(state.output, _eu_val % 256);
-    push(state.output, (_eu_val / 256) % 256);
-    push(state.output, (_eu_val / 65536) % 256);
-    push(state.output, (_eu_val / 16777216) % 256);
+    push(_g_output, _eu_val % 256);
+    push(_g_output, (_eu_val / 256) % 256);
+    push(_g_output, (_eu_val / 65536) % 256);
+    push(_g_output, (_eu_val / 16777216) % 256);
 }
 
 fn _emit_f64_le(state, _ef_val) {
     let _ef_bytes = __f64_to_le_bytes(_ef_val);
     let _ef_i = 0;
     while _ef_i < 8 {
-        push(state.output, _ef_bytes[_ef_i]);
+        push(_g_output, _ef_bytes[_ef_i]);
         let _ef_i = _ef_i + 1;
     };
 }
@@ -108,10 +109,10 @@ fn _emit_f64_le(state, _ef_val) {
 fn _emit_str(state, _es_str) {
     let _es_bytes = __str_bytes(_es_str);
     let _es_len = len(_es_bytes);
-    push(state.output, _es_len);
+    push(_g_output, _es_len);
     let _es_i = 0;
     while _es_i < _es_len {
-        push(state.output, _es_bytes[_es_i]);
+        push(_g_output, _es_bytes[_es_i]);
         let _es_i = _es_i + 1;
     };
 }
@@ -120,12 +121,12 @@ fn _emit_str_u16(state, _esu_str) {
     let _esu_bytes = __str_bytes(_esu_str);
     let _esu_len = len(_esu_bytes);
     // Length prefix = number of u16 molecules
-    push(state.output, _esu_len % 256);
-    push(state.output, (_esu_len / 256) % 256);
+    push(_g_output, _esu_len % 256);
+    push(_g_output, (_esu_len / 256) % 256);
     let _esu_i = 0;
     while _esu_i < _esu_len {
-        push(state.output, _esu_bytes[_esu_i]);
-        push(state.output, 33);
+        push(_g_output, _esu_bytes[_esu_i]);
+        push(_g_output, 33);
         let _esu_i = _esu_i + 1;
     };
 }
@@ -139,11 +140,11 @@ fn emit_num(state, _en_val) {
 fn emit_load(state, _el_name) {
     let _el_len = len(_el_name);
     _emit_byte(state, 2);
-    push(state.output, _el_len);
+    push(_g_output, _el_len);
     let _el_i = 0;
     while _el_i < _el_len {
         let _el_code = __char_code(char_at(_el_name, _el_i));
-        push(state.output, _el_code);
+        push(_g_output, _el_code);
         let _el_i = _el_i + 1;
     };
 }
@@ -151,10 +152,10 @@ fn emit_load(state, _el_name) {
 fn emit_store(state, _es_name) {
     let _es_len = len(_es_name);
     _emit_byte(state, 19);
-    push(state.output, _es_len);
+    push(_g_output, _es_len);
     let _es_i = 0;
     while _es_i < _es_len {
-        push(state.output, __char_code(char_at(_es_name, _es_i)));
+        push(_g_output, __char_code(char_at(_es_name, _es_i)));
         let _es_i = _es_i + 1;
     };
 }
@@ -162,10 +163,10 @@ fn emit_store(state, _es_name) {
 fn emit_call(state, _ec_name) {
     let _ec_len = len(_ec_name);
     _emit_byte(state, 7);
-    push(state.output, _ec_len);
+    push(_g_output, _ec_len);
     let _ec_i = 0;
     while _ec_i < _ec_len {
-        push(state.output, __char_code(char_at(_ec_name, _ec_i)));
+        push(_g_output, __char_code(char_at(_ec_name, _ec_i)));
         let _ec_i = _ec_i + 1;
     };
 }
@@ -218,16 +219,16 @@ fn emit_op(state, _op) {
 }
 
 fn current_pos(state) {
-    return len(state.output);
+    return len(_g_output);
 }
 
 fn patch_jump(state, pos, target) {
     // Patch 4-byte LE u32 at pos+1 (after opcode byte)
     let _pj_pos = pos + 1;
-    set_at(state.output, _pj_pos, target % 256);
-    set_at(state.output, _pj_pos + 1, (target / 256) % 256);
-    set_at(state.output, _pj_pos + 2, (target / 65536) % 256);
-    set_at(state.output, _pj_pos + 3, (target / 16777216) % 256);
+    set_at(_g_output, _pj_pos, target % 256);
+    set_at(_g_output, _pj_pos + 1, (target / 256) % 256);
+    set_at(_g_output, _pj_pos + 2, (target / 65536) % 256);
+    set_at(_g_output, _pj_pos + 3, (target / 16777216) % 256);
 }
 
 fn is_local(state, name) {
@@ -652,10 +653,10 @@ fn compile_stmt(state, stmt) {
             // Closure instruction = [0x25][param_count:1][body_len:4] = 6 bytes
             let _fn_body_len = current_pos(state) - _fn_closure_pos - 6;
             let _fn_bpos = _fn_closure_pos + 2;
-            set_at(state.output, _fn_bpos, _fn_body_len % 256);
-            set_at(state.output, _fn_bpos + 1, (_fn_body_len / 256) % 256);
-            set_at(state.output, _fn_bpos + 2, (_fn_body_len / 65536) % 256);
-            set_at(state.output, _fn_bpos + 3, (_fn_body_len / 16777216) % 256);
+            set_at(_g_output, _fn_bpos, _fn_body_len % 256);
+            set_at(_g_output, _fn_bpos + 1, (_fn_body_len / 256) % 256);
+            set_at(_g_output, _fn_bpos + 2, (_fn_body_len / 65536) % 256);
+            set_at(_g_output, _fn_bpos + 3, (_fn_body_len / 16777216) % 256);
             // Store closure in var_table
             emit_op(state, make_op_name("Store", _fn_name));
         },
@@ -717,25 +718,36 @@ fn compile_stmt(state, stmt) {
             let _wl_old_conts = _continue_patches;
             let _break_patches = [];
             let _continue_patches = [];
-            let loop_start = current_pos(state);
+            let _wl_body = body;
+            let _wl_start = current_pos(state);
+            push(_ce_stack, _wl_body);
             compile_expr(state, cond);
-            let jz_pos = current_pos(state);
+            let _wl_body = pop(_ce_stack);
+            let _wl_jz = current_pos(state);
             emit_op(state, make_op_num("Jz", 0));
-            let bi = 0;
-            while bi < len(body) {
-                compile_stmt(state, body[bi]);
-                let bi = bi + 1;
+            let _wl_bi = 0;
+            while _wl_bi < len(_wl_body) {
+                push(_ce_stack, _wl_body);
+                push(_ce_stack, _wl_jz);
+                push(_ce_stack, _wl_start);
+                push(_ce_stack, _wl_bi);
+                compile_stmt(state, _wl_body[_wl_bi]);
+                let _wl_bi = pop(_ce_stack);
+                let _wl_start = pop(_ce_stack);
+                let _wl_jz = pop(_ce_stack);
+                let _wl_body = pop(_ce_stack);
+                let _wl_bi = _wl_bi + 1;
             };
-            // Patch continue jumps → loop_start (re-evaluate condition)
+            // Patch continue → _wl_start
             let _wl_cp = 0;
             while _wl_cp < len(_continue_patches) {
-                patch_jump(state, _continue_patches[_wl_cp], loop_start);
+                patch_jump(state, _continue_patches[_wl_cp], _wl_start);
                 let _wl_cp = _wl_cp + 1;
             };
-            emit_op(state, make_op_num("Jmp", loop_start));
-            // Patch break jumps → after loop
+            emit_jmp(state, _wl_start);
+            // Patch break → after loop
             let _wl_exit = current_pos(state);
-            patch_jump(state, jz_pos, _wl_exit);
+            patch_jump(state, _wl_jz, _wl_exit);
             let _bp_i = 0;
             while _bp_i < len(_break_patches) {
                 patch_jump(state, _break_patches[_bp_i], _wl_exit);
