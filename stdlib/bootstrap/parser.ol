@@ -590,12 +590,17 @@ pub fn parse_stmt(p) {
     // while cond { ... }
     if is_keyword_tok(tok, "while") {
         advance(p);
+        // Save token range for condition (re-parsed in semantic to avoid dict corruption)
+        let _ps_wc_start = p.pos;
         let _ps_wcond = parse_expr(p);
-        push(_pb_stack, _ps_wcond);
+        let _ps_wc_end = p.pos;
+        push(_pb_stack, _ps_wc_start);
+        push(_pb_stack, _ps_wc_end);
         let _ps_wbody = parse_block(p);
-        let _ps_wcond = pop(_pb_stack);
+        let _ps_wc_end = pop(_pb_stack);
+        let _ps_wc_start = pop(_pb_stack);
         if is_symbol_tok(peek(p), ";") { advance(p); };
-        return Stmt::WhileStmt { cond: _ps_wcond, body: _ps_wbody };
+        return Stmt::WhileStmt { cond: _ps_wcond, body: _ps_wbody, cond_start: _ps_wc_start, cond_end: _ps_wc_end, tokens: p.tokens };
     };
 
     // for var in expr { ... }
