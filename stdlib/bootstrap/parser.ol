@@ -382,6 +382,9 @@ fn is_binop(tok) {
     };
 }
 
+// Explicit save stack for recursive parse_expr_prec (ASM VM has no scoping)
+let _pep_stack = [];
+
 fn parse_expr_prec(p, min_prec) {
     let _pep_lhs = parse_primary(p);
 
@@ -395,8 +398,13 @@ fn parse_expr_prec(p, min_prec) {
                 };
                 advance(p); // consume operator
                 let _pep_op = ch;
-                let _pep_saved = _pep_lhs;
+                // Save lhs + op on explicit stack before recursive call
+                push(_pep_stack, _pep_lhs);
+                push(_pep_stack, _pep_op);
                 let _pep_rhs = parse_expr_prec(p, _pep_prec + 1);
+                // Restore after recursion (pop in reverse order)
+                let _pep_op = pop(_pep_stack);
+                let _pep_saved = pop(_pep_stack);
                 let _pep_lhs = Expr::BinOp { op: _pep_op, lhs: _pep_saved, rhs: _pep_rhs };
             },
             _ => { break; },

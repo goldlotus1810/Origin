@@ -8,10 +8,11 @@
 // Reference: crates/olang/src/lang/semantic.rs (Rust implementation)
 // This only needs to compile lexer.ol + parser.ol, not 100% of Rust version.
 
-// (debug emits removed)
-
 use olang.bootstrap.lexer;
 use olang.bootstrap.parser;
+
+// Explicit save stack for recursive compile_expr (ASM VM has no scoping)
+let _ce_stack = [];
 
 // ── IR Opcode representation ────────────────────────────────────
 // We represent opcodes as structs with an "op" tag string + args.
@@ -275,19 +276,22 @@ fn compile_expr(state, expr) {
                     compile_expr(state, rhs);
                     patch_jump(state, jmp_pos, current_pos(state));
                 } else {
+                    // Save op on explicit stack before recursive calls
+                    push(_ce_stack, op);
                     compile_expr(state, lhs);
                     compile_expr(state, rhs);
-                    if op == "+" { emit_op(state, make_op_name("Call", "__hyp_add")); };
-                    if op == "-" { emit_op(state, make_op_name("Call", "__hyp_sub")); };
-                    if op == "*" { emit_op(state, make_op_name("Call", "__hyp_mul")); };
-                    if op == "/" { emit_op(state, make_op_name("Call", "__hyp_div")); };
-                    if op == "%" { emit_op(state, make_op_name("Call", "__hyp_mod")); };
-                    if op == "==" { emit_op(state, make_op_name("Call", "__eq")); };
-                    if op == "!=" { emit_op(state, make_op_name("Call", "__cmp_ne")); };
-                    if op == "<" { emit_op(state, make_op_name("Call", "__cmp_lt")); };
-                    if op == ">" { emit_op(state, make_op_name("Call", "__cmp_gt")); };
-                    if op == "<=" { emit_op(state, make_op_name("Call", "__cmp_le")); };
-                    if op == ">=" { emit_op(state, make_op_name("Call", "__cmp_ge")); };
+                    let _binop = pop(_ce_stack);
+                    if _binop == "+" { emit_op(state, make_op_name("Call", "__hyp_add")); };
+                    if _binop == "-" { emit_op(state, make_op_name("Call", "__hyp_sub")); };
+                    if _binop == "*" { emit_op(state, make_op_name("Call", "__hyp_mul")); };
+                    if _binop == "/" { emit_op(state, make_op_name("Call", "__hyp_div")); };
+                    if _binop == "%" { emit_op(state, make_op_name("Call", "__hyp_mod")); };
+                    if _binop == "==" { emit_op(state, make_op_name("Call", "__eq")); };
+                    if _binop == "!=" { emit_op(state, make_op_name("Call", "__cmp_ne")); };
+                    if _binop == "<" { emit_op(state, make_op_name("Call", "__cmp_lt")); };
+                    if _binop == ">" { emit_op(state, make_op_name("Call", "__cmp_gt")); };
+                    if _binop == "<=" { emit_op(state, make_op_name("Call", "__cmp_le")); };
+                    if _binop == ">=" { emit_op(state, make_op_name("Call", "__cmp_ge")); };
                 };
             };
         },
