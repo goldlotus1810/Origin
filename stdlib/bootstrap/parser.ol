@@ -225,7 +225,7 @@ fn parse_primary(p) {
         },
         TokenKind::Ident { name } => {
             advance(p);
-            let result = Expr::Ident { name: name };
+            let _pp_result = Expr::Ident { name: name };
 
             // Path expression: Name::Member or Name::Member { fields }
             if is_symbol_tok(peek(p), "::") {
@@ -243,9 +243,9 @@ fn parse_primary(p) {
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
                     expect_symbol(p, "}");
-                    let result = Expr::StructLit { path: name + "::" + member, fields: fields };
+                    let _pp_result = Expr::StructLit { path: name + "::" + member, fields: fields };
                 } else {
-                    let result = Expr::PathExpr { base: name, member: member };
+                    let _pp_result = Expr::PathExpr { base: name, member: member };
                 };
             };
 
@@ -264,7 +264,7 @@ fn parse_primary(p) {
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
                     expect_symbol(p, "}");
-                    let result = Expr::StructLit { path: name, fields: fields };
+                    let _pp_result = Expr::StructLit { path: name, fields: fields };
                 };
             };
 
@@ -274,27 +274,33 @@ fn parse_primary(p) {
                 if is_symbol_tok(peek(p), ".") {
                     advance(p);
                     let field = expect_ident(p);
-                    let result = Expr::FieldAccess { object: result, field: field };
+                    let _pp_result = Expr::FieldAccess { object: _pp_result, field: field };
                 };
                 if is_symbol_tok(peek(p), "[") {
                     advance(p);
                     let index = parse_expr(p);
                     expect_symbol(p, "]");
-                    let result = Expr::Index { object: result, index: index };
+                    let _pp_result = Expr::Index { object: _pp_result, index: index };
                 };
                 if is_symbol_tok(peek(p), "(") {
                     advance(p);
-                    let args = [];
+                    let _pp_call_args = [];
+                    // Save _pp_result before recursive parse_expr (may overwrite)
+                    push(_pb_stack, _pp_result);
                     while !is_symbol_tok(peek(p), ")") && !is_eof(peek(p)) {
-                        push(args, parse_expr(p));
+                        push(_pb_stack, _pp_call_args);
+                        let _pp_arg = parse_expr(p);
+                        let _pp_call_args = pop(_pb_stack);
+                        push(_pp_call_args, _pp_arg);
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
                     expect_symbol(p, ")");
-                    let result = Expr::Call { callee: result, args: args };
+                    let _pp_saved = pop(_pb_stack);
+                    let _pp_result = Expr::Call { callee: _pp_saved, args: _pp_call_args };
                 };
             };
 
-            return result;
+            return _pp_result;
         },
         TokenKind::Symbol { ch } => {
             // Unary NOT: !expr
