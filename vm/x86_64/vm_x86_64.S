@@ -1896,10 +1896,8 @@ op_call:
     add     %rdx, %r14
 
 .array_new_done:
-    # Ensure at least ARRAY_INIT_CAP capacity is reserved on heap.
-    # Current r15 = array_base + 8 + count*16 (after elements).
-    # Need: array_base + 8 + ARRAY_INIT_CAP*16 total minimum.
-    # Only advance r15 if current elements use less than capacity.
+    # ALWAYS reserve ARRAY_INIT_CAP capacity on heap.
+    # This prevents subsequent allocations from landing in our capacity zone.
     lea     8(%rdi), %rax              # array_base + 8
     add     $ARRAY_INIT_CAP * 16, %rax # + capacity bytes
     cmp     %rax, %r15
@@ -2001,7 +1999,9 @@ op_call:
     test    %rdi, %rdi
     jz      .array_push_create_new
 
-    # Read count, write element at end (within pre-allocated capacity)
+    # In-place push: write element at end of array.
+    # Array layout: [count:8][elem0:16][elem1:16]...
+    # Capacity was pre-reserved at allocation time.
     mov     (%rdi), %rcx               # count
     # Element position: 8 + count*16
     mov     %rcx, %rax
@@ -2010,7 +2010,6 @@ op_call:
     mov     %r8, (%rdi, %rax)          # write val ptr
     mov     %r9, 8(%rdi, %rax)         # write val len
     incq    (%rdi)                      # count++
-
     # Push same array back (in-place modification)
     sub     $16, %r14
     mov     %rdi, (%r14)

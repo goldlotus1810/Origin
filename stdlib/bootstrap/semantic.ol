@@ -68,6 +68,9 @@ type SemanticState {
 fn new_state() {
     return SemanticState {
         ops: [],
+        op_tags: [],
+        op_names: [],
+        op_values: [],
         locals: [],
         fns: [],
         fn_bodies: [],
@@ -82,14 +85,19 @@ fn new_state() {
 
 fn emit_op(state, _op) {
     push(state.ops, _op);
+    push(state.op_tags, _op[0]);
+    push(state.op_names, _op[1]);
+    push(state.op_values, _op[2]);
 }
 
 fn current_pos(state) {
-    return len(state.ops);
+    return len(state.op_tags);
 }
 
 fn patch_jump(state, pos, target) {
     // Patch a Jmp/Jz at position pos to jump to target
+    set_at(state.op_values, pos, target);
+    // Also update ops array for compatibility
     let old_op = state.ops[pos];
     let new_op = [old_op[0], old_op[1], target];
     set_at(state.ops, pos, new_op);
@@ -226,7 +234,8 @@ fn precompile_fns(state, stmts) {
 fn compile_expr(state, expr) {
     match expr {
         Expr::NumLit { value } => {
-            emit_op(state, make_op_num("PushNum", value));
+            let _ce_numval = value;
+            emit_op(state, make_op_num("PushNum", _ce_numval));
         },
         Expr::StrLit { value } => {
             emit_op(state, make_op_name("Push", value));

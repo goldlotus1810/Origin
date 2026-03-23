@@ -243,6 +243,81 @@ fn op_size(_os_op) {
 
 // ── Entry point ────────────────────────────────────────────────
 
+fn encode_flat(_eo_out, _ef_tag, _ef_name, _ef_val) {
+    if _ef_tag == "PushNum" { emit_byte(_eo_out, 21); emit_f64_le(_eo_out, _ef_val); return; };
+    if _ef_tag == "Emit" { emit_byte(_eo_out, 6); return; };
+    if _ef_tag == "Halt" { emit_byte(_eo_out, 15); return; };
+    if _ef_tag == "Ret" { emit_byte(_eo_out, 8); return; };
+    if _ef_tag == "Pop" { emit_byte(_eo_out, 12); return; };
+    if _ef_tag == "Dup" { emit_byte(_eo_out, 11); return; };
+    if _ef_tag == "ScopeBegin" { emit_byte(_eo_out, 23); return; };
+    if _ef_tag == "ScopeEnd" { emit_byte(_eo_out, 24); return; };
+    if _ef_tag == "Push" { emit_byte(_eo_out, 1); emit_str_u16(_eo_out, _ef_name); return; };
+    if _ef_tag == "Load" { emit_byte(_eo_out, 2); emit_str(_eo_out, _ef_name); return; };
+    if _ef_tag == "Store" { emit_byte(_eo_out, 19); emit_str(_eo_out, _ef_name); return; };
+    if _ef_tag == "LoadLocal" { emit_byte(_eo_out, 20); emit_str(_eo_out, _ef_name); return; };
+    if _ef_tag == "StoreUpdate" { emit_byte(_eo_out, 28); emit_str(_eo_out, _ef_name); return; };
+    if _ef_tag == "Call" { emit_byte(_eo_out, 7); emit_str(_eo_out, _ef_name); return; };
+    if _ef_tag == "Jmp" { emit_byte(_eo_out, 9); emit_u32_le(_eo_out, _ef_val); return; };
+    if _ef_tag == "Jz" { emit_byte(_eo_out, 10); emit_u32_le(_eo_out, _ef_val); return; };
+    if _ef_tag == "Swap" { emit_byte(_eo_out, 13); return; };
+    if _ef_tag == "Closure" { emit_byte(_eo_out, 37); emit_byte(_eo_out, _ef_val); emit_u32_le(_eo_out, _ef_name); return; };
+}
+
+pub fn generate_parallel(tags, names, values) {
+    // Pass 1: measure actual encoded size
+    let offsets = [];
+    let _gpos = 0;
+    let _gi = 0;
+    while _gi < len(tags) {
+        push(offsets, _gpos);
+        let _gt1 = [];
+        encode_flat(_gt1, tags[_gi], names[_gi], values[_gi]);
+        let _gpos = _gpos + len(_gt1);
+        let _gi = _gi + 1;
+    };
+    push(offsets, _gpos);
+    // Pass 2: encode with resolved jump targets
+    let _gout = [];
+    let _gi2 = 0;
+    while _gi2 < len(tags) {
+        let _gt = tags[_gi2];
+        if _gt == "Jmp" {
+            let _gtarget = values[_gi2];
+            if _gtarget < len(offsets) {
+                emit_byte(_gout, 9);
+                emit_u32_le(_gout, offsets[_gtarget]);
+            } else {
+                encode_flat(_gout, _gt, names[_gi2], values[_gi2]);
+            };
+        } else {
+            if _gt == "Jz" {
+                let _gtarget = values[_gi2];
+                if _gtarget < len(offsets) {
+                    emit_byte(_gout, 10);
+                    emit_u32_le(_gout, offsets[_gtarget]);
+                } else {
+                    encode_flat(_gout, _gt, names[_gi2], values[_gi2]);
+                };
+            } else {
+                if _gt == "Closure" {
+                    let _gbody_ops = names[_gi2];
+                    let _gbody_start = _gi2 + 1;
+                    let _gbody_end = _gbody_start + _gbody_ops;
+                    let _gbyte_len = offsets[_gbody_end] - offsets[_gbody_start];
+                    emit_byte(_gout, 37);
+                    emit_byte(_gout, values[_gi2]);
+                    emit_u32_le(_gout, _gbyte_len);
+                } else {
+                    encode_flat(_gout, _gt, names[_gi2], values[_gi2]);
+                };
+            };
+        };
+        let _gi2 = _gi2 + 1;
+    };
+    return _gout;
+}
+
 pub fn generate(ops) {
     // Pass 1: measure actual encoded size by encoding to fresh temp arrays.
     let offsets = [];
