@@ -1077,69 +1077,52 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
         }
     }
 
-    // Phase 1.5: Pre-compile function bodies for CallClosure dispatch.
-    // Only for files with many functions (likely recursive/mutual calls).
-    // Files with ≤ functions use inline Closure+Store in lower_stmt instead.
-    // Use Phase 1.5 for files with 2+ functions (prevents recursive inline Closure
-    // stack overflow and ensures all functions visible via CallClosure).
+    // Phase 1.5: Pre-compile function bodies as Closure+Store.
+    // Each function becomes: Closure(params, body_len) [body] Ret → Store(fn_name).
+    // Closure opcode pushes marker + jumps over body; Store registers in var table.
+    // Call sites use Call(fn_name) — ASM VM finds closure in var table via op_call.
+    // This avoids CallClosure's stack-based marker which ASM VM can't handle.
     if ctx.fns.len() >= 2 {
-        // Emit a Jmp to skip all compiled function bodies
-        let skip_all = ctx.prog.ops.len();
-        ctx.prog.push_op(Op::Jmp(0)); // placeholder
-
-        // Pass 1: allocate slots for all functions (reserve space for param stores + placeholder)
-        // We record the body_start PC for each function so forward references work
-        let fn_count = ctx.fns.len();
-        let mut fn_body_starts: Vec<usize> = Vec::new();
-        let mut fn_body_jmps: Vec<usize> = Vec::new();
-        for fi in 0..fn_count {
-            let fn_def = &ctx.fns[fi];
-            let body_start = ctx.prog.ops.len();
-            fn_body_starts.push(body_start);
-
-            // Reserve space: Store for each param + Jmp(placeholder) to actual body
-            for p in fn_def.params.iter().rev() {
-                ctx.prog.push_op(Op::Store(p.clone()));
-            }
-            fn_body_jmps.push(ctx.prog.ops.len());
-            ctx.prog.push_op(Op::Jmp(0)); // placeholder — will jump to actual body code
-
-            // Register compiled function now (body_start is the entry point)
-            ctx.compiled_fns.push((fn_def.name.clone(), body_start, fn_def.params.clone()));
-        }
-
-        // Pass 2: compile function bodies (all functions are now registered, so CallClosure works)
         ctx.use_call_closure = true;
+        let fn_count = ctx.fns.len();
+
         for fi in 0..fn_count {
             let fn_def = ctx.fns[fi].clone();
-            let actual_body = ctx.prog.ops.len();
+            let fn_name = fn_def.name.clone();
 
-            // Patch the Jmp from pass 1 to point to actual body code
-            ctx.prog.ops[fn_body_jmps[fi]] = Op::Jmp(actual_body);
+            // Emit Closure(param_count, body_len_placeholder) — jumps over body
+            let closure_pos = ctx.current_pos();
+            ctx.emit(Op::Closure(fn_def.params.len() as u8, 0)); // placeholder
 
-            // Lower body
+            // Body: Store params in reverse order (stack is LIFO)
+            for p in fn_def.params.iter().rev() {
+                ctx.emit(Op::Store(p.clone()));
+            }
             ctx.locals = fn_def.params.clone();
+
+            // Lower body statements
             for s in &fn_def.body {
                 lower_stmt(s, &mut ctx);
             }
 
-            // Default return
-            ctx.prog.push_op(Op::Push(crate::molecular::MolecularChain::empty()));
-            ctx.prog.push_op(Op::Ret);
+            // Default return: empty chain + Ret
+            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+            ctx.emit(Op::Ret);
+
+            // Patch Closure body_len (op count from closure_pos+1 to here)
+            let body_len = ctx.current_pos() - closure_pos - 1;
+            ctx.ops_mut()[closure_pos] = Op::Closure(fn_def.params.len() as u8, body_len);
+
             ctx.locals.clear();
+
+            // Store closure marker in var table (runs immediately since Closure skips body)
+            ctx.emit(Op::Store(fn_name.clone()));
+            ctx.locals.push(fn_name.clone());
+
+            // Record as compiled (so FnDef in main pass is skipped)
+            ctx.compiled_fns.push((fn_name, 0, Vec::new()));
         }
-        // Keep use_call_closure = true for the main pass too,
-        // so all function calls use CallClosure instead of inlining.
-        // ctx.use_call_closure = false;
-
-        // Patch the skip jump
-        let after_fns = ctx.prog.ops.len();
-        ctx.prog.ops[skip_all] = Op::Jmp(after_fns);
-
-        // TODO: Phase 1.5 functions need var_table registration for ASM REPL.
-        // Current blocker: Closure body can't just be a stub (REPL calls it).
-        // Can't duplicate body (jump offsets wrong). Can't inline (stack overflow).
-        // Need: ASM CallClosure to use compiled_fns table like Rust VM does.
+        // use_call_closure stays true for the main pass
     }
 
     // Second pass: lower statements
@@ -1706,20 +1689,11 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
         Stmt::FnDef { name, params, body, .. } => {
             if ctx.use_call_closure {
-                // Phase 1.5: body already compiled. Emit trampoline closure
-                // so function registers in var_table (for REPL/external lookup).
-                // Trampoline body: Jmp(pre_compiled_body) + Ret = 2 ops.
-                if let Some((_fn_name, body_pc, _fn_params)) = ctx.compiled_fns.iter()
-                    .find(|(n, _, _)| n == name)
-                    .cloned()
-                {
-                    ctx.emit(Op::Closure(params.len() as u8, 2));
-                    ctx.emit(Op::Jmp(body_pc));
-                    ctx.emit(Op::Ret);
-                    ctx.emit(Op::Store(name.clone()));
-                    ctx.locals.push(name.clone());
+                // Phase 1.5: function already compiled as Closure+Store.
+                // Skip entirely — no trampoline needed.
+                if ctx.compiled_fns.iter().any(|(n, _, _)| n == name) {
+                    return;
                 }
-                return;
             }
             // Small files: emit Closure + body + Store inline.
             let body_start_placeholder = ctx.current_pos();
@@ -2352,73 +2326,16 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     || ctx.inlining_stack.len() > 8;
 
                 if is_recursive {
-                    // Recursive call: use CallClosure mechanism
                     let fn_name = name.to_string();
-                    let param_count = fn_def.params.len();
 
-                    // Check if function body is already compiled
-                    let compiled_pc = ctx.compiled_fns.iter()
-                        .find(|(n, _, _)| n == &fn_name)
-                        .map(|(_, pc, _)| *pc);
-
-                    let body_pc = if let Some(pc) = compiled_pc {
-                        pc
-                    } else {
-                        // Compile function body to a separate block
-                        let fn_params = fn_def.params.clone();
-                        let fn_body = fn_def.body.clone();
-
-                        let saved_locals = ctx.locals.clone();
-                        let saved_inline_depth = ctx.inline_depth;
-
-                        // Skip over the compiled body during normal execution
-                        let skip_jmp = ctx.current_pos();
-                        ctx.emit(Op::Jmp(0));
-
-                        let body_start = ctx.current_pos();
-
-                        // Args are on stack in reverse order for CallClosure
-                        // Store params from stack
-                        for p in fn_params.iter().rev() {
-                            ctx.emit(Op::Store(p.clone()));
-                        }
-                        ctx.locals = fn_params.clone();
-                        ctx.inline_depth = 0;
-
-                        // Lower body statements
-                        let body_len = fn_body.len();
-                        if body_len > 0 {
-                            for s in &fn_body[..] {
-                                lower_stmt(s, ctx);
-                            }
-                        }
-                        // Default return: empty chain
-                        ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
-                        ctx.emit(Op::Ret);
-
-                        ctx.locals = saved_locals;
-                        ctx.inline_depth = saved_inline_depth;
-
-                        let after_body = ctx.current_pos();
-                        ctx.patch_jump(skip_jmp, after_body);
-
-                        ctx.compiled_fns.push((fn_name.clone(), body_start, fn_params));
-                        body_start
-                    };
-
-                    // Emit: push closure marker, push args, CallClosure
-                    // Closure marker must match make_closure_marker() format:
-                    // [tag_molecule, pc_low_u16, pc_high_u16] — 3 raw u16 words
-                    // so closure_body_pc() can extract body_pc correctly.
-                    let tag = crate::molecular::Molecule::raw(0xFF, param_count as u8, 0, 0, 1);
-                    let mut marker = crate::molecular::MolecularChain::single(tag);
-                    marker.push_raw(body_pc as u16);
-                    marker.push_raw((body_pc >> 16) as u16);
-                    ctx.emit(Op::Push(marker));
+                    // Phase 1.5 closure call: push args, then Call(fn_name).
+                    // The closure was registered via Closure+Store in Phase 1.5.
+                    // ASM VM: op_call fallback finds closure in var_table.
+                    // Rust VM: Call handler checks scopes for closure.
                     for arg in args {
                         lower_expr(arg, ctx);
                     }
-                    ctx.emit(Op::CallClosure(param_count as u8));
+                    ctx.emit(Op::Call(fn_name.into()));
                 } else {
                 // Non-recursive: inline as before
                 let call_id = ctx.next_call_id();
