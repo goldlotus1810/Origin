@@ -57,8 +57,10 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| OL.6 | For-in loops | ~100 LOC | FREE | `for item in items { ... }` — parser + semantic + VM. |
-| OL.7 | String interpolation | ~100 LOC | FREE | `"Hello {name}"` — lexer + codegen. |
+| OL.6 | For-in loops + range() | ~120 LOC | DONE ✅ | `for x in items { }`, `for i in range(n) { }`. PR #311. |
+| OL.7 | Smart string concat | ~100 LOC | DONE ✅ | `"Age: " + 25` → auto-convert. `__to_string` builtin. PR #312. |
+| OL.7b | String interpolation `"hello {name}"` | ~200 LOC | FREE | Blocked: lexer self-compile conflict with `{` in source. Needs f-string prefix. |
+| OL.7c | Else-if chains | ~20 LOC | FREE | `else if` syntax. Blocked: jump offset bug in nested IfStmt. |
 | OL.8 | Import/module system | ~300 LOC | FREE | `use module.func` — resolve at compile time. |
 | OL.9 | Error handling | ~200 LOC | FREE | `try { ... } catch { ... }` — parser + VM. |
 | OL.10 | Array/Dict comprehension | ~150 LOC | FREE | `[x * 2 for x in items]` — sugar. |
@@ -123,4 +125,5 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-22  VM optimization 3.7x. Native binary boots. 806KB.
 2026-03-23  SELF-HOSTING. fib(20)=6765. 30+ bugs fixed. 27/27 tests.
 2026-03-23  Rust archived. Olang era begins.
+2026-03-23  OL.6 for-in loops + range(). OL.7 smart string concat. PR #311 #312.
 ```
