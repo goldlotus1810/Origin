@@ -276,7 +276,6 @@ fn compile_expr(state, expr) {
                     compile_expr(state, rhs);
                     patch_jump(state, jmp_pos, current_pos(state));
                 } else {
-                    // Save op on explicit stack before recursive calls
                     push(_ce_stack, op);
                     compile_expr(state, lhs);
                     compile_expr(state, rhs);
@@ -306,6 +305,14 @@ fn compile_expr(state, expr) {
                 Expr::Ident { name } => { let _ce_fname = name; },
                 _ => {},
             };
+            // Save ALL locals BEFORE args (fn calls may overwrite)
+            let _ce_nl = len(state.locals);
+            let _ce_sli = 0;
+            while _ce_sli < _ce_nl {
+                emit_op(state, make_op_name("LoadLocal", state.locals[_ce_sli]));
+                let _ce_sli = _ce_sli + 1;
+            };
+            push(_ce_stack, _ce_nl);
             // Compile args
             let ai = 0;
             while ai < len(args) {
@@ -342,6 +349,17 @@ fn compile_expr(state, expr) {
                         };
                     };
                 };
+            };
+            // Restore locals after ANY call (saved before args)
+            let _ce_rnl = pop(_ce_stack);
+            if _ce_rnl > 0 {
+                emit_op(state, make_op_name("Store", "__call_ret"));
+                let _ce_rli = _ce_rnl - 1;
+                while _ce_rli >= 0 {
+                    emit_op(state, make_op_name("Store", state.locals[_ce_rli]));
+                    let _ce_rli = _ce_rli - 1;
+                };
+                emit_op(state, make_op_name("LoadLocal", "__call_ret"));
             };
         },
         Expr::FieldAccess { object, field } => {
