@@ -3995,9 +3995,8 @@ msg_divzero:
 msg_greeting:
     .ascii "\xe2\x97\x8b HomeOS v0.05\n"
     .ascii "\xe2\x97\x8b Type code or text \xc2\xb7 exit to quit\n"
-    .byte 0
 msg_greeting_len:
-    .byte 59                            # total length of greeting
+    .byte 55                            # exact byte count of greeting
 
 msg_prompt:
     .ascii "\xe2\x97\x8b > "             # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
