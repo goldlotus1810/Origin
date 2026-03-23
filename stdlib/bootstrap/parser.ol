@@ -476,14 +476,21 @@ fn parse_match_expr(p) {
 
 // ── Statement parsing ────────────────────────────────────────────
 
+// Explicit stack for recursive parse_block (ASM VM has no scoping)
+let _pb_stack = [];
+
 fn parse_block(p) {
     expect_symbol(p, "{");
-    let stmts = [];
+    let _pb_stmts = [];
     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
-        push(stmts, parse_stmt(p));
+        // Save before recursive parse_stmt (which may call parse_block)
+        push(_pb_stack, _pb_stmts);
+        let _pb_item = parse_stmt(p);
+        let _pb_stmts = pop(_pb_stack);
+        push(_pb_stmts, _pb_item);
     };
     expect_symbol(p, "}");
-    return stmts;
+    return _pb_stmts;
 }
 
 pub fn parse_stmt(p) {
@@ -506,11 +513,11 @@ pub fn parse_stmt(p) {
     // let name = expr;
     if is_keyword_tok(tok, "let") {
         advance(p);
-        let name = expect_ident(p);
+        let _ps_lname = expect_ident(p);
         expect_symbol(p, "=");
-        let value = parse_expr(p);
+        let _ps_lval = parse_expr(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
-        return Stmt::LetStmt { name: name, value: value };
+        return Stmt::LetStmt { name: _ps_lname, value: _ps_lval };
     };
 
     // fn name(params) { body }
@@ -519,55 +526,56 @@ pub fn parse_stmt(p) {
             advance(p); // skip pub
         };
         advance(p); // skip fn
-        let name = expect_ident(p);
+        let _ps_fn_name = expect_ident(p);
         expect_symbol(p, "(");
-        let params = [];
+        let _ps_fn_params = [];
         while !is_symbol_tok(peek(p), ")") && !is_eof(peek(p)) {
-            push(params, expect_ident(p));
+            push(_ps_fn_params, expect_ident(p));
             if is_symbol_tok(peek(p), ",") { advance(p); };
         };
         expect_symbol(p, ")");
-        let body = parse_block(p);
-        return Stmt::FnDef { name: name, params: params, body: body };
+        let _ps_fn_body = parse_block(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::FnDef { name: _ps_fn_name, params: _ps_fn_params, body: _ps_fn_body };
     };
 
     // if cond { ... } else { ... }
     if is_keyword_tok(tok, "if") {
         advance(p);
-        let cond = parse_expr(p);
-        let then_block = parse_block(p);
-        let else_block = [];
+        let _ps_cond = parse_expr(p);
+        let _ps_then = parse_block(p);
+        let _ps_else = [];
         if is_keyword_tok(peek(p), "else") {
             advance(p);
-            let else_block = parse_block(p);
+            let _ps_else = parse_block(p);
         };
         if is_symbol_tok(peek(p), ";") { advance(p); };
-        return Stmt::IfStmt { cond: cond, then_block: then_block, else_block: else_block };
+        return Stmt::IfStmt { cond: _ps_cond, then_block: _ps_then, else_block: _ps_else };
     };
 
     // while cond { ... }
     if is_keyword_tok(tok, "while") {
         advance(p);
-        let cond = parse_expr(p);
-        let body = parse_block(p);
+        let _ps_wcond = parse_expr(p);
+        let _ps_wbody = parse_block(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
-        return Stmt::WhileStmt { cond: cond, body: body };
+        return Stmt::WhileStmt { cond: _ps_wcond, body: _ps_wbody };
     };
 
     // return expr;
     if is_keyword_tok(tok, "return") {
         advance(p);
-        let value = parse_expr(p);
+        let _ps_rval = parse_expr(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
-        return Stmt::ReturnStmt { value: value };
+        return Stmt::ReturnStmt { value: _ps_rval };
     };
 
     // emit expr;
     if is_keyword_tok(tok, "emit") {
         advance(p);
-        let expr = parse_expr(p);
+        let _ps_expr = parse_expr(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
-        return Stmt::EmitStmt { expr: expr };
+        return Stmt::EmitStmt { expr: _ps_expr };
     };
 
     // break;
@@ -695,10 +703,10 @@ pub fn parse_stmt(p) {
 // ── Top-level parse ──────────────────────────────────────────────
 
 pub fn parse(tokens) {
-    let p = new_parser(tokens);
-    let program = [];
-    while !is_eof(peek(p)) {
-        push(program, parse_stmt(p));
+    let _pp = new_parser(tokens);
+    let _pp_program = [];
+    while !is_eof(peek(_pp)) {
+        push(_pp_program, parse_stmt(_pp));
     };
-    return program;
+    return _pp_program;
 }
