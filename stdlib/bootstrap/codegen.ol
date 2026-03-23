@@ -93,13 +93,16 @@ fn emit_str(output, s) {
 }
 
 fn emit_str_u16(output, s) {
-    // Encode string as [len:2][utf8_bytes:N] (for Push chains)
+    // Encode Push chain: [mol_count:2 LE][u16_mol_0:2 LE][u16_mol_1:2 LE]...
+    // Each char → u16 molecule = 0x2100 | byte_value
     let bytes = str_bytes(s);
     let slen = len(bytes);
     emit_u16_le(output, slen);
     let su = 0;
     while su < slen {
-        push(output, bytes[su]);
+        let mol = bytes[su] + 8448;
+        push(output, mol % 256);
+        push(output, mol / 256);
         let su = su + 1;
     };
 }

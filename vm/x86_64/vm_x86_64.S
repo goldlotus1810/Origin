@@ -1320,25 +1320,25 @@ op_call:
     jmp     vm_loop
 
 .call_substr:
-    # Pop len (f64), pop start (f64), pop string → push substring
+    # Pop end (f64), pop start (f64), pop string → push substring
+    # substr(str, start, end) — end is exclusive index (not length)
     add     %rcx, %r13
-    movsd   (%r14), %xmm0             # sub_len
+    movsd   (%r14), %xmm0             # end index
     cvttsd2si %xmm0, %rdx
-    movsd   16(%r14), %xmm0           # start
+    movsd   16(%r14), %xmm0           # start index
     cvttsd2si %xmm0, %rax
     mov     32(%r14), %rsi            # string ptr
-    mov     40(%r14), %rcx            # string len
+    mov     40(%r14), %rcx            # string mol_count
     add     $48, %r14                 # pop 3
 
     # Bounds
     cmp     %rcx, %rax
     jae     .char_at_empty
-    add     %rax, %rdx
     cmp     %rcx, %rdx
     jbe     .substr_ok
-    mov     %rcx, %rdx
+    mov     %rcx, %rdx                 # clamp end to string length
 .substr_ok:
-    sub     %rax, %rdx                 # mol_count of substring
+    sub     %rax, %rdx                 # mol_count = end - start
     lea     (%rsi, %rax, 2), %rsi     # start ptr (×2 for u16 molecules)
 
     # Copy molecules to heap (rdx molecules × 2 bytes each)
