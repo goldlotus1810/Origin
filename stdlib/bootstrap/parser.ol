@@ -397,12 +397,13 @@ fn parse_expr_prec(p, min_prec) {
                     break;
                 };
                 advance(p); // consume operator
-                let _pep_op = ch;
-                // Save lhs + op on explicit stack before recursive call
+                // Save ALL state before recursive call
                 push(_pep_stack, _pep_lhs);
-                push(_pep_stack, _pep_op);
+                push(_pep_stack, ch);
+                push(_pep_stack, min_prec);
                 let _pep_rhs = parse_expr_prec(p, _pep_prec + 1);
-                // Restore after recursion (pop in reverse order)
+                // Restore after recursion
+                let min_prec = pop(_pep_stack);
                 let _pep_op = pop(_pep_stack);
                 let _pep_saved = pop(_pep_stack);
                 let _pep_lhs = Expr::BinOp { op: _pep_op, lhs: _pep_saved, rhs: _pep_rhs };
