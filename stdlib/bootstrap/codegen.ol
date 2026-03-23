@@ -152,10 +152,10 @@ fn tag_for(op_tag) {
 // ── Main encoder ───────────────────────────────────────────────
 
 fn encode_op(_eo_out, op) {
-    let t = op.tag;
+    let t = op[0];
     if t == "PushNum" {
         emit_byte(_eo_out, 21);
-        emit_f64_le(_eo_out, op.value);
+        emit_f64_le(_eo_out, op[2]);
         return;
     };
     if t == "Emit" { emit_byte(_eo_out, 6); return; };
@@ -167,50 +167,50 @@ fn encode_op(_eo_out, op) {
     if t == "ScopeEnd" { emit_byte(_eo_out, 24); return; };
     if t == "Push" {
         emit_byte(_eo_out, 1);
-        emit_str_u16(_eo_out, op.name);
+        emit_str_u16(_eo_out, op[1]);
         return;
     };
     if t == "Load" {
         emit_byte(_eo_out, 2);
-        emit_str(_eo_out, op.name);
+        emit_str(_eo_out, op[1]);
         return;
     };
     if t == "Store" {
         emit_byte(_eo_out, 19);
-        emit_str(_eo_out, op.name);
+        emit_str(_eo_out, op[1]);
         return;
     };
     if t == "LoadLocal" {
         emit_byte(_eo_out, 20);
-        emit_str(_eo_out, op.name);
+        emit_str(_eo_out, op[1]);
         return;
     };
     if t == "StoreUpdate" {
         emit_byte(_eo_out, 28);
-        emit_str(_eo_out, op.name);
+        emit_str(_eo_out, op[1]);
         return;
     };
     if t == "Call" {
         emit_byte(_eo_out, 7);
-        emit_str(_eo_out, op.name);
+        emit_str(_eo_out, op[1]);
         return;
     };
     if t == "Jmp" {
         emit_byte(_eo_out, 9);
-        emit_u32_le(_eo_out, op.value);
+        emit_u32_le(_eo_out, op[2]);
         return;
     };
     if t == "Jz" {
         emit_byte(_eo_out, 10);
-        emit_u32_le(_eo_out, op.value);
+        emit_u32_le(_eo_out, op[2]);
         return;
     };
     if t == "Swap" { emit_byte(_eo_out, 13); return; };
     if t == "Closure" {
         // Closure: [0x25][param_count:1][body_len:4]
         emit_byte(_eo_out, 37);
-        emit_byte(_eo_out, op.value);
-        emit_u32_le(_eo_out, op.name);
+        emit_byte(_eo_out, op[2]);
+        emit_u32_le(_eo_out, op[1]);
         return;
     };
 }
@@ -218,10 +218,10 @@ fn encode_op(_eo_out, op) {
 // ── Op byte size (for jump target resolution) ─────────────────
 
 fn op_size(_os_op) {
-    let _os_t = _os_op.tag;
+    let _os_t = _os_op[0];
     if _os_t == "PushNum" { return 9; };
     if _os_t == "Push" {
-        let _os_name = _os_op.name;
+        let _os_name = _os_op[1];
         let _os_b = str_bytes(_os_name);
         let _os_len = len(_os_b);
         let _os_result = 3 + _os_len * 2;
@@ -229,7 +229,7 @@ fn op_size(_os_op) {
     };
     if _os_t == "Load" || _os_t == "Store" || _os_t == "LoadLocal"
         || _os_t == "StoreUpdate" || _os_t == "Call" {
-        let _os_name2 = _os_op.name;
+        let _os_name2 = _os_op[1];
         let _os_b2 = str_bytes(_os_name2);
         let _os_len2 = len(_os_b2);
         let _os_result2 = 2 + _os_len2;
@@ -262,9 +262,9 @@ pub fn generate(ops) {
     let _gi2 = 0;
     while _gi2 < len(ops) {
         let _gop = ops[_gi2];
-        let _gt = _gop.tag;
+        let _gt = _gop[0];
         if _gt == "Jmp" {
-            let _gtarget = _gop.value;
+            let _gtarget = _gop[2];
             if _gtarget < len(offsets) {
                 emit_byte(_gout, 9);
                 emit_u32_le(_gout, offsets[_gtarget]);
@@ -273,7 +273,7 @@ pub fn generate(ops) {
             };
         } else {
             if _gt == "Jz" {
-                let _gtarget = _gop.value;
+                let _gtarget = _gop[2];
                 if _gtarget < len(offsets) {
                     emit_byte(_gout, 10);
                     emit_u32_le(_gout, offsets[_gtarget]);
@@ -282,14 +282,12 @@ pub fn generate(ops) {
                 };
             } else {
                 if _gt == "Closure" {
-                    // Closure: body_len is op-count in name field.
-                    // Convert to byte-count using offsets.
-                    let _gbody_ops = _gop.name;
+                    let _gbody_ops = _gop[1];
                     let _gbody_start = _gi2 + 1;
                     let _gbody_end = _gbody_start + _gbody_ops;
                     let _gbyte_len = offsets[_gbody_end] - offsets[_gbody_start];
                     emit_byte(_gout, 37);
-                    emit_byte(_gout, _gop.value);
+                    emit_byte(_gout, _gop[2]);
                     emit_u32_le(_gout, _gbyte_len);
                 } else {
                     encode_op(_gout, _gop);
