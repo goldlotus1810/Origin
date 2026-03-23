@@ -25,6 +25,7 @@ union Expr {
     IfExpr { cond: Expr, then_expr: Expr, else_expr: Expr },
     MolLiteral { packed: Num },
     MatchExpr { subject: Expr, arms: Vec[MatchArm] },
+    DictLit { fields: Vec[FieldInit] },
 }
 
 union Stmt {
@@ -66,6 +67,9 @@ type MatchArm {
     body: Vec[Stmt],
 }
 
+// ── Parse error flag (global, checked by repl.ol) ───────────────
+let _g_parse_error = 0;
+
 // ── Parser state ─────────────────────────────────────────────────
 
 type Parser {
@@ -96,10 +100,12 @@ fn expect_symbol(p, sym) {
         TokenKind::Symbol { ch } => {
             if ch != sym {
                 emit "Parse error: expected '" + sym + "' got '" + ch + "'";
+                let _g_parse_error = 1;
             };
         },
         _ => {
             emit "Parse error: expected symbol '" + sym + "'";
+            let _g_parse_error = 1;
         },
     };
     return tok;
@@ -113,6 +119,7 @@ fn expect_ident(p) {
         },
         _ => {
             emit "Parse error: expected identifier";
+            let _g_parse_error = 1;
             return "";
         },
     };
@@ -221,6 +228,7 @@ fn parse_primary(p) {
             };
             // Other keywords used as identifiers (fallthrough to emit error)
             emit "Parse error: unexpected keyword '" + name + "'";
+            let _g_parse_error = 1;
             advance(p);
             return Expr::NumLit { value: 0 };
         },
@@ -344,14 +352,49 @@ fn parse_primary(p) {
                 return Expr::ArrayLit { items: items };
             };
             // Molecular literal: { S=1 R=2 V=128 A=128 T=3 }
+            // Also handles dict literal attempt: { key: val } → error + skip
             if ch == "{" {
                 advance(p);
+                // Lookahead: if next is ident followed by ":", it's a dict literal (unsupported)
+                // Skip to matching "}" to prevent cascading errors
+                let _mol_peek = peek(p);
+                let _mol_is_dict = 0;
+                match _mol_peek.kind {
+                    TokenKind::Ident { name } => {
+                        // Check if token after ident is ":"
+                        if p.pos + 1 < len(p.tokens) {
+                            let _mol_peek2 = p.tokens[p.pos + 1];
+                            match _mol_peek2.kind {
+                                TokenKind::Symbol { ch } => {
+                                    if ch == ":" {
+                                        let _mol_is_dict = 1;
+                                    };
+                                },
+                                _ => {},
+                            };
+                        };
+                    },
+                    _ => {},
+                };
+                if _mol_is_dict == 1 {
+                    // Parse dict literal: { key: value, key2: value2 }
+                    let _dl_fields = [];
+                    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) && _g_parse_error == 0 {
+                        let _dl_fname = expect_ident(p);
+                        expect_symbol(p, ":");
+                        let _dl_fval = parse_expr(p);
+                        push(_dl_fields, FieldInit { name: _dl_fname, value: _dl_fval });
+                        if is_symbol_tok(peek(p), ",") { advance(p); };
+                    };
+                    expect_symbol(p, "}");
+                    return Expr::DictLit { fields: _dl_fields };
+                };
                 let s = 0;
                 let r = 0;
                 let v = 0;
                 let a = 0;
                 let t = 0;
-                while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
+                while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) && _g_parse_error == 0 {
                     let dim = expect_ident(p);
                     expect_symbol(p, "=");
                     let val_tok = advance(p);
@@ -372,11 +415,13 @@ fn parse_primary(p) {
                 return Expr::MolLiteral { packed: packed };
             };
             emit "Parse error: unexpected symbol '" + ch + "'";
+            let _g_parse_error = 1;
             advance(p);
             return Expr::NumLit { value: 0 };
         },
         _ => {
             emit "Parse error: unexpected token";
+            let _g_parse_error = 1;
             advance(p);
             return Expr::NumLit { value: 0 };
         },
@@ -502,7 +547,7 @@ let _pb_stack = [];
 fn parse_block(p) {
     expect_symbol(p, "{");
     let _pb_stmts = [];
-    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
+    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) && _g_parse_error == 0 {
         // Save before recursive parse_stmt (which may call parse_block)
         push(_pb_stack, _pb_stmts);
         let _pb_item = parse_stmt(p);
@@ -757,9 +802,10 @@ pub fn parse_stmt(p) {
 // ── Top-level parse ──────────────────────────────────────────────
 
 pub fn parse(tokens) {
+    let _g_parse_error = 0;
     let _pp = new_parser(tokens);
     let _pp_program = [];
-    while !is_eof(peek(_pp)) {
+    while !is_eof(peek(_pp)) && _g_parse_error == 0 {
         push(_pp_program, parse_stmt(_pp));
     };
     return _pp_program;

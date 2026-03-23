@@ -100,9 +100,10 @@ push(items, 4);
 emit items[0];           // 1
 emit len(items);          // 4
 
-// Dicts
+// Dicts (dict literal syntax)
 let config = { name: "HomeOS", version: 5 };
-emit config.name;
+emit config.name;         // "HomeOS"
+emit config.version;      // 5
 
 // Types & Unions
 type Point { x: Num, y: Num }

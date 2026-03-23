@@ -153,4 +153,5 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  28 PRs in 1 session. Olang = functional programming language. 844KB.
 2026-03-24  Kira inspector: 8 docs conflicts found (DC.1-DC.8). CLAUDE.md + handbook lỗi thời.
 2026-03-24  DC.1-DC.8 ALL FIXED. CLAUDE.md + handbook synced with code.
+2026-03-24  BUG #1 FIXED: dict literal { key: value } + parse error recovery. 21/21 Kira tests pass.
 ```
