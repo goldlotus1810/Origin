@@ -35,7 +35,7 @@
 # Array heap layout: [count:8][elem_0_ptr:8][elem_0_len:8]...
 # When array is relocated by push: old location gets [FORWARD_MARKER:8][new_base:8]
 # Dict heap layout:  [count:8][entry: key_ptr:8 key_len:8 val_ptr:8 val_len:8]...
-.equ ARRAY_INIT_CAP, 1024
+.equ ARRAY_INIT_CAP, 4096
 .equ ARRAY_FORWARD_MARKER, -2      # sentinel: array relocated
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
@@ -1926,13 +1926,17 @@ op_call:
     add     %rdx, %r14
 
 .array_new_done:
-    # ALWAYS reserve ARRAY_INIT_CAP capacity on heap.
-    # This prevents subsequent allocations from landing in our capacity zone.
-    lea     8(%rdi), %rax              # array_base + 8
-    add     $ARRAY_INIT_CAP * 16, %rax # + capacity bytes
+    # Reserve capacity only for EMPTY arrays (used with push).
+    # Non-empty arrays (ArrayLit [1,2,3]) are fixed-size — no capacity needed.
+    mov     (%rdi), %rcx               # count
+    test    %rcx, %rcx
+    jnz     .array_new_push             # non-empty → skip capacity
+    # Empty array: reserve ARRAY_INIT_CAP for future pushes
+    lea     8(%rdi), %rax
+    add     $ARRAY_INIT_CAP * 16, %rax
     cmp     %rax, %r15
-    jae     .array_new_push             # r15 already past capacity
-    mov     %rax, %r15                  # bump r15 to ensure capacity
+    jae     .array_new_push
+    mov     %rax, %r15
 .array_new_push:
     # Push array
     sub     $16, %r14
