@@ -8,6 +8,20 @@
 // Reference: crates/olang/src/lang/semantic.rs (Rust implementation)
 // This only needs to compile lexer.ol + parser.ol, not 100% of Rust version.
 
+pub fn sem_test() {
+    emit "[SEM TEST]";
+    return 999;
+}
+
+// Move analyze here to test if position matters
+pub fn analyze2(ast) {
+    emit "[AZ2]";
+    let state = new_state();
+    return state;
+}
+
+emit "[SEM OK]";
+
 use olang.bootstrap.lexer;
 use olang.bootstrap.parser;
 
@@ -65,6 +79,7 @@ type SemanticState {
 }
 
 fn new_state() {
+    emit "[NS]";
     return SemanticState {
         ops: [],
         locals: [],
@@ -472,6 +487,8 @@ fn compile_expr(state, expr) {
 // ── Statement compilation ───────────────────────────────────────
 
 fn compile_stmt(state, stmt) {
+    emit "[CS]";
+    emit stmt;
     match stmt {
         Stmt::LetStmt { name, value } => {
             compile_expr(state, value);
@@ -631,6 +648,7 @@ fn validate(state) {
 // ── Entry point ─────────────────────────────────────────────────
 
 pub fn analyze(ast) {
+    emit "[AZ]";
     let state = new_state();
 
     // Pass 1: Collect function definitions
@@ -639,8 +657,6 @@ pub fn analyze(ast) {
     // Decide compilation strategy
     if len(state.fns) > 10 {
         state.use_call_closure = 1;
-        // Pass 1.5: Pre-compile function bodies
-        // Emit Jmp to skip all function bodies
         let skip_pos = current_pos(state);
         emit_op(state, make_op_num("Jmp", 0));
         precompile_fns(state, ast);

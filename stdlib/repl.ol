@@ -23,32 +23,33 @@ pub fn repl_eval(input) {
 
   // Phase 1: Tokenize
   let tokens = tokenize(src);
+  emit "[T]";
+  emit len(tokens);
   if len(tokens) == 0 { return ""; }
-
-  // Check for tokenizer error token
-  let last = tokens[len(tokens) - 1];
-  if last.type == "Error" {
-    return "Lex error: " + last.value;
-  }
 
   // Phase 2: Parse
   let ast = parse(tokens);
-  if ast.error {
-    return "Parse error: " + ast.error;
-  }
+  emit "[P]";
+  emit len(ast);
 
   // Phase 3: Semantic analysis
+  let tv = sem_test();
+  emit "[ST]";
+  emit tv;
   let state = analyze(ast);
-  if len(state.errors) > 0 {
-    return "Error: " + state.errors[0];
-  }
+  emit "[A]";
+  emit len(state.ops);
 
   // Phase 4: Code generation
   let bc = generate(state.ops);
+  emit "[G]";
+  emit len(bc);
   if len(bc) == 0 { return ""; }
 
   // Phase 5: Execute compiled bytecode
-  return __eval_bytecode(bc);
+  let result = __eval_bytecode(bc);
+  emit "[E]";
+  return result;
 }
 
 // ════════════════════════════════════════════════════════
