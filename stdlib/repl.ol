@@ -31,8 +31,8 @@ pub fn repl_eval(input) {
   // Phase 3: Semantic analysis
   let state = analyze(ast);
 
-  // Phase 4: Code generation
-  let bc = generate(state.ops);
+  // Phase 4: Bytecode already in state.output (direct emission)
+  let bc = state.output;
   if len(bc) == 0 { return ""; }
 
   // Phase 5: Execute compiled bytecode
