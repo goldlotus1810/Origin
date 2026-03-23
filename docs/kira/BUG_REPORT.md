@@ -91,17 +91,19 @@ echo 'let d = { name: "Kira", age: 3 }' | gdb -batch \
 | 19 | Range | `for i in range(5)` | 0..4 | 0..4 |
 | 20 | Break | `break` at i==5 | 0..4 | 0..4 |
 
-### FAIL (1/21 tests)
+### FAIL (0/21 tests)
 
-| # | Test | Input | Expected | Actual | Bug ID |
+_All 21 tests pass as of 2026-03-24._
+
+| # | Test | Input | Expected | Actual | Status |
 |---|------|-------|----------|--------|--------|
-| 21 | Dict literal | `{ name: "Kira" }` | dict object | SEGFAULT | BUG #1 |
+| 21 | Dict literal | `{ name: "Kira" }` | dict object | dict object | FIXED ✅ |
 
 ---
 
 ## Ghi chú cho phiên sau
 
-- [ ] Fix BUG #1 — ưu tiên error recovery trước, dict syntax sau
+- [x] Fix BUG #1 — error recovery + dict literal syntax (2026-03-24)
 - [ ] Kiểm tra `origin_new.olang` tracked trong git — cân nhắc `git rm --cached` để untrack
 - [ ] Dọn 16 Rust warnings (optional, low priority)
 - [ ] Test thêm: recursion depth limit, large arrays (>256 elements), string edge cases
@@ -113,4 +115,5 @@ echo 'let d = { name: "Kira", age: 3 }' | gdb -batch \
 
 ```
 2026-03-23  Phiên đầu tiên. 20/21 tests pass. BUG #1: dict literal segfault.
+2026-03-24  BUG #1 FIXED. 21/21 tests pass. Dict literal + parse error recovery.
 ```
