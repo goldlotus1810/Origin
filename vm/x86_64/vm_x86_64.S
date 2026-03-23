@@ -2992,19 +2992,58 @@ op_emit:
     jmp     vm_loop
 
 .emit_array:
-    # Print "[array N]" with element count
+    # Print "[elem0, elem1, ...]" with actual contents
     # rsi = array base ptr
     test    %rsi, %rsi
     jz      .emit_array_empty
-    mov     (%rsi), %rax               # count
-    lea     str_array_open(%rip), %rsi
-    mov     $7, %edx                    # "[array "
+    push    %rsi                        # save array base
+    # Print "["
+    lea     str_lbracket(%rip), %rsi
+    mov     $1, %edx
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
-    # Print count as number
-    cvtsi2sd %rax, %xmm0
-    call    f64_to_ascii
+    pop     %rsi                        # restore array base
+    mov     (%rsi), %rcx               # count
+    test    %rcx, %rcx
+    jz      .emit_array_close
+    lea     8(%rsi), %rbp              # first element ptr
+    xor     %eax, %eax                  # index = 0
+    push    %rcx                        # save count
+.emit_array_elem:
+    push    %rax                        # save index
+    push    %rbp                        # save element ptr
+    # Check element type
+    mov     8(%rbp), %rdx              # elem len/marker
+    cmp     $F64_MARKER, %rdx
+    je      .emit_array_f64
+    # String element: decode u16 molecules
+    mov     (%rbp), %rsi               # string ptr
+    test    %rdx, %rdx
+    jz      .emit_array_elem_done
+    # Decode molecules to ASCII on heap
+    push    %rdx
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+.emit_arr_str_decode:
+    test    %rcx, %rcx
+    jz      .emit_arr_str_write
+    movzwl  (%rsi), %eax
+    movb    %al, (%rdi)
+    add     $2, %rsi
+    inc     %rdi
+    dec     %rcx
+    jmp     .emit_arr_str_decode
+.emit_arr_str_write:
+    pop     %rdx                        # mol_count = char count
+    mov     %r15, %rsi
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .emit_array_elem_done
+.emit_array_f64:
+    movq    (%rbp), %xmm0             # f64 bits
+    call    f64_to_ascii               # → eax = len, output at r15
     mov     %r15, %rsi
     mov     %eax, %edx
     mov     $1, %edi
@@ -3013,8 +3052,31 @@ op_emit:
     syscall
     pop     %rax
     add     %rax, %r15
-    lea     str_bracket_nl(%rip), %rsi
+.emit_array_elem_done:
+    pop     %rbp                        # restore element ptr
+    pop     %rax                        # restore index
+    inc     %rax
+    add     $16, %rbp                   # next element
+    # Check if more elements
+    mov     (%rsp), %rcx              # peek count from stack
+    cmp     %rcx, %rax
+    jae     .emit_array_close_pop
+    # Print ", "
+    push    %rax
+    push    %rbp
+    lea     str_comma_space(%rip), %rsi
     mov     $2, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rbp
+    pop     %rax
+    jmp     .emit_array_elem
+.emit_array_close_pop:
+    pop     %rcx                        # pop saved count
+.emit_array_close:
+    lea     str_rbracket_nl(%rip), %rsi
+    mov     $2, %edx                    # "]\n"
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
@@ -4293,6 +4355,9 @@ const_neg_one:  .double -1.0
 str_array_open:  .ascii "[array "
 str_bracket_nl:  .ascii "]\n"
 str_empty_array: .ascii "[]\n\0"
+str_lbracket:    .ascii "["
+str_rbracket_nl: .ascii "]\n"
+str_comma_space: .ascii ", "
 str_dict_open:   .ascii "{dict "
 str_brace_nl:    .ascii "}\n"
 str_empty_dict:  .ascii "{}\n\0"
