@@ -908,6 +908,9 @@ op_call:
     movabs  $0x3F9867C32BC1B166, %rdx   # __to_string
     cmp     %rdx, %rax
     je      .call_to_string
+    movabs  $0x07515EC1BC3E1099, %rdx   # __char_code
+    cmp     %rdx, %rax
+    je      .call_char_code
     movabs  $0xE811320261AE416D, %rdx   # __type_of
     cmp     %rdx, %rax
     je      .call_type_of
@@ -1746,6 +1749,27 @@ op_call:
     # Non-convertible types: return empty string
     mov     $0, (%r14)
     mov     $0, 8(%r14)
+    jmp     vm_loop
+
+# ── Char-code builtin: string → f64 byte value (NO heap allocation) ────
+
+.call_char_code:
+    add     %rcx, %r13
+    # Pop string (u16 molecule chain)
+    mov     (%r14), %rsi               # string ptr
+    mov     8(%r14), %rcx              # mol_count
+    # Read first molecule's low byte = ASCII value
+    test    %rcx, %rcx
+    jz      .char_code_zero
+    movzbl  (%rsi), %eax               # low byte of first u16 molecule
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.char_code_zero:
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ── String-trim builtin ─────────────────────────────────────────────────

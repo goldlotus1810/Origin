@@ -71,6 +71,7 @@ type SemanticState {
 fn new_state() {
     return SemanticState {
         ops: [],
+        output: [],
         locals: [],
         fns: [],
         fn_bodies: [],
@@ -83,17 +84,150 @@ fn new_state() {
     };
 }
 
+// Direct bytecode emission — no IR buffer, no heap corruption
+fn _emit_byte(state, _eb_val) {
+    push(state.output, _eb_val);
+}
+
+fn _emit_u32_le(state, _eu_val) {
+    push(state.output, _eu_val % 256);
+    push(state.output, (_eu_val / 256) % 256);
+    push(state.output, (_eu_val / 65536) % 256);
+    push(state.output, (_eu_val / 16777216) % 256);
+}
+
+fn _emit_f64_le(state, _ef_val) {
+    let _ef_bytes = __f64_to_le_bytes(_ef_val);
+    let _ef_i = 0;
+    while _ef_i < 8 {
+        push(state.output, _ef_bytes[_ef_i]);
+        let _ef_i = _ef_i + 1;
+    };
+}
+
+fn _emit_str(state, _es_str) {
+    let _es_bytes = __str_bytes(_es_str);
+    let _es_len = len(_es_bytes);
+    push(state.output, _es_len);
+    let _es_i = 0;
+    while _es_i < _es_len {
+        push(state.output, _es_bytes[_es_i]);
+        let _es_i = _es_i + 1;
+    };
+}
+
+fn _emit_str_u16(state, _esu_str) {
+    let _esu_bytes = __str_bytes(_esu_str);
+    let _esu_len = len(_esu_bytes);
+    // Length prefix = number of u16 molecules
+    push(state.output, _esu_len % 256);
+    push(state.output, (_esu_len / 256) % 256);
+    let _esu_i = 0;
+    while _esu_i < _esu_len {
+        push(state.output, _esu_bytes[_esu_i]);
+        push(state.output, 33);
+        let _esu_i = _esu_i + 1;
+    };
+}
+
+// Direct emit functions that DON'T use temp arrays (avoid heap overlap)
+fn emit_num(state, _en_val) {
+    _emit_byte(state, 21);
+    _emit_f64_le(state, _en_val);
+}
+
+fn emit_load(state, _el_name) {
+    let _el_len = len(_el_name);
+    _emit_byte(state, 2);
+    push(state.output, _el_len);
+    let _el_i = 0;
+    while _el_i < _el_len {
+        let _el_code = __char_code(char_at(_el_name, _el_i));
+        push(state.output, _el_code);
+        let _el_i = _el_i + 1;
+    };
+}
+
+fn emit_store(state, _es_name) {
+    let _es_len = len(_es_name);
+    _emit_byte(state, 19);
+    push(state.output, _es_len);
+    let _es_i = 0;
+    while _es_i < _es_len {
+        push(state.output, __char_code(char_at(_es_name, _es_i)));
+        let _es_i = _es_i + 1;
+    };
+}
+
+fn emit_call(state, _ec_name) {
+    let _ec_len = len(_ec_name);
+    _emit_byte(state, 7);
+    push(state.output, _ec_len);
+    let _ec_i = 0;
+    while _ec_i < _ec_len {
+        push(state.output, __char_code(char_at(_ec_name, _ec_i)));
+        let _ec_i = _ec_i + 1;
+    };
+}
+
+fn emit_push_str(state, _eps_name) {
+    _emit_byte(state, 1);
+    _emit_str_u16(state, _eps_name);
+}
+
+fn emit_simple(state, _esm_opcode) {
+    _emit_byte(state, _esm_opcode);
+}
+
+fn emit_jmp(state, _ej_target) {
+    _emit_byte(state, 9);
+    _emit_u32_le(state, _ej_target);
+}
+
+fn emit_jz(state, _ejz_target) {
+    _emit_byte(state, 10);
+    _emit_u32_le(state, _ejz_target);
+}
+
+fn emit_closure(state, _ecl_pcnt) {
+    _emit_byte(state, 37);
+    _emit_byte(state, _ecl_pcnt);
+    _emit_u32_le(state, 0);
+}
+
+// Legacy emit_op — routes to direct functions
 fn emit_op(state, _op) {
-    push(state.ops, _op);
+    let _eo_tag = _op[0];
+    let _eo_name = _op[1];
+    let _eo_val = _op[2];
+    if _eo_tag == "PushNum" { emit_num(state, _eo_val); return; };
+    if _eo_tag == "Emit" { emit_simple(state, 6); return; };
+    if _eo_tag == "Halt" { emit_simple(state, 15); return; };
+    if _eo_tag == "Ret" { emit_simple(state, 8); return; };
+    if _eo_tag == "Pop" { emit_simple(state, 12); return; };
+    if _eo_tag == "Dup" { emit_simple(state, 11); return; };
+    if _eo_tag == "Swap" { emit_simple(state, 13); return; };
+    if _eo_tag == "Push" { emit_push_str(state, _eo_name); return; };
+    if _eo_tag == "Load" { emit_load(state, _eo_name); return; };
+    if _eo_tag == "Store" { emit_store(state, _eo_name); return; };
+    if _eo_tag == "LoadLocal" { emit_load(state, _eo_name); return; };
+    if _eo_tag == "Call" { emit_call(state, _eo_name); return; };
+    if _eo_tag == "Jmp" { emit_jmp(state, _eo_val); return; };
+    if _eo_tag == "Jz" { emit_jz(state, _eo_val); return; };
+    if _eo_tag == "Closure" { emit_closure(state, _eo_val); return; };
 }
 
 fn current_pos(state) {
-    return len(state.ops);
+    return len(state.output);
 }
 
 fn patch_jump(state, pos, target) {
-    let _pj_old = state.ops[pos];
-    set_at(state.ops, pos, [_pj_old[0], _pj_old[1], target]);
+    // Patch 4-byte LE u32 at pos+1 (after opcode byte)
+    let _pj_pos = pos + 1;
+    set_at(state.output, _pj_pos, target % 256);
+    set_at(state.output, _pj_pos + 1, (target / 256) % 256);
+    set_at(state.output, _pj_pos + 2, (target / 65536) % 256);
+    set_at(state.output, _pj_pos + 3, (target / 16777216) % 256);
 }
 
 fn is_local(state, name) {
@@ -242,16 +376,12 @@ fn compile_expr(state, expr) {
         },
         Expr::Ident { name } => {
             if name == "true" {
-                emit_op(state, make_op_num("PushNum", 1));
+                emit_num(state, 1);
             } else {
                 if name == "false" {
-                    emit_op(state, make_op_name("Push", ""));
+                    emit_push_str(state, "");
                 } else {
-                    if is_local(state, name) {
-                        emit_op(state, make_op_name("LoadLocal", name));
-                    } else {
-                        emit_op(state, make_op_name("Load", name));
-                    };
+                    emit_load(state, name);
                 };
             };
         },
@@ -508,11 +638,14 @@ fn compile_stmt(state, stmt) {
             emit_op(state, make_op_name("Push", ""));
             emit_op(state, make_op_simple("Ret"));
             restore_locals(state, _fn_saved);
-            // Patch Closure body_len
-            let _fn_body_len = current_pos(state) - _fn_closure_pos - 1;
-            set_at(state.ops, _fn_closure_pos, make_op(
-                "Closure", _fn_body_len, _fn_pcnt
-            ));
+            // Patch Closure body_len (in bytes)
+            // Closure instruction = [0x25][param_count:1][body_len:4] = 6 bytes
+            let _fn_body_len = current_pos(state) - _fn_closure_pos - 6;
+            let _fn_bpos = _fn_closure_pos + 2;
+            set_at(state.output, _fn_bpos, _fn_body_len % 256);
+            set_at(state.output, _fn_bpos + 1, (_fn_body_len / 256) % 256);
+            set_at(state.output, _fn_bpos + 2, (_fn_body_len / 65536) % 256);
+            set_at(state.output, _fn_bpos + 3, (_fn_body_len / 16777216) % 256);
             // Store closure in var_table
             emit_op(state, make_op_name("Store", _fn_name));
         },
