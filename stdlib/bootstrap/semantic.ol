@@ -17,6 +17,7 @@ let _if_stack = [];
 let _break_patches = [];
 let _continue_patches = [];
 let _g_output = [];
+let _g_pos = 0;
 
 // ── IR Opcode representation ────────────────────────────────────
 // We represent opcodes as structs with an "op" tag string + args.
@@ -69,8 +70,18 @@ type SemanticState {
     unions: Vec[Str],
 }
 
-fn new_state() {
+fn _prefill_output() {
     let _g_output = [];
+    let _pf = 0;
+    while _pf < 1024 {
+        push(_g_output, 0);
+        let _pf = _pf + 1;
+    };
+}
+
+fn new_state() {
+    _prefill_output();
+    let _g_pos = 0;
     return SemanticState {
         ops: [],
         locals: [],
@@ -87,21 +98,22 @@ fn new_state() {
 
 // Direct bytecode emission — no IR buffer, no heap corruption
 fn _emit_byte(state, _eb_val) {
-    push(_g_output, _eb_val);
+    set_at(_g_output, _g_pos, _eb_val);
+    let _g_pos = _g_pos + 1;
 }
 
 fn _emit_u32_le(state, _eu_val) {
-    push(_g_output, _eu_val % 256);
-    push(_g_output, (_eu_val / 256) % 256);
-    push(_g_output, (_eu_val / 65536) % 256);
-    push(_g_output, (_eu_val / 16777216) % 256);
+    _emit_byte(state, _eu_val % 256);
+    _emit_byte(state, (_eu_val / 256) % 256);
+    _emit_byte(state, (_eu_val / 65536) % 256);
+    _emit_byte(state, (_eu_val / 16777216) % 256);
 }
 
 fn _emit_f64_le(state, _ef_val) {
     let _ef_bytes = __f64_to_le_bytes(_ef_val);
     let _ef_i = 0;
     while _ef_i < 8 {
-        push(_g_output, _ef_bytes[_ef_i]);
+        _emit_byte(state, _ef_bytes[_ef_i]);
         let _ef_i = _ef_i + 1;
     };
 }
@@ -109,10 +121,10 @@ fn _emit_f64_le(state, _ef_val) {
 fn _emit_str(state, _es_str) {
     let _es_bytes = __str_bytes(_es_str);
     let _es_len = len(_es_bytes);
-    push(_g_output, _es_len);
+    _emit_byte(state, _es_len);
     let _es_i = 0;
     while _es_i < _es_len {
-        push(_g_output, _es_bytes[_es_i]);
+        _emit_byte(state, _es_bytes[_es_i]);
         let _es_i = _es_i + 1;
     };
 }
@@ -120,13 +132,12 @@ fn _emit_str(state, _es_str) {
 fn _emit_str_u16(state, _esu_str) {
     let _esu_bytes = __str_bytes(_esu_str);
     let _esu_len = len(_esu_bytes);
-    // Length prefix = number of u16 molecules
-    push(_g_output, _esu_len % 256);
-    push(_g_output, (_esu_len / 256) % 256);
+    _emit_byte(state, _esu_len % 256);
+    _emit_byte(state, (_esu_len / 256) % 256);
     let _esu_i = 0;
     while _esu_i < _esu_len {
-        push(_g_output, _esu_bytes[_esu_i]);
-        push(_g_output, 33);
+        _emit_byte(state, _esu_bytes[_esu_i]);
+        _emit_byte(state, 33);
         let _esu_i = _esu_i + 1;
     };
 }
@@ -140,11 +151,10 @@ fn emit_num(state, _en_val) {
 fn emit_load(state, _el_name) {
     let _el_len = len(_el_name);
     _emit_byte(state, 2);
-    push(_g_output, _el_len);
+    _emit_byte(state, _el_len);
     let _el_i = 0;
     while _el_i < _el_len {
-        let _el_code = __char_code(char_at(_el_name, _el_i));
-        push(_g_output, _el_code);
+        _emit_byte(state, __char_code(char_at(_el_name, _el_i)));
         let _el_i = _el_i + 1;
     };
 }
@@ -152,10 +162,10 @@ fn emit_load(state, _el_name) {
 fn emit_store(state, _es_name) {
     let _es_len = len(_es_name);
     _emit_byte(state, 19);
-    push(_g_output, _es_len);
+    _emit_byte(state, _es_len);
     let _es_i = 0;
     while _es_i < _es_len {
-        push(_g_output, __char_code(char_at(_es_name, _es_i)));
+        _emit_byte(state, __char_code(char_at(_es_name, _es_i)));
         let _es_i = _es_i + 1;
     };
 }
@@ -163,10 +173,10 @@ fn emit_store(state, _es_name) {
 fn emit_call(state, _ec_name) {
     let _ec_len = len(_ec_name);
     _emit_byte(state, 7);
-    push(_g_output, _ec_len);
+    _emit_byte(state, _ec_len);
     let _ec_i = 0;
     while _ec_i < _ec_len {
-        push(_g_output, __char_code(char_at(_ec_name, _ec_i)));
+        _emit_byte(state, __char_code(char_at(_ec_name, _ec_i)));
         let _ec_i = _ec_i + 1;
     };
 }
@@ -219,7 +229,7 @@ fn emit_op(state, _op) {
 }
 
 fn current_pos(state) {
-    return len(_g_output);
+    return _g_pos;
 }
 
 fn patch_jump(state, pos, target) {

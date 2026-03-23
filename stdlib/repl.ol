@@ -31,9 +31,9 @@ pub fn repl_eval(input) {
   // Phase 3: Semantic analysis
   let state = analyze(ast);
 
-  // Phase 4: Bytecode in global _g_output
+  // Phase 4: Bytecode in _g_output (pre-filled array with set_at, no push)
   let bc = _g_output;
-  if len(bc) == 0 { return ""; }
+  if _g_pos == 0 { return ""; }
 
   // Phase 5: Execute compiled bytecode
   return __eval_bytecode(bc);
