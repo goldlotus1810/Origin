@@ -2162,6 +2162,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "neg" => Some("__hyp_neg"),
                 "mod" => Some("__hyp_mod"),
                 "array_set" => Some("__array_set"),
+                "set_at" => Some("__array_set"),
                 "slice" => Some("__array_slice"),
                 "is_empty" => Some("__is_empty"),
                 "eq" => Some("__eq"),

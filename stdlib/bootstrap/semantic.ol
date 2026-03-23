@@ -542,7 +542,7 @@ fn compile_stmt(state, stmt) {
             compile_expr(state, cond);
             let jz_pos = current_pos(state);
             emit_op(state, make_op_num("Jz", 0));
-            emit_op(state, make_op_simple("Pop"));
+            // Jz pops condition. No extra Pop needed.
             // Then block
             let ti = 0;
             while ti < len(then_block) {
@@ -553,7 +553,6 @@ fn compile_stmt(state, stmt) {
                 let jmp_pos = current_pos(state);
                 emit_op(state, make_op_num("Jmp", 0));
                 patch_jump(state, jz_pos, current_pos(state));
-                emit_op(state, make_op_simple("Pop"));
                 let ei = 0;
                 while ei < len(else_block) {
                     compile_stmt(state, else_block[ei]);
@@ -562,7 +561,6 @@ fn compile_stmt(state, stmt) {
                 patch_jump(state, jmp_pos, current_pos(state));
             } else {
                 patch_jump(state, jz_pos, current_pos(state));
-                emit_op(state, make_op_simple("Pop"));
             };
         },
         Stmt::WhileStmt { cond, body } => {
@@ -571,7 +569,7 @@ fn compile_stmt(state, stmt) {
             compile_expr(state, cond);
             let jz_pos = current_pos(state);
             emit_op(state, make_op_num("Jz", 0));
-            emit_op(state, make_op_simple("Pop"));
+            // Jz pops condition. No extra Pop.
             let bi = 0;
             while bi < len(body) {
                 compile_stmt(state, body[bi]);
@@ -580,7 +578,6 @@ fn compile_stmt(state, stmt) {
             emit_op(state, make_op_simple("ScopeEnd"));
             emit_op(state, make_op_num("Jmp", loop_start));
             patch_jump(state, jz_pos, current_pos(state));
-            emit_op(state, make_op_simple("Pop"));
         },
         Stmt::BreakStmt => {
             // Simplified: emit Jmp(0) — would need break_jumps tracking
