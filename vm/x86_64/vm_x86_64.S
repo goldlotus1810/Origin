@@ -934,6 +934,9 @@ op_call:
     movabs  $0x46A5ACF6ACD83186, %rdx   # __pop (alias)
     cmp     %rdx, %rax
     je      .call_array_pop
+    movabs  $0xB56460DC788BF312, %rdx   # __array_range
+    cmp     %rdx, %rax
+    je      .call_array_range
     movabs  $0xDEE1C66E474DB2AC, %rdx   # __array_len
     cmp     %rdx, %rax
     je      .call_len                    # same as __len
@@ -1877,6 +1880,51 @@ op_call:
     xor     %eax, %eax
     mov     %rax, (%r14)
     mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Array range builtin: range(n) → [0, 1, 2, ..., n-1]
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_array_range:
+    # Stack: [n] → array of [0, 1, ..., n-1]
+    add     %rcx, %r13
+    # Pop n (f64)
+    movsd   (%r14), %xmm0
+    add     $16, %r14
+    cvttsd2siq %xmm0, %rcx            # n as integer
+
+    # Allocate array on heap: count + n * 16 bytes (within ARRAY_INIT_CAP)
+    mov     %r15, %rdi                  # array base
+    mov     %rcx, (%r15)                # count = n
+    add     $8, %r15                    # past count field
+
+    # Fill array with f64 values 0, 1, 2, ..., n-1
+    xor     %eax, %eax                  # i = 0
+    test    %rcx, %rcx
+    jz      .range_done
+.range_fill:
+    # Convert i to f64 and store as [ptr=f64_bits, len=F64_MARKER]
+    cvtsi2sdq %rax, %xmm1
+    movq    %xmm1, (%r15)              # ptr = f64 bits
+    movq    $F64_MARKER, 8(%r15)       # len = F64_MARKER
+    add     $16, %r15
+    inc     %rax
+    cmp     %rcx, %rax
+    jb      .range_fill
+.range_done:
+    # Ensure heap is bumped to at least ARRAY_INIT_CAP
+    # Calculate: base + 8 + ARRAY_INIT_CAP*16
+    lea     8(%rdi), %rax
+    add     $ARRAY_INIT_CAP * 16, %rax
+    cmp     %rax, %r15
+    jae     .range_push
+    mov     %rax, %r15                  # bump heap to capacity
+.range_push:
+    # Push array onto stack
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
