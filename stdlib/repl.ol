@@ -105,17 +105,42 @@ pub fn repl_eval(input) {
     };
   }
 
-  // Compile command: read file → tokenize → parse → compile (in BOOT context)
+  // Compile command: read file → tokenize → stream parse+compile (incremental)
   if len(src) > 8 {
     if __substr(src, 0, 8) == "compile " {
       let _rc_path = __substr(src, 8, len(src));
       let _rc_src = __file_read(_rc_path);
       if len(_rc_src) == 0 { return "Error: cannot read " + _rc_path; };
+      // Tokenize (single pass — uses __array_with_cap, no heap issue)
       let _rc_tokens = tokenize(_rc_src);
-      emit "  tokens[0]: " + _rc_tokens[0].text + " tokens[1]: " + _rc_tokens[1].text;
-      let _rc_ast = parse(_rc_tokens);
-      let _rc_state = analyze(_rc_ast);
-      return "Compiled " + _rc_path + ": " + __to_string(len(_rc_src)) + " chars → " + __to_string(len(_rc_tokens)) + " tokens → " + __to_string(_g_pos) + " bytes bytecode";
+      let _rc_ntok = len(_rc_tokens);
+      // Stream compile: parse+analyze one statement at a time
+      // Save heap before each statement, restore after emit bytecode
+      _prefill_output();
+      let _rc_parser = { tokens: _rc_tokens, pos: 0 };
+      let _g_parse_error = 0;
+      let _rc_stmts = 0;
+      while _rc_parser.pos < _rc_ntok {
+        // Check EOF
+        let _rc_peek = _rc_tokens[_rc_parser.pos];
+        if _rc_peek.text == "" { break; };
+        // Save heap before parse+compile of this statement
+        let _rc_hp = __heap_save();
+        // Parse ONE statement
+        let _rc_stmt = parse_stmt(_rc_parser);
+        if _g_parse_error == 1 {
+          _g_parse_error = 0;
+          __heap_restore(_rc_hp);
+          continue;
+        };
+        // Compile this statement → emit bytecode to _g_output
+        let _rc_ast1 = [_rc_stmt];
+        analyze(_rc_ast1);
+        _rc_stmts = _rc_stmts + 1;
+        // DON'T restore heap here — _g_output bytecode must persist
+        // But AST node from parse_stmt is no longer needed
+      };
+      return "Compiled " + _rc_path + ": " + __to_string(len(_rc_src)) + " chars → " + __to_string(_rc_ntok) + " tokens → " + __to_string(_g_pos) + " bytes (" + __to_string(_rc_stmts) + " stmts)";
     };
   }
 
