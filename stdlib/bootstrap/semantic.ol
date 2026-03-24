@@ -18,6 +18,8 @@ let _break_patches = [];
 let _continue_patches = [];
 let _g_output = [];
 let _g_pos = 0;
+let _g_for_depth = 0;
+let __g_for_vars = ["", "", "", "", "", "", "", ""];  // max 8 nesting levels
 
 // ── IR Opcode representation ────────────────────────────────────
 // We represent opcodes as structs with an "op" tag string + args.
@@ -795,15 +797,20 @@ fn compile_stmt(state, stmt) {
             let _continue_patches = _wl_old_conts;
         },
         Stmt::ForStmt { var, iter, body } => {
-            // Lower for-in to while loop:
-            //   let __for_arr = iter;
-            //   let __for_len = len(__for_arr);
-            //   let __for_idx = 0;
-            //   while __for_idx < __for_len {
-            //       let var = __for_arr[__for_idx];
-            //       body...
-            //       __for_idx = __for_idx + 1;
-            //   }
+            // Read ALL depth-indexed globals BEFORE incrementing _g_for_depth
+            let _fl_var = "";
+            let _fl_is = 0;
+            let _fl_ie = 0;
+            if _g_for_depth == 0 { let _fl_var = __g_fv0; let _fl_is = __g_fi0s; let _fl_ie = __g_fi0e; };
+            if _g_for_depth == 1 { let _fl_var = __g_fv1; let _fl_is = __g_fi1s; let _fl_ie = __g_fi1e; };
+            if _g_for_depth == 2 { let _fl_var = __g_fv2; let _fl_is = __g_fi2s; let _fl_ie = __g_fi2e; };
+            if _g_for_depth == 3 { let _fl_var = __g_fv3; let _fl_is = __g_fi3s; let _fl_ie = __g_fi3e; };
+            // Lower for-in to while loop with UNIQUE names per depth
+            let _fl_d = __to_string(_g_for_depth);
+            let _fl_arr = "__for_" + _fl_d + "_arr";
+            let _fl_len = "__for_" + _fl_d + "_len";
+            let _fl_idx = "__for_" + _fl_d + "_idx";
+            let _g_for_depth = _g_for_depth + 1;
 
             // Save outer break/continue context
             let _fl_old_breaks = _break_patches;
@@ -811,57 +818,75 @@ fn compile_stmt(state, stmt) {
             let _break_patches = [];
             let _continue_patches = [];
 
-            // Evaluate and store iterator
-            compile_expr(state, iter);
-            emit_op(state, make_op_name("Store", "__for_arr"));
+            // Evaluate and store iterator (re-parse from tokens — dict field corrupt)
+            let _fl_ip = new_parser(__g_fi_tokens);
+            _fl_ip.pos = _fl_is;
+            let _fl_iter_ast = parse_expr(_fl_ip);
+            compile_expr(state, _fl_iter_ast);
+            emit_op(state, make_op_name("Store", _fl_arr));
 
-            // Store length: len(__for_arr)
-            emit_op(state, make_op_name("Load", "__for_arr"));
+            // Store length
+            emit_op(state, make_op_name("Load", _fl_arr));
             emit_op(state, make_op_name("Call", "__array_len"));
-            emit_op(state, make_op_name("Store", "__for_len"));
+            emit_op(state, make_op_name("Store", _fl_len));
 
             // Initialize index = 0
             emit_op(state, make_op_num("PushNum", 0));
-            emit_op(state, make_op_name("Store", "__for_idx"));
+            emit_op(state, make_op_name("Store", _fl_idx));
 
-            // Loop start: __for_idx < __for_len
+            // Loop start
             let _fl_start = current_pos(state);
             let _continue_target = _fl_start;
-            emit_op(state, make_op_name("Load", "__for_idx"));
-            emit_op(state, make_op_name("Load", "__for_len"));
+            emit_op(state, make_op_name("Load", _fl_idx));
+            emit_op(state, make_op_name("Load", _fl_len));
             emit_op(state, make_op_name("Call", "__cmp_lt"));
             let _fl_jz = current_pos(state);
             emit_op(state, make_op_num("Jz", 0));
 
-            // let var = __for_arr[__for_idx]
-            emit_op(state, make_op_name("Load", "__for_arr"));
-            emit_op(state, make_op_name("Load", "__for_idx"));
+            // let var = arr[idx]
+            emit_op(state, make_op_name("Load", _fl_arr));
+            emit_op(state, make_op_name("Load", _fl_idx));
             emit_op(state, make_op_name("Call", "__array_get"));
-            emit_op(state, make_op_name("Store", var));
+            emit_op(state, make_op_name("Store", _fl_var));
 
-            // Compile body
+            // Emit increment + jump BEFORE body compilation
+            // (so we don't need _fl_idx string after body — it may be corrupt)
+            // Skip increment on first entry: Jmp → body_start
+            let _fl_body_jmp = current_pos(state);
+            emit_jmp(state, 0);              // placeholder → body_start
+
+            // INCREMENT SECTION (jumped to from body end)
+            let _fl_inc = current_pos(state);
+            emit_op(state, make_op_name("Load", _fl_idx));
+            emit_op(state, make_op_num("PushNum", 1));
+            emit_op(state, make_op_name("Call", "__hyp_add"));
+            emit_op(state, make_op_name("Store", _fl_idx));
+            emit_jmp(state, _fl_start);     // jump back to condition check
+
+            // BODY START (patched from body_jmp)
+            let _fl_body_start = current_pos(state);
+            patch_jump(state, _fl_body_jmp, _fl_body_start);
+
+            // Compile body — no _fl_* needed after this
             let _fl_bi = 0;
             while _fl_bi < len(body) {
                 compile_stmt(state, body[_fl_bi]);
                 let _fl_bi = _fl_bi + 1;
             };
 
-            // Patch continue jumps → increment section
-            let _fl_inc = current_pos(state);
+            // Patch continue → increment section
             let _fl_cp = 0;
             while _fl_cp < len(_continue_patches) {
                 patch_jump(state, _continue_patches[_fl_cp], _fl_inc);
                 let _fl_cp = _fl_cp + 1;
             };
-            // Increment: __for_idx = __for_idx + 1
-            emit_op(state, make_op_name("Load", "__for_idx"));
-            emit_op(state, make_op_num("PushNum", 1));
-            emit_op(state, make_op_name("Call", "__hyp_add"));
-            emit_op(state, make_op_name("Store", "__for_idx"));
 
-            // Jump back to loop start
+            // Jump to increment section
+            emit_jmp(state, _fl_inc);
+
+            // Jump back
             emit_op(state, make_op_num("Jmp", _fl_start));
-            // Patch break jumps and loop exit
+            // Patch break + exit
             let _fl_exit = current_pos(state);
             patch_jump(state, _fl_jz, _fl_exit);
             let _fl_bp = 0;
@@ -869,9 +894,10 @@ fn compile_stmt(state, stmt) {
                 patch_jump(state, _break_patches[_fl_bp], _fl_exit);
                 let _fl_bp = _fl_bp + 1;
             };
-            // Restore outer context
+            // Restore
             let _break_patches = _fl_old_breaks;
             let _continue_patches = _fl_old_conts;
+            let _g_for_depth = _g_for_depth - 1;
         },
         Stmt::BreakStmt => {
             let _brk_pos = current_pos(state);
