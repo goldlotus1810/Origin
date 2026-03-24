@@ -815,11 +815,19 @@ fn compile_expr(state, expr) {
                     };
                     let jz_pos = current_pos(state);
                     emit_op(state, make_op_num("Jz", 0));
-                    emit_op(state, make_op_simple("Pop"));
-                    // Skip bindings for now (TODO: extract from dict)
-                    // Compile arm body: re-parse + compile ONE stmt at a time
-                    // (avoids storing array of AST dicts which get corrupted)
-                    let _m_bpos = _m_body_s + 1;  // skip opening {
+                    // Pre-emit end-Jmp BEFORE body (body re-parse corrupts later bytes)
+                    let _m_skip_jmp = current_pos(state);
+                    emit_jmp(state, 0);              // skip → body_start
+                    let _mej_pos = current_pos(state);
+                    if ai == 0 { let __g_mej0 = _mej_pos; };
+                    if ai == 1 { let __g_mej1 = _mej_pos; };
+                    if ai == 2 { let __g_mej2 = _mej_pos; };
+                    if ai == 3 { let __g_mej3 = _mej_pos; };
+                    emit_jmp(state, 0);              // end-Jmp (patched later)
+                    let _m_body_begin = current_pos(state);
+                    patch_jump(state, _m_skip_jmp, _m_body_begin);
+                    // Compile arm body via re-parse
+                    let _m_bpos = _m_body_s + 1;
                     while _m_bpos < (_m_body_e - 1) {
                         let _m_bp2 = new_parser(__g_ma_tokens);
                         _m_bp2.pos = _m_bpos;
@@ -829,16 +837,21 @@ fn compile_expr(state, expr) {
                         compile_stmt(state, _m_bstmt);
                         let _m_bpos = _m_bp2.pos;
                     };
+                    // Jump to pre-emitted end-Jmp
+                    emit_jmp(state, _mej_pos);
+                    patch_jump(state, jz_pos, current_pos(state));
+                } else {
+                    // Wildcard: pre-emit end-Jmp then body
+                    let _m_wskip = current_pos(state);
+                    emit_jmp(state, 0);
                     let _mej_pos = current_pos(state);
                     if ai == 0 { let __g_mej0 = _mej_pos; };
                     if ai == 1 { let __g_mej1 = _mej_pos; };
                     if ai == 2 { let __g_mej2 = _mej_pos; };
                     if ai == 3 { let __g_mej3 = _mej_pos; };
-                    emit_op(state, make_op_num("Jmp", 0));
-                    patch_jump(state, jz_pos, current_pos(state));
-                    emit_op(state, make_op_simple("Pop"));
-                } else {
-                    // Wildcard: always matches — re-parse + compile one stmt at a time
+                    emit_jmp(state, 0);
+                    let _m_wbody_begin = current_pos(state);
+                    patch_jump(state, _m_wskip, _m_wbody_begin);
                     let _m_wpos = _m_body_s + 1;
                     while _m_wpos < (_m_body_e - 1) {
                         let _m_wp2 = new_parser(__g_ma_tokens);
@@ -849,17 +862,14 @@ fn compile_expr(state, expr) {
                         compile_stmt(state, _m_wstmt2);
                         let _m_wpos = _m_wp2.pos;
                     };
-                    let _mej_pos = current_pos(state);
-                    if ai == 0 { let __g_mej0 = _mej_pos; };
-                    if ai == 1 { let __g_mej1 = _mej_pos; };
-                    if ai == 2 { let __g_mej2 = _mej_pos; };
-                    if ai == 3 { let __g_mej3 = _mej_pos; };
-                    emit_op(state, make_op_num("Jmp", 0));
+                    emit_jmp(state, _mej_pos);
                 };
                 let ai = ai + 1;
             };
-            // Patch all end jumps (from globals)
+            // Patch all end jumps BEFORE dummy result (so they execute PushNum)
             let _m_end = current_pos(state);
+            // Push dummy result (match is expression, needs value on stack)
+            emit_op(state, make_op_num("PushNum", 0));
             if __g_mej0 >= 0 { patch_jump(state, __g_mej0, _m_end); };
             if __g_mej1 >= 0 { patch_jump(state, __g_mej1, _m_end); };
             if __g_mej2 >= 0 { patch_jump(state, __g_mej2, _m_end); };
