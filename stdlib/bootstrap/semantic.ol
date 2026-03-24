@@ -410,7 +410,9 @@ fn compile_expr(state, expr) {
         Expr::BinOp { op, lhs, rhs } => {
             // Short-circuit for && and ||
             if op == "&&" {
+                // Short-circuit: Dup → Jz(end) → Pop → rhs → end
                 compile_expr(state, lhs);
+                emit_op(state, make_op_simple("Dup"));
                 let jz_pos = current_pos(state);
                 emit_op(state, make_op_num("Jz", 0));
                 emit_op(state, make_op_simple("Pop"));
@@ -418,7 +420,9 @@ fn compile_expr(state, expr) {
                 patch_jump(state, jz_pos, current_pos(state));
             } else {
                 if op == "||" {
+                    // Short-circuit: Dup → Jz(false) → Jmp(end) → false: Pop → rhs → end
                     compile_expr(state, lhs);
+                    emit_op(state, make_op_simple("Dup"));
                     let jz_pos = current_pos(state);
                     emit_op(state, make_op_num("Jz", 0));
                     let jmp_pos = current_pos(state);
