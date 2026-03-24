@@ -923,6 +923,14 @@ op_call:
     movabs  $0x07515EC1BC3E1099, %rdx   # __char_code
     cmp     %rdx, %rax
     je      .call_char_code
+    # ── File I/O builtins ──
+    movabs  $0x229C6ACCAE3B5DBE, %rdx   # __file_read
+    cmp     %rdx, %rax
+    je      .call_file_read
+    movabs  $0xC8220FDA76231661, %rdx   # __file_write
+    cmp     %rdx, %rax
+    je      .call_file_write
+
     movabs  $0xE811320261AE416D, %rdx   # __type_of
     cmp     %rdx, %rax
     je      .call_type_of
@@ -3346,6 +3354,14 @@ op_ret:
     mov     %rcx, 8(%r14)            # mol count (64)
     jmp     vm_loop
 
+.call_file_read:
+    add     %rcx, %r13
+    jmp     op_file_read
+
+.call_file_write:
+    add     %rcx, %r13
+    jmp     op_file_write
+
 .call_floor:
     # __floor(x) → floor(x)
     add     %rcx, %r13
@@ -3862,9 +3878,81 @@ op_query:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_file_read:
-    # Pop filename from stack, read file, push contents
-    # Stub: push empty
-    add     $16, %r14                   # pop filename
+    # Pop filename string, read file contents, push as string
+    # Stack: [filename_ptr, filename_len] → [content_ptr, content_len]
+    mov     (%r14), %rsi            # filename ptr (u16 molecules)
+    mov     8(%r14), %rdx           # filename len (mol count)
+    add     $16, %r14               # pop
+
+    # Decode u16 filename → ASCII bytes in temp buffer
+    lea     sha_input(%rip), %rdi   # reuse sha_input as temp (1024 bytes)
+    xor     %rcx, %rcx
+    test    %rdx, %rdx
+    jz      .fread_empty
+.fread_decode:
+    cmp     %rdx, %rcx
+    jge     .fread_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fread_decode
+
+.fread_open:
+    movb    $0, (%rdi, %rcx)        # null-terminate
+    # Open file
+    lea     sha_input(%rip), %rdi   # filename
+    xor     %esi, %esi              # O_RDONLY
+    xor     %edx, %edx              # mode 0
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .fread_empty             # open failed → push empty
+
+    # Read file into heap
+    mov     %rax, %r8               # save fd
+    mov     %r15, %rdi              # read into heap
+    mov     $0x100000, %edx         # max 1MB
+    mov     %r8, %rsi               # fd (wrong reg)
+    # syscall: read(fd, buf, count) → rdi=fd, rsi=buf, rdx=count
+    mov     %r8, %rdi               # fd
+    mov     %r15, %rsi              # buf
+    mov     $0x100000, %edx         # max 1MB
+    mov     $SYS_READ, %eax
+    syscall
+    push    %rax                    # save bytes_read
+
+    # Close file
+    mov     %r8, %rdi
+    mov     $SYS_CLOSE, %eax
+    syscall
+
+    pop     %rcx                    # bytes_read
+    test    %rcx, %rcx
+    jle     .fread_empty
+
+    # Encode bytes → u16 molecules on heap (after raw bytes)
+    mov     %r15, %r8               # raw bytes base
+    add     %rcx, %r15              # bump past raw bytes
+    mov     %r15, %rdi              # u16 output base
+    xor     %rdx, %rdx
+.fread_encode:
+    cmp     %rcx, %rdx
+    jge     .fread_push
+    movzbl  (%r8, %rdx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %rdx
+    jmp     .fread_encode
+
+.fread_push:
+    # Push string (ptr=u16 base, len=mol count)
+    sub     $16, %r14
+    mov     %rdi, (%r14)            # u16 base
+    mov     %rcx, 8(%r14)           # mol count = byte count
+    jmp     vm_loop
+
+.fread_empty:
     sub     $16, %r14
     xor     %eax, %eax
     mov     %rax, (%r14)
@@ -3873,9 +3961,57 @@ op_file_read:
 
 op_file_write:
 op_file_append:
-    # Pop value, pop filename, write
-    # Stub: pop 2
-    add     $32, %r14
+    # Pop content, pop filename, write to file
+    # Stack: [filename, content]
+    mov     (%r14), %r8             # content ptr
+    mov     8(%r14), %r9            # content len
+    mov     16(%r14), %rsi          # filename ptr
+    mov     24(%r14), %rdx          # filename len
+    add     $32, %r14               # pop both
+
+    # Decode filename → ASCII
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.fwrite_fname:
+    cmp     %rdx, %rcx
+    jge     .fwrite_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fwrite_fname
+.fwrite_open:
+    movb    $0, (%rdi, %rcx)
+    # Open/create file
+    lea     sha_input(%rip), %rdi
+    mov     $0x241, %esi            # O_WRONLY|O_CREAT|O_TRUNC
+    mov     $0644, %edx             # permissions
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      vm_loop                  # open failed
+
+    # Decode content u16 → bytes, write
+    push    %rax                    # save fd
+    lea     sha_input(%rip), %rdi   # reuse buffer for decoded content
+    xor     %rcx, %rcx
+.fwrite_decode:
+    cmp     %r9, %rcx
+    jge     .fwrite_do
+    movzbl  (%r8, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fwrite_decode
+.fwrite_do:
+    pop     %rdi                    # fd
+    push    %rcx                    # save len
+    lea     sha_input(%rip), %rsi   # buf
+    pop     %rdx                    # len
+    push    %rdi                    # save fd
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rdi                    # fd
+    mov     $SYS_CLOSE, %eax
+    syscall
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
