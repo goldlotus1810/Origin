@@ -83,13 +83,13 @@ fn _prefill_output() {
         let _g_output = __array_range(16384);
         let _g_output_ready = 1;
     };
-    // Just reset position
-    let _g_pos = 0;
+    // NOTE: _g_pos NOT reset here — streaming compiler accumulates.
+    // Caller must reset _g_pos explicitly when starting a new compilation.
 }
 
 fn new_state() {
     _prefill_output();
-    let _g_pos = 0;
+    // NOTE: _g_pos NOT reset here — streaming compiler accumulates across statements
     return SemanticState {
         ops: [],
         locals: [],

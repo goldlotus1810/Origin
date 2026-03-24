@@ -516,7 +516,7 @@ fn parse_primary(p) {
                 let packed = mol_new(s, r, v, a, t);
                 return Expr::MolLiteral { packed: packed };
             };
-            emit "Parse error: unexpected symbol '" + ch + "'";
+            emit "Parse error: unexpected symbol '" + ch + "' at pos " + __to_string(p.pos) + " line " + __to_string(tok.line);
             let _g_parse_error = 1;
             advance(p);
             return Expr::NumLit { value: 0 };
@@ -801,9 +801,17 @@ pub fn parse_stmt(p) {
         return Stmt::ForStmt { var: _ps_fvar, iter: _ps_fiter, body: _ps_fbody };
     };
 
-    // return expr;
+    // return expr; OR return;
     if is_keyword_tok(tok, "return") {
         advance(p);
+        // Check for bare return (no expression)
+        if is_symbol_tok(peek(p), ";") {
+            advance(p);
+            return Stmt::ReturnStmt { value: Expr::NumLit { value: 0 } };
+        };
+        if is_symbol_tok(peek(p), "}") {
+            return Stmt::ReturnStmt { value: Expr::NumLit { value: 0 } };
+        };
         let _ps_rval = parse_expr(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::ReturnStmt { value: _ps_rval };

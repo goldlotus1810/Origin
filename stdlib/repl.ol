@@ -115,8 +115,8 @@ pub fn repl_eval(input) {
       let _rc_tokens = tokenize(_rc_src);
       let _rc_ntok = len(_rc_tokens);
       // Stream compile: parse+analyze one statement at a time
-      // Save heap before each statement, restore after emit bytecode
       _prefill_output();
+      let _g_pos = 0;  // reset bytecode position for new compilation
       let _rc_parser = { tokens: _rc_tokens, pos: 0 };
       let _g_parse_error = 0;
       let _rc_stmts = 0;
@@ -290,6 +290,7 @@ pub fn repl_eval(input) {
   }
 
   // Phase 3: Semantic analysis
+  let _g_pos = 0;
   let state = analyze(ast);
 
   // Phase 4: Bytecode in _g_output (pre-filled array with set_at, no push)
