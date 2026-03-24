@@ -3084,6 +3084,12 @@ op_ret:
     cmp     %rcx, %r9
     jge     .sha_done
 
+    # Save rcx/r9/rdi BEFORE W extension (W extend clobbers ecx)
+    lea     sha_save_regs(%rip), %rax
+    mov     %rcx, 24(%rax)            # padded length
+    mov     %r9,  16(%rax)            # block offset
+    mov     %rdi, 32(%rax)            # input pointer
+
     # Prepare message schedule W[0..63]
     lea     sha_w(%rip), %r10
     # W[0..15] = block words (big-endian)
@@ -3138,13 +3144,11 @@ op_ret:
     jmp     .sha_w_extend
 
 .sha_compress:
-    # Save ALL VM registers to BSS (stack push/pop unreliable across 64 rounds)
+    # Save remaining VM registers (rcx/r9/rdi already saved at block_loop)
     lea     sha_save_regs(%rip), %rax
     mov     %r12, 0(%rax)
     mov     %rbp, 8(%rax)
-    mov     %r9,  16(%rax)
-    mov     %rcx, 24(%rax)
-    mov     %rdi, 32(%rax)
+    # r9, rcx, rdi already saved before W extension
     mov     %rbx, 40(%rax)
     mov     %r14, 48(%rax)
     mov     %r15, 56(%rax)
@@ -3274,7 +3278,7 @@ op_ret:
     cmp     $8, %r8d
     jge     .sha_hex_done
     mov     (%rbx, %r8, 4), %eax
-    bswap   %eax                     # big-endian
+    # State words stored as native u32, already correct order — NO bswap needed
     # Emit 8 hex nibbles
     mov     $8, %r9d                  # nibble count
 .sha_nibble:

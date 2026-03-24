@@ -74,7 +74,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 |----|------|--------|--------|-------|
 | OL.11 | ARM64 ASM VM | ~2000 LOC | FREE | vm/aarch64/vm_aarch64.S. asm_emit_arm64.ol có sẵn. |
 | OL.12 | WASM target | ~1000 LOC | FREE | Compile to WASM. wasm_emit.ol có sẵn. |
-| OL.13 | Crypto in ASM | ~500 LOC | FREE | SHA-256, AES-256 in x86_64 assembly. |
+| OL.13 | Crypto in ASM | ~250 LOC | DONE ✅ (SHA-256) | `__sha256(str)` → 64-char hex. FIPS 180-4. 3/3 vectors pass. |
 | OL.14 | Browser E2E | ~500 LOC | FREE | origin.html + WASM binary. |
 | OL.15 | Mobile (Android/iOS) | ~1000 LOC | FREE | ARM64 native + WASM iOS. |
 
