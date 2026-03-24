@@ -4012,6 +4012,11 @@ op_file_append:
     pop     %rdi                    # fd
     mov     $SYS_CLOSE, %eax
     syscall
+    # Push dummy result (builtin must leave value on stack for ExprStmt Pop)
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
