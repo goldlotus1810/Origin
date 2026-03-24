@@ -902,6 +902,9 @@ op_call:
     movabs  $0xEA1BDD6D065BF46A, %rdx   # __str_substr (alias)
     cmp     %rdx, %rax
     je      .call_substr
+    movabs  $0x304A3A896BAAE100, %rdx   # substr (short alias)
+    cmp     %rdx, %rax
+    je      .call_substr
     movabs  $0xFBE159BD1C6EBFA7, %rdx   # __str_trim
     cmp     %rdx, %rax
     je      .call_str_trim
@@ -915,6 +918,9 @@ op_call:
     cmp     %rdx, %rax
     je      .call_str_bytes
     movabs  $0x3EA9B2DCA6EB46A2, %rdx   # __to_number
+    cmp     %rdx, %rax
+    je      .call_to_number
+    movabs  $0xE1C2E76089AECDEF, %rdx   # to_num (short alias)
     cmp     %rdx, %rax
     je      .call_to_number
     movabs  $0x3F9867C32BC1B166, %rdx   # __to_string
@@ -1374,10 +1380,10 @@ op_call:
     repe    cmpsb
     je      .eq_true_chain
 .eq_false_chain:
-    # Push empty (false)
+    # Push f64 0.0 (false) — NOT empty chain (breaks &&/|| short-circuit)
     xor     %eax, %eax
     mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 .eq_true_chain:
     # Push 1.0 (true)
@@ -1389,8 +1395,8 @@ op_call:
 .eq_false:
     add     $16, %r14                  # pop 1
     xor     %eax, %eax
-    mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    mov     %rax, (%r14)               # f64 0.0
+    movq    $F64_MARKER, 8(%r14)       # mark as f64 (not empty chain)
     jmp     vm_loop
 
 .call_lt:
@@ -4012,6 +4018,11 @@ op_file_append:
     pop     %rdi                    # fd
     mov     $SYS_CLOSE, %eax
     syscall
+    # Push dummy result (builtin must leave value on stack for ExprStmt Pop)
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -4219,10 +4230,10 @@ op_cmp_ge:
     jmp     vm_loop
 
 .cmp_false:
-    # Rust VM returns empty chain for false → Jz compatible
+    # Return f64 0.0 for false (NOT empty chain — breaks &&/|| logic)
     xor     %eax, %eax
-    mov     %rax, (%r14)               # ptr = 0
-    mov     %rax, 8(%r14)              # len = 0 (empty = false)
+    mov     %rax, (%r14)               # f64 bits = 0 (0.0)
+    movq    $F64_MARKER, 8(%r14)       # mark as f64
     jmp     vm_loop
 
 vm_error_div_zero:
