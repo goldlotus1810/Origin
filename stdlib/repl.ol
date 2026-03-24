@@ -81,6 +81,37 @@ pub fn repl_eval(input) {
     return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
   }
 
+  // Learn file: read file and split into sentences for knowledge
+  if len(src) > 11 {
+    if __substr(src, 0, 11) == "learn_file " {
+      let _lf_path = __substr(src, 11, len(src));
+      let _lf_content = __file_read(_lf_path);
+      if len(_lf_content) == 0 { return "Error: cannot read " + _lf_path; };
+      // Split by newlines and learn each line
+      let _lf_line = "";
+      let _lf_count = 0;
+      let _lf_i = 0;
+      while _lf_i < len(_lf_content) {
+        let _lf_ch = char_at(_lf_content, _lf_i);
+        if __char_code(_lf_ch) == 10 {
+          if len(_lf_line) > 10 {
+            knowledge_learn(_lf_line);
+            _lf_count = _lf_count + 1;
+          };
+          _lf_line = "";
+        } else {
+          _lf_line = _lf_line + _lf_ch;
+        };
+        let _lf_i = _lf_i + 1;
+      };
+      if len(_lf_line) > 10 {
+        knowledge_learn(_lf_line);
+        _lf_count = _lf_count + 1;
+      };
+      return "Learned " + __to_string(_lf_count) + " facts from " + _lf_path + ". Knowledge: " + __to_string(knowledge_count());
+    };
+  }
+
   // Learn command: teach HomeOS a fact
   if len(src) > 6 {
     if __substr(src, 0, 6) == "learn " {
@@ -107,6 +138,40 @@ pub fn repl_eval(input) {
     };
   }
 
+  // Check if input looks like code (starts with keyword or symbol)
+  // If not → treat as natural text conversation
+  let _re_first = char_at(src, 0);
+  let _re_is_code = 0;
+  // Code starts with: letter (let/fn/if/emit/match/try/for/while/type/union)
+  // or symbol ([ for array, { for dict, ( for group, " for string, digit)
+  if __char_code(_re_first) >= 48 { if __char_code(_re_first) <= 57 { _re_is_code = 1; }; };
+  if _re_first == "[" { _re_is_code = 1; };
+  if _re_first == "\"" { _re_is_code = 1; };
+  if _re_first == "(" { _re_is_code = 1; };
+  if _re_first == "-" { _re_is_code = 1; };
+  // Check keyword starts
+  if len(src) >= 2 {
+    let _re_2 = __substr(src, 0, 2);
+    if _re_2 == "le" { _re_is_code = 1; };
+    if _re_2 == "fn" { _re_is_code = 1; };
+    if _re_2 == "if" { _re_is_code = 1; };
+    if _re_2 == "em" { _re_is_code = 1; };
+    if _re_2 == "ma" { _re_is_code = 1; };
+    if _re_2 == "tr" { _re_is_code = 1; };
+    if _re_2 == "fo" { _re_is_code = 1; };
+    if _re_2 == "wh" { _re_is_code = 1; };
+    if _re_2 == "ty" { _re_is_code = 1; };
+    if _re_2 == "un" { _re_is_code = 1; };
+    if _re_2 == "pu" { _re_is_code = 1; };
+    if _re_2 == "re" { _re_is_code = 1; };
+    if _re_2 == "__" { _re_is_code = 1; };
+  };
+
+  // Not code → natural text conversation
+  if _re_is_code == 0 {
+    return agent_respond(src);
+  }
+
   // Phase 1: Tokenize
   let tokens = tokenize(src);
   if len(tokens) == 0 { return ""; }
@@ -114,9 +179,9 @@ pub fn repl_eval(input) {
   // Phase 2: Parse
   let ast = parse(tokens);
 
-  // Check for parse errors — abort before analyze/eval to prevent segfault
+  // Parse error → fallback to agent
   if _g_parse_error == 1 {
-    return "";
+    return agent_respond(src);
   }
 
   // Phase 3: Semantic analysis
