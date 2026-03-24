@@ -271,7 +271,11 @@ fn parse_primary(p) {
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
                         let fname = expect_ident(p);
                         expect_symbol(p, ":");
+                        push(_pb_stack, fields);
+                        push(_pb_stack, fname);
                         let fvalue = parse_expr(p);
+                        let fname = pop(_pb_stack);
+                        let fields = pop(_pb_stack);
                         push(fields, FieldInit { name: fname, value: fvalue });
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
@@ -292,7 +296,11 @@ fn parse_primary(p) {
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
                         let fname = expect_ident(p);
                         expect_symbol(p, ":");
+                        push(_pb_stack, fields);
+                        push(_pb_stack, fname);
                         let fvalue = parse_expr(p);
+                        let fname = pop(_pb_stack);
+                        let fields = pop(_pb_stack);
                         push(fields, FieldInit { name: fname, value: fvalue });
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
@@ -467,11 +475,16 @@ fn parse_primary(p) {
                 };
                 if _mol_is_dict == 1 {
                     // Parse dict literal: { key: value, key2: value2 }
+                    // NOTE: parse_expr may recurse (nested dict) → save _dl_fields + _dl_fname
                     let _dl_fields = [];
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) && _g_parse_error == 0 {
                         let _dl_fname = expect_ident(p);
                         expect_symbol(p, ":");
+                        push(_pb_stack, _dl_fields);
+                        push(_pb_stack, _dl_fname);
                         let _dl_fval = parse_expr(p);
+                        let _dl_fname = pop(_pb_stack);
+                        let _dl_fields = pop(_pb_stack);
                         push(_dl_fields, FieldInit { name: _dl_fname, value: _dl_fval });
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
