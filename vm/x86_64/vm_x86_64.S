@@ -916,6 +916,11 @@ op_call:
     cmp     %rdx, %rax
     je      .call_type_of
 
+    # ── Error handling builtins ──
+    movabs  $0xDFF308A36F62AAF5, %rdx   # __throw
+    cmp     %rdx, %rax
+    je      .call_throw
+
     # ── Array builtins ──
     movabs  $0xF10E316E51D66791, %rdx   # __array_new
     cmp     %rdx, %rax
@@ -2996,13 +3001,128 @@ op_ret:
     mov     %rdx, (%rsi)
     jmp     vm_loop
 
+.call_throw:
+    # __throw(msg) — unwind to nearest try/catch
+    # Stack: [msg_value] → store in __error var, jump to catch_PC
+    add     %rcx, %r13                  # skip name_len
+    # Pop error message (keep on stack for catch block to access)
+    mov     (%r14), %r8                # msg ptr
+    mov     8(%r14), %r9               # msg len
+    add     $16, %r14                   # pop
+
+    # Store error message in __error variable (hash of "__error")
+    movabs  $0x07515EC1BC3E1099, %rdx   # temp: store as "__error" var
+    # Actually, use the var_table to store error. For now, just jump to catch.
+
+    # Check try_depth
+    lea     try_depth(%rip), %rsi
+    cmpq    $0, (%rsi)
+    je      .throw_no_handler
+
+    # Pop try frame
+    decq    (%rsi)                      # depth--
+    mov     (%rsi), %rdx               # new depth
+    lea     try_stack(%rip), %rdi
+    shl     $4, %rdx                    # depth * 16
+    mov     (%rdi, %rdx), %rax         # catch_PC
+    mov     8(%rdi, %rdx), %r14        # restore stack pointer
+
+    # Push error message onto restored stack (catch block can access it)
+    sub     $16, %r14
+    mov     %r8, (%r14)
+    mov     %r9, 8(%r14)
+
+    # Jump to catch_PC
+    mov     %rax, %r13                  # set PC = catch_PC
+    jmp     vm_loop
+
+.throw_no_handler:
+    # No try block — print error and halt
+    # Print "Error: " prefix
+    lea     .err_prefix(%rip), %rsi
+    mov     $7, %rdx
+    mov     $1, %rdi
+    mov     $1, %rax
+    syscall
+    # Print error message
+    mov     %r8, %rsi
+    mov     %r9, %rdx
+    cmp     $F64_MARKER, %rdx
+    je      .throw_halt                 # skip if f64 (can't print number easily)
+    test    %rdx, %rdx
+    jz      .throw_halt
+    # Check if string (0x21xx pattern)
+    movzwl  (%rsi), %eax
+    and     $0xFF00, %eax
+    cmp     $0x2100, %eax
+    jne     .throw_halt
+    # Decode u16 string
+    mov     %r9, %rcx                   # mol count
+    lea     throw_buf(%rip), %rdi
+    xor     %rdx, %rdx
+.throw_decode:
+    cmp     %rcx, %rdx
+    jge     .throw_write
+    movzbl  (%rsi, %rdx, 2), %eax
+    mov     %al, (%rdi, %rdx)
+    inc     %rdx
+    jmp     .throw_decode
+.throw_write:
+    lea     throw_buf(%rip), %rsi
+    # rdx = length
+    mov     $1, %rdi
+    mov     $1, %rax
+    syscall
+.throw_halt:
+    # Print newline and halt
+    lea     str_newline(%rip), %rsi
+    mov     $1, %rdx
+    mov     $1, %rdi
+    mov     $1, %rax
+    syscall
+    mov     $60, %rax
+    mov     $1, %rdi
+    syscall
+
+.section .rodata
+.err_prefix:
+    .ascii  "Error: "
+.section .text
+
 op_try_begin:
-    # [0x37, target_u32_le]
-    add     $4, %r13                    # skip catch target
+    # [0x1A, catch_offset_u32_le]
+    # Push (catch_PC, saved_r14) onto try_stack
+    # r13 already points past opcode byte
+    movzbl  (%r12, %r13), %eax         # read catch_offset byte 0
+    movzbl  1(%r12, %r13), %edx
+    shl     $8, %edx
+    or      %edx, %eax
+    movzbl  2(%r12, %r13), %edx
+    shl     $16, %edx
+    or      %edx, %eax
+    movzbl  3(%r12, %r13), %edx
+    shl     $24, %edx
+    or      %edx, %eax                  # eax = catch_offset (absolute PC)
+    add     $4, %r13
+
+    # Push onto try_stack
+    lea     try_depth(%rip), %rsi
+    mov     (%rsi), %rdx               # depth
+    lea     try_stack(%rip), %rdi
+    shl     $4, %rdx                    # depth * 16
+    lea     (%rdi, %rdx), %rdi         # try_stack[depth]
+    mov     %rax, (%rdi)               # catch_PC
+    mov     %r14, 8(%rdi)              # saved stack pointer
+    lea     try_depth(%rip), %rsi
+    incq    (%rsi)                      # depth++
     jmp     vm_loop
 
 op_catch_end:
-    # [0x38]
+    # Pop try_stack (catch block finished)
+    lea     try_depth(%rip), %rsi
+    cmpq    $0, (%rsi)
+    je      vm_loop                     # no try frame → skip
+    decq    (%rsi)                      # depth--
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -4506,6 +4626,12 @@ _save_rbx:
 scope_frame_ptrs:
     .space 2048                         # 256 frame pointers × 8 bytes (max recursion depth)
     .align 8
+try_stack:
+    .space 256                          # 16 try frames × 16 bytes (catch_PC:8 + saved_r14:8)
+try_depth:
+    .space 8                            # current try nesting depth (0 = no try)
+throw_buf:
+    .space 256                          # temp buffer for error message decoding
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
 eval_total:

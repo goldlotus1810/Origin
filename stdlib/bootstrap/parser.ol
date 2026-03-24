@@ -44,6 +44,7 @@ union Stmt {
     UseStmt { path: Str },
     MatchStmt { subject: Expr, arms: Vec[MatchArm] },
     FieldAssign { object: Str, field: Str, value: Expr },
+    TryCatch { try_block: Vec[Stmt], catch_block: Vec[Stmt] },
 }
 
 type Field {
@@ -675,6 +676,19 @@ pub fn parse_stmt(p) {
         let _ps_expr = parse_expr(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::EmitStmt { expr: _ps_expr };
+    };
+
+    // try { ... } catch { ... }
+    if is_keyword_tok(tok, "try") {
+        advance(p);
+        let _ps_try = parse_block(p);
+        // expect "catch"
+        if is_keyword_tok(peek(p), "catch") {
+            advance(p);
+        };
+        let _ps_catch = parse_block(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::TryCatch { try_block: _ps_try, catch_block: _ps_catch };
     };
 
     // break;

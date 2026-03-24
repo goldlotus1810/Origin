@@ -65,7 +65,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | OL.7e | Variable assignment fix | ~5 LOC | DONE ✅ | `let b = b + a` now works. LetStmt name save. PR #320. |
 | OL.7f | FieldAssign fix + audit | ~10 LOC | DONE ✅ | Full 18-site match binding audit. PR #321. |
 | OL.8 | Import/module system | ~300 LOC | FREE | `use module.func` — resolve at compile time. |
-| OL.9 | Error handling | ~200 LOC | FREE | `try { ... } catch { ... }` — parser + VM. |
+| OL.9 | Error handling | ~200 LOC | DONE ✅ | `try { ... } catch { ... }` + `__throw(msg)`. VM try_stack + parser + semantic. |
 | OL.10 | Array/Dict comprehension | ~150 LOC | BLOCKED | `[x * 2 for x in items]` — blocked by heap overlap. Dict fields + _ce_stack corrupt during compilation. Need arena allocator. |
 
 ### Tier 3 — Platform
@@ -154,6 +154,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Kira inspector: 8 docs conflicts found (DC.1-DC.8). CLAUDE.md + handbook lỗi thời.
 2026-03-24  DC.1-DC.8 ALL FIXED. CLAUDE.md + handbook synced with code.
 2026-03-24  BUG #1 FIXED: dict literal { key: value } + parse error recovery. 21/21 Kira tests pass.
+2026-03-24  OL.9 DONE: try/catch + __throw(msg). VM try_stack, nested try, unhandled error exit.
 2026-03-24  OL.10 BLOCKED: comprehension expr compilation corrupts _g_output via heap overlap.
             Root cause: _ce_stack capacity zone + ListComp dict fields overwritten by allocs inside compile_expr.
             Fix requires arena allocator or separate heap regions.

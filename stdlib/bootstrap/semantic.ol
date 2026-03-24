@@ -912,6 +912,59 @@ fn compile_stmt(state, stmt) {
             compile_expr(state, subject);
             emit_op(state, make_op_simple("Pop"));
         },
+        Stmt::TryCatch { try_block, catch_block } => {
+            // try { body } catch { handler }
+            // → TryBegin(catch_pc) [try body] Jmp(end) [catch body] CatchEnd
+            let _tc_try = try_block;
+            let _tc_catch = catch_block;
+
+            // TryBegin — patch later with catch_pc
+            let _tc_try_pos = current_pos(state);
+            _emit_byte(state, 26);      // 0x1A = TryBegin
+            _emit_u32_le(state, 0);     // placeholder for catch_offset
+
+            // Compile try block
+            let _tc_ti = 0;
+            while _tc_ti < len(_tc_try) {
+                push(_ce_stack, _tc_try);
+                push(_ce_stack, _tc_catch);
+                push(_ce_stack, _tc_try_pos);
+                push(_ce_stack, _tc_ti);
+                compile_stmt(state, _tc_try[_tc_ti]);
+                let _tc_ti = pop(_ce_stack);
+                let _tc_try_pos = pop(_ce_stack);
+                let _tc_catch = pop(_ce_stack);
+                let _tc_try = pop(_ce_stack);
+                let _tc_ti = _tc_ti + 1;
+            };
+
+            // Jmp past catch on success
+            let _tc_jmp_pos = current_pos(state);
+            emit_jmp(state, 0);         // placeholder
+
+            // Patch TryBegin → catch_pc
+            let _tc_catch_pc = current_pos(state);
+            patch_jump(state, _tc_try_pos, _tc_catch_pc);
+
+            // Compile catch block
+            let _tc_ci = 0;
+            while _tc_ci < len(_tc_catch) {
+                push(_ce_stack, _tc_catch);
+                push(_ce_stack, _tc_jmp_pos);
+                push(_ce_stack, _tc_ci);
+                compile_stmt(state, _tc_catch[_tc_ci]);
+                let _tc_ci = pop(_ce_stack);
+                let _tc_jmp_pos = pop(_ce_stack);
+                let _tc_catch = pop(_ce_stack);
+                let _tc_ci = _tc_ci + 1;
+            };
+
+            // CatchEnd
+            _emit_byte(state, 27);      // 0x1B = CatchEnd
+
+            // Patch Jmp → after catch
+            patch_jump(state, _tc_jmp_pos, current_pos(state));
+        },
         Stmt::ExprStmt { expr } => {
             compile_expr(state, expr);
             emit_op(state, make_op_simple("Pop"));
