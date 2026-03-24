@@ -94,34 +94,104 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | CUT.3 | Olang test framework | — | DONE ✅ | `test` command, 12/12 tests. BLOCK.3 resolved. |
 | CUT.4 | Self-build (no Rust) | — | DONE ✅ | `build` → 381KB binary. fib(20)=6765. Recursive self-build verified. |
 
+### Tier 5 — UDC-native Olang (chuẩn hóa: mọi thứ = node = 16 bits)
+
+> **Triết lý:** Thay vì nhớ hàng ngàn fn với hàng ngàn lệnh,
+> chỉ cần nhớ 8,846 UDC/công thức và ghép chúng lại như Lego.
+> 1 node(fn) == { x = val:UDC[ID]; ... } — 16 bits cho 1 hàm/lệnh.
+> fn{fn{...}} == fn, n=∞-1 → không bao giờ thiếu bộ nhớ.
+>
+> **Nguyên tắc ∞-1:** Không materialize tất cả. Stream, accumulate, reference.
+> **Nguyên tắc Structure=Meaning:** Syntax = toán. Không thêm keyword — cấu trúc tự nói.
+> **Nguyên tắc T×S:** Mọi giá trị = tọa độ 5D. P_weight 2B = hình+quan hệ+cảm xúc+năng lượng+thời gian.
+
+#### Phase 5A — Stabilize (ngôn ngữ ổn định)
+
+| ID | Task | Effort | Status | Notes |
+|----|------|--------|--------|-------|
+| ST.1 | BUG-INDEX/BUG-SORT fix | — | DONE ✅ | a[expr] heap overlap. ArrayLit→push. |
+| ST.2 | map/filter/reduce stdlib | ~50 LOC | TODO | Functional pipeline thay vì manual loops |
+| ST.3 | min/max/any/all/zip/enumerate | ~40 LOC | TODO | Utility functions cơ bản |
+| ST.4 | Regression test suite | ~100 LOC | TODO | 30+ tests covering a[expr], sort, nested loops, closures |
+
+#### Phase 5B — Node-native (1 LOC = 1 node = 16 bits)
+
+| ID | Task | Effort | Status | Notes |
+|----|------|--------|--------|-------|
+| ND.1 | Molecule literal trong Olang | ~30 LOC | TODO | `mol(0x2100)` hoặc `@●` → u16 P_weight trực tiếp trên VM stack |
+| ND.2 | Extract S/R/V/A/T từ molecule | ~20 LOC ASM | TODO | `mol.s()`, `mol.r()`, `mol.v()`, `mol.a()`, `mol.t()` → bit extract builtins |
+| ND.3 | Chain = array of u16 | ~30 LOC | TODO | `chain = [mol1, mol2, mol3]` — compact u16 storage, không phải 16B/entry |
+| ND.4 | Node type native | ~50 LOC | TODO | `node { dn: u16, mol: chain, fire: Num, links: [] }` — mọi fn/var/fact = node |
+| ND.5 | Knowledge → chain storage | ~80 LOC | TODO | Thay string (10KB/fact) → UDC chain (vài bytes). Tiết kiệm 100x. |
+| ND.6 | Variable = node | ~60 LOC | TODO | `let x = 42` → node { dn=hash("x"), mol=encode(42), links=[] } |
+
+#### Phase 5C — Formula dispatch (giá trị = công thức = hình dạng)
+
+| ID | Task | Effort | Status | Notes |
+|----|------|--------|--------|-------|
+| FE.1 | R dispatch: 16 relation types | ~120 LOC | TODO | R=0→Algebraic, R=1→Order, R=5→Currency... (xem PLAN_FORMULA_ENGINE) |
+| FE.2 | V/A physics | ~80 LOC | TODO | V=6→deep well→approach, A=7→supercritical→urgent |
+| FE.3 | T spline parameters | ~60 LOC | TODO | T=3→rhythmic→sin(2πft+φ), frequency/amplitude/phase |
+| FE.4 | S×T rendering | ~100 LOC | TODO | 18 SDF × T params = vô hạn hình dạng. f(p)=\|p\|-r, r=T.amplitude |
+| FE.5 | 42 UDC encode formulas | ~200 LOC | TODO | F₀(cp)=[f_S,f_R,f_V,f_A,f_T]. Xem docs/UDC_DOC/UDC_formulas.md |
+
+#### Phase 5D — Lego composition (fn = chain of nodes)
+
+| ID | Task | Effort | Status | Notes |
+|----|------|--------|--------|-------|
+| LG.1 | fn → inspectable node chain | ~100 LOC | TODO | fn body = chain of instruction nodes, không phải opaque bytecode |
+| LG.2 | Compose fn từ UDC blocks | ~80 LOC | TODO | `fn = compose(node1, node2, node3)` — Lego assembly |
+| LG.3 | Silk = implicit từ chain order | ~40 LOC | TODO | Thay explicit bigrams → sequence trong chain = 0 bytes overhead |
+| LG.4 | Dream = cluster fn → skill | ~60 LOC | TODO | Repeated fn patterns → promote to named skill node |
+| LG.5 | Self-describe: fn biết mình là gì | ~40 LOC | TODO | fn.mol → cảm xúc, fn.fire → hot function, fn.links → related fns |
+
 ---
 
 ## Dependency Graph
 
 ```
             ┌────────────────────────────────┐
-            │ TIER 1 — Intelligence Layer    │
-            │ OL.1 Encoder                   │
-            │ OL.2 Analysis                  │
-            │ OL.3 Intent    → OL.5 Response │
-            │ OL.4 Agents                    │
+            │ TIER 1 — Intelligence Layer    │  ✅ DONE
+            └────────────┬───────────────────┘
+            ┌────────────▼───────────────────┐
+            │ TIER 2 — Language Features     │  ✅ DONE
+            └────────────┬───────────────────┘
+            ┌────────────▼───────────────────┐
+            │ TIER 3 — Platform              │  ⚠️ ARM64 WIP
+            └────────────┬───────────────────┘
+            ┌────────────▼───────────────────┐
+            │ TIER 4 — Cắt dây rốn           │  ✅ DONE
+            └────────────┬───────────────────┘
+                         │
+    ═════════════════════╪══════════════════════ ← HIỆN TẠI
+                         │
+            ┌────────────▼───────────────────┐
+            │ TIER 5A — Stabilize            │
+            │ ST.1-4: bugs, stdlib, tests    │
             └────────────┬───────────────────┘
                          │
             ┌────────────▼───────────────────┐
-            │ TIER 2 — Language Features     │
-            │ OL.6-10 (song song)            │
+            │ TIER 5B — Node-native          │
+            │ ND.1-6: mol literals, chain,   │
+            │         node type, knowledge   │
             └────────────┬───────────────────┘
                          │
             ┌────────────▼───────────────────┐
-            │ TIER 3 — Platform              │
-            │ OL.11 ARM64 │ OL.12 WASM       │
-            │ OL.13 Crypto│ OL.14-15 Browser │
+            │ TIER 5C — Formula dispatch     │
+            │ FE.1-5: R/V/A/T/S eval,       │
+            │         42 UDC formulas        │
             └────────────┬───────────────────┘
                          │
             ┌────────────▼───────────────────┐
-            │ TIER 4 — Cắt dây rốn           │
-            │ CUT.1 → CUT.2 → CUT.3 → CUT.4 │
+            │ TIER 5D — Lego composition     │
+            │ LG.1-5: fn=chain, compose,     │
+            │         Silk, Dream, self-desc │
             └────────────────────────────────┘
+
+  Sau 5D: HomeOS viết trên Olang = ghép Lego.
+  Mỗi LOC = 1 node (16 bits). Mỗi fn = chain of nodes.
+  Không nhớ hàng ngàn lệnh — chỉ nhớ 8,846 UDC + compose.
+```
 ```
 
 ---
