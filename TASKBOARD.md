@@ -199,6 +199,29 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.43 | DONE ✅ | Tests 14 updated |
 | DC.44 | DONE ✅ | Phase 5 section added to CLAUDE.md |
 | DC.45 | DONE ✅ | Auto-learn documented in Phase 5 section |
+| DC.46 | OPEN | `CLAUDE.md:391` — repl 304→322 LOC |
+| DC.47 | OPEN ⚠️ | `CLAUDE.md:392` — homeos 40→**43 files**, 7,992→**8,910** LOC (+918!) |
+| DC.48 | OPEN | `CLAUDE.md:37,378` — Binary ~901KB→~927KB (949KB) |
+| DC.49 | OPEN | `CLAUDE.md:332` — Tests 14→**16** |
+| DC.50 | OPEN | Phase 5 thiếu: alias, node, UDC decode, UTF-8, emo carry-over, stemming, digest |
+
+### Spec v3 vs Code (architecture gap — INFO level)
+
+| # | Spec Section | Status | Notes |
+|---|-------------|--------|-------|
+| SC.1 | SecurityGate 3-layer | ⚠️ Partial | Code: 2 keywords. Spec: Bloom + normalized + semantic |
+| SC.2 | Fusion (multi-modality) | ❌ Not impl | text-only for now |
+| SC.3 | 7 Instincts | ❌ Not impl | Honesty, Contradiction, Causality, etc. |
+| SC.4 | Immune Selection N=3 | ❌ Not impl | single-branch inference |
+| SC.5 | Homeostasis (Free Energy) | ❌ Not impl | no F tracking |
+| SC.6 | DNA Repair (self_correct) | ❌ Not impl | no critique loop |
+| SC.7 | KnowTree hierarchical | ❌ Flat array | spec says L0→L3 tree |
+| SC.8 | UDC + P_weight encoding | ✅ Correct | block ranges + bit layout |
+| SC.9 | Compose (amplify V) | ✅ Correct | |
+| SC.10 | Hebbian Select | ✅ Correct | silk_co_activate |
+| SC.11 | Dream pipeline | ✅ Correct | scan STM + promote |
+| SC.12 | MolecularChain | ✅ Correct | u16 molecules |
+| SC.13 | 10-stage pipeline | ✅ NEW | alias→UDC→node→DN/QR→decode→emoji→output |
 
 ---
 
@@ -257,4 +280,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Inspect #12: 8/8+test 14/14. DC.33-38 FIXED. DC.39-DC.45 new (LOC drift, Phase 5 undoc). 923KB.
 2026-03-24  DC.39-DC.45 ALL FIXED. CLAUDE.md fully synced: LOC, binary, tests, Phase 5.
 2026-03-24  Inspect #13: 6/6+test 14/14. ZERO CONFLICTS. 45/45 DCs resolved. Docs 100% synced. 923KB.
+2026-03-24  P5.2: emotion carry-over + Vietnamese stemming + digest + UTF-8 decoder.
+2026-03-24  P5.3: full pipeline (alias→UDC→node→DN/QR→decode→emoji). 3 new files. 949KB.
+2026-03-24  Inspect #14: 8/8+test 16/16. DC.46-50 new. SC.1-13 Spec v3 audit. 7 gaps (INFO), 6 matched.
 ```
