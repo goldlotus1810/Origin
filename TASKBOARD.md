@@ -66,7 +66,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | OL.7f | FieldAssign fix + audit | ~10 LOC | DONE ✅ | Full 18-site match binding audit. PR #321. |
 | OL.8 | Import/module system | ~300 LOC | FREE | `use module.func` — resolve at compile time. |
 | OL.9 | Error handling | ~200 LOC | DONE ✅ | `try { ... } catch { ... }` + `__throw(msg)`. VM try_stack + parser + semantic. |
-| OL.10 | Array/Dict comprehension | ~150 LOC | BLOCKED | `[x * 2 for x in items]` — blocked by heap overlap. Dict fields + _ce_stack corrupt during compilation. Need arena allocator. |
+| OL.10 | Array comprehension | ~150 LOC | DONE ✅ | `[x * 2 for x in items if cond]`. Depth-indexed globals + manual token emit. |
 
 ### Tier 3 — Platform
 

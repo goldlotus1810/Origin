@@ -26,6 +26,7 @@ union Expr {
     MolLiteral { packed: Num },
     MatchExpr { subject: Expr, arms: Vec[MatchArm] },
     DictLit { fields: Vec[FieldInit] },
+    ArrayComp { var: Str, depth: Num },
 }
 
 union Stmt {
@@ -70,6 +71,28 @@ type MatchArm {
 
 // ── Parse error flag (global, checked by repl.ol) ───────────────
 let _g_parse_error = 0;
+
+// ── ArrayComp globals (depth-indexed — arrays unsafe due to heap overlap) ──
+let _g_comp_depth = 0;
+// expr token ranges
+let __g_ce0s = 0; let __g_ce0e = 0;
+let __g_ce1s = 0; let __g_ce1e = 0;
+let __g_ce2s = 0; let __g_ce2e = 0;
+let __g_ce3s = 0; let __g_ce3e = 0;
+// iter token ranges
+let __g_ci0s = 0; let __g_ci0e = 0;
+let __g_ci1s = 0; let __g_ci1e = 0;
+let __g_ci2s = 0; let __g_ci2e = 0;
+let __g_ci3s = 0; let __g_ci3e = 0;
+// filter token ranges (-1 = no filter)
+let __g_cf0s = -1; let __g_cf0e = -1;
+let __g_cf1s = -1; let __g_cf1e = -1;
+let __g_cf2s = -1; let __g_cf2e = -1;
+let __g_cf3s = -1; let __g_cf3e = -1;
+// var names
+let __g_cv0 = ""; let __g_cv1 = ""; let __g_cv2 = ""; let __g_cv3 = "";
+// tokens ref
+let __g_comp_tokens = "";
 
 // ── Parser state ─────────────────────────────────────────────────
 
@@ -339,14 +362,79 @@ fn parse_primary(p) {
                 expect_symbol(p, ")");
                 return expr;
             };
-            // Array literal: [expr, expr, ...]
+            // Array literal or comprehension: [expr, ...] or [expr for x in iter]
             if ch == "[" {
                 advance(p);
-                let items = [];
-                while !is_symbol_tok(peek(p), "]") && !is_eof(peek(p)) {
-                    push(items, parse_expr(p));
-                    if is_symbol_tok(peek(p), ",") {
+                // Empty array
+                if is_symbol_tok(peek(p), "]") {
+                    advance(p);
+                    return Expr::ArrayLit { items: [] };
+                };
+                // Save expr range: increment depth FIRST to prevent inner [ ] from
+                // overwriting our depth slot. Inner arrays use depth+1 slot (harmless).
+                let _pa_my_depth = _g_comp_depth;
+                let _g_comp_depth = _g_comp_depth + 1;
+                if _pa_my_depth == 0 { let __g_ce0s = p.pos; };
+                if _pa_my_depth == 1 { let __g_ce1s = p.pos; };
+                if _pa_my_depth == 2 { let __g_ce2s = p.pos; };
+                if _pa_my_depth == 3 { let __g_ce3s = p.pos; };
+                let _pa_first = parse_expr(p);
+                if _pa_my_depth == 0 { let __g_ce0e = p.pos; };
+                if _pa_my_depth == 1 { let __g_ce1e = p.pos; };
+                if _pa_my_depth == 2 { let __g_ce2e = p.pos; };
+                if _pa_my_depth == 3 { let __g_ce3e = p.pos; };
+                // Check for comprehension
+                if is_keyword_tok(peek(p), "for") {
+                    advance(p);
+                    let _pa_cv = peek(p).text;
+                    advance(p);
+                    advance(p);  // consume "in"
+                    let _pa_iter_start = p.pos;
+                    let _pa_iter_expr = parse_expr(p);
+                    let _pa_iter_end = p.pos;
+                    let _pa_filt_start = -1;
+                    let _pa_filt_end = -1;
+                    if is_keyword_tok(peek(p), "if") {
                         advance(p);
+                        let _pa_filt_start = p.pos;
+                        let _pa_filt_expr = parse_expr(p);
+                        let _pa_filt_end = p.pos;
+                    };
+                    expect_symbol(p, "]");
+                    // Save iter + filter + var to depth-indexed globals
+                    // (expr range already saved above, before inner parse)
+                    let _pa_d = _g_comp_depth - 1;
+                    if _pa_d == 0 {
+                        let __g_ci0s = _pa_iter_start; let __g_ci0e = _pa_iter_end;
+                        let __g_cf0s = _pa_filt_start; let __g_cf0e = _pa_filt_end;
+                        let __g_cv0 = _pa_cv;
+                    };
+                    if _pa_d == 1 {
+                        let __g_ci1s = _pa_iter_start; let __g_ci1e = _pa_iter_end;
+                        let __g_cf1s = _pa_filt_start; let __g_cf1e = _pa_filt_end;
+                        let __g_cv1 = _pa_cv;
+                    };
+                    if _pa_d == 2 {
+                        let __g_ci2s = _pa_iter_start; let __g_ci2e = _pa_iter_end;
+                        let __g_cf2s = _pa_filt_start; let __g_cf2e = _pa_filt_end;
+                        let __g_cv2 = _pa_cv;
+                    };
+                    if _pa_d == 3 {
+                        let __g_ci3s = _pa_iter_start; let __g_ci3e = _pa_iter_end;
+                        let __g_cf3s = _pa_filt_start; let __g_cf3e = _pa_filt_end;
+                        let __g_cv3 = _pa_cv;
+                    };
+                    let __g_comp_tokens = p.tokens;
+                    // depth already incremented above
+                    return Expr::ArrayComp { var: _pa_cv, depth: _pa_d };
+                };
+                // Regular array literal — restore depth (was incremented speculatively)
+                let _g_comp_depth = _g_comp_depth - 1;
+                let items = [_pa_first];
+                while is_symbol_tok(peek(p), ",") {
+                    advance(p);
+                    if !is_symbol_tok(peek(p), "]") {
+                        push(items, parse_expr(p));
                     };
                 };
                 expect_symbol(p, "]");
