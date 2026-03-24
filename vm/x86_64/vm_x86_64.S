@@ -936,6 +936,27 @@ op_call:
     movabs  $0xC8220FDA76231661, %rdx   # __file_write
     cmp     %rdx, %rax
     je      .call_file_write
+    # ── Raw byte builtins (for self-build) ──
+    movabs  $0xB2E2F645F237541B, %rdx   # __bytes_new
+    cmp     %rdx, %rax
+    je      .call_bytes_new
+    movabs  $0x5871F4465043D679, %rdx   # __bytes_set
+    cmp     %rdx, %rax
+    je      .call_bytes_set
+    movabs  $0xEF8C08461494EA05, %rdx   # __bytes_get
+    cmp     %rdx, %rax
+    je      .call_bytes_get
+    movabs  $0x255314D8EC3C037E, %rdx   # __bytes_write
+    cmp     %rdx, %rax
+    je      .call_bytes_write_raw
+    movabs  $0xA5845725C8B01606, %rdx   # __file_read_bytes
+    cmp     %rdx, %rax
+    je      .call_file_read_bytes
+    movabs  $0xC4352F45FC06104A, %rdx   # __bytes_len
+    cmp     %rdx, %rax
+    je      .call_bytes_len
+    cmp     %rdx, %rax
+    je      .call_file_write
 
     movabs  $0xE811320261AE416D, %rdx   # __type_of
     cmp     %rdx, %rax
@@ -3367,6 +3388,186 @@ op_ret:
 .call_file_write:
     add     %rcx, %r13
     jmp     op_file_write
+
+# ── Raw byte buffer builtins ────────────────────────────────────────
+# Bytes buffers: stored as [size:8][raw_bytes:N] on heap
+# VM stack entry: ptr = heap_base, len = BYTES_MARKER (-5)
+.equ BYTES_MARKER, -5
+
+.call_bytes_new:
+    # __bytes_new(size) → byte buffer
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax          # size
+    add     $16, %r14               # pop size
+    # Allocate on heap: [size:8][zeroed bytes]
+    mov     %r15, %rdi              # buffer base
+    mov     %rax, (%r15)            # store size
+    add     $8, %r15                # past size header
+    # Zero the buffer
+    push    %rdi
+    push    %rax
+    mov     %r15, %rdi
+    xor     %esi, %esi
+    mov     %rax, %rcx
+    rep     stosb
+    pop     %rax
+    pop     %rdi
+    add     %rax, %r15              # bump heap past buffer
+    # Push result
+    sub     $16, %r14
+    mov     %rdi, (%r14)            # ptr = buffer base
+    movq    $BYTES_MARKER, 8(%r14)  # marker
+    jmp     vm_loop
+
+.call_bytes_set:
+    # __bytes_set(buf, offset, value) → buf
+    add     %rcx, %r13
+    # Pop value (f64)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax          # byte value
+    # Pop offset (f64)
+    movsd   16(%r14), %xmm1
+    cvttsd2si %xmm1, %rdx          # offset
+    # Pop buf
+    mov     32(%r14), %rdi          # buf ptr
+    add     $48, %r14               # pop 3
+    # Write byte at buf + 8 + offset
+    mov     %al, 8(%rdi, %rdx)
+    # Push buf back
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $BYTES_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_get:
+    # __bytes_get(buf, offset) → f64 byte value
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdx          # offset
+    mov     16(%r14), %rdi          # buf ptr
+    add     $16, %r14               # pop offset (keep buf slot for result)
+    movzbl  8(%rdi, %rdx), %eax    # read byte
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)          # overwrite buf with result
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_write_raw:
+    # __bytes_write(path, buf, size) → 0
+    add     %rcx, %r13
+    # Pop size
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r9           # size
+    # Pop buf
+    mov     16(%r14), %r8           # buf ptr
+    # Pop path (string)
+    mov     32(%r14), %rsi          # path ptr (u16 mols)
+    mov     40(%r14), %rdx          # path len
+    add     $48, %r14               # pop 3
+    # Decode path → ASCII
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.bw_decode_path:
+    cmp     %rdx, %rcx
+    jge     .bw_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .bw_decode_path
+.bw_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    mov     $0x241, %esi            # O_WRONLY|O_CREAT|O_TRUNC
+    mov     $0755, %edx             # permissions (executable)
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .bw_fail
+    # Write raw bytes from buf+8
+    mov     %rax, %rdi              # fd
+    lea     8(%r8), %rsi            # data = buf + 8 (skip size header)
+    mov     %r9, %rdx              # size
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Close
+    mov     $SYS_CLOSE, %eax
+    syscall
+.bw_fail:
+    # Push 0 result
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_file_read_bytes:
+    # __file_read_bytes(path) → bytes buffer (raw, not u16 encoded)
+    add     %rcx, %r13
+    mov     (%r14), %rsi            # path ptr (u16 mols)
+    mov     8(%r14), %rdx           # path len
+    add     $16, %r14               # pop
+    # Decode path
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.frb_decode:
+    cmp     %rdx, %rcx
+    jge     .frb_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .frb_decode
+.frb_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    xor     %esi, %esi              # O_RDONLY
+    xor     %edx, %edx
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .frb_empty
+    # Read into heap as bytes buffer [size:8][data:N]
+    mov     %rax, %r8               # fd
+    mov     %r15, %rdi              # buf base
+    add     $8, %r15                # skip size header
+    mov     %r15, %rsi              # read target
+    mov     $0x200000, %edx         # max 2MB
+    mov     %r8, %rdi               # fd
+    mov     $SYS_READ, %eax
+    syscall
+    push    %rax                    # save bytes_read
+    mov     %r8, %rdi
+    mov     $SYS_CLOSE, %eax
+    syscall
+    pop     %rcx                    # bytes_read
+    test    %rcx, %rcx
+    jle     .frb_empty
+    # Set size header
+    mov     %r15, %rdi
+    sub     $8, %rdi                # buf base
+    mov     %rcx, (%rdi)            # size
+    add     %rcx, %r15              # bump heap past data
+    # Push
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $BYTES_MARKER, 8(%r14)
+    jmp     vm_loop
+.frb_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_len:
+    # __bytes_len(buf) → f64 size
+    add     %rcx, %r13
+    mov     (%r14), %rdi            # buf ptr
+    mov     (%rdi), %rax            # size from header
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
 
 .call_floor:
     # __floor(x) → floor(x)
