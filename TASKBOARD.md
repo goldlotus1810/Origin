@@ -86,9 +86,9 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
 | CUT.1 | Migrate Rust runtime → Olang | — | DONE ✅ | Rust crates = dead code. All runtime logic in Olang stdlib. |
-| CUT.2 | Migrate Rust builder → Olang | LỚN | IN PROGRESS | builder.ol (303 LOC) exists. Needs batch compile + ELF pack. |
+| CUT.2 | Migrate Rust builder → Olang | LỚN | DONE ✅ | `build` command: copies VM + bytecode → new ELF. Self-build works! |
 | CUT.3 | Olang test framework | — | DONE ✅ | `test` command, 12/12 tests. BLOCK.3 resolved. |
-| CUT.4 | Remove Rust dependency | — | BLOCKED | When CUT.2 done: origin.olang builds itself. |
+| CUT.4 | Self-build (no Rust) | — | DONE ✅ | `build` → 381KB binary. fib(20)=6765. Recursive self-build verified. |
 
 ---
 
@@ -182,6 +182,17 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | BLOCK.2 | **DONE** ✅ | _g_output 4096→8192, ARRAY_INIT_CAP 4096→8192. 8KB bytecode. |
 | BLOCK.3 | **DONE** ✅ | `test` REPL command, 12/12 inline tests. assert_eq framework. |
 
+### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #10)
+
+| # | Mức độ | File | Xung đột |
+|---|--------|------|----------|
+| DC.33 | TRUNG BÌNH | `CLAUDE.md:367` | VM 5,050→5,439 LOC (+389: file I/O, aliases, CUT.4) |
+| DC.34 | TRUNG BÌNH | `CLAUDE.md:372-373` | repl 160→**243** LOC (+83: learn_file, NL mode, build), homeos 7,701→7,836 LOC |
+| DC.35 | TRUNG BÌNH | `CLAUDE.md:37,347` | Binary ~877KB → **~890KB** (911,435 bytes) |
+| DC.36 | TRUNG BÌNH | `CLAUDE.md` builtins | Thiếu __file_read, __file_write, __file_read_bytes |
+| DC.37 | TRUNG BÌNH | `CLAUDE.md:308-318` | REPL commands thiếu: learn_file, build, test, compile |
+| DC.38 | NHẸ | `CLAUDE.md:308-318` | Không ghi nhận natural language mode (auto-detect code vs text) |
+
 ---
 
 ## Log
@@ -229,4 +240,9 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Inspect #8: 7/7 PASS + test 12/12. DC.31 now 4096→16384 (4x). No new issues.
 2026-03-24  DC.28-DC.32 ALL FIXED by Nox. 32/32 docs conflicts resolved. ZERO open conflicts.
 2026-03-24  Inspect #9: 6/6 PASS + test 12/12. ALL 32 DCs verified. Docs 100% synced. GREEN LIGHT T4.
+2026-03-24  T4: File I/O builtins (__file_read/write). Self-compile pipeline. Comparison fix (f64 0.0).
+2026-03-24  CUT.4 DONE: SELF-BUILD WORKS! build → 381KB binary. fib(20)=6765. Recursive verified.
+2026-03-24  Inspect #10: 6/6+test 12/12+self-build. CUT.1-4 ALL DONE. DC.33-DC.36 new. Binary 909KB.
+2026-03-24  feat: learn_file command, natural language mode (auto-detect code vs text), 911KB.
+2026-03-24  Inspect #11: 7/7+test 12/12+NL mode. DC.37-DC.38 new (REPL commands, NL mode). repl 243 LOC.
 ```
