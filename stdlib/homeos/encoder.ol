@@ -732,7 +732,6 @@ fn knowledge_search(_ks_query) {
 // ════════════════════════════════════════════════════════════════
 
 fn _sb_compile_file(_sbcf_path, _sbcf_bc, _sbcf_pos) {
-    let _sbcf_cp = __heap_save();
     let _sbcf_src = __file_read(_sbcf_path);
     if len(_sbcf_src) > 0 {
         _prefill_output();
@@ -752,7 +751,6 @@ fn _sb_compile_file(_sbcf_path, _sbcf_bc, _sbcf_pos) {
             emit "  " + _sbcf_path + ": SKIP";
         };
     };
-    __heap_restore(_sbcf_cp);
     return _sbcf_pos;
 }
 
@@ -778,12 +776,22 @@ pub fn self_build() {
     let _sb_compiled = 0;
     let _sb_errors = 0;
 
-    // Small stdlib files (bootstrap too large for current compiler perf)
+    // Bootstrap compiler — skip for now (lexer.ol KEYWORDS array too large)
+    // TODO: compile bootstrap when arena allocator available
+    // _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/lexer.ol", _sb_bc, _sb_bc_pos);
+    // _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/parser.ol", _sb_bc, _sb_bc_pos);
+    // _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/semantic.ol", _sb_bc, _sb_bc_pos);
+    // _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/codegen.ol", _sb_bc, _sb_bc_pos);
+    // Stdlib (small files first)
     _sb_bc_pos = _sb_compile_file("stdlib/vec.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/test.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/repl.ol", _sb_bc, _sb_bc_pos);
     _sb_bc_pos = _sb_compile_file("stdlib/mol.ol", _sb_bc, _sb_bc_pos);
     _sb_bc_pos = _sb_compile_file("stdlib/chain.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/test.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/repl.ol", _sb_bc, _sb_bc_pos);
+    // HomeOS
+    _sb_bc_pos = _sb_compile_file("stdlib/homeos/emotion.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/homeos/response.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/homeos/encoder.ol", _sb_bc, _sb_bc_pos);
 
     // Append Halt
     __bytes_set(_sb_bc, _sb_bc_pos, 15);
