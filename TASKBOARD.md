@@ -48,8 +48,8 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
 | OL.1 | Encoder: text → molecule (.ol) | ~180 LOC | DONE ✅ | `encode <text>` REPL command. Block-range UCD mapper. LCA compose. Emotion. |
-| OL.2 | Analysis: sentence fusion (.ol) | ~400 LOC | FREE | Port context/analysis. Emotion composition. |
-| OL.3 | Intent inference engine (.ol) | ~300 LOC | FREE | Port intent estimation. Context-aware. |
+| OL.2 | Analysis: sentence fusion (.ol) | ~120 LOC | DONE ✅ | fusion.ol + pipeline in encoder.ol. Context detect + emotion compose. |
+| OL.3 | Intent inference engine (.ol) | ~80 LOC | DONE ✅ | 6 intent types: chat/heal/learn/technical/command + tone selection. |
 | OL.4 | Agents: flesh out stubs (.ol) | ~500 LOC | FREE | chief.ol, leo.ol, worker.ol, gate.ol — real logic. |
 | OL.5 | Response composer (.ol) | ~200 LOC | FREE | Emotion-aware, context-aware response generation. |
 

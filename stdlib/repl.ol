@@ -25,15 +25,16 @@ pub fn repl_eval(input) {
   if len(src) > 7 {
     if __substr(src, 0, 7) == "encode " {
       let _re_text = __substr(src, 7, len(src));
-      let _re_mol = encode_text(_re_text);
-      let _re_emo = text_emotion(_re_text);
+      let _re_mol = analyze_input(_re_text);
       return "Mol=" + __to_string(_re_mol) +
              " S=" + __to_string(_mol_s(_re_mol)) +
              " R=" + __to_string(_mol_r(_re_mol)) +
              " V=" + __to_string(_mol_v(_re_mol)) +
              " A=" + __to_string(_mol_a(_re_mol)) +
              " T=" + __to_string(_mol_t(_re_mol)) +
-             " Emo=" + __to_string(_re_emo.v) + "/" + __to_string(_re_emo.a);
+             " | Intent=" + __g_analysis_intent +
+             " Tone=" + __g_analysis_tone +
+             " Ctx=" + __g_analysis_role + "/" + __g_analysis_source;
     };
   }
 
