@@ -29,9 +29,9 @@ pub fn repl_eval(input) {
     };
   }
 
-  // Memory command: show STM state
+  // Memory command: show STM + Silk state
   if src == "memory" {
-    return "STM: " + __to_string(stm_count()) + " turns stored";
+    return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges";
   }
 
   // Encode command: encode <text> → show molecular encoding
