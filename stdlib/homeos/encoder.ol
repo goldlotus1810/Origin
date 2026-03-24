@@ -671,16 +671,11 @@ pub fn analyze_input(text) {
 // ════════════════════════════════════════════════════════════════
 
 pub fn agent_process(text) {
-    // GATE — security check FIRST
-    let gate_result = "allow";
-    if _a_has(text, "tu tu") == 1 { gate_result = "crisis"; };
-    if _a_has(text, "muon chet") == 1 { gate_result = "crisis"; };
-    if _a_has(text, "kill myself") == 1 { gate_result = "crisis"; };
-    if _a_has(text, "suicide") == 1 { gate_result = "crisis"; };
-
-    if gate_result == "crisis" {
+    // GATE — SC.1 normalized security check
+    let _ap_gate = _security_gate(text);
+    if len(_ap_gate) > 0 {
         let __g_agent_action = "crisis";
-        return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc.";
+        return _ap_gate;
     };
 
     // ENCODE + ANALYZE
@@ -956,7 +951,8 @@ pub fn stm_digest() { return __stm_digest; }
 // Simplified: edges stored as flat array of { from, to, weight, emotion }
 
 let __silk = [];
-let __silk_max = 64;
+let __silk_max = 128;
+let __silk_decay_counter = 0;
 
 fn silk_co_activate(word_a, word_b, intent) {
     // Search for existing edge
@@ -965,10 +961,12 @@ fn silk_co_activate(word_a, word_b, intent) {
         let e = __silk[i];
         if e.from == word_a {
             if e.to == word_b {
-                // Strengthen: Hebbian update
+                // Strengthen: Hebbian update (bounded by 1.0)
+                let _sca_new_w = e.weight + (0.01 * (1 - (e.weight * 0.618)));
+                if _sca_new_w > 1 { _sca_new_w = 1; };
                 set_at(__silk, i, {
                     from: word_a, to: word_b,
-                    weight: (e.weight + (0.01 * ((1 - (e.weight * 0.618))))),
+                    weight: _sca_new_w,
                     emotion: intent, fires: (e.fires + 1)
                 });
                 return;
@@ -979,6 +977,38 @@ fn silk_co_activate(word_a, word_b, intent) {
     // New edge
     if len(__silk) < __silk_max {
         push(__silk, { from: word_a, to: word_b, weight: 0.1, emotion: intent, fires: 1 });
+    };
+}
+
+// SC.12: Decay φ⁻¹ — all edges lose weight over time (forgetting)
+// Spec: weight *= (1 - φ⁻¹) where φ⁻¹ ≈ 0.618. We use 0.95 per cycle (gentler).
+// Edges below threshold (0.01) are pruned (apoptosis).
+fn silk_decay() {
+    let __silk_decay_counter = __silk_decay_counter + 1;
+    // Run every 3 turns
+    if __hyp_mod(__silk_decay_counter, 3) != 0 { return; };
+
+    let _sd_new = [];
+    let _sd_i = 0;
+    while _sd_i < len(__silk) {
+        let _sd_e = __silk[_sd_i];
+        // Decay: weight *= 0.95 (approximated as weight - weight/20)
+        let _sd_decayed = _sd_e.weight - (_sd_e.weight / 20);
+        if _sd_decayed > 0.01 {
+            // Keep edge with decayed weight
+            set_at(__silk, _sd_i, {
+                from: _sd_e.from, to: _sd_e.to,
+                weight: _sd_decayed,
+                emotion: _sd_e.emotion, fires: _sd_e.fires
+            });
+            push(_sd_new, __silk[_sd_i]);
+        };
+        // else: pruned (apoptosis) — edge too weak
+        let _sd_i = _sd_i + 1;
+    };
+    // Only replace if pruning happened
+    if len(_sd_new) < len(__silk) {
+        let __silk = _sd_new;
     };
 }
 
@@ -1041,27 +1071,49 @@ pub fn silk_count() { return len(__silk); }
 let __dream_count = 0;
 
 fn dream_cycle() {
-    // Run every 5 turns — scan STM for repeated intents, strengthen patterns
+    // SC.13: Run every 5 turns — scan STM → find themes → strengthen Silk
     let __dream_count = __dream_count + 1;
     if __hyp_mod(__dream_count, 5) != 0 { return; };
 
     // Count intent frequencies in STM
-    let heal_count = 0;
-    let learn_count = 0;
-    let i = 0;
-    while i < len(__stm) {
-        if __stm[i].intent == "heal" { heal_count = heal_count + 1; };
-        if __stm[i].intent == "learn" { learn_count = learn_count + 1; };
-        let i = i + 1;
+    let _dc_heal = 0;
+    let _dc_learn = 0;
+    let _dc_tech = 0;
+    let _dc_i = 0;
+    while _dc_i < len(__stm) {
+        if __stm[_dc_i].intent == "heal" { _dc_heal = _dc_heal + 1; };
+        if __stm[_dc_i].intent == "learn" { _dc_learn = _dc_learn + 1; };
+        if __stm[_dc_i].intent == "technical" { _dc_tech = _dc_tech + 1; };
+        let _dc_i = _dc_i + 1;
     };
 
-    // If dominant theme → store as consolidated memory
-    if heal_count >= 3 {
-        let __dream_theme = "heal";
+    // Dominant theme → strengthen related Silk edges (consolidation)
+    let _dc_dominant = "chat";
+    if _dc_heal >= 3 { _dc_dominant = "heal"; };
+    if _dc_learn >= 3 { _dc_dominant = "learn"; };
+    if _dc_tech >= 3 { _dc_dominant = "technical"; };
+
+    // Strengthen: boost weight of edges matching dominant emotion
+    if _dc_dominant != "chat" {
+        let _dc_j = 0;
+        while _dc_j < len(__silk) {
+            let _dc_e = __silk[_dc_j];
+            if _dc_e.emotion == _dc_dominant {
+                // Dream boost: +0.05 to matching edges (consolidation)
+                let _dc_new_w = _dc_e.weight + 0.05;
+                if _dc_new_w > 1 { _dc_new_w = 1; };
+                set_at(__silk, _dc_j, {
+                    from: _dc_e.from, to: _dc_e.to,
+                    weight: _dc_new_w,
+                    emotion: _dc_e.emotion, fires: _dc_e.fires
+                });
+            };
+            let _dc_j = _dc_j + 1;
+        };
     };
-    if learn_count >= 3 {
-        let __dream_theme = "learn";
-    };
+
+    // Decay: apply φ⁻¹ forgetting
+    silk_decay();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1108,6 +1160,34 @@ fn stm_find_related(_sfr_input) {
 // Agent v3 — with memory + Silk + Dream
 // ════════════════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════════════════
+// SC.1 — SecurityGate (normalized pattern matching)
+// ════════════════════════════════════════════════════════════════
+// Spec: 3 layers — Bloom → Normalized → Semantic
+// Implementation: normalized keyword scan on alias-normalized text
+// Crisis patterns: Vietnamese + English, slang-aware (alias already applied)
+
+let __gate_crisis_response = "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc.";
+
+fn _security_gate(_sg_text) {
+    // SC.1: Normalized pattern matching (inline — no array access issues in boot)
+    // Vietnamese crisis patterns (alias-normalized: ko→khong etc)
+    if _a_has(_sg_text, "tu tu") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "muon chet") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "khong muon song") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "het hy vong") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "chan song") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "muon bo di") == 1 { return __gate_crisis_response; };
+    // English crisis patterns
+    if _a_has(_sg_text, "kill myself") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "want to die") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "end my life") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "suicide") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "no reason to live") == 1 { return __gate_crisis_response; };
+    if _a_has(_sg_text, "better off dead") == 1 { return __gate_crisis_response; };
+    return "";
+}
+
 pub fn agent_respond(text) {
     // ══════════════════════════════════════════════════════
     // FULL PIPELINE: input → alias → emoji → UDC encode →
@@ -1115,12 +1195,12 @@ pub fn agent_respond(text) {
     //   emoji → alias → output
     // ══════════════════════════════════════════════════════
 
-    // ── GATE ──
-    if _a_has(text, "tu tu") == 1 { return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc."; };
-    if _a_has(text, "kill myself") == 1 { return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc."; };
-
     // ── 1. ALIAS (input normalization) ──
     let _ar_norm = alias_normalize(text);
+
+    // ── GATE (SC.1: normalized pattern matching — AFTER alias) ──
+    let _gate = _security_gate(_ar_norm);
+    if len(_gate) > 0 { return _gate; };
 
     // ── 2. EMOJI (UTF-8 decode → extract emotion from Unicode) ──
     let _ar_emo_uni = text_emotion_unicode(_ar_norm);
