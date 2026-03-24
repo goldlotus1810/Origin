@@ -329,3 +329,94 @@ pub fn compose_reply(intent, tone, text) {
 
     return ack + followup;
 }
+
+// ════════════════════════════════════════════════════════════════
+// STM — Short-Term Memory
+// ════════════════════════════════════════════════════════════════
+// Keeps last N exchanges. Each entry: { input, intent, tone, molecule }
+// Agent can reference previous inputs for context.
+
+let __stm = [];
+let __stm_max = 8;
+
+pub fn stm_push(text, intent, tone) {
+    push(__stm, { input: text, intent: intent, tone: tone, turn: len(__stm) });
+    // Evict oldest if over limit
+    if len(__stm) > __stm_max {
+        let __stm_new = [];
+        let i = 1;
+        while i < len(__stm) {
+            push(__stm_new, __stm[i]);
+            let i = i + 1;
+        };
+        let __stm = __stm_new;
+    };
+}
+
+pub fn stm_last_input() {
+    if len(__stm) == 0 { return ""; };
+    return __stm[len(__stm) - 1].input;
+}
+
+pub fn stm_last_intent() {
+    if len(__stm) == 0 { return "chat"; };
+    return __stm[len(__stm) - 1].intent;
+}
+
+pub fn stm_count() {
+    return len(__stm);
+}
+
+// Check if topic repeated N+ times
+pub fn stm_topic_repeated(keyword, n) {
+    let count = 0;
+    let i = 0;
+    while i < len(__stm) {
+        if _a_has(__stm[i].input, keyword) == 1 {
+            count = count + 1;
+        };
+        let i = i + 1;
+    };
+    if count >= n { return 1; };
+    return 0;
+}
+
+// ════════════════════════════════════════════════════════════════
+// Agent v2 — with memory
+// ════════════════════════════════════════════════════════════════
+
+pub fn agent_respond(text) {
+    // GATE
+    if _a_has(text, "tu tu") == 1 { return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc."; };
+    if _a_has(text, "kill myself") == 1 { return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc."; };
+
+    // ENCODE + ANALYZE
+    let mol = analyze_input(text);
+    let intent = __g_analysis_intent;
+    let tone = __g_analysis_tone;
+
+    // REMEMBER
+    stm_push(text, intent, tone);
+
+    // CONTEXT from memory
+    let memory_context = "";
+    // If same topic repeated 3+ times → deeper acknowledgment
+    if stm_count() >= 3 {
+        let prev = stm_last_input();
+        if prev == text {
+            memory_context = " Minh thay ban nhac lai dieu nay. Minh hieu no quan trong voi ban.";
+        };
+    };
+    // If returning after heal → check in
+    if stm_count() >= 2 {
+        if stm_last_intent() == "heal" {
+            if intent != "heal" {
+                memory_context = " Ban co ve da on hon roi.";
+            };
+        };
+    };
+
+    // RESPOND
+    let reply = compose_reply(intent, tone, text);
+    return reply + memory_context;
+}
