@@ -164,6 +164,14 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.26 | DONE ✅ | Memory systems section: STM, Silk, Dream, Knowledge documented |
 | DC.27 | DEFERRED | PLAN_REWRITE.md — will update at T4 start |
 
+### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #6)
+
+| # | Mức độ | File | Xung đột |
+|---|--------|------|----------|
+| DC.28 | TRUNG BÌNH | `CLAUDE.md:37,347` | Binary `~891KB` → thực tế ~871KB (891,374 bytes ÷ 1024 = 870KB). Sai đơn vị |
+| DC.29 | NHẸ | `CLAUDE.md:200,205` | Opcode 0x09 Jmp duplicate entry |
+| DC.30 | NHẸ | `CLAUDE.md:373` | HomeOS stdlib 7,832 LOC → thực tế 7,701 LOC |
+
 ### Pre-T4 Blockers
 
 | # | Mức độ | Vấn đề |
@@ -211,4 +219,6 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  DC.9-DC.20 ALL FIXED. CLAUDE.md + handbook fully synced.
 2026-03-24  STM + Silk + Dream + Knowledge learning. Nó nhớ. Nó biết sách. 891KB.
 2026-03-24  Inspect #5 (pre-T4): 13/13 tests PASS. 7 new conflicts DC.21-DC.27. 3 blockers identified.
+2026-03-24  DC.21-DC.26 FIXED by Nox. DC.27 DEFERRED.
+2026-03-24  Inspect #6: 10/10 PASS. DC.28-DC.30 new (minor: KB unit error, opcode dup, LOC drift).
 ```
