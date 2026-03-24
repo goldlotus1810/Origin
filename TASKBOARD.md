@@ -346,4 +346,5 @@ VI PHẠM hiện tại:
 2026-03-24  __array_with_cap builtin: explicit capacity, fix token corruption from relocation.
 2026-03-24  STREAMING COMPILER: parse+compile one stmt at a time. ALL 4 bootstrap files compile!
             lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s. ZERO segfaults. 957KB.
+2026-03-24  Kira: __sleep(ms) + __time() + __write_raw(). terminal.ol 284 LOC (ANSI animations). PR #404.
 ```

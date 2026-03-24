@@ -202,6 +202,14 @@ __type_of(x) → "number"/"string"/"array"/"dict"/"closure"
 __f64_to_le_bytes(n) → array of 8 bytes
 __to_string(n) → string    __to_number(s) → number
 __char_code(ch) → codepoint number
+
+// Array capacity
+__array_with_cap(n) → empty array with n-slot pre-allocated capacity
+
+// Time + Terminal
+__sleep(ms) → sleep for ms milliseconds (nanosleep)
+__time() → current time in milliseconds (CLOCK_MONOTONIC)
+__write_raw(str) → write string to stdout (ANSI escape support)
 ```
 
 ---
@@ -410,13 +418,13 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,522 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,634 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (262 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (988 LOC) |
 | `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,334 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
 | `stdlib/repl.ol` | REPL entry point (348 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (43 files, 9,142 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,426 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
