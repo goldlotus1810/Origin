@@ -955,6 +955,12 @@ op_call:
     movabs  $0xC4352F45FC06104A, %rdx   # __bytes_len
     cmp     %rdx, %rax
     je      .call_bytes_len
+    movabs  $0xA3A423F5F0BEDF3B, %rdx   # __heap_save
+    cmp     %rdx, %rax
+    je      .call_heap_save
+    movabs  $0xDACC10780A43732C, %rdx   # __heap_restore
+    cmp     %rdx, %rax
+    je      .call_heap_restore
     cmp     %rdx, %rax
     je      .call_file_write
 
@@ -3559,6 +3565,37 @@ op_ret:
     mov     %rax, 8(%r14)
     jmp     vm_loop
 
+.call_heap_save:
+    # __heap_save() → stores r15 in BSS, returns index as f64
+    add     %rcx, %r13
+    lea     heap_checkpoints(%rip), %rax
+    lea     heap_cp_count(%rip), %rdx
+    mov     (%rdx), %rcx               # current count
+    mov     %r15, (%rax, %rcx, 8)      # store r15 at checkpoints[count]
+    inc     %rcx
+    mov     %rcx, (%rdx)               # count++
+    dec     %rcx                        # return index (before increment)
+    sub     $16, %r14
+    cvtsi2sd %rcx, %xmm0              # index as f64 (small number, safe)
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_heap_restore:
+    # __heap_restore(index) → resets r15 from saved checkpoint
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax              # index
+    add     $16, %r14                   # pop
+    lea     heap_checkpoints(%rip), %rdx
+    mov     (%rdx, %rax, 8), %r15      # restore r15
+    # Push dummy result
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
 .call_bytes_len:
     # __bytes_len(buf) → f64 size
     add     %rcx, %r13
@@ -5378,6 +5415,10 @@ try_depth:
     .space 8                            # current try nesting depth (0 = no try)
 throw_buf:
     .space 256                          # temp buffer for error message decoding
+heap_checkpoints:
+    .space 128                          # 16 checkpoint slots × 8 bytes
+heap_cp_count:
+    .space 8
 sha_input:
     .space 1024                         # SHA-256 input buffer (max ~900 bytes after padding)
 sha_state:

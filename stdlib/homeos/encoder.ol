@@ -731,6 +731,31 @@ fn knowledge_search(_ks_query) {
 // CUT.4 — Self-Build: origin.olang builds itself
 // ════════════════════════════════════════════════════════════════
 
+fn _sb_compile_file(_sbcf_path, _sbcf_bc, _sbcf_pos) {
+    let _sbcf_cp = __heap_save();
+    let _sbcf_src = __file_read(_sbcf_path);
+    if len(_sbcf_src) > 0 {
+        _prefill_output();
+        let _g_pos = 0;
+        let _sbcf_tokens = tokenize(_sbcf_src);
+        let _sbcf_ast = parse(_sbcf_tokens);
+        let _sbcf_state = analyze(_sbcf_ast);
+        if _g_pos > 0 {
+            let _sbcf_ci = 0;
+            while _sbcf_ci < _g_pos {
+                __bytes_set(_sbcf_bc, _sbcf_pos, _g_output[_sbcf_ci]);
+                let _sbcf_pos = _sbcf_pos + 1;
+                let _sbcf_ci = _sbcf_ci + 1;
+            };
+            emit "  " + _sbcf_path + ": " + __to_string(_g_pos) + " bytes";
+        } else {
+            emit "  " + _sbcf_path + ": SKIP";
+        };
+    };
+    __heap_restore(_sbcf_cp);
+    return _sbcf_pos;
+}
+
 pub fn self_build() {
     emit "=== Self-Build ===";
 
@@ -748,46 +773,21 @@ pub fn self_build() {
     emit "  Header offset: " + __to_string(_sb_header_off);
 
     // Step 2: Compile all .ol files
-    // Single file for now — multi-file needs heap reset between compiles
-    // TODO: implement heap_reset or arena allocator for batch compile
-    let _sb_files = [
-        "stdlib/repl.ol"
-    ];
-
-    let _sb_bc = __bytes_new(1048576);  // 1MB bytecode buffer
+    let _sb_bc = __bytes_new(65536);
     let _sb_bc_pos = 0;
-    let _sb_fi = 0;
     let _sb_compiled = 0;
     let _sb_errors = 0;
 
-    while _sb_fi < len(_sb_files) {
-        let _sb_path = _sb_files[_sb_fi];
-        let _sb_src = __file_read(_sb_path);
-        if len(_sb_src) > 0 {
-            // Reset compiler state
-            _prefill_output();
-            let _g_pos = 0;
-            // Compile
-            let _sb_tokens = tokenize(_sb_src);
-            let _sb_ast = parse(_sb_tokens);
-            let _sb_state = analyze(_sb_ast);
-            // Copy bytecode to output buffer
-            if _g_pos > 0 {
-                let _sb_ci = 0;
-                while _sb_ci < _g_pos {
-                    __bytes_set(_sb_bc, _sb_bc_pos, _g_output[_sb_ci]);
-                    let _sb_bc_pos = _sb_bc_pos + 1;
-                    let _sb_ci = _sb_ci + 1;
-                };
-                _sb_compiled = _sb_compiled + 1;
-                emit "  " + _sb_path + ": " + __to_string(_g_pos) + " bytes";
-            } else {
-                _sb_errors = _sb_errors + 1;
-                emit "  " + _sb_path + ": SKIP (0 bytes)";
-            };
-        };
-        let _sb_fi = _sb_fi + 1;
-    };
+    // Compile files sequentially (no array — ARRAY_INIT_CAP too large for string arrays)
+    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/lexer.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/parser.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/semantic.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/codegen.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/mol.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/chain.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/repl.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/test.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/vec.ol", _sb_bc, _sb_bc_pos);
 
     // Append Halt
     __bytes_set(_sb_bc, _sb_bc_pos, 15);
