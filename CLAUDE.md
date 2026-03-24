@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~861KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~871KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -288,7 +288,7 @@ use(my_var);                   // WRONG VALUE!
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~861KB)
+make build                    # → origin_new.olang (~871KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -308,7 +308,7 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,031 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,050 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (258 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (952 LOC) |
 | `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,244 LOC) |

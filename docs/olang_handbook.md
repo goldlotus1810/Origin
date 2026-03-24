@@ -1522,16 +1522,19 @@ pub fn repl_eval(input) {
 }
 ```
 
-### Native Binary — 806KB, zero dependencies
+### Native Binary — ~871KB, zero dependencies
 
 Olang chay tren native binary (x86_64, no libc):
-- ASM VM: `vm/x86_64/vm_x86_64.S` (~4000 LOC assembly)
-- Bootstrap compiler: 4 file Olang tu viet chinh no
-- Full features: arithmetic, strings, variables, if-else, while, functions
+- ASM VM: `vm/x86_64/vm_x86_64.S` (~5,050 LOC assembly)
+- Bootstrap compiler: 4 file Olang tu viet chinh no (2,883 LOC)
+- Full features: arithmetic, strings, variables, if-else, while, for-in, functions
+- Dict literals, array comprehension, try/catch, string interpolation
 - Deep recursion: `fact(10) = 3,628,800`
 - Tree recursion: `fib(20) = 6,765`
 - VM var_table scoping: snapshot/restore per closure call
-- 27/27 REPL tests pass
+- Crypto: `__sha256(str)` — FIPS 180-4 compliant
+- Math: `__floor(x)`, `__ceil(x)` — SSE4.1 roundsd
+- Intelligence: encode, analyze, intent, respond, STM, Silk, Dream, Knowledge
 
 ```
 $ echo 'fn fib(n) { if n < 2 { return n; }; return fib(n-1) + fib(n-2); }; emit fib(10)' | ./origin_new.olang
