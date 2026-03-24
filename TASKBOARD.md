@@ -187,9 +187,11 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | # | Mức độ | File | Xung đột |
 |---|--------|------|----------|
 | DC.33 | TRUNG BÌNH | `CLAUDE.md:367` | VM 5,050→5,439 LOC (+389: file I/O, aliases, CUT.4) |
-| DC.34 | TRUNG BÌNH | `CLAUDE.md:372-373` | repl 160→178, homeos 7,701→7,836 LOC |
-| DC.35 | TRUNG BÌNH | `CLAUDE.md:37,347` | Binary ~877KB → ~888KB (909,279 bytes) |
+| DC.34 | TRUNG BÌNH | `CLAUDE.md:372-373` | repl 160→**243** LOC (+83: learn_file, NL mode, build), homeos 7,701→7,836 LOC |
+| DC.35 | TRUNG BÌNH | `CLAUDE.md:37,347` | Binary ~877KB → **~890KB** (911,435 bytes) |
 | DC.36 | TRUNG BÌNH | `CLAUDE.md` builtins | Thiếu __file_read, __file_write, __file_read_bytes |
+| DC.37 | TRUNG BÌNH | `CLAUDE.md:308-318` | REPL commands thiếu: learn_file, build, test, compile |
+| DC.38 | NHẸ | `CLAUDE.md:308-318` | Không ghi nhận natural language mode (auto-detect code vs text) |
 
 ---
 
@@ -241,4 +243,6 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  T4: File I/O builtins (__file_read/write). Self-compile pipeline. Comparison fix (f64 0.0).
 2026-03-24  CUT.4 DONE: SELF-BUILD WORKS! build → 381KB binary. fib(20)=6765. Recursive verified.
 2026-03-24  Inspect #10: 6/6+test 12/12+self-build. CUT.1-4 ALL DONE. DC.33-DC.36 new. Binary 909KB.
+2026-03-24  feat: learn_file command, natural language mode (auto-detect code vs text), 911KB.
+2026-03-24  Inspect #11: 7/7+test 12/12+NL mode. DC.37-DC.38 new (REPL commands, NL mode). repl 243 LOC.
 ```
