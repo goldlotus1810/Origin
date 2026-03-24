@@ -251,9 +251,27 @@ fn parse_primary(p) {
                 };
                 return Expr::IfExpr { cond: cond, then_expr: then_val, else_expr: else_val };
             };
-            // match expression
+            // match expression — but NOT if used as variable (match = 0, emit match)
             if name == "match" {
-                return parse_match_expr(p);
+                // Peek AHEAD: if token AFTER match is ident/keyword → match expression.
+                let _mp_is_expr = 0;
+                let _mp_next = peek(p);  // still the match token
+                if (p.pos + 1) < len(p.tokens) {
+                    _mp_next = p.tokens[p.pos + 1];  // actual next token
+                };
+                match _mp_next.kind {
+                    TokenKind::Ident { name } => { _mp_is_expr = 1; },
+                    TokenKind::Keyword { name } => { _mp_is_expr = 1; },
+                    _ => {},
+                };
+                if is_symbol_tok(_mp_next, "(") { _mp_is_expr = 1; };
+                if is_symbol_tok(_mp_next, "!") { _mp_is_expr = 1; };
+                if _mp_is_expr == 1 {
+                    return parse_match_expr(p);
+                };
+                // Fallthrough: treat match as identifier
+                advance(p);
+                return Expr::Ident { name: "match" };
             };
             // Lambda: fn(params) { body } — skip and return 0 (no closure support yet)
             if name == "fn" {
@@ -499,22 +517,26 @@ fn parse_primary(p) {
                 // Skip to matching "}" to prevent cascading errors
                 let _mol_peek = peek(p);
                 let _mol_is_dict = 0;
+                // Check for dict literal: { ident/keyword : value, ... }
+                let _mol_is_name = 0;
                 match _mol_peek.kind {
-                    TokenKind::Ident { name } => {
-                        // Check if token after ident is ":"
-                        if p.pos + 1 < len(p.tokens) {
-                            let _mol_peek2 = p.tokens[p.pos + 1];
-                            match _mol_peek2.kind {
-                                TokenKind::Symbol { ch } => {
-                                    if ch == ":" {
-                                        let _mol_is_dict = 1;
-                                    };
-                                },
-                                _ => {},
-                            };
-                        };
-                    },
+                    TokenKind::Ident { name } => { _mol_is_name = 1; },
+                    TokenKind::Keyword { name } => { _mol_is_name = 1; },
                     _ => {},
+                };
+                if _mol_is_name == 1 {
+                    // Check if token after name is ":"
+                    if p.pos + 1 < len(p.tokens) {
+                        let _mol_peek2 = p.tokens[p.pos + 1];
+                        match _mol_peek2.kind {
+                            TokenKind::Symbol { ch } => {
+                                if ch == ":" {
+                                    let _mol_is_dict = 1;
+                                };
+                            },
+                            _ => {},
+                        };
+                    };
                 };
                 if _mol_is_dict == 1 {
                     // Parse dict literal: { key: value, key2: value2 }
@@ -908,6 +930,21 @@ pub fn parse_stmt(p) {
 
     // match subject { arms }
     if is_keyword_tok(tok, "match") {
+        // Check: match = expr (assignment) vs match expr { ... } (match stmt)
+        if p.pos + 1 < len(p.tokens) {
+            if is_symbol_tok(p.tokens[p.pos + 1], "=") {
+                if p.pos + 2 < len(p.tokens) {
+                    if !is_symbol_tok(p.tokens[p.pos + 2], "=") {
+                        // match = expr (bare assignment)
+                        advance(p);
+                        advance(p);
+                        let _ps_mval = parse_expr(p);
+                        if is_symbol_tok(peek(p), ";") { advance(p); };
+                        return Stmt::LetStmt { name: "match", value: _ps_mval };
+                    };
+                };
+            };
+        };
         let mexpr = parse_match_expr(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::MatchStmt { subject: mexpr, arms: [] };
@@ -982,8 +1019,30 @@ pub fn parse_stmt(p) {
         return Stmt::UnionDef { name: name, variants: variants };
     };
 
-    // Check for assignment: name = expr, name.field = expr, name.f[i].g = expr, etc.
-    // Scan forward from current pos to find '=' (not '==') before ';' or '}'
+    // Check for keyword used as variable: match = 0, from = x
+    // Must check BEFORE the general expression statement fallthrough
+    match tok.kind {
+        TokenKind::Keyword { name } => {
+            if p.pos + 1 < len(p.tokens) {
+                let _ps_kn = p.tokens[p.pos + 1];
+                if is_symbol_tok(_ps_kn, "=") {
+                    if p.pos + 2 < len(p.tokens) {
+                        if !is_symbol_tok(p.tokens[p.pos + 2], "=") {
+                            let _ps_kwname = name;
+                            advance(p);
+                            advance(p);
+                            let _ps_kwval = parse_expr(p);
+                            if is_symbol_tok(peek(p), ";") { advance(p); };
+                            return Stmt::LetStmt { name: _ps_kwname, value: _ps_kwval };
+                        };
+                    };
+                };
+            };
+        },
+        _ => {},
+    };
+
+    // Check for assignment: name = expr, name.field = expr, etc.
     match tok.kind {
         TokenKind::Ident { name } => {
             // Scan for assignment '=' within reasonable distance

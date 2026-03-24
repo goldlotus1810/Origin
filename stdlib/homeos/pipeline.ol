@@ -94,4 +94,3 @@ fn _i_has(text, word) {
     };
     return 0;
 }
-}
