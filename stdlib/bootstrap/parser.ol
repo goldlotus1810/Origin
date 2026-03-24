@@ -287,10 +287,25 @@ fn parse_primary(p) {
             };
 
             // Struct literal: Name { field: value, ... }
-            // Only when Name starts with uppercase (heuristic)
+            // Only when Name starts with uppercase AND next-next token is ":"
+            // This prevents `if X { ... }` from being parsed as struct literal
             if is_symbol_tok(peek(p), "{") {
                 let first_ch = char_at(name, 0);
+                let _sl_is_struct = 0;
                 if first_ch >= "A" && first_ch <= "Z" {
+                    // Lookahead: { ident : → struct literal. { other → block/if body
+                    if (p.pos + 2) < len(p.tokens) {
+                        let _sl_peek1 = p.tokens[p.pos + 1];
+                        if is_ident_tok(_sl_peek1) {
+                            if (p.pos + 3) < len(p.tokens) {
+                                if is_symbol_tok(p.tokens[p.pos + 2], ":") {
+                                    _sl_is_struct = 1;
+                                };
+                            };
+                        };
+                    };
+                };
+                if _sl_is_struct == 1 {
                     advance(p); // consume {
                     let fields = [];
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
