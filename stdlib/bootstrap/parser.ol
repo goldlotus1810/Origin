@@ -928,48 +928,75 @@ pub fn parse_stmt(p) {
         return Stmt::UnionDef { name: name, variants: variants };
     };
 
-    // Check for field assignment: name.field = expr;
-    // Must check before expression statement since it starts with ident
+    // Check for assignment: name = expr, name.field = expr, name.f[i].g = expr, etc.
+    // Scan forward from current pos to find '=' (not '==') before ';' or '}'
     match tok.kind {
         TokenKind::Ident { name } => {
-            // Look ahead for assignment patterns
-            if p.pos + 1 < len(p.tokens) {
-                let next1 = p.tokens[p.pos + 1];
-
-                // Bare assignment: name = expr → desugar to LetStmt
-                if is_symbol_tok(next1, "=") {
-                    // Check it's not == (comparison)
-                    if p.pos + 2 < len(p.tokens) {
-                        let next2 = p.tokens[p.pos + 2];
-                        if !is_symbol_tok(next2, "=") {
-                            let _ps_aname = name;  // save BEFORE parse_expr (overwrites match binding)
-                            advance(p); // consume name
-                            advance(p); // consume =
-                            let _ps_aval = parse_expr(p);
-                            if is_symbol_tok(peek(p), ";") { advance(p); };
-                            return Stmt::LetStmt { name: _ps_aname, value: _ps_aval };
+            // Scan for assignment '=' within reasonable distance
+            let _ps_scan = p.pos + 1;
+            let _ps_found_eq = 0;
+            let _ps_eq_pos = 0;
+            let _ps_depth = 0;
+            while _ps_scan < len(p.tokens) {
+                let _ps_st = p.tokens[_ps_scan];
+                // Stop at statement boundary
+                if is_symbol_tok(_ps_st, ";") { break; };
+                if is_symbol_tok(_ps_st, "{") { break; };
+                if is_symbol_tok(_ps_st, "}") { break; };
+                // Track parens/brackets depth
+                if is_symbol_tok(_ps_st, "(") { _ps_depth = _ps_depth + 1; };
+                if is_symbol_tok(_ps_st, ")") { _ps_depth = _ps_depth - 1; };
+                if is_symbol_tok(_ps_st, "[") { _ps_depth = _ps_depth + 1; };
+                if is_symbol_tok(_ps_st, "]") { _ps_depth = _ps_depth - 1; };
+                // Found '=' at depth 0 (not inside parens/brackets)
+                if _ps_depth == 0 {
+                    if is_symbol_tok(_ps_st, "=") {
+                        // Not '=='
+                        if (_ps_scan + 1) < len(p.tokens) {
+                            if !is_symbol_tok(p.tokens[_ps_scan + 1], "=") {
+                                _ps_found_eq = 1;
+                                _ps_eq_pos = _ps_scan;
+                                break;
+                            };
+                        } else {
+                            _ps_found_eq = 1;
+                            _ps_eq_pos = _ps_scan;
+                            break;
                         };
                     };
                 };
+                let _ps_scan = _ps_scan + 1;
+            };
 
-                // Field assignment: name.field = expr
-                if is_symbol_tok(next1, ".") {
-                    if p.pos + 2 < len(p.tokens) {
-                        let next2 = p.tokens[p.pos + 2];
-                        if is_ident_tok(next2) {
-                            if p.pos + 3 < len(p.tokens) {
-                                let next3 = p.tokens[p.pos + 3];
-                                if is_symbol_tok(next3, "=") {
-                                    advance(p); // consume name
-                                    advance(p); // consume .
-                                    let field = expect_ident(p);
-                                    expect_symbol(p, "=");
-                                    let value = parse_expr(p);
-                                    if is_symbol_tok(peek(p), ";") { advance(p); };
-                                    return Stmt::FieldAssign { object: name, field: field, value: value };
-                                };
-                            };
-                        };
+            if _ps_found_eq == 1 {
+                // Assignment detected. Parse LHS tokens → determine assign type.
+                if _ps_eq_pos == (p.pos + 1) {
+                    // Simple: name = expr
+                    let _ps_aname = name;
+                    advance(p); // consume name
+                    advance(p); // consume =
+                    let _ps_aval = parse_expr(p);
+                    if is_symbol_tok(peek(p), ";") { advance(p); };
+                    return Stmt::LetStmt { name: _ps_aname, value: _ps_aval };
+                } else {
+                    // Complex LHS: name.field = expr, name[i] = expr, name.a[i].b = expr
+                    // Parse LHS as expression (up to =)
+                    let _ps_saved_pos = p.pos;
+                    let _ps_lhs = parse_expr(p);
+                    expect_symbol(p, "=");
+                    let _ps_rhs = parse_expr(p);
+                    if is_symbol_tok(peek(p), ";") { advance(p); };
+                    // Determine assign type from LHS
+                    match _ps_lhs {
+                        Expr::FieldAccess { object, field } => {
+                            // Could be name.field or complex.chain.field
+                            // For now: emit as FieldAssign with object as string
+                            return Stmt::FieldAssign { object: object, field: field, value: _ps_rhs };
+                        },
+                        _ => {
+                            // General assignment — wrap as ExprStmt (runtime handles)
+                            return Stmt::ExprStmt { expr: Expr::BinOp { op: "=", lhs: _ps_lhs, rhs: _ps_rhs } };
+                        },
                     };
                 };
             };
