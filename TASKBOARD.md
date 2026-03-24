@@ -164,6 +164,6 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  BUG #1 FIXED: dict literal { key: value } + parse error recovery. 21/21 Kira tests pass.
 2026-03-24  Inspect #2: 5/5 tests PASS. DC.1-DC.8 confirmed FIXED. 3 new minor conflicts (DC.9-DC.11).
 2026-03-24  OL.9 DONE: try/catch + __throw(msg). VM try_stack, nested try, unhandled error exit.
-2026-03-24  BUG-1 (nested for-in): var/iter heap overlap found. Partial fix via globals + re-parse.
-            [11, 21] correct values but outer loop runs once. WIP.
+2026-03-24  BUG-1 FIXED: nested for-in works! [11,21,12,22] + 3×3=9 results.
+            Fix: depth-indexed globals for var/iter/inc/jz + pre-emit increment + re-parse iter.
 ```

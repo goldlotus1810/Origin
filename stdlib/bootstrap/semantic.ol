@@ -867,12 +867,26 @@ fn compile_stmt(state, stmt) {
             let _fl_body_start = current_pos(state);
             patch_jump(state, _fl_body_jmp, _fl_body_start);
 
-            // Compile body — no _fl_* needed after this
+            // Save _fl_inc and _fl_jz to depth-indexed globals
+            let _fl_my_depth = _g_for_depth - 1;
+            if _fl_my_depth == 0 { let __g_fl_inc0 = _fl_inc; let __g_fl_jz0 = _fl_jz; };
+            if _fl_my_depth == 1 { let __g_fl_inc1 = _fl_inc; let __g_fl_jz1 = _fl_jz; };
+            if _fl_my_depth == 2 { let __g_fl_inc2 = _fl_inc; let __g_fl_jz2 = _fl_jz; };
+            if _fl_my_depth == 3 { let __g_fl_inc3 = _fl_inc; let __g_fl_jz3 = _fl_jz; };
+
+            // Compile body
             let _fl_bi = 0;
             while _fl_bi < len(body) {
                 compile_stmt(state, body[_fl_bi]);
                 let _fl_bi = _fl_bi + 1;
             };
+
+            // Restore _fl_inc and _fl_jz (re-compute depth from _g_for_depth)
+            let _fl_rd = _g_for_depth - 1;
+            if _fl_rd == 0 { let _fl_inc = __g_fl_inc0; let _fl_jz = __g_fl_jz0; };
+            if _fl_rd == 1 { let _fl_inc = __g_fl_inc1; let _fl_jz = __g_fl_jz1; };
+            if _fl_rd == 2 { let _fl_inc = __g_fl_inc2; let _fl_jz = __g_fl_jz2; };
+            if _fl_rd == 3 { let _fl_inc = __g_fl_inc3; let _fl_jz = __g_fl_jz3; };
 
             // Patch continue → increment section
             let _fl_cp = 0;
@@ -884,8 +898,7 @@ fn compile_stmt(state, stmt) {
             // Jump to increment section
             emit_jmp(state, _fl_inc);
 
-            // Jump back
-            emit_op(state, make_op_num("Jmp", _fl_start));
+            // (removed duplicate Jmp — increment section already has Jmp LOOP_START)
             // Patch break + exit
             let _fl_exit = current_pos(state);
             patch_jump(state, _fl_jz, _fl_exit);
