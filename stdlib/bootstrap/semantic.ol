@@ -766,57 +766,104 @@ fn compile_expr(state, expr) {
             let subj_name = "__match_subj";
             emit_op(state, make_op_name("Store", subj_name));
             push_local(state, subj_name);
-            let end_jumps = [];
+            let __g_mej0 = -1; let __g_mej1 = -1; let __g_mej2 = -1; let __g_mej3 = -1;
             let ai = 0;
-            while ai < len(arms) {
-                let arm = arms[ai];
-                if arm.pattern != "_" {
-                    // Load subject, check type/tag
+            let _m_num_arms = len(arms);
+            while ai < _m_num_arms {
+                // Read pattern + body token range from GLOBALS (dict fields corrupt)
+                let _m_pattern = "";
+                let _m_body_s = 0;
+                let _m_body_e = 0;
+                if ai == 0 { let _m_pattern = __g_ma0_pat; let _m_body_s = __g_ma0_bs; let _m_body_e = __g_ma0_be; };
+                if ai == 1 { let _m_pattern = __g_ma1_pat; let _m_body_s = __g_ma1_bs; let _m_body_e = __g_ma1_be; };
+                if ai == 2 { let _m_pattern = __g_ma2_pat; let _m_body_s = __g_ma2_bs; let _m_body_e = __g_ma2_be; };
+                if ai == 3 { let _m_pattern = __g_ma3_pat; let _m_body_s = __g_ma3_bs; let _m_body_e = __g_ma3_be; };
+                let _m_bindings = _m_bindings;
+                let _m_body = _m_body;
+                if _m_pattern != "_" {
+                    // Load subject and compare
                     emit_op(state, make_op_name("LoadLocal", subj_name));
-                    emit_op(state, make_op_name("Call", "__type_of"));
-                    emit_op(state, make_op_name("Push", arm.pattern));
-                    emit_op(state, make_op_name("Call", "__eq"));
+                    let _mp = _m_pattern;
+                    let _mp_is_num = 0;
+                    let _mp_is_str = 0;
+                    if len(_mp) > 6 {
+                        if char_at(_mp, 0) == "_" {
+                            if char_at(_mp, 1) == "_" {
+                                if char_at(_mp, 5) == ":" {
+                                    if char_at(_mp, 2) == "n" { let _mp_is_num = 1; };
+                                    if char_at(_mp, 2) == "s" { let _mp_is_str = 1; };
+                                };
+                            };
+                        };
+                    };
+                    if _mp_is_num == 1 {
+                        // Number pattern: compare subject == number
+                        let _mp_numstr = __substr(_mp, 6, len(_mp));
+                        emit_op(state, make_op_num("PushNum", __to_number(_mp_numstr)));
+                        emit_op(state, make_op_name("Call", "__eq"));
+                    } else {
+                        if _mp_is_str == 1 {
+                            // String pattern: compare subject == string
+                            let _mp_strval = __substr(_mp, 6, len(_mp));
+                            emit_push_str(state, _mp_strval);
+                            emit_op(state, make_op_name("Call", "__eq"));
+                        } else {
+                            // Enum/struct pattern: compare type tag
+                            emit_op(state, make_op_name("Push", _mp));
+                            emit_op(state, make_op_name("Call", "__match_enum"));
+                        };
+                    };
                     let jz_pos = current_pos(state);
                     emit_op(state, make_op_num("Jz", 0));
                     emit_op(state, make_op_simple("Pop"));
-                    // Extract bindings
-                    let bi = 0;
-                    while bi < len(arm.bindings) {
-                        emit_op(state, make_op_name("LoadLocal", subj_name));
-                        emit_op(state, make_op_name("Push", arm.bindings[bi]));
-                        emit_op(state, make_op_name("Call", "__dict_get"));
-                        emit_op(state, make_op_name("Store", arm.bindings[bi]));
-                        push_local(state, arm.bindings[bi]);
-                        let bi = bi + 1;
+                    // Skip bindings for now (TODO: extract from dict)
+                    // Compile arm body: re-parse + compile ONE stmt at a time
+                    // (avoids storing array of AST dicts which get corrupted)
+                    let _m_bpos = _m_body_s + 1;  // skip opening {
+                    while _m_bpos < (_m_body_e - 1) {
+                        let _m_bp2 = new_parser(__g_ma_tokens);
+                        _m_bp2.pos = _m_bpos;
+                        if is_symbol_tok(peek(_m_bp2), "}") { break; };
+                        if is_eof(peek(_m_bp2)) { break; };
+                        let _m_bstmt = parse_stmt(_m_bp2);
+                        compile_stmt(state, _m_bstmt);
+                        let _m_bpos = _m_bp2.pos;
                     };
-                    // Compile arm body
-                    let si = 0;
-                    while si < len(arm.body) {
-                        compile_stmt(state, arm.body[si]);
-                        let si = si + 1;
-                    };
-                    push(end_jumps, current_pos(state));
+                    let _mej_pos = current_pos(state);
+                    if ai == 0 { let __g_mej0 = _mej_pos; };
+                    if ai == 1 { let __g_mej1 = _mej_pos; };
+                    if ai == 2 { let __g_mej2 = _mej_pos; };
+                    if ai == 3 { let __g_mej3 = _mej_pos; };
                     emit_op(state, make_op_num("Jmp", 0));
                     patch_jump(state, jz_pos, current_pos(state));
                     emit_op(state, make_op_simple("Pop"));
                 } else {
-                    // Wildcard: always matches
-                    let si = 0;
-                    while si < len(arm.body) {
-                        compile_stmt(state, arm.body[si]);
-                        let si = si + 1;
+                    // Wildcard: always matches — re-parse + compile one stmt at a time
+                    let _m_wpos = _m_body_s + 1;
+                    while _m_wpos < (_m_body_e - 1) {
+                        let _m_wp2 = new_parser(__g_ma_tokens);
+                        _m_wp2.pos = _m_wpos;
+                        if is_symbol_tok(peek(_m_wp2), "}") { break; };
+                        if is_eof(peek(_m_wp2)) { break; };
+                        let _m_wstmt2 = parse_stmt(_m_wp2);
+                        compile_stmt(state, _m_wstmt2);
+                        let _m_wpos = _m_wp2.pos;
                     };
-                    push(end_jumps, current_pos(state));
+                    let _mej_pos = current_pos(state);
+                    if ai == 0 { let __g_mej0 = _mej_pos; };
+                    if ai == 1 { let __g_mej1 = _mej_pos; };
+                    if ai == 2 { let __g_mej2 = _mej_pos; };
+                    if ai == 3 { let __g_mej3 = _mej_pos; };
                     emit_op(state, make_op_num("Jmp", 0));
                 };
                 let ai = ai + 1;
             };
-            // Patch all end jumps
-            let ei = 0;
-            while ei < len(end_jumps) {
-                patch_jump(state, end_jumps[ei], current_pos(state));
-                let ei = ei + 1;
-            };
+            // Patch all end jumps (from globals)
+            let _m_end = current_pos(state);
+            if __g_mej0 >= 0 { patch_jump(state, __g_mej0, _m_end); };
+            if __g_mej1 >= 0 { patch_jump(state, __g_mej1, _m_end); };
+            if __g_mej2 >= 0 { patch_jump(state, __g_mej2, _m_end); };
+            if __g_mej3 >= 0 { patch_jump(state, __g_mej3, _m_end); };
         },
         _ => {
             add_error(state, "Unknown expression type");
