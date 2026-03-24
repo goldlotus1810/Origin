@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~877KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~890KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -175,11 +175,25 @@ __eval_bytecode(bc) // execute compiled bytecode
 // Math
 __floor(x)  __ceil(x)
 
+// Bitwise
+__bit_or(a,b)  __bit_and(a,b)  __bit_xor(a,b)  __bit_shl(a,n)  __bit_shr(a,n)
+
 // Crypto
 __sha256(str) → 64-char hex string (FIPS 180-4)
 
 // Error handling
 __throw(msg) → unwind to nearest try/catch
+
+// File I/O
+__file_read(path) → string contents (u16 molecules)
+__file_write(path, content) → write string to file
+__file_read_bytes(path) → raw byte buffer
+__bytes_new(size) → zeroed byte buffer
+__bytes_get(buf, offset) → byte as f64
+__bytes_set(buf, offset, value) → write byte
+__bytes_write(path, buf, size) → write raw bytes to file
+__bytes_len(buf) → buffer size
+__heap_save() → checkpoint index    __heap_restore(idx) → reset heap
 
 // Type
 __type_of(x) → "number"/"string"/"array"/"dict"/"closure"
@@ -306,15 +320,20 @@ use(my_var);                   // WRONG VALUE!
 ## REPL Commands
 
 ```
-emit <expr>         Evaluate and print expression
-let x = 42          Define variable
-fn f(x) { ... }     Define function
-encode <text>       Show molecular encoding + intent + tone + context
-respond <text>      Full agent response (with STM memory)
-learn <text>        Teach HomeOS a fact (stored in knowledge base)
-memory              Show STM turns + Silk edges + Knowledge facts
-help                Show available commands
-exit / quit         Exit REPL
+emit <expr>              Evaluate and print expression
+let x = 42               Define variable
+fn f(x) { ... }          Define function
+encode <text>            Show molecular encoding + intent + tone + context
+respond <text>           Full agent response (with STM memory)
+learn <text>             Teach HomeOS a fact
+learn_file <path>        Read file and learn each line as fact
+compile <path>           Compile .ol file → show bytecode size
+build                    Self-build: compile + pack → origin_built.olang
+test                     Run 12 inline tests
+memory                   Show STM turns + Silk edges + Knowledge facts
+help                     Show available commands
+exit / quit              Exit REPL
+<natural text>           Auto-detect: non-code → agent_respond (Vietnamese OK)
 ```
 
 ## Memory Systems (STM + Silk + Dream + Knowledge)
@@ -344,7 +363,7 @@ Knowledge Store:
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~877KB)
+make build                    # → origin_new.olang (~890KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -364,13 +383,13 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,050 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,471 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (258 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (974 LOC) |
 | `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,301 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (160 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,701 LOC) |
+| `stdlib/repl.ol` | REPL entry point (243 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,838 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |

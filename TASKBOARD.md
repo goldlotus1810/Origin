@@ -186,12 +186,12 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | # | Mức độ | File | Xung đột |
 |---|--------|------|----------|
-| DC.33 | TRUNG BÌNH | `CLAUDE.md:367` | VM 5,050→5,439 LOC (+389: file I/O, aliases, CUT.4) |
-| DC.34 | TRUNG BÌNH | `CLAUDE.md:372-373` | repl 160→**243** LOC (+83: learn_file, NL mode, build), homeos 7,701→7,836 LOC |
-| DC.35 | TRUNG BÌNH | `CLAUDE.md:37,347` | Binary ~877KB → **~890KB** (911,435 bytes) |
-| DC.36 | TRUNG BÌNH | `CLAUDE.md` builtins | Thiếu __file_read, __file_write, __file_read_bytes |
-| DC.37 | TRUNG BÌNH | `CLAUDE.md:308-318` | REPL commands thiếu: learn_file, build, test, compile |
-| DC.38 | NHẸ | `CLAUDE.md:308-318` | Không ghi nhận natural language mode (auto-detect code vs text) |
+| DC.33 | DONE ✅ | VM 5,471 LOC |
+| DC.34 | DONE ✅ | repl 243 LOC, homeos 7,838 LOC |
+| DC.35 | DONE ✅ | Binary ~890KB |
+| DC.36 | DONE ✅ | File I/O + bytes + heap builtins documented |
+| DC.37 | DONE ✅ | All REPL commands documented |
+| DC.38 | DONE ✅ | Natural language mode documented |
 
 ---
 
