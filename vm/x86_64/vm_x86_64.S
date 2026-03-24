@@ -24,7 +24,7 @@
 
 # ── Constants ────────────────────────────────────────────────────────────
 .equ STACK_SIZE,    0x100000        # 1 MB VM stack
-.equ HEAP_SIZE,     0x4000000       # 64 MB heap arena
+.equ HEAP_SIZE,     0x10000000      # 256 MB heap arena
 .equ HEADER_SIZE,   32
 .equ ELF_HEADER_SIZE, 120           # ELF64 header + 1 program header
 .equ F64_MARKER,    -1              # len = 0xFFFFFFFFFFFFFFFF means f64
@@ -902,6 +902,9 @@ op_call:
     movabs  $0xEA1BDD6D065BF46A, %rdx   # __str_substr (alias)
     cmp     %rdx, %rax
     je      .call_substr
+    movabs  $0x304A3A896BAAE100, %rdx   # substr (short alias)
+    cmp     %rdx, %rax
+    je      .call_substr
     movabs  $0xFBE159BD1C6EBFA7, %rdx   # __str_trim
     cmp     %rdx, %rax
     je      .call_str_trim
@@ -917,12 +920,50 @@ op_call:
     movabs  $0x3EA9B2DCA6EB46A2, %rdx   # __to_number
     cmp     %rdx, %rax
     je      .call_to_number
+    movabs  $0xE1C2E76089AECDEF, %rdx   # to_num (short alias)
+    cmp     %rdx, %rax
+    je      .call_to_number
     movabs  $0x3F9867C32BC1B166, %rdx   # __to_string
     cmp     %rdx, %rax
     je      .call_to_string
     movabs  $0x07515EC1BC3E1099, %rdx   # __char_code
     cmp     %rdx, %rax
     je      .call_char_code
+    # ── File I/O builtins ──
+    movabs  $0x229C6ACCAE3B5DBE, %rdx   # __file_read
+    cmp     %rdx, %rax
+    je      .call_file_read
+    movabs  $0xC8220FDA76231661, %rdx   # __file_write
+    cmp     %rdx, %rax
+    je      .call_file_write
+    # ── Raw byte builtins (for self-build) ──
+    movabs  $0xB2E2F645F237541B, %rdx   # __bytes_new
+    cmp     %rdx, %rax
+    je      .call_bytes_new
+    movabs  $0x5871F4465043D679, %rdx   # __bytes_set
+    cmp     %rdx, %rax
+    je      .call_bytes_set
+    movabs  $0xEF8C08461494EA05, %rdx   # __bytes_get
+    cmp     %rdx, %rax
+    je      .call_bytes_get
+    movabs  $0x255314D8EC3C037E, %rdx   # __bytes_write
+    cmp     %rdx, %rax
+    je      .call_bytes_write_raw
+    movabs  $0xA5845725C8B01606, %rdx   # __file_read_bytes
+    cmp     %rdx, %rax
+    je      .call_file_read_bytes
+    movabs  $0xC4352F45FC06104A, %rdx   # __bytes_len
+    cmp     %rdx, %rax
+    je      .call_bytes_len
+    movabs  $0xA3A423F5F0BEDF3B, %rdx   # __heap_save
+    cmp     %rdx, %rax
+    je      .call_heap_save
+    movabs  $0xDACC10780A43732C, %rdx   # __heap_restore
+    cmp     %rdx, %rax
+    je      .call_heap_restore
+    cmp     %rdx, %rax
+    je      .call_file_write
+
     movabs  $0xE811320261AE416D, %rdx   # __type_of
     cmp     %rdx, %rax
     je      .call_type_of
@@ -1366,10 +1407,10 @@ op_call:
     repe    cmpsb
     je      .eq_true_chain
 .eq_false_chain:
-    # Push empty (false)
+    # Push f64 0.0 (false) — NOT empty chain (breaks &&/|| short-circuit)
     xor     %eax, %eax
     mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 .eq_true_chain:
     # Push 1.0 (true)
@@ -1381,8 +1422,8 @@ op_call:
 .eq_false:
     add     $16, %r14                  # pop 1
     xor     %eax, %eax
-    mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    mov     %rax, (%r14)               # f64 0.0
+    movq    $F64_MARKER, 8(%r14)       # mark as f64 (not empty chain)
     jmp     vm_loop
 
 .call_lt:
@@ -3346,6 +3387,225 @@ op_ret:
     mov     %rcx, 8(%r14)            # mol count (64)
     jmp     vm_loop
 
+.call_file_read:
+    add     %rcx, %r13
+    jmp     op_file_read
+
+.call_file_write:
+    add     %rcx, %r13
+    jmp     op_file_write
+
+# ── Raw byte buffer builtins ────────────────────────────────────────
+# Bytes buffers: stored as [size:8][raw_bytes:N] on heap
+# VM stack entry: ptr = heap_base, len = BYTES_MARKER (-5)
+.equ BYTES_MARKER, -5
+
+.call_bytes_new:
+    # __bytes_new(size) → byte buffer
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax          # size
+    add     $16, %r14               # pop size
+    # Allocate on heap: [size:8][zeroed bytes]
+    mov     %r15, %rdi              # buffer base
+    mov     %rax, (%r15)            # store size
+    add     $8, %r15                # past size header
+    # Zero the buffer
+    push    %rdi                    # save buf base
+    mov     %rax, %rcx              # count = size
+    push    %rcx                    # save size
+    mov     %r15, %rdi              # dest = data start
+    xor     %eax, %eax              # AL = 0 (rep stosb stores AL)
+    rep     stosb
+    pop     %rax                    # restore size
+    pop     %rdi                    # restore buf base
+    add     %rax, %r15              # bump heap past buffer
+    # Push result
+    sub     $16, %r14
+    mov     %rdi, (%r14)            # ptr = buffer base
+    movq    $BYTES_MARKER, 8(%r14)  # marker
+    jmp     vm_loop
+
+.call_bytes_set:
+    # __bytes_set(buf, offset, value) → buf
+    add     %rcx, %r13
+    # Pop value (f64)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax          # byte value
+    # Pop offset (f64)
+    movsd   16(%r14), %xmm1
+    cvttsd2si %xmm1, %rdx          # offset
+    # Pop buf
+    mov     32(%r14), %rdi          # buf ptr
+    add     $48, %r14               # pop 3
+    # Write byte at buf + 8 + offset
+    mov     %al, 8(%rdi, %rdx)
+    # Push buf back
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $BYTES_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_get:
+    # __bytes_get(buf, offset) → f64 byte value
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdx          # offset
+    mov     16(%r14), %rdi          # buf ptr
+    add     $16, %r14               # pop offset (keep buf slot for result)
+    movzbl  8(%rdi, %rdx), %eax    # read byte
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)          # overwrite buf with result
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_write_raw:
+    # __bytes_write(path, buf, size) → 0
+    add     %rcx, %r13
+    # Pop size
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r9           # size
+    # Pop buf
+    mov     16(%r14), %r8           # buf ptr
+    # Pop path (string)
+    mov     32(%r14), %rsi          # path ptr (u16 mols)
+    mov     40(%r14), %rdx          # path len
+    add     $48, %r14               # pop 3
+    # Decode path → ASCII
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.bw_decode_path:
+    cmp     %rdx, %rcx
+    jge     .bw_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .bw_decode_path
+.bw_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    mov     $0x241, %esi            # O_WRONLY|O_CREAT|O_TRUNC
+    mov     $0755, %edx             # permissions (executable)
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .bw_fail
+    # Write raw bytes from buf+8
+    mov     %rax, %rdi              # fd
+    lea     8(%r8), %rsi            # data = buf + 8 (skip size header)
+    mov     %r9, %rdx              # size
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Close
+    mov     $SYS_CLOSE, %eax
+    syscall
+.bw_fail:
+    # Push 0 result
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_file_read_bytes:
+    # __file_read_bytes(path) → bytes buffer (raw, not u16 encoded)
+    add     %rcx, %r13
+    mov     (%r14), %rsi            # path ptr (u16 mols)
+    mov     8(%r14), %rdx           # path len
+    add     $16, %r14               # pop
+    # Decode path
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.frb_decode:
+    cmp     %rdx, %rcx
+    jge     .frb_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .frb_decode
+.frb_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    xor     %esi, %esi              # O_RDONLY
+    xor     %edx, %edx
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .frb_empty
+    # Read into heap as bytes buffer [size:8][data:N]
+    mov     %rax, %r8               # fd
+    mov     %r15, %rdi              # buf base
+    add     $8, %r15                # skip size header
+    mov     %r15, %rsi              # read target
+    mov     $0x200000, %edx         # max 2MB
+    mov     %r8, %rdi               # fd
+    mov     $SYS_READ, %eax
+    syscall
+    push    %rax                    # save bytes_read
+    mov     %r8, %rdi
+    mov     $SYS_CLOSE, %eax
+    syscall
+    pop     %rcx                    # bytes_read
+    test    %rcx, %rcx
+    jle     .frb_empty
+    # Set size header
+    mov     %r15, %rdi
+    sub     $8, %rdi                # buf base
+    mov     %rcx, (%rdi)            # size
+    add     %rcx, %r15              # bump heap past data
+    # Push
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $BYTES_MARKER, 8(%r14)
+    jmp     vm_loop
+.frb_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.call_heap_save:
+    # __heap_save() → stores r15 in BSS, returns index as f64
+    add     %rcx, %r13
+    lea     heap_checkpoints(%rip), %rax
+    lea     heap_cp_count(%rip), %rdx
+    mov     (%rdx), %rcx               # current count
+    mov     %r15, (%rax, %rcx, 8)      # store r15 at checkpoints[count]
+    inc     %rcx
+    mov     %rcx, (%rdx)               # count++
+    dec     %rcx                        # return index (before increment)
+    sub     $16, %r14
+    cvtsi2sd %rcx, %xmm0              # index as f64 (small number, safe)
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_heap_restore:
+    # __heap_restore(index) → resets r15 from saved checkpoint
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax              # index
+    add     $16, %r14                   # pop
+    lea     heap_checkpoints(%rip), %rdx
+    mov     (%rdx, %rax, 8), %r15      # restore r15
+    # Push dummy result
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_len:
+    # __bytes_len(buf) → f64 size
+    add     %rcx, %r13
+    mov     (%r14), %rdi            # buf ptr
+    mov     (%rdi), %rax            # size from header
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
 .call_floor:
     # __floor(x) → floor(x)
     add     %rcx, %r13
@@ -3862,9 +4122,81 @@ op_query:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_file_read:
-    # Pop filename from stack, read file, push contents
-    # Stub: push empty
-    add     $16, %r14                   # pop filename
+    # Pop filename string, read file contents, push as string
+    # Stack: [filename_ptr, filename_len] → [content_ptr, content_len]
+    mov     (%r14), %rsi            # filename ptr (u16 molecules)
+    mov     8(%r14), %rdx           # filename len (mol count)
+    add     $16, %r14               # pop
+
+    # Decode u16 filename → ASCII bytes in temp buffer
+    lea     sha_input(%rip), %rdi   # reuse sha_input as temp (1024 bytes)
+    xor     %rcx, %rcx
+    test    %rdx, %rdx
+    jz      .fread_empty
+.fread_decode:
+    cmp     %rdx, %rcx
+    jge     .fread_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fread_decode
+
+.fread_open:
+    movb    $0, (%rdi, %rcx)        # null-terminate
+    # Open file
+    lea     sha_input(%rip), %rdi   # filename
+    xor     %esi, %esi              # O_RDONLY
+    xor     %edx, %edx              # mode 0
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .fread_empty             # open failed → push empty
+
+    # Read file into heap
+    mov     %rax, %r8               # save fd
+    mov     %r15, %rdi              # read into heap
+    mov     $0x100000, %edx         # max 1MB
+    mov     %r8, %rsi               # fd (wrong reg)
+    # syscall: read(fd, buf, count) → rdi=fd, rsi=buf, rdx=count
+    mov     %r8, %rdi               # fd
+    mov     %r15, %rsi              # buf
+    mov     $0x100000, %edx         # max 1MB
+    mov     $SYS_READ, %eax
+    syscall
+    push    %rax                    # save bytes_read
+
+    # Close file
+    mov     %r8, %rdi
+    mov     $SYS_CLOSE, %eax
+    syscall
+
+    pop     %rcx                    # bytes_read
+    test    %rcx, %rcx
+    jle     .fread_empty
+
+    # Encode bytes → u16 molecules on heap (after raw bytes)
+    mov     %r15, %r8               # raw bytes base
+    add     %rcx, %r15              # bump past raw bytes
+    mov     %r15, %rdi              # u16 output base
+    xor     %rdx, %rdx
+.fread_encode:
+    cmp     %rcx, %rdx
+    jge     .fread_push
+    movzbl  (%r8, %rdx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %rdx
+    jmp     .fread_encode
+
+.fread_push:
+    # Push string (ptr=u16 base, len=mol count)
+    sub     $16, %r14
+    mov     %rdi, (%r14)            # u16 base
+    mov     %rcx, 8(%r14)           # mol count = byte count
+    jmp     vm_loop
+
+.fread_empty:
     sub     $16, %r14
     xor     %eax, %eax
     mov     %rax, (%r14)
@@ -3873,9 +4205,62 @@ op_file_read:
 
 op_file_write:
 op_file_append:
-    # Pop value, pop filename, write
-    # Stub: pop 2
-    add     $32, %r14
+    # Pop content, pop filename, write to file
+    # Stack: [filename, content]
+    mov     (%r14), %r8             # content ptr
+    mov     8(%r14), %r9            # content len
+    mov     16(%r14), %rsi          # filename ptr
+    mov     24(%r14), %rdx          # filename len
+    add     $32, %r14               # pop both
+
+    # Decode filename → ASCII
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.fwrite_fname:
+    cmp     %rdx, %rcx
+    jge     .fwrite_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fwrite_fname
+.fwrite_open:
+    movb    $0, (%rdi, %rcx)
+    # Open/create file
+    lea     sha_input(%rip), %rdi
+    mov     $0x241, %esi            # O_WRONLY|O_CREAT|O_TRUNC
+    mov     $0644, %edx             # permissions
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      vm_loop                  # open failed
+
+    # Decode content u16 → bytes, write
+    push    %rax                    # save fd
+    lea     sha_input(%rip), %rdi   # reuse buffer for decoded content
+    xor     %rcx, %rcx
+.fwrite_decode:
+    cmp     %r9, %rcx
+    jge     .fwrite_do
+    movzbl  (%r8, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fwrite_decode
+.fwrite_do:
+    pop     %rdi                    # fd
+    push    %rcx                    # save len
+    lea     sha_input(%rip), %rsi   # buf
+    pop     %rdx                    # len
+    push    %rdi                    # save fd
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rdi                    # fd
+    mov     $SYS_CLOSE, %eax
+    syscall
+    # Push dummy result (builtin must leave value on stack for ExprStmt Pop)
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -4083,10 +4468,10 @@ op_cmp_ge:
     jmp     vm_loop
 
 .cmp_false:
-    # Rust VM returns empty chain for false → Jz compatible
+    # Return f64 0.0 for false (NOT empty chain — breaks &&/|| logic)
     xor     %eax, %eax
-    mov     %rax, (%r14)               # ptr = 0
-    mov     %rax, 8(%r14)              # len = 0 (empty = false)
+    mov     %rax, (%r14)               # f64 bits = 0 (0.0)
+    movq    $F64_MARKER, 8(%r14)       # mark as f64
     jmp     vm_loop
 
 vm_error_div_zero:
@@ -5030,6 +5415,10 @@ try_depth:
     .space 8                            # current try nesting depth (0 = no try)
 throw_buf:
     .space 256                          # temp buffer for error message decoding
+heap_checkpoints:
+    .space 128                          # 16 checkpoint slots × 8 bytes
+heap_cp_count:
+    .space 8
 sha_input:
     .space 1024                         # SHA-256 input buffer (max ~900 bytes after padding)
 sha_state:

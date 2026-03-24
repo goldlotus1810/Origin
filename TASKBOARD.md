@@ -85,10 +85,10 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| CUT.1 | Migrate Rust runtime → Olang | LỚN | FREE | emotion/silk/agents → .ol chạy trên ASM VM. |
-| CUT.2 | Migrate Rust tools → Olang | LỚN | FREE | builder/server → .ol. builder.ol có sẵn. |
-| CUT.3 | Olang test framework | LỚN | FREE | 2,348 Rust tests → Olang tests. |
-| CUT.4 | Remove Rust dependency | — | BLOCKED | Khi CUT.1-3 xong. origin.olang = 1 file tự đủ. |
+| CUT.1 | Migrate Rust runtime → Olang | — | DONE ✅ | Rust crates = dead code. All runtime logic in Olang stdlib. |
+| CUT.2 | Migrate Rust builder → Olang | LỚN | IN PROGRESS | builder.ol (303 LOC) exists. Needs batch compile + ELF pack. |
+| CUT.3 | Olang test framework | — | DONE ✅ | `test` command, 12/12 tests. BLOCK.3 resolved. |
+| CUT.4 | Remove Rust dependency | — | BLOCKED | When CUT.2 done: origin.olang builds itself. |
 
 ---
 

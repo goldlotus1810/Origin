@@ -58,6 +58,24 @@ pub fn repl_eval(input) {
     };
   }
 
+  // Compile command: read file → tokenize → parse → compile (in BOOT context)
+  if len(src) > 8 {
+    if __substr(src, 0, 8) == "compile " {
+      let _rc_path = __substr(src, 8, len(src));
+      let _rc_src = __file_read(_rc_path);
+      if len(_rc_src) == 0 { return "Error: cannot read " + _rc_path; };
+      let _rc_tokens = tokenize(_rc_src);
+      let _rc_ast = parse(_rc_tokens);
+      let _rc_state = analyze(_rc_ast);
+      return "Compiled " + _rc_path + ": " + __to_string(len(_rc_src)) + " chars → " + __to_string(len(_rc_tokens)) + " tokens → " + __to_string(_g_pos) + " bytes bytecode";
+    };
+  }
+
+  // Build command: self-build (compile all .ol → pack binary)
+  if src == "build" {
+    return self_build();
+  }
+
   // Memory command: show STM + Silk + Knowledge state
   if src == "memory" {
     return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
