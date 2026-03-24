@@ -78,12 +78,9 @@ let _g_output_ready = 0;
 fn _prefill_output() {
     // Only allocate ONCE — reuse on subsequent calls
     if _g_output_ready == 0 {
-        let _g_output = [];
-        let _pf = 0;
-        while _pf < 16384 {
-            push(_g_output, 0);
-            let _pf = _pf + 1;
-        };
+        // Use __array_range to allocate exact size in ONE shot (no relocation!)
+        // Values [0..16383] will be overwritten by set_at during codegen
+        let _g_output = __array_range(16384);
         let _g_output_ready = 1;
     };
     // Just reset position
