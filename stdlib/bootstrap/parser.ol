@@ -798,22 +798,43 @@ pub fn parse_stmt(p) {
     // Must check before expression statement since it starts with ident
     match tok.kind {
         TokenKind::Ident { name } => {
-            // Look ahead for name.field = expr pattern
-            if p.pos + 2 < len(p.tokens) {
+            // Look ahead for assignment patterns
+            if p.pos + 1 < len(p.tokens) {
                 let next1 = p.tokens[p.pos + 1];
-                let next2 = p.tokens[p.pos + 2];
-                if is_symbol_tok(next1, ".") && is_ident_tok(next2) {
-                    // Check if it's assignment: name.field = expr
-                    if p.pos + 3 < len(p.tokens) {
-                        let next3 = p.tokens[p.pos + 3];
-                        if is_symbol_tok(next3, "=") {
+
+                // Bare assignment: name = expr → desugar to LetStmt
+                if is_symbol_tok(next1, "=") {
+                    // Check it's not == (comparison)
+                    if p.pos + 2 < len(p.tokens) {
+                        let next2 = p.tokens[p.pos + 2];
+                        if !is_symbol_tok(next2, "=") {
+                            let _ps_aname = name;  // save BEFORE parse_expr (overwrites match binding)
                             advance(p); // consume name
-                            advance(p); // consume .
-                            let field = expect_ident(p);
-                            expect_symbol(p, "=");
-                            let value = parse_expr(p);
+                            advance(p); // consume =
+                            let _ps_aval = parse_expr(p);
                             if is_symbol_tok(peek(p), ";") { advance(p); };
-                            return Stmt::FieldAssign { object: name, field: field, value: value };
+                            return Stmt::LetStmt { name: _ps_aname, value: _ps_aval };
+                        };
+                    };
+                };
+
+                // Field assignment: name.field = expr
+                if is_symbol_tok(next1, ".") {
+                    if p.pos + 2 < len(p.tokens) {
+                        let next2 = p.tokens[p.pos + 2];
+                        if is_ident_tok(next2) {
+                            if p.pos + 3 < len(p.tokens) {
+                                let next3 = p.tokens[p.pos + 3];
+                                if is_symbol_tok(next3, "=") {
+                                    advance(p); // consume name
+                                    advance(p); // consume .
+                                    let field = expect_ident(p);
+                                    expect_symbol(p, "=");
+                                    let value = parse_expr(p);
+                                    if is_symbol_tok(peek(p), ";") { advance(p); };
+                                    return Stmt::FieldAssign { object: name, field: field, value: value };
+                                };
+                            };
                         };
                     };
                 };
