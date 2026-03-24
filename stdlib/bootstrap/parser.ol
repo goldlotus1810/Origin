@@ -386,9 +386,14 @@ fn parse_primary(p) {
                     let _pp_saved_obj = pop(_pb_stack);
                     expect_symbol(p, "]");
                     // Desugar a[i] → __array_get(a, i) — avoids Index dict corruption
+                    // Build args with push (NOT ArrayLit) — ArrayLit [a,b] via __array_new
+                    // can lose element[1] due to heap overlap in boot context
+                    let _pp_idx_args = [];
+                    push(_pp_idx_args, _pp_saved_obj);
+                    push(_pp_idx_args, _pp_idx_expr);
                     let _pp_result = Expr::Call {
                         callee: Expr::Ident { name: "__array_get" },
-                        args: [_pp_saved_obj, _pp_idx_expr],
+                        args: _pp_idx_args,
                     };
                 };
                 if is_symbol_tok(peek(p), "(") {

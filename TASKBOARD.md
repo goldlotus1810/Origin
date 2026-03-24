@@ -225,13 +225,15 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.60 | DONE ✅ | ^ (XOR) in precedence table |
 | DC.61 | DONE ✅ | bare return; documented |
 
-### BUG-SORT — Bubble sort regression (NGHIÊM TRỌNG)
+### BUG-SORT — Bubble sort regression — FIXED ✅ (2026-03-25)
 
 ```
-Input:  let a = [5,2,8,1,9]; bubble sort with set_at
-Expect: [1,2,5,8,9]
-Actual: [5,2,5,5,8]
-Status: OPEN — cần điều tra. Có thể liên quan đến parser/semantic refactor.
+Root cause: parser.ol desugar a[expr] dùng ArrayLit [obj, idx] (qua __array_new).
+  __array_new(2) tạo array KHÔNG có capacity dự phòng.
+  Heap overlap khiến element[1] (index expr) bị mất → luôn trả a[0].
+Fix: đổi sang push-based array (giống handler "(" call args).
+  push() dùng capacity zone đã pre-allocate → an toàn.
+Verify: [5,2,8,1,9] → [1,2,5,8,9] ✅, 16/16 tests, fib(20)=6765.
 ```
 
 ### Spec v3 vs Code (architecture gap — INFO level)
@@ -375,4 +377,5 @@ VI PHẠM hiện tại:
 2026-03-24  Nox: 100% SELF-COMPILE (48/48). Hex literals, match-as-var, lambda skip, keyword dict fields.
             Parser 988→1136 LOC. Lexer 262→298 LOC. Binary 957KB→964KB.
 2026-03-24  Inspect #15: 4/5 PASS. BUG-SORT REGRESSION (bubble sort broken). DC.51-61. Binary 964,642B.
+2026-03-25  BUG-SORT FIXED: a[BinOp] heap overlap — ArrayLit→push in parser.ol. [1,2,5,8,9] ✅.
 ```
