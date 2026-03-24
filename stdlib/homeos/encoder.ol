@@ -127,6 +127,128 @@ pub fn encode_text(text) {
 }
 
 // ════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
+// Vietnamese word stemming — strip common prefixes/modifiers
+// ════════════════════════════════════════════════════════════════
+// "dang buon" → split → "dang" (skip) + "buon" (affect hit)
+// "rat vui" → "rat" (intensifier) + "vui" (affect hit, amplified)
+// These prefixes are removed before word_affect lookup.
+
+let __vi_prefixes = ["dang", "da", "se", "cung", "van", "hay", "nay", "the"];
+let __vi_intensifiers = ["rat", "qua", "lam", "cuc", "sieu", "het"];
+let __vi_negators = ["khong", "chua", "ko", "kh"];
+
+fn _vi_is_prefix(_vp_word) {
+    let _vp_i = 0;
+    while _vp_i < len(__vi_prefixes) {
+        if __vi_prefixes[_vp_i] == _vp_word { return 1; };
+        let _vp_i = _vp_i + 1;
+    };
+    return 0;
+}
+
+fn _vi_is_intensifier(_vi_word) {
+    let _vi_i = 0;
+    while _vi_i < len(__vi_intensifiers) {
+        if __vi_intensifiers[_vi_i] == _vi_word { return 1; };
+        let _vi_i = _vi_i + 1;
+    };
+    return 0;
+}
+
+fn _vi_is_negator(_vn_word) {
+    let _vn_i = 0;
+    while _vn_i < len(__vi_negators) {
+        if __vi_negators[_vn_i] == _vn_word { return 1; };
+        let _vn_i = _vn_i + 1;
+    };
+    return 0;
+}
+
+// Enhanced text_emotion with stemming: handles "rat buon", "khong vui", "dang lo"
+pub fn text_emotion_v2(_tev_text) {
+    let _tev_v = 4;
+    let _tev_a = 4;
+    let _tev_hits = 0;
+    let _tev_negate = 0;
+    let _tev_intensify = 0;
+    let _tev_w = "";
+    let _tev_i = 0;
+    while _tev_i < len(_tev_text) {
+        let _tev_ch = char_at(_tev_text, _tev_i);
+        let _tev_code = __char_code(_tev_ch);
+        if _tev_code == 32 {
+            if len(_tev_w) >= 2 {
+                // Check modifiers first
+                if _vi_is_negator(_tev_w) == 1 {
+                    _tev_negate = 1;
+                } else {
+                    if _vi_is_intensifier(_tev_w) == 1 {
+                        _tev_intensify = 1;
+                    } else {
+                        if _vi_is_prefix(_tev_w) == 0 {
+                            // Real content word → lookup affect
+                            let _tev_af = word_affect(_tev_w);
+                            if _tev_af.v != 4 {
+                                let _tev_nv = _tev_af.v;
+                                let _tev_na = _tev_af.a;
+                                // Apply negation: flip valence around neutral (4)
+                                if _tev_negate == 1 {
+                                    _tev_nv = 8 - _tev_nv;
+                                    _tev_negate = 0;
+                                };
+                                // Apply intensifier: push away from neutral
+                                if _tev_intensify == 1 {
+                                    if _tev_nv > 4 { _tev_nv = _enc_min(7, _tev_nv + 1); };
+                                    if _tev_nv < 4 { _tev_nv = _enc_max(1, _tev_nv - 1); };
+                                    _tev_na = _enc_min(7, _tev_na + 1);
+                                    _tev_intensify = 0;
+                                };
+                                _tev_v = _tev_nv;
+                                _tev_a = _tev_na;
+                                _tev_hits = _tev_hits + 1;
+                            } else {
+                                // Non-affect word → reset modifiers
+                                _tev_negate = 0;
+                                _tev_intensify = 0;
+                            };
+                        };
+                    };
+                };
+            };
+            _tev_w = "";
+        } else {
+            // Punctuation handling
+            if _tev_code == 33 { _tev_a = _enc_min(7, _tev_a + 1); _tev_v = _enc_min(7, _tev_v + 1); };
+            if _tev_code == 63 { _tev_a = _enc_min(7, _tev_a + 1); };
+            if _tev_code == 46 { _tev_a = _enc_max(0, _tev_a - 1); };
+            _tev_w = _tev_w + _tev_ch;
+        };
+        let _tev_i = _tev_i + 1;
+    };
+    // Check last word
+    if len(_tev_w) >= 2 {
+        if _vi_is_prefix(_tev_w) == 0 {
+            if _vi_is_intensifier(_tev_w) == 0 {
+                if _vi_is_negator(_tev_w) == 0 {
+                    let _tev_af = word_affect(_tev_w);
+                    if _tev_af.v != 4 {
+                        let _tev_nv = _tev_af.v;
+                        if _tev_negate == 1 { _tev_nv = 8 - _tev_nv; };
+                        if _tev_intensify == 1 {
+                            if _tev_nv > 4 { _tev_nv = _enc_min(7, _tev_nv + 1); };
+                            if _tev_nv < 4 { _tev_nv = _enc_max(1, _tev_nv - 1); };
+                        };
+                        _tev_v = _tev_nv;
+                        _tev_a = _tev_af.a;
+                    };
+                };
+            };
+        };
+    };
+    return { v: _tev_v, a: _tev_a };
+}
+
 // Word affect table (minimal Vietnamese + English)
 // ════════════════════════════════════════════════════════════════
 
@@ -469,6 +591,50 @@ pub fn compose_reply(intent, tone, text) {
 let __stm = [];
 let __stm_max = 32;
 
+// ── Emotion carry-over state ──
+// Running emotion: exponential moving average across turns
+let __emo_v = 4;  // valence (1=neg, 4=neutral, 7=pos)
+let __emo_a = 4;  // arousal (1=calm, 4=neutral, 7=excited)
+let __emo_streak = 0;  // consecutive same-valence turns
+
+fn _emo_update(new_v, new_a) {
+    // EMA: 60% old + 40% new → smooth carry-over
+    // MUST use explicit parens — Rust compiler precedence bug: a*b+c*d → (a*b+c)*d
+    let __emo_v = __floor(( (__emo_v * 6) + (new_v * 4) ) / 10);
+    let __emo_a = __floor(( (__emo_a * 6) + (new_a * 4) ) / 10);
+    // Track streak: same direction (pos/neg) for 3+ turns → amplify
+    if new_v >= 5 {
+        if __emo_streak >= 0 { let __emo_streak = __emo_streak + 1; }
+        else { let __emo_streak = 1; };
+    } else {
+        if new_v <= 3 {
+            if __emo_streak <= 0 { let __emo_streak = __emo_streak - 1; }
+            else { let __emo_streak = -1; };
+        } else {
+            // Neutral → decay streak toward 0
+            if __emo_streak > 0 { let __emo_streak = __emo_streak - 1; };
+            if __emo_streak < 0 { let __emo_streak = __emo_streak + 1; };
+        };
+    };
+}
+
+pub fn emo_state() {
+    return { v: __emo_v, a: __emo_a, streak: __emo_streak };
+}
+
+// Emotion-aware tone override: when streak strong, bias the tone
+fn _emo_bias_tone(tone) {
+    // 3+ positive turns → empathetic/gentle tone
+    if __emo_streak >= 3 {
+        if tone == "precise" { return "gentle"; };
+    };
+    // 3+ negative turns → empathetic (even if analysis says precise)
+    if __emo_streak <= -3 {
+        return "empathetic";
+    };
+    return tone;
+}
+
 pub fn stm_push(text, intent, tone) {
     push(__stm, { input: text, intent: intent, tone: tone, turn: len(__stm) });
     // Evict oldest if over limit
@@ -534,6 +700,65 @@ pub fn stm_summary() {
     if _ss_chat > 0 { _ss_result = _ss_result + "tro chuyen(" + __to_string(_ss_chat) + ") "; };
     return _ss_result;
 }
+
+// ── Conversation digest ──
+// When STM > 16 turns, compress older half into a digest string
+let __stm_digest = "";
+let __stm_digest_count = 0;
+
+fn _stm_maybe_digest() {
+    if len(__stm) < 16 { return; };
+    // Already digested recently
+    if __stm_digest_count >= len(__stm) { return; };
+    // Build digest from first half of STM
+    let _sd_half = __floor(len(__stm) / 2);
+    let _sd_heal = 0;
+    let _sd_learn = 0;
+    let _sd_tech = 0;
+    let _sd_chat = 0;
+    let _sd_topics = "";
+    let _sd_i = 0;
+    while _sd_i < _sd_half {
+        let _sd_entry = __stm[_sd_i];
+        if _sd_entry.intent == "heal" { _sd_heal = _sd_heal + 1; };
+        if _sd_entry.intent == "learn" { _sd_learn = _sd_learn + 1; };
+        if _sd_entry.intent == "technical" { _sd_tech = _sd_tech + 1; };
+        if _sd_entry.intent == "chat" { _sd_chat = _sd_chat + 1; };
+        // Collect first word of each input as topic hints
+        let _sd_fw = "";
+        let _sd_fi = 0;
+        while _sd_fi < len(_sd_entry.input) {
+            if __char_code(char_at(_sd_entry.input, _sd_fi)) == 32 { break; };
+            _sd_fw = _sd_fw + char_at(_sd_entry.input, _sd_fi);
+            let _sd_fi = _sd_fi + 1;
+        };
+        if len(_sd_fw) > 2 {
+            if len(_sd_topics) > 0 { _sd_topics = _sd_topics + ", "; };
+            _sd_topics = _sd_topics + _sd_fw;
+        };
+        let _sd_i = _sd_i + 1;
+    };
+    // Build digest string
+    let _sd_d = "";
+    if _sd_heal > 0 { _sd_d = _sd_d + "cam-xuc(" + __to_string(_sd_heal) + ") "; };
+    if _sd_learn > 0 { _sd_d = _sd_d + "hoc(" + __to_string(_sd_learn) + ") "; };
+    if _sd_tech > 0 { _sd_d = _sd_d + "ky-thuat(" + __to_string(_sd_tech) + ") "; };
+    if _sd_chat > 0 { _sd_d = _sd_d + "chat(" + __to_string(_sd_chat) + ") "; };
+    if len(_sd_topics) > 0 { _sd_d = _sd_d + "| " + _sd_topics; };
+    let __stm_digest = _sd_d;
+    let __stm_digest_count = len(__stm);
+
+    // Evict digested entries (keep second half)
+    let _sd_new = [];
+    let _sd_j = _sd_half;
+    while _sd_j < len(__stm) {
+        push(_sd_new, __stm[_sd_j]);
+        let _sd_j = _sd_j + 1;
+    };
+    let __stm = _sd_new;
+}
+
+pub fn stm_digest() { return __stm_digest; }
 
 // ════════════════════════════════════════════════════════════════
 // Silk — Hebbian Learning (fire together → wire together)
@@ -703,8 +928,16 @@ pub fn agent_respond(text) {
     let intent = __g_analysis_intent;
     let tone = __g_analysis_tone;
 
+    // EMOTION CARRY-OVER — update running state + bias tone
+    let _ar_emo = text_emotion_v2(text);
+    _emo_update(_ar_emo.v, _ar_emo.a);
+    tone = _emo_bias_tone(tone);
+
     // REMEMBER (STM)
     stm_push(text, intent, tone);
+
+    // DIGEST — compress older turns when STM gets full
+    _stm_maybe_digest();
 
     // LEARN (Silk — Hebbian co-activation)
     silk_learn_from_text(text, intent);

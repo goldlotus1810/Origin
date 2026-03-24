@@ -91,6 +91,12 @@ pub fn repl_eval(input) {
     if mol_new(0, 0, 4, 4, 2) == 146 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: mol_new"; };
     // File I/O
     if len(__file_read("TASKBOARD.md")) > 100 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: fileread"; };
+    // Emotion v2: "rat buon" → v < 4 (negation/intensifier)
+    let _t_emo = text_emotion_v2("rat buon");
+    if _t_emo.v < 4 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: emo_v2_intense"; };
+    // Emotion v2: "khong vui" → negated positive → v < 4
+    let _t_emo2 = text_emotion_v2("khong vui");
+    if _t_emo2.v < 4 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: emo_v2_negate"; };
     // Summary
     if _tf == 0 {
       return "ALL PASS: " + __to_string(_tp) + "/" + __to_string(_tp + _tf);
@@ -127,7 +133,13 @@ pub fn repl_eval(input) {
 
   if src == "memory" {
     let _rm_s = stm_summary();
-    return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts | Themes: " + _rm_s;
+    let _rm_emo = emo_state();
+    let _rm_d = stm_digest();
+    let _rm_out = "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
+    _rm_out = _rm_out + " | Emo: V=" + __to_string(_rm_emo.v) + " A=" + __to_string(_rm_emo.a) + " streak=" + __to_string(_rm_emo.streak);
+    if len(_rm_d) > 0 { _rm_out = _rm_out + " | Digest: " + _rm_d; };
+    _rm_out = _rm_out + " | Themes: " + _rm_s;
+    return _rm_out;
   }
 
   // Learn file: read file and split into sentences for knowledge
