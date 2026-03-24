@@ -442,6 +442,8 @@ fn compile_expr(state, expr) {
                     if _binop == "%" { emit_op(state, make_op_name("Call", "__hyp_mod")); };
                     if _binop == "<<" { emit_op(state, make_op_name("Call", "__bit_shl")); };
                     if _binop == ">>" { emit_op(state, make_op_name("Call", "__bit_shr")); };
+                    if _binop == "|" { emit_op(state, make_op_name("Call", "__bit_or")); };
+                    if _binop == "^" { emit_op(state, make_op_name("Call", "__bit_xor")); };
                     if _binop == "==" { emit_op(state, make_op_name("Call", "__eq")); };
                     if _binop == "!=" { emit_op(state, make_op_name("Call", "__cmp_ne")); };
                     if _binop == "<" { emit_op(state, make_op_name("Call", "__cmp_lt")); };

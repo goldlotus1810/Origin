@@ -576,11 +576,13 @@ fn parse_primary(p) {
 fn precedence(op) {
     if op == "||" { return 1; };
     if op == "&&" { return 2; };
-    if op == "==" || op == "!=" { return 3; };
-    if op == "<" || op == ">" || op == "<=" || op == ">=" { return 4; };
-    if op == "<<" || op == ">>" { return 5; };
-    if op == "+" || op == "-" { return 6; };
-    if op == "*" || op == "/" || op == "%" { return 7; };
+    if op == "|" { return 3; };
+    if op == "^" { return 4; };
+    if op == "==" || op == "!=" { return 5; };
+    if op == "<" || op == ">" || op == "<=" || op == ">=" { return 6; };
+    if op == "<<" || op == ">>" { return 7; };
+    if op == "+" || op == "-" { return 8; };
+    if op == "*" || op == "/" || op == "%" { return 9; };
     return 0;
 }
 
