@@ -1380,10 +1380,10 @@ op_call:
     repe    cmpsb
     je      .eq_true_chain
 .eq_false_chain:
-    # Push empty (false)
+    # Push f64 0.0 (false) — NOT empty chain (breaks &&/|| short-circuit)
     xor     %eax, %eax
     mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 .eq_true_chain:
     # Push 1.0 (true)
@@ -1395,8 +1395,8 @@ op_call:
 .eq_false:
     add     $16, %r14                  # pop 1
     xor     %eax, %eax
-    mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    mov     %rax, (%r14)               # f64 0.0
+    movq    $F64_MARKER, 8(%r14)       # mark as f64 (not empty chain)
     jmp     vm_loop
 
 .call_lt:
@@ -4230,10 +4230,10 @@ op_cmp_ge:
     jmp     vm_loop
 
 .cmp_false:
-    # Rust VM returns empty chain for false → Jz compatible
+    # Return f64 0.0 for false (NOT empty chain — breaks &&/|| logic)
     xor     %eax, %eax
-    mov     %rax, (%r14)               # ptr = 0
-    mov     %rax, 8(%r14)              # len = 0 (empty = false)
+    mov     %rax, (%r14)               # f64 bits = 0 (0.0)
+    movq    $F64_MARKER, 8(%r14)       # mark as f64
     jmp     vm_loop
 
 vm_error_div_zero:
