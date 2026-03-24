@@ -78,7 +78,8 @@ pub fn repl_eval(input) {
 
   // Memory command: show STM + Silk + Knowledge state
   if src == "memory" {
-    return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
+    let _rm_s = stm_summary();
+    return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts | Themes: " + _rm_s;
   }
 
   // Learn file: read file and split into sentences for knowledge
