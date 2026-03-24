@@ -217,11 +217,23 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | SC.6 | DNA Repair (self_correct) | ❌ Not impl | no critique loop |
 | SC.7 | KnowTree hierarchical | ❌ Flat array | spec says L0→L3 tree |
 | SC.8 | UDC + P_weight encoding | ✅ Correct | block ranges + bit layout |
-| SC.9 | Compose (amplify V) | ✅ Correct | |
-| SC.10 | Hebbian Select | ✅ Correct | silk_co_activate |
-| SC.11 | Dream pipeline | ✅ Correct | scan STM + promote |
-| SC.12 | MolecularChain | ✅ Correct | u16 molecules |
-| SC.13 | 10-stage pipeline | ✅ NEW | alias→UDC→node→DN/QR→decode→emoji→output |
+| SC.9 | Compose (amplify V) | ❌ **BUG-V** | `_amplify_v()` dùng TRUNG BÌNH — vi phạm Spec §1.6! |
+| SC.10 | Compose S: Union | ⚠️ max() | Code dùng max() thay vì SDF union |
+| SC.11 | Compose R: Compose | ⚠️ average | Code dùng (ra+rb)/2 — spec nói Compose |
+| SC.12 | Hebbian Select | ⚠️ No decay | silk_co_activate OK, nhưng thiếu decay φ⁻¹ |
+| SC.13 | Dream pipeline | ✅ Partial | dream_cycle scan STM, nhưng thiếu Maturity pipeline |
+| SC.14 | MolecularChain | ✅ Correct | u16 molecules |
+| SC.15 | 10-stage pipeline | ✅ NEW | alias→UDC→node→DN/QR→decode→emoji→output |
+| SC.16 | 5 Checkpoints | ❌ 0/5 | Pipeline không có checkpoint nào |
+
+### Docs vs Docs conflicts
+
+| # | Mức độ | Files | Xung đột |
+|---|--------|-------|----------|
+| DOC.1 | NGHIÊM TRỌNG | STORAGE_NOTE vs Spec v3 | P_weight: 5 bytes vs 2 bytes (u16) |
+| DOC.2 | TRUNG BÌNH | MILESTONE vs reality | ARRAY_CAP 4096→16384, heap 64→256MB, binary 806→949KB |
+| DOC.3 | TRUNG BÌNH | Handbook vs CLAUDE.md | Opcodes thiếu, binary "806KB" outdated |
+| DOC.4 | NHẸ | CHECK_TO_PASS | check-logic tool (Rust) = dead code |
 
 ---
 
@@ -282,5 +294,8 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Inspect #13: 6/6+test 14/14. ZERO CONFLICTS. 45/45 DCs resolved. Docs 100% synced. 923KB.
 2026-03-24  P5.2: emotion carry-over + Vietnamese stemming + digest + UTF-8 decoder.
 2026-03-24  P5.3: full pipeline (alias→UDC→node→DN/QR→decode→emoji). 3 new files. 949KB.
-2026-03-24  Inspect #14: 8/8+test 16/16. DC.46-50 new. SC.1-13 Spec v3 audit. 7 gaps (INFO), 6 matched.
+2026-03-24  Inspect #14: 8/8+test 16/16. DC.46-50 + SC.1-16 + DOC.1-4. Deep Spec v3 audit.
+            BUG-V CRITICAL: _amplify_v() dùng TRUNG BÌNH — vi phạm Spec §1.6 + CHECK_TO_PASS §1!
+            5 Checkpoints: 0/5 implement. SecurityGate: 2 keywords vs spec 3-layer. Hebbian: no decay.
+            DOC.1: STORAGE_NOTE P_weight 5B vs Spec+code 2B. DOC.2: MILESTONE outdated.
 ```
