@@ -672,12 +672,22 @@ let _pb_stack = __array_with_cap(512);
 fn parse_block(p) {
     expect_symbol(p, "{");
     let _pb_stmts = [];
-    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) && _g_parse_error == 0 {
+    while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
         // Save before recursive parse_stmt (which may call parse_block)
         push(_pb_stack, _pb_stmts);
         let _pb_item = parse_stmt(p);
         let _pb_stmts = pop(_pb_stack);
-        push(_pb_stmts, _pb_item);
+        if _g_parse_error == 1 {
+            // Error recovery: skip to next ';' or '}' boundary
+            _g_parse_error = 0;
+            while !is_eof(peek(p)) {
+                if is_symbol_tok(peek(p), ";") { advance(p); break; };
+                if is_symbol_tok(peek(p), "}") { break; };
+                advance(p);
+            };
+        } else {
+            push(_pb_stmts, _pb_item);
+        };
     };
     expect_symbol(p, "}");
     return _pb_stmts;
