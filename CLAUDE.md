@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~928KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~935KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -378,7 +378,10 @@ DN/QR Nodes:       SHA-256 addressed nodes, dedup, fire counting, bidirectional 
 UDC Decoder:       molecule → mood label (Russell's circumplex), emoji_for_emotion()
 Auto-Learn:        _boot_learn() loads training data on first REPL call
 Training Data:     docs/training/ — 6 files, 661 entries auto-loaded at boot
-Self-Compile:      lexer.ol compiles in 1.0s (was hanging — nested dict/struct fix)
+Self-Compile:      ALL 4 bootstrap files compile (streaming, zero segfaults):
+                   lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
+                   __array_with_cap(n) builtin for explicit capacity allocation
+                   ARRAY_INIT_CAP=512, recursive forward pointer following
 ```
 
 ---
@@ -387,7 +390,7 @@ Self-Compile:      lexer.ol compiles in 1.0s (was hanging — nested dict/struct
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~928KB)
+make build                    # → origin_new.olang (~935KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -407,13 +410,13 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,471 LOC) |
-| `stdlib/bootstrap/lexer.ol` | Tokenizer (259 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,522 LOC) |
+| `stdlib/bootstrap/lexer.ol` | Tokenizer (262 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (988 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,337 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,334 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (322 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (43 files, 8,910 LOC) |
+| `stdlib/repl.ol` | REPL entry point (348 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (43 files, 9,142 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
