@@ -201,3 +201,68 @@ pub fn encode(text) {
     let emotion = text_emotion(text);
     return { molecule: molecule, emotion: emotion, source: "text" };
 }
+
+// ════════════════════════════════════════════════════════════════
+// Analysis pipeline (inline — avoids cross-file function issues)
+// ════════════════════════════════════════════════════════════════
+
+fn _a_has(text, word) {
+    let tlen = len(text);
+    let wlen = len(word);
+    if wlen > tlen { return 0; };
+    let i = 0;
+    while i <= (tlen - wlen) {
+        let _ah_match = 1;
+        let j = 0;
+        while j < wlen {
+            if char_at(text, (i + j)) != char_at(word, j) {
+                _ah_match = 0;
+                break;
+            };
+            let j = j + 1;
+        };
+        if _ah_match == 1 { return 1; };
+        let i = i + 1;
+    };
+    return 0;
+}
+
+pub fn analyze_input(text) {
+    let molecule = encode_text(text);
+    let emo = text_emotion(text);
+
+    // Context
+    let role = "observer";
+    let source = "now";
+    if _a_has(text, "toi") == 1 { role = "first"; };
+    if _a_has(text, " I ") == 1 { role = "first"; };
+    if _a_has(text, "my ") == 1 { role = "first"; };
+
+    // Intent
+    let intent = "chat";
+    if _a_has(text, "buon") == 1 { intent = "heal"; };
+    if _a_has(text, "sad") == 1 { intent = "heal"; };
+    if _a_has(text, "tired") == 1 { intent = "heal"; };
+    if _a_has(text, "la gi") == 1 { intent = "learn"; };
+    if _a_has(text, "how to") == 1 { intent = "learn"; };
+    if _a_has(text, "?") == 1 { intent = "learn"; };
+    if _a_has(text, "code") == 1 { intent = "technical"; };
+    if _a_has(text, "bug") == 1 { intent = "technical"; };
+    if _a_has(text, "turn on") == 1 { intent = "command"; };
+    if _a_has(text, "bat den") == 1 { intent = "command"; };
+
+    // Tone
+    let tone = "neutral";
+    if intent == "heal" { tone = "empathetic"; };
+    if intent == "learn" { tone = "explanatory"; };
+    if intent == "technical" { tone = "precise"; };
+    if intent == "command" { tone = "confirmatory"; };
+    if emo.v < 3 { tone = "gentle"; };
+
+    // Store globals
+    let __g_analysis_intent = intent;
+    let __g_analysis_tone = tone;
+    let __g_analysis_role = role;
+    let __g_analysis_source = source;
+    return molecule;
+}
