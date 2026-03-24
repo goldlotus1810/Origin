@@ -109,22 +109,58 @@ pub fn tokenize(source) {
         if is_digit(ch) {
             let start = pos;
             let start_col = col;
-            while pos < src_len && is_digit(char_at(source, pos)) {
-                let pos = pos + 1;
-                let col = col + 1;
+            // Hex literal: 0x... or 0X...
+            let _nl_is_hex = 0;
+            if ch == "0" && (pos + 1) < src_len {
+                let _nl_next = char_at(source, pos + 1);
+                if _nl_next == "x" || _nl_next == "X" {
+                    _nl_is_hex = 1;
+                    let pos = pos + 2;
+                    let col = col + 2;
+                    while pos < src_len {
+                        let _nl_hc = char_at(source, pos);
+                        if is_digit(_nl_hc) || (_nl_hc >= "a" && _nl_hc <= "f") || (_nl_hc >= "A" && _nl_hc <= "F") {
+                            let pos = pos + 1;
+                            let col = col + 1;
+                        } else {
+                            break;
+                        };
+                    };
+                };
             };
-            // Decimal point
-            if pos < src_len && char_at(source, pos) == "." {
-                let pos = pos + 1;
-                let col = col + 1;
+            if _nl_is_hex == 0 {
                 while pos < src_len && is_digit(char_at(source, pos)) {
                     let pos = pos + 1;
                     let col = col + 1;
                 };
+                // Decimal point
+                if pos < src_len && char_at(source, pos) == "." {
+                    let pos = pos + 1;
+                    let col = col + 1;
+                    while pos < src_len && is_digit(char_at(source, pos)) {
+                        let pos = pos + 1;
+                        let col = col + 1;
+                    };
+                };
             };
             let text = substr(source, start, pos);
+            let _nl_numval = 0;
+            if _nl_is_hex == 1 {
+                // Convert hex string to number: skip "0x" prefix
+                let _nl_hi = 2;
+                while _nl_hi < len(text) {
+                    let _nl_hd = char_at(text, _nl_hi);
+                    _nl_numval = _nl_numval * 16;
+                    if _nl_hd >= "0" && _nl_hd <= "9" { _nl_numval = _nl_numval + (__char_code(_nl_hd) - 48); };
+                    if _nl_hd >= "a" && _nl_hd <= "f" { _nl_numval = _nl_numval + (__char_code(_nl_hd) - 87); };
+                    if _nl_hd >= "A" && _nl_hd <= "F" { _nl_numval = _nl_numval + (__char_code(_nl_hd) - 55); };
+                    let _nl_hi = _nl_hi + 1;
+                };
+            } else {
+                _nl_numval = to_num(text);
+            };
             push(tokens, Token {
-                kind: TokenKind::Number { value: to_num(text) },
+                kind: TokenKind::Number { value: _nl_numval },
                 text: text,
                 line: line,
                 col: start_col,
