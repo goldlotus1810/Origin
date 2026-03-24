@@ -47,7 +47,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| OL.1 | Encoder: text → molecule (.ol) | ~300 LOC | FREE | Port agents/encoder. Word → 5D coordinate. |
+| OL.1 | Encoder: text → molecule (.ol) | ~300 LOC | BLOCKED by OL.8 | encoder.ol written (160 LOC) but REPL can't call stdlib functions. |
 | OL.2 | Analysis: sentence fusion (.ol) | ~400 LOC | FREE | Port context/analysis. Emotion composition. |
 | OL.3 | Intent inference engine (.ol) | ~300 LOC | FREE | Port intent estimation. Context-aware. |
 | OL.4 | Agents: flesh out stubs (.ol) | ~500 LOC | FREE | chief.ol, leo.ol, worker.ol, gate.ol — real logic. |
@@ -64,7 +64,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | OL.7d | Pretty-print arrays | ~80 LOC | DONE ✅ | `emit [1,2,3]` instead of `[array 3]`. PR #318. |
 | OL.7e | Variable assignment fix | ~5 LOC | DONE ✅ | `let b = b + a` now works. LetStmt name save. PR #320. |
 | OL.7f | FieldAssign fix + audit | ~10 LOC | DONE ✅ | Full 18-site match binding audit. PR #321. |
-| OL.8 | Import/module system | ~300 LOC | FREE | `use module.func` — resolve at compile time. |
+| OL.8 | Import/module system | ~300 LOC | **CRITICAL** | stdlib→REPL bridge. Blocks ALL Tier 1 work. REPL can't call stdlib functions. |
 | OL.9 | Error handling | ~200 LOC | DONE ✅ | `try { ... } catch { ... }` + `__throw(msg)`. VM try_stack + parser + semantic. |
 | OL.10 | Array comprehension | ~150 LOC | DONE ✅ | `[x * 2 for x in items if cond]`. Depth-indexed globals + manual token emit. |
 
