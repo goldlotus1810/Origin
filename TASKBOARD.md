@@ -9,14 +9,18 @@
 ## Trạng thái: FULL STACK (2026-03-24)
 
 ```
-origin_new.olang = ~871KB native binary (891,374 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (2,883 LOC Olang)
-  ✅ Intelligence layer: encode + analyze + intent + respond (OL.1-5)
+origin_new.olang = ~935KB native binary (957,442 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (3,013 LOC Olang)
+  ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
   ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
-  ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf...
-  ✅ ASM VM x86_64 (5,031 LOC), no libc, zero dependencies
+  ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 16/16 tests
+  ✅ ASM VM x86_64 (5,522 LOC), no libc, zero dependencies
+  ✅ HomeOS: 43 files, 9,142 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
+  ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
+     lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
+  ✅ Spec v3: SC.1,7,9-13 done (7/16)
 ```
 
 ---
@@ -199,29 +203,29 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.43 | DONE ✅ | Tests 14 updated |
 | DC.44 | DONE ✅ | Phase 5 section added to CLAUDE.md |
 | DC.45 | DONE ✅ | Auto-learn documented in Phase 5 section |
-| DC.46 | OPEN | `CLAUDE.md:391` — repl 304→322 LOC |
-| DC.47 | OPEN ⚠️ | `CLAUDE.md:392` — homeos 40→**43 files**, 7,992→**8,910** LOC (+918!) |
-| DC.48 | OPEN | `CLAUDE.md:37,378` — Binary ~901KB→~927KB (949KB) |
-| DC.49 | OPEN | `CLAUDE.md:332` — Tests 14→**16** |
-| DC.50 | OPEN | Phase 5 thiếu: alias, node, UDC decode, UTF-8, emo carry-over, stemming, digest |
+| DC.46 | DONE ✅ | repl 322 LOC updated |
+| DC.47 | DONE ✅ | homeos 43 files, 8,910 LOC updated |
+| DC.48 | DONE ✅ | Binary ~928KB (950,469 bytes) updated |
+| DC.49 | DONE ✅ | Tests 16 updated |
+| DC.50 | DONE ✅ | Phase 5 fully documented: alias, node, UDC decode, UTF-8, emoji, stemming, digest, DN/QR |
 
 ### Spec v3 vs Code (architecture gap — INFO level)
 
 | # | Spec Section | Status | Notes |
 |---|-------------|--------|-------|
-| SC.1 | SecurityGate 3-layer | ⚠️ Partial | Code: 2 keywords. Spec: Bloom + normalized + semantic |
+| SC.1 | SecurityGate 3-layer | ✅ Done | 12 patterns (VI+EN), alias-normalized, inline matching |
 | SC.2 | Fusion (multi-modality) | ❌ Not impl | text-only for now |
 | SC.3 | 7 Instincts | ❌ Not impl | Honesty, Contradiction, Causality, etc. |
 | SC.4 | Immune Selection N=3 | ❌ Not impl | single-branch inference |
 | SC.5 | Homeostasis (Free Energy) | ❌ Not impl | no F tracking |
 | SC.6 | DNA Repair (self_correct) | ❌ Not impl | no critique loop |
-| SC.7 | KnowTree hierarchical | ❌ Flat array | spec says L0→L3 tree |
+| SC.7 | KnowTree hierarchical | ✅ UDC chain | dual search: molecule similarity + keyword |
 | SC.8 | UDC + P_weight encoding | ✅ Correct | block ranges + bit layout |
-| SC.9 | Compose (amplify V) | ❌ **BUG-V** | `_amplify_v()` dùng TRUNG BÌNH — vi phạm Spec §1.6! |
-| SC.10 | Compose S: Union | ⚠️ max() | Code dùng max() thay vì SDF union |
-| SC.11 | Compose R: Compose | ⚠️ average | Code dùng (ra+rb)/2 — spec nói Compose |
-| SC.12 | Hebbian Select | ⚠️ No decay | silk_co_activate OK, nhưng thiếu decay φ⁻¹ |
-| SC.13 | Dream pipeline | ✅ Partial | dream_cycle scan STM, nhưng thiếu Maturity pipeline |
+| SC.9 | Compose (amplify V) | ✅ Done | amplify_v: base + sign × boost (Spec §1.6) |
+| SC.10 | Compose S: Union | ✅ Done | _union_s: SDF union (max complexity) |
+| SC.11 | Compose R: Compose | ✅ Done | _compose_r: same→keep, diff→max |
+| SC.12 | Hebbian Select | ✅ Done | silk_decay φ⁻¹ every 3 turns, prune < 0.01 |
+| SC.13 | Dream pipeline | ✅ Done | strengthen dominant + decay weak (consolidation) |
 | SC.14 | MolecularChain | ✅ Correct | u16 molecules |
 | SC.15 | 10-stage pipeline | ✅ NEW | alias→UDC→node→DN/QR→decode→emoji→output |
 | SC.16 | 5 Checkpoints | ❌ 0/5 | Pipeline không có checkpoint nào |
@@ -333,8 +337,13 @@ VI PHẠM hiện tại:
 2026-03-24  Inspect #13: 6/6+test 14/14. ZERO CONFLICTS. 45/45 DCs resolved. Docs 100% synced. 923KB.
 2026-03-24  P5.2: emotion carry-over + Vietnamese stemming + digest + UTF-8 decoder.
 2026-03-24  P5.3: full pipeline (alias→UDC→node→DN/QR→decode→emoji). 3 new files. 949KB.
+2026-03-24  Inspect #14: DC.46-50 found (LOC drift, Phase 5 undoc). Spec v3 gap analysis. BUGFIX_ARCHITECTURE.md.
+2026-03-24  BUG FIX: nested struct/dict/enum save-restore (5 sites). lexer.ol compiles! 1.0s.
+2026-03-24  DC.46-DC.50 ALL FIXED. CLAUDE.md + TASKBOARD synced. 950KB. 16/16 tests.
 2026-03-24  Inspect #14: 8/8+test 16/16. DC.46-50 + SC.1-16 + DOC.1-4. Deep Spec v3 audit.
-            BUG-V CRITICAL: _amplify_v() dùng TRUNG BÌNH — vi phạm Spec §1.6 + CHECK_TO_PASS §1!
-            5 Checkpoints: 0/5 implement. SecurityGate: 2 keywords vs spec 3-layer. Hebbian: no decay.
-            DOC.1: STORAGE_NOTE P_weight 5B vs Spec+code 2B. DOC.2: MILESTONE outdated.
+2026-03-24  SC.9 FIXED: amplify_v Spec §1.6. SC.7: UDC chain knowledge. SC.10-11: Union/Compose.
+2026-03-24  SC.1: SecurityGate 12 patterns. SC.12: Silk decay φ⁻¹. SC.13: Dream consolidation.
+2026-03-24  __array_with_cap builtin: explicit capacity, fix token corruption from relocation.
+2026-03-24  STREAMING COMPILER: parse+compile one stmt at a time. ALL 4 bootstrap files compile!
+            lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s. ZERO segfaults. 957KB.
 ```

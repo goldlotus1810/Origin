@@ -55,7 +55,10 @@ fn is_whitespace(ch) {
 
 // ── Main tokenizer ───────────────────────────────────────────────
 pub fn tokenize(source) {
-    let tokens = [];
+    // Pre-allocate capacity based on source size (~1 token per 5 chars)
+    let _tok_cap = __floor(len(source) / 4) + 100;
+    if _tok_cap < 1024 { _tok_cap = 1024; };
+    let tokens = __array_with_cap(_tok_cap);
     let pos = 0;
     let line = 1;
     let col = 1;

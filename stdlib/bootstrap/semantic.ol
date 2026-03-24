@@ -12,8 +12,8 @@ use olang.bootstrap.lexer;
 use olang.bootstrap.parser;
 
 // Explicit save stack for recursive compile_expr (ASM VM has no scoping)
-let _ce_stack = [];
-let _if_stack = [];
+let _ce_stack = __array_with_cap(512);
+let _if_stack = __array_with_cap(512);
 let _break_patches = [];
 let _continue_patches = [];
 let _g_output = [];
@@ -78,12 +78,9 @@ let _g_output_ready = 0;
 fn _prefill_output() {
     // Only allocate ONCE — reuse on subsequent calls
     if _g_output_ready == 0 {
-        let _g_output = [];
-        let _pf = 0;
-        while _pf < 16384 {
-            push(_g_output, 0);
-            let _pf = _pf + 1;
-        };
+        // Use __array_range to allocate exact size in ONE shot (no relocation!)
+        // Values [0..16383] will be overwritten by set_at during codegen
+        let _g_output = __array_range(16384);
         let _g_output_ready = 1;
     };
     // Just reset position
@@ -544,28 +541,50 @@ fn compile_expr(state, expr) {
         },
         Expr::StructLit { path, fields } => {
             // Struct or enum variant with fields
+            // Save fields/fi before compile_expr (recursive may clobber)
             let fi = 0;
-            while fi < len(fields) {
+            let _sl_count = len(fields);
+            while fi < _sl_count {
                 let f = fields[fi];
-                emit_op(state, make_op_name("Push", f.name));
-                compile_expr(state, f.value);
+                let _sl_fname = f.name;
+                let _sl_fval = f.value;
+                emit_op(state, make_op_name("Push", _sl_fname));
+                push(_ce_stack, fields);
+                push(_ce_stack, fi);
+                push(_ce_stack, _sl_count);
+                push(_ce_stack, path);
+                compile_expr(state, _sl_fval);
+                let path = pop(_ce_stack);
+                let _sl_count = pop(_ce_stack);
+                let fi = pop(_ce_stack);
+                let fields = pop(_ce_stack);
                 let fi = fi + 1;
             };
-            emit_op(state, make_op_num("PushNum", len(fields)));
+            emit_op(state, make_op_num("PushNum", _sl_count));
             emit_op(state, make_op_name("Call", "__dict_new"));
             emit_op(state, make_op_name("Push", path));
             emit_op(state, make_op_name("Call", "__struct_tag"));
         },
         Expr::DictLit { fields } => {
             // Dict literal: { key: value, ... } — no tag
+            // Save fields before compile_expr (recursive may clobber _dl_i/_dl_f)
             let _dl_i = 0;
-            while _dl_i < len(fields) {
+            let _dl_count = len(fields);
+            while _dl_i < _dl_count {
                 let _dl_f = fields[_dl_i];
-                emit_op(state, make_op_name("Push", _dl_f.name));
-                compile_expr(state, _dl_f.value);
+                let _dl_fname = _dl_f.name;
+                let _dl_fval = _dl_f.value;
+                emit_op(state, make_op_name("Push", _dl_fname));
+                push(_ce_stack, fields);
+                push(_ce_stack, _dl_i);
+                push(_ce_stack, _dl_count);
+                compile_expr(state, _dl_fval);
+                let _dl_count = pop(_ce_stack);
+                let _dl_i = pop(_ce_stack);
+                let fields = pop(_ce_stack);
                 let _dl_i = _dl_i + 1;
             };
-            emit_op(state, make_op_num("PushNum", len(fields)));
+            emit_op(state, make_op_num("PushNum", _dl_count));
             emit_op(state, make_op_name("Call", "__dict_new"));
         },
         Expr::ArrayComp { var, depth } => {

@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~901KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~935KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -329,7 +329,7 @@ learn <text>             Teach HomeOS a fact
 learn_file <path>        Read file and learn each line as fact
 compile <path>           Compile .ol file → show bytecode size
 build                    Self-build: compile + pack → origin_built.olang
-test                     Run 14 inline tests
+test                     Run 16 inline tests
 memory                   Show STM turns + Silk edges + Knowledge facts
 help                     Show available commands
 exit / quit              Exit REPL
@@ -360,13 +360,28 @@ Knowledge Store:
 ## Phase 5 — Intelligence Layer (P5)
 
 ```
-Word Affect:       72 entries (Vietnamese + English), 50-language expansion planned
-Personality:       14 template globals, set_personality("empathetic"|"formal"|"playful")
-Context Window:    STM max 32 turns (expanded from 8)
+10-Stage Pipeline: input → alias → emoji → UDC encode → node → Learning → DN/QR
+                   ← UDC decode ← emoji ← alias ← output
+
+Alias System:      31 Vietnamese slang mappings (ko→khong, dc→duoc, bn→ban)
+                   10 emoji shortcodes (:)→😊, :(→😢, <3→❤)
+UTF-8 Decoder:     utf8_decode() — 1-4 byte sequences → full Unicode codepoint
+Emoji Emotion:     25+ emoji with fine-grained V/A (😊=V7/A6, 😭=V1/A6, 😡=V1/A7)
+                   text_emotion_unicode() — scan text for emoji → extract V/A from molecule
+Word Affect:       72 entries (Vietnamese + English), Vietnamese stemming (negator/intensifier)
+                   text_emotion_v2() — word + emoji fusion (70% emoji / 30% word)
+Emotion Carry:     EMA 60/40 across turns, streak detection (3+ same → bias tone)
+Personality:       14 template globals, set_personality("formal"|"casual"|"english")
+Context Window:    STM max 32 turns, auto-digest when >16 (compress + evict)
+DN/QR Nodes:       SHA-256 addressed nodes, dedup, fire counting, bidirectional linking
+                   qr_search() — keyword matching weighted by fire count
+UDC Decoder:       molecule → mood label (Russell's circumplex), emoji_for_emotion()
 Auto-Learn:        _boot_learn() loads training data on first REPL call
-Training Data:     docs/training/ — 6 files (about, world knowledge, dialog patterns)
-                   661 entries auto-loaded at boot
-Sentiment:         text_emotion() — word-level affect scoring from word_affect table
+Training Data:     docs/training/ — 6 files, 661 entries auto-loaded at boot
+Self-Compile:      ALL 4 bootstrap files compile (streaming, zero segfaults):
+                   lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
+                   __array_with_cap(n) builtin for explicit capacity allocation
+                   ARRAY_INIT_CAP=512, recursive forward pointer following
 ```
 
 ---
@@ -375,7 +390,7 @@ Sentiment:         text_emotion() — word-level affect scoring from word_affect
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~901KB)
+make build                    # → origin_new.olang (~935KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -395,13 +410,13 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,471 LOC) |
-| `stdlib/bootstrap/lexer.ol` | Tokenizer (259 LOC) |
-| `stdlib/bootstrap/parser.ol` | Parser recursive descent (975 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,315 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,522 LOC) |
+| `stdlib/bootstrap/lexer.ol` | Tokenizer (262 LOC) |
+| `stdlib/bootstrap/parser.ol` | Parser recursive descent (988 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,334 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (304 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,992 LOC) |
+| `stdlib/repl.ol` | REPL entry point (348 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (43 files, 9,142 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |

@@ -271,7 +271,11 @@ fn parse_primary(p) {
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
                         let fname = expect_ident(p);
                         expect_symbol(p, ":");
+                        push(_pb_stack, fields);
+                        push(_pb_stack, fname);
                         let fvalue = parse_expr(p);
+                        let fname = pop(_pb_stack);
+                        let fields = pop(_pb_stack);
                         push(fields, FieldInit { name: fname, value: fvalue });
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
@@ -292,7 +296,11 @@ fn parse_primary(p) {
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
                         let fname = expect_ident(p);
                         expect_symbol(p, ":");
+                        push(_pb_stack, fields);
+                        push(_pb_stack, fname);
                         let fvalue = parse_expr(p);
+                        let fname = pop(_pb_stack);
+                        let fields = pop(_pb_stack);
                         push(fields, FieldInit { name: fname, value: fvalue });
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
@@ -467,11 +475,16 @@ fn parse_primary(p) {
                 };
                 if _mol_is_dict == 1 {
                     // Parse dict literal: { key: value, key2: value2 }
+                    // NOTE: parse_expr may recurse (nested dict) → save _dl_fields + _dl_fname
                     let _dl_fields = [];
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) && _g_parse_error == 0 {
                         let _dl_fname = expect_ident(p);
                         expect_symbol(p, ":");
+                        push(_pb_stack, _dl_fields);
+                        push(_pb_stack, _dl_fname);
                         let _dl_fval = parse_expr(p);
+                        let _dl_fname = pop(_pb_stack);
+                        let _dl_fields = pop(_pb_stack);
                         push(_dl_fields, FieldInit { name: _dl_fname, value: _dl_fval });
                         if is_symbol_tok(peek(p), ",") { advance(p); };
                     };
@@ -509,7 +522,7 @@ fn parse_primary(p) {
             return Expr::NumLit { value: 0 };
         },
         _ => {
-            emit "Parse error: unexpected token";
+            emit "Parse error: unexpected token: " + tok.text + " at pos " + __to_string(p.pos);
             let _g_parse_error = 1;
             advance(p);
             return Expr::NumLit { value: 0 };
@@ -538,7 +551,7 @@ fn is_binop(tok) {
 }
 
 // Explicit save stack for recursive parse_expr_prec (ASM VM has no scoping)
-let _pep_stack = [];
+let _pep_stack = __array_with_cap(512);
 
 fn parse_expr_prec(p, min_prec) {
     let _pep_lhs = parse_primary(p);
@@ -654,7 +667,7 @@ fn parse_match_expr(p) {
 // ── Statement parsing ────────────────────────────────────────────
 
 // Explicit stack for recursive parse_block (ASM VM has no scoping)
-let _pb_stack = [];
+let _pb_stack = __array_with_cap(512);
 
 fn parse_block(p) {
     expect_symbol(p, "{");
