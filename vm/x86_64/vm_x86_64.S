@@ -916,6 +916,14 @@ op_call:
     cmp     %rdx, %rax
     je      .call_type_of
 
+    # ── Math builtins ──
+    movabs  $0x185FC0C022E829AF, %rdx   # __floor
+    cmp     %rdx, %rax
+    je      .call_floor
+    movabs  $0x9E3D368BE8B3606A, %rdx   # __ceil
+    cmp     %rdx, %rax
+    je      .call_ceil
+
     # ── Error handling builtins ──
     movabs  $0xDFF308A36F62AAF5, %rdx   # __throw
     cmp     %rdx, %rax
@@ -2999,6 +3007,22 @@ op_ret:
     # Rewind scope top
     lea     var_shadow_top(%rip), %rsi
     mov     %rdx, (%rsi)
+    jmp     vm_loop
+
+.call_floor:
+    # __floor(x) → floor(x)
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    roundsd $1, %xmm0, %xmm0          # round toward -inf
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+.call_ceil:
+    # __ceil(x) → ceil(x)
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    roundsd $2, %xmm0, %xmm0          # round toward +inf
+    movsd   %xmm0, (%r14)
     jmp     vm_loop
 
 .call_throw:
