@@ -9,7 +9,7 @@
 ## Trạng thái: FULL STACK (2026-03-24)
 
 ```
-origin_new.olang = 861KB native binary (881,253 bytes)
+origin_new.olang = ~871KB native binary (891,374 bytes)
   ✅ Bootstrap compiler: lexer + parser + semantic + codegen (2,883 LOC Olang)
   ✅ Intelligence layer: encode + analyze + intent + respond (OL.1-5)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
