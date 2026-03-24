@@ -3138,42 +3138,32 @@ op_ret:
     jmp     .sha_w_extend
 
 .sha_compress:
-    # Initialize working variables a..h from state
-    lea     sha_state(%rip), %rbx
-    mov     0(%rbx), %eax            # a
-    push    %rax
-    mov     4(%rbx), %eax            # b
-    push    %rax
-    mov     8(%rbx), %eax            # c
-    push    %rax
-    mov     12(%rbx), %eax           # d
-    push    %rax
-    mov     16(%rbx), %eax           # e
-    push    %rax
-    mov     20(%rbx), %eax           # f
-    push    %rax
-    mov     24(%rbx), %eax           # g
-    push    %rax
-    mov     28(%rbx), %eax           # h
-    push    %rax
-    # Stack: [h, g, f, e, d, c, b, a] (h at top)
+    # Save ALL VM registers to BSS (stack push/pop unreliable across 64 rounds)
+    lea     sha_save_regs(%rip), %rax
+    mov     %r12, 0(%rax)
+    mov     %rbp, 8(%rax)
+    mov     %r9,  16(%rax)
+    mov     %rcx, 24(%rax)
+    mov     %rdi, 32(%rax)
+    mov     %rbx, 40(%rax)
+    mov     %r14, 48(%rax)
+    mov     %r15, 56(%rax)
 
-    # Use sha_abcdefgh buffer for working vars
+    # Initialize working vars from state → sha_abcdefgh
+    lea     sha_state(%rip), %rbx
     lea     sha_abcdefgh(%rip), %rbp
-    pop     %rax; mov %eax, 28(%rbp)  # h
-    pop     %rax; mov %eax, 24(%rbp)  # g
-    pop     %rax; mov %eax, 20(%rbp)  # f
-    pop     %rax; mov %eax, 16(%rbp)  # e
-    pop     %rax; mov %eax, 12(%rbp)  # d
-    pop     %rax; mov %eax, 8(%rbp)   # c
-    pop     %rax; mov %eax, 4(%rbp)   # b
-    pop     %rax; mov %eax, 0(%rbp)   # a
+    mov     0(%rbx), %eax; mov %eax, 0(%rbp)
+    mov     4(%rbx), %eax; mov %eax, 4(%rbp)
+    mov     8(%rbx), %eax; mov %eax, 8(%rbp)
+    mov     12(%rbx), %eax; mov %eax, 12(%rbp)
+    mov     16(%rbx), %eax; mov %eax, 16(%rbp)
+    mov     20(%rbx), %eax; mov %eax, 20(%rbp)
+    mov     24(%rbx), %eax; mov %eax, 24(%rbp)
+    mov     28(%rbx), %eax; mov %eax, 28(%rbp)
 
     # 64 compression rounds
-    lea     sha_k(%rip), %r10        # K constants
-    lea     sha_w(%rip), %r11        # W schedule
-    xor     %r12d, %r12d             # round counter (TEMP: save/restore r12!)
-    push    %r12                      # save bytecode base
+    lea     sha_k(%rip), %r10
+    lea     sha_w(%rip), %r11
     xor     %r12d, %r12d
 .sha_round:
     cmp     $64, %r12d
@@ -3247,18 +3237,28 @@ op_ret:
     jmp     .sha_round
 
 .sha_round_done:
-    pop     %r12                      # restore bytecode base
-
-    # Add compressed values to state
+    # Add compressed values to state BEFORE restoring rbp
+    # (rbp still points to sha_abcdefgh from compression)
     lea     sha_state(%rip), %rbx
-    mov     0(%rbp), %eax;  add %eax, 0(%rbx)    # H[0] += a
-    mov     4(%rbp), %eax;  add %eax, 4(%rbx)    # H[1] += b
-    mov     8(%rbp), %eax;  add %eax, 8(%rbx)    # H[2] += c
-    mov     12(%rbp), %eax; add %eax, 12(%rbx)   # H[3] += d
-    mov     16(%rbp), %eax; add %eax, 16(%rbx)   # H[4] += e
-    mov     20(%rbp), %eax; add %eax, 20(%rbx)   # H[5] += f
-    mov     24(%rbp), %eax; add %eax, 24(%rbx)   # H[6] += g
-    mov     28(%rbp), %eax; add %eax, 28(%rbx)   # H[7] += h
+    mov     0(%rbp), %eax;  add %eax, 0(%rbx)
+    mov     4(%rbp), %eax;  add %eax, 4(%rbx)
+    mov     8(%rbp), %eax;  add %eax, 8(%rbx)
+    mov     12(%rbp), %eax; add %eax, 12(%rbx)
+    mov     16(%rbp), %eax; add %eax, 16(%rbx)
+    mov     20(%rbp), %eax; add %eax, 20(%rbx)
+    mov     24(%rbp), %eax; add %eax, 24(%rbx)
+    mov     28(%rbp), %eax; add %eax, 28(%rbx)
+
+    # NOW restore ALL VM registers from BSS
+    lea     sha_save_regs(%rip), %rax
+    mov     0(%rax), %r12
+    mov     8(%rax), %rbp
+    mov     16(%rax), %r9
+    mov     24(%rax), %rcx
+    mov     32(%rax), %rdi
+    mov     40(%rax), %rbx
+    mov     48(%rax), %r14
+    mov     56(%rax), %r15
 
     add     $64, %r9
     jmp     .sha_block_loop
@@ -4982,6 +4982,10 @@ sha_w:
     .space 256                          # W[0..63] message schedule (64 × 4 bytes)
 sha_abcdefgh:
     .space 32                           # working variables a..h (8 × 4 bytes)
+sha_save_regs:
+    .space 64                           # saved VM registers during SHA-256 (8 × 8 bytes)
+sha_round_idx:
+    .space 8                            # round counter (avoid clobbering r12)
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
 eval_total:
