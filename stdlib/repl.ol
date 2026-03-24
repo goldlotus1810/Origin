@@ -18,7 +18,15 @@ pub fn repl_eval(input) {
   // Check for REPL commands
   if src == "exit" || src == "quit" { return "__exit__"; }
   if src == "help" {
-    return "Commands: let, fn, emit, if, while, match, encode <text>, exit\nType Olang code or natural text.";
+    return "Commands: let, fn, emit, if, while, match, encode <text>, respond <text>, exit\nType Olang code or natural text.";
+  }
+
+  // Respond command: full agent pipeline → response
+  if len(src) > 8 {
+    if __substr(src, 0, 8) == "respond " {
+      let _rr_text = __substr(src, 8, len(src));
+      return agent_process(_rr_text);
+    };
   }
 
   // Encode command: encode <text> → show molecular encoding

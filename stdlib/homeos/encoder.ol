@@ -266,3 +266,66 @@ pub fn analyze_input(text) {
     let __g_analysis_source = source;
     return molecule;
 }
+
+// ════════════════════════════════════════════════════════════════
+// OL.4 — Agent dispatch (chief/leo/worker/gate)
+// ════════════════════════════════════════════════════════════════
+
+pub fn agent_process(text) {
+    // GATE — security check FIRST
+    let gate_result = "allow";
+    if _a_has(text, "tu tu") == 1 { gate_result = "crisis"; };
+    if _a_has(text, "muon chet") == 1 { gate_result = "crisis"; };
+    if _a_has(text, "kill myself") == 1 { gate_result = "crisis"; };
+    if _a_has(text, "suicide") == 1 { gate_result = "crisis"; };
+
+    if gate_result == "crisis" {
+        let __g_agent_action = "crisis";
+        return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc.";
+    };
+
+    // ENCODE + ANALYZE
+    let mol = analyze_input(text);
+    let intent = __g_analysis_intent;
+    let tone = __g_analysis_tone;
+
+    // LEO — dispatch by intent
+    let __g_agent_action = intent;
+
+    // RESPONSE — compose based on intent + tone
+    return compose_reply(intent, tone, text);
+}
+
+// ════════════════════════════════════════════════════════════════
+// OL.5 — Response composer
+// ════════════════════════════════════════════════════════════════
+
+pub fn compose_reply(intent, tone, text) {
+    // Part 1: Acknowledgment
+    let ack = "";
+    if tone == "empathetic" { ack = "Minh hieu cam giac do."; };
+    if tone == "gentle" { ack = "Tu tu thoi, khong voi dau."; };
+    if tone == "explanatory" { ack = "De minh tim hieu cho ban."; };
+    if tone == "precise" { ack = "OK."; };
+    if tone == "confirmatory" { ack = "Da nhan."; };
+
+    // Part 2: Intent-driven follow-up
+    let followup = "";
+    if intent == "heal" {
+        followup = " Ban muon chia se them khong?";
+    };
+    if intent == "learn" {
+        followup = " Ban muon biet cu the dieu gi?";
+    };
+    if intent == "technical" {
+        followup = " Cho minh xem code hoac error message.";
+    };
+    if intent == "command" {
+        followup = " Dang xu ly...";
+    };
+    if intent == "chat" {
+        ack = "Minh nghe roi.";
+    };
+
+    return ack + followup;
+}
