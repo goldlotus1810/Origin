@@ -21,12 +21,17 @@ pub fn repl_eval(input) {
     return "Commands: let, fn, emit, if, while, match, encode <text>, respond <text>, exit\nType Olang code or natural text.";
   }
 
-  // Respond command: full agent pipeline → response
+  // Respond command: full agent pipeline with memory → response
   if len(src) > 8 {
     if __substr(src, 0, 8) == "respond " {
       let _rr_text = __substr(src, 8, len(src));
-      return agent_process(_rr_text);
+      return agent_respond(_rr_text);
     };
+  }
+
+  // Memory command: show STM state
+  if src == "memory" {
+    return "STM: " + __to_string(stm_count()) + " turns stored";
   }
 
   // Encode command: encode <text> → show molecular encoding

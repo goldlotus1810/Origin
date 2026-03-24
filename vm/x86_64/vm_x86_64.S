@@ -4507,12 +4507,31 @@ op_halt:
     mov     $SYS_WRITE, %eax
     syscall
 
-    # Read line from stdin into heap buffer
+    # Read line from stdin (byte-by-byte until newline, for pipe compatibility)
     mov     %r15, %rsi                  # buf = heap ptr
-    mov     $4096, %edx                 # max 4KB input
+    xor     %ecx, %ecx                  # bytes read = 0
+.repl_read_byte:
+    lea     (%rsi, %rcx), %rdx         # dest = buf + offset
+    push    %rcx
+    push    %rsi
+    mov     %rdx, %rsi                  # buf for read
+    mov     $1, %edx                    # read 1 byte
     xor     %edi, %edi                  # fd = stdin
     mov     $SYS_READ, %eax
     syscall
+    pop     %rsi
+    pop     %rcx
+    test    %rax, %rax
+    jle     .repl_read_done             # EOF or error
+    cmpb    $0x0A, (%rsi, %rcx)        # newline?
+    je      .repl_read_newline
+    inc     %rcx
+    cmp     $4095, %rcx                 # max length
+    jl      .repl_read_byte
+.repl_read_newline:
+    inc     %rcx                        # include newline in count
+.repl_read_done:
+    mov     %rcx, %rax                  # rax = bytes read (compatible with old code)
 
     # Check for EOF or error
     test    %rax, %rax
