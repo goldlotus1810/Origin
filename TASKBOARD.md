@@ -164,15 +164,15 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.26 | DONE ✅ | Memory systems section: STM, Silk, Dream, Knowledge documented |
 | DC.27 | DEFERRED | PLAN_REWRITE.md — will update at T4 start |
 
-### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #6)
+### Docs Conflicts — DC.28-DC.32 DONE ✅ (fixed 2026-03-24 Nox)
 
-| # | Mức độ | File | Xung đột |
-|---|--------|------|----------|
-| DC.28 | TRUNG BÌNH | `CLAUDE.md:37,347` | Binary `~891KB` → thực tế ~877KB (897,628 bytes). Sai đơn vị |
-| DC.29 | NHẸ | `CLAUDE.md:200,205` | Opcode 0x09 Jmp duplicate entry |
-| DC.30 | NHẸ | `CLAUDE.md:373` | HomeOS stdlib 7,832 LOC → thực tế 7,701 LOC |
-| DC.31 | **NGHIÊM TRỌNG** | `CLAUDE.md:290` | ARRAY_INIT_CAP = 4096 → thực tế **16384** (doubled twice: 4096→8192→16384) |
-| DC.32 | TRUNG BÌNH | `CLAUDE.md:369-372` | LOC drift: parser 952→974, semantic 1244→1301, repl 131→160 |
+| # | Status | Fix |
+|---|--------|-----|
+| DC.28 | DONE ✅ | Binary ~877KB (897,628 bytes) |
+| DC.29 | DONE ✅ | Opcode table reorganized, no duplicates |
+| DC.30 | DONE ✅ | HomeOS stdlib 7,701 LOC |
+| DC.31 | DONE ✅ | ARRAY_INIT_CAP = 16384 documented |
+| DC.32 | DONE ✅ | LOC: parser 974, semantic 1301, repl 160 |
 
 ### Pre-T4 Blockers — ALL DONE ✅
 

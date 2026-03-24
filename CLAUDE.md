@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~891KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~877KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -197,13 +197,13 @@ __char_code(ch) → codepoint number
 ### Bytecode opcodes (bc_format=1)
 
 ```
-0x01 Push(str)       0x09 Jmp(offset)     0x14 LoadLocal(name)
-0x02 Load(name)      0x0A Jz(offset)      0x15 PushNum(f64)
-0x06 Emit            0x0B Dup             0x19 PushMol(5 bytes)
-0x07 Call(name)      0x0C Pop             0x1A TryBegin(catch_offset)
-0x08 Ret             0x0D Swap            0x1B CatchEnd
-0x09 Jmp(offset)     0x0F Halt            0x1C StoreUpdate(name)
-0x13 Store(name)     0x24 CallClosure     0x25 Closure(body_len)
+0x01 Push(str)       0x0B Dup             0x19 PushMol(5 bytes)
+0x02 Load(name)      0x0C Pop             0x1A TryBegin(catch_offset)
+0x06 Emit            0x0D Swap            0x1B CatchEnd
+0x07 Call(name)      0x0F Halt            0x1C StoreUpdate(name)
+0x08 Ret             0x13 Store(name)     0x24 CallClosure
+0x09 Jmp(offset)     0x14 LoadLocal(name) 0x25 Closure(body_len)
+0x0A Jz(offset)      0x15 PushNum(f64)
 ```
 
 ### Scoping
@@ -287,8 +287,8 @@ use(my_var);                   // WRONG VALUE!
     Stride 2 cho mọi string builtin.
     codegen emit_str_u16: encode từng byte → 0x2100 | byte.
 
-④ ARRAY_INIT_CAP = 4096 — Empty `[]` pre-allocates 4096 slots (64KB).
-    ArrayLit `[1,2,3]` does NOT pre-allocate. Heap overlap risk with `[]`.
+④ ARRAY_INIT_CAP = 16384 — Empty `[]` pre-allocates 16384 slots (256KB).
+    ArrayLit `[1,2,3]` does NOT pre-allocate. _g_output uses 16384 slots (16KB bytecode).
 
 ⑤ Missing builtins → .call_skip → stack leak:
     Nếu thêm function mới cần builtin chưa có → PHẢI implement trong ASM.
@@ -344,7 +344,7 @@ Knowledge Store:
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~891KB)
+make build                    # → origin_new.olang (~877KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -366,11 +366,11 @@ make check-all
 |------|---------|
 | `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,050 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (258 LOC) |
-| `stdlib/bootstrap/parser.ol` | Parser recursive descent (952 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,244 LOC) |
+| `stdlib/bootstrap/parser.ol` | Parser recursive descent (974 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,301 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (131 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,832 LOC) |
+| `stdlib/repl.ol` | REPL entry point (160 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,701 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
