@@ -59,12 +59,12 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 |----|------|--------|--------|-------|
 | OL.6 | For-in loops + range() | ~120 LOC | DONE ✅ | `for x in items { }`, `for i in range(n) { }`. PR #311. |
 | OL.7 | Smart string concat | ~100 LOC | DONE ✅ | `"Age: " + 25` → auto-convert. `__to_string` builtin. PR #312. |
-| OL.7b | String interpolation `"hello {name}"` | ~200 LOC | FREE | Blocked: lexer self-compile conflict with `{` in source. Needs f-string prefix. |
+| OL.7b | String interpolation `$"hello {name}"` | ~50 LOC | DONE ✅ | Lexer desugars `$"...{expr}..."` to `"..." + __to_string(expr) + "..."`. |
 | OL.7c | Else-if chains | ~20 LOC | DONE ✅ | `else if` syntax. Parser var save/restore. PR #317. |
 | OL.7d | Pretty-print arrays | ~80 LOC | DONE ✅ | `emit [1,2,3]` instead of `[array 3]`. PR #318. |
 | OL.7e | Variable assignment fix | ~5 LOC | DONE ✅ | `let b = b + a` now works. LetStmt name save. PR #320. |
 | OL.7f | FieldAssign fix + audit | ~10 LOC | DONE ✅ | Full 18-site match binding audit. PR #321. |
-| OL.8 | Import/module system | ~300 LOC | **CRITICAL** | stdlib→REPL bridge. Blocks ALL Tier 1 work. REPL can't call stdlib functions. |
+| OL.8 | Import/module system | ~300 LOC | DEFERRED | REPL can't call stdlib fns directly. Workaround: same-file + boot context. Tier 1 done without it. |
 | OL.9 | Error handling | ~200 LOC | DONE ✅ | `try { ... } catch { ... }` + `__throw(msg)`. VM try_stack + parser + semantic. |
 | OL.10 | Array comprehension | ~150 LOC | DONE ✅ | `[x * 2 for x in items if cond]`. Depth-indexed globals + manual token emit. |
 

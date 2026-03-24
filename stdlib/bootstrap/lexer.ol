@@ -156,6 +156,68 @@ pub fn tokenize(source) {
             continue;
         };
 
+        // Interpolated string: $"hello {expr}!"
+        // Desugars to: ("hello " + __to_string(expr) + "!")
+        // Emits: ( StringLit + Ident + StringLit ... )
+        if ch == "$" && pos + 1 < src_len && char_at(source, pos + 1) == "\"" {
+            let _is_start_col = col;
+            let pos = pos + 2;  // skip $"
+            let col = col + 2;
+            // Emit opening (
+            push(tokens, Token { kind: TokenKind::Symbol { ch: "(" }, text: "(", line: line, col: _is_start_col });
+            let _is_first = 1;
+            let _is_seg_start = pos;
+            while pos < src_len && char_at(source, pos) != "\"" {
+                if char_at(source, pos) == "{" {
+                    // Emit string segment before {
+                    let _is_seg = __substr(source, _is_seg_start, pos);
+                    if _is_first == 0 {
+                        push(tokens, Token { kind: TokenKind::Symbol { ch: "+" }, text: "+", line: line, col: col });
+                    };
+                    push(tokens, Token { kind: TokenKind::StringLit { value: _is_seg }, text: _is_seg, line: line, col: col });
+                    let _is_first = 0;
+                    let pos = pos + 1;  // skip {
+                    let col = col + 1;
+                    // Emit + __to_string(
+                    push(tokens, Token { kind: TokenKind::Symbol { ch: "+" }, text: "+", line: line, col: col });
+                    push(tokens, Token { kind: TokenKind::Ident { name: "__to_string" }, text: "__to_string", line: line, col: col });
+                    push(tokens, Token { kind: TokenKind::Symbol { ch: "(" }, text: "(", line: line, col: col });
+                    // Tokenize expr inside {} (simple: just read ident/number until })
+                    let _is_expr_start = pos;
+                    while pos < src_len && char_at(source, pos) != "}" {
+                        let pos = pos + 1;
+                        let col = col + 1;
+                    };
+                    // Emit the expr as ident
+                    let _is_expr = __substr(source, _is_expr_start, pos);
+                    if is_digit(char_at(_is_expr, 0)) {
+                        push(tokens, Token { kind: TokenKind::Number { value: __to_number(_is_expr) }, text: _is_expr, line: line, col: col });
+                    } else {
+                        push(tokens, Token { kind: TokenKind::Ident { name: _is_expr }, text: _is_expr, line: line, col: col });
+                    };
+                    // Close __to_string()
+                    push(tokens, Token { kind: TokenKind::Symbol { ch: ")" }, text: ")", line: line, col: col });
+                    let pos = pos + 1;  // skip }
+                    let col = col + 1;
+                    let _is_seg_start = pos;
+                } else {
+                    let pos = pos + 1;
+                    let col = col + 1;
+                };
+            };
+            // Emit final string segment
+            let _is_final = __substr(source, _is_seg_start, pos);
+            if _is_first == 0 {
+                push(tokens, Token { kind: TokenKind::Symbol { ch: "+" }, text: "+", line: line, col: col });
+            };
+            push(tokens, Token { kind: TokenKind::StringLit { value: _is_final }, text: _is_final, line: line, col: col });
+            // Emit closing )
+            push(tokens, Token { kind: TokenKind::Symbol { ch: ")" }, text: ")", line: line, col: col });
+            let pos = pos + 1;  // skip closing "
+            let col = col + 1;
+            continue;
+        };
+
         // Multi-char symbols: ==, !=, <=, >=, =>, ->, ::, &&, ||
         if pos + 1 < src_len {
             let two = substr(source, pos, pos + 2);
