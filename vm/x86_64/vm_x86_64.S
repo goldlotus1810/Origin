@@ -45,7 +45,10 @@
 .equ SYS_CLOSE,     3
 .equ SYS_MMAP,      9
 .equ SYS_MUNMAP,    11
+.equ SYS_NANOSLEEP, 35
+.equ SYS_CLOCK_GETTIME, 228
 .equ SYS_EXIT,      60
+.equ CLOCK_MONOTONIC, 1
 
 # ── File open flags ─────────────────────────────────────────────────────
 .equ O_RDONLY,       0
@@ -1082,6 +1085,17 @@ op_call:
     movabs  $0xC3FD4316C34B889E, %rdx   # __enum_def (2 args)
     cmp     %rdx, %rax
     je      .call_noop_pop2
+
+    # ── Timer/sleep builtins ──
+    movabs  $0x9EEC1A86B3B21786, %rdx   # __sleep
+    cmp     %rdx, %rax
+    je      .call_sleep
+    movabs  $0x0E6B6C4BB0C674BA, %rdx   # __time
+    cmp     %rdx, %rax
+    je      .call_time
+    movabs  $0xC3ADA5D879284B3B, %rdx   # __write_raw
+    cmp     %rdx, %rax
+    je      .call_write_raw
 
     # ── Eval bytecode (nested execution) ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
@@ -3652,6 +3666,104 @@ op_ret:
     movsd   (%r14), %xmm0
     roundsd $2, %xmm0, %xmm0          # round toward +inf
     movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+# ── __sleep(ms) — nanosleep syscall ──────────────────────────────────────
+.call_sleep:
+    add     %rcx, %r13                  # skip name_len
+    # Pop ms (f64) from VM stack
+    movsd   (%r14), %xmm0
+    add     $16, %r14                   # pop
+    # Convert ms → seconds + nanoseconds
+    cvttsd2si %xmm0, %rax              # ms as integer
+    # rax = total ms, compute sec = ms / 1000, nsec = (ms % 1000) * 1_000_000
+    xor     %edx, %edx
+    mov     $1000, %rcx
+    div     %rcx                        # rax=sec, rdx=remainder_ms
+    imul    $1000000, %rdx, %rdx        # remainder → nanoseconds
+    # Build timespec on CPU stack (16 bytes aligned)
+    sub     $16, %rsp
+    mov     %rax, (%rsp)               # tv_sec
+    mov     %rdx, 8(%rsp)             # tv_nsec
+    # syscall nanosleep(timespec*, NULL)
+    mov     %rsp, %rdi                  # rdi = &timespec
+    xor     %esi, %esi                  # rsi = NULL (remaining)
+    mov     $SYS_NANOSLEEP, %eax
+    syscall
+    add     $16, %rsp                   # restore stack
+    # Push 0.0 (success)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── __time() — clock_gettime CLOCK_MONOTONIC → ms ──────────────────────
+.call_time:
+    add     %rcx, %r13                  # skip name_len
+    # Build timespec on CPU stack
+    sub     $16, %rsp
+    mov     $CLOCK_MONOTONIC, %edi      # clock_id
+    mov     %rsp, %rsi                  # &timespec
+    mov     $SYS_CLOCK_GETTIME, %eax
+    syscall
+    # Convert to milliseconds: sec*1000 + nsec/1_000_000
+    mov     (%rsp), %rax               # tv_sec
+    imul    $1000, %rax, %rax           # sec → ms
+    mov     8(%rsp), %rdx             # tv_nsec
+    mov     $1000000, %rcx
+    xor     %r8d, %r8d                  # clear for div
+    push    %rax                        # save sec_ms
+    mov     %rdx, %rax
+    xor     %edx, %edx
+    div     %rcx                        # rax = nsec/1000000
+    pop     %rdx                        # rdx = sec_ms
+    add     %rdx, %rax                  # total ms
+    add     $16, %rsp                   # restore stack
+    # Push result as f64
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── __write_raw(str) — write raw bytes to stdout (for ANSI escapes) ────
+.call_write_raw:
+    add     %rcx, %r13                  # skip name_len
+    # Pop string from VM stack
+    mov     (%r14), %rsi               # ptr (u16 molecules)
+    mov     8(%r14), %rdx              # len (mol count)
+    add     $16, %r14                   # pop
+    # Decode u16 molecules → raw bytes in temp buffer on CPU stack
+    # Each molecule = 0x2100 | byte, stride 2 bytes
+    # Max reasonable: 256 bytes for ANSI sequences
+    mov     %rdx, %rcx                 # mol_count
+    sub     $256, %rsp                  # temp buffer
+    mov     %rsp, %rdi                  # dest ptr
+    xor     %r8d, %r8d                  # byte count
+.wr_decode:
+    test    %rcx, %rcx
+    jz      .wr_write
+    movzwl  (%rsi), %eax               # read u16 molecule
+    and     $0xFF, %eax                 # extract byte (mask off 0x2100)
+    movb    %al, (%rdi, %r8)
+    inc     %r8
+    add     $2, %rsi                    # next molecule
+    dec     %rcx
+    jmp     .wr_decode
+.wr_write:
+    # SYS_WRITE(fd=1, buf=rsp, len=r8)
+    mov     $1, %edi                    # stdout
+    mov     %rsp, %rsi                  # buffer
+    mov     %r8, %rdx                   # byte count
+    mov     $SYS_WRITE, %eax
+    syscall
+    add     $256, %rsp                  # restore stack
+    # Push 0.0
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
 .call_throw:
