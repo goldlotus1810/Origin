@@ -300,32 +300,75 @@ pub fn agent_process(text) {
 // OL.5 — Response composer
 // ════════════════════════════════════════════════════════════════
 
-pub fn compose_reply(intent, tone, text) {
-    // Part 1: Acknowledgment
-    let ack = "";
-    if tone == "empathetic" { ack = "Minh hieu cam giac do."; };
-    if tone == "gentle" { ack = "Tu tu thoi, khong voi dau."; };
-    if tone == "explanatory" { ack = "De minh tim hieu cho ban."; };
-    if tone == "precise" { ack = "OK."; };
-    if tone == "confirmatory" { ack = "Da nhan."; };
+// Response templates — configurable personality
+let __tpl_empathetic = "Minh hieu cam giac do.";
+let __tpl_gentle = "Tu tu thoi, khong voi dau.";
+let __tpl_explanatory = "De minh tim hieu cho ban.";
+let __tpl_precise = "OK.";
+let __tpl_confirmatory = "Da nhan.";
+let __tpl_chat = "Minh nghe roi.";
+let __tpl_heal = " Ban muon chia se them khong?";
+let __tpl_learn = " Ban muon biet cu the dieu gi?";
+let __tpl_technical = " Cho minh xem code hoac error message.";
+let __tpl_command = " Dang xu ly...";
+let __tpl_heal_better = " Ban co ve da on hon roi.";
+let __tpl_topic_repeat = " Minh thay ban nhac lai dieu nay. Minh hieu no quan trong voi ban.";
+let __tpl_remember = " (Minh nho truoc do ban noi ve: ";
+let __tpl_know = "(Minh biet: ";
 
-    // Part 2: Intent-driven follow-up
+// Change personality: set_personality("formal") / set_personality("casual")
+pub fn set_personality(style) {
+    if style == "formal" {
+        let __tpl_empathetic = "Toi hieu cam giac cua ban.";
+        let __tpl_gentle = "Xin hay binh tinh.";
+        let __tpl_explanatory = "Toi se tim hieu cho ban.";
+        let __tpl_precise = "Da hieu.";
+        let __tpl_confirmatory = "Da tiep nhan.";
+        let __tpl_chat = "Vang, toi dang lang nghe.";
+        let __tpl_heal = " Ban co muon chia se them khong?";
+        let __tpl_learn = " Ban muon tim hieu dieu gi cu the?";
+    };
+    if style == "casual" {
+        let __tpl_empathetic = "Uh, minh hieu ma.";
+        let __tpl_gentle = "Chill thoi, khong sao dau.";
+        let __tpl_explanatory = "De minh check cho.";
+        let __tpl_precise = "OK nhe.";
+        let __tpl_confirmatory = "Roger!";
+        let __tpl_chat = "Yo!";
+        let __tpl_heal = " Ke tiep di?";
+        let __tpl_learn = " Muon biet gi nua?";
+    };
+    if style == "english" {
+        let __tpl_empathetic = "I understand how you feel.";
+        let __tpl_gentle = "Take your time.";
+        let __tpl_explanatory = "Let me look into that.";
+        let __tpl_precise = "Got it.";
+        let __tpl_confirmatory = "Acknowledged.";
+        let __tpl_chat = "I'm listening.";
+        let __tpl_heal = " Want to talk more?";
+        let __tpl_learn = " What specifically?";
+        let __tpl_heal_better = " You seem better now.";
+        let __tpl_topic_repeat = " I notice this matters to you.";
+        let __tpl_remember = " (I recall you mentioned: ";
+        let __tpl_know = "(I know: ";
+    };
+    return "Personality: " + style;
+}
+
+pub fn compose_reply(intent, tone, text) {
+    let ack = "";
+    if tone == "empathetic" { ack = __tpl_empathetic; };
+    if tone == "gentle" { ack = __tpl_gentle; };
+    if tone == "explanatory" { ack = __tpl_explanatory; };
+    if tone == "precise" { ack = __tpl_precise; };
+    if tone == "confirmatory" { ack = __tpl_confirmatory; };
+
     let followup = "";
-    if intent == "heal" {
-        followup = " Ban muon chia se them khong?";
-    };
-    if intent == "learn" {
-        followup = " Ban muon biet cu the dieu gi?";
-    };
-    if intent == "technical" {
-        followup = " Cho minh xem code hoac error message.";
-    };
-    if intent == "command" {
-        followup = " Dang xu ly...";
-    };
-    if intent == "chat" {
-        ack = "Minh nghe roi.";
-    };
+    if intent == "heal" { followup = __tpl_heal; };
+    if intent == "learn" { followup = __tpl_learn; };
+    if intent == "technical" { followup = __tpl_technical; };
+    if intent == "command" { followup = __tpl_command; };
+    if intent == "chat" { ack = __tpl_chat; };
 
     return ack + followup;
 }
@@ -589,7 +632,7 @@ pub fn agent_respond(text) {
         let _ar_related = stm_find_related(_ar_current);
         if len(_ar_related) > 0 {
             if _ar_related != _ar_current {
-                memory_context = " (Minh nho truoc do ban noi ve: " + _ar_related + ")";
+                memory_context = __tpl_remember + _ar_related + ")";
             };
         };
     };
@@ -597,7 +640,7 @@ pub fn agent_respond(text) {
     // CONTEXT — repeated topic detection
     if stm_count() >= 3 {
         if stm_topic_repeated(text, 2) == 1 {
-            memory_context = " Minh thay ban nhac lai dieu nay. Minh hieu no quan trong voi ban.";
+            memory_context = __tpl_topic_repeat;
         };
     };
 
@@ -607,7 +650,7 @@ pub fn agent_respond(text) {
         if _prev_idx >= 0 {
             if __stm[_prev_idx].intent == "heal" {
                 if intent != "heal" {
-                    memory_context = " Ban co ve da on hon roi.";
+                    memory_context = __tpl_heal_better;
                 };
             };
         };
@@ -746,7 +789,7 @@ fn knowledge_search(_ks_query) {
     };
 
     if _ks_best_score > 0 {
-        return "(Minh biet: " + _ks_best + ")";
+        return __tpl_know + _ks_best + ")";
     };
     return "";
 }
