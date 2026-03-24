@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~871KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~891KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -146,8 +146,9 @@ __str_bytes(s) → array of byte values
 __str_is_keyword(s) → bool
 
 // Array
-len(a)  push(a, val)  a[i]  set_at(a, i, val)
+len(a)  push(a, val)  pop(a)  a[i]  set_at(a, i, val)
 __array_new(count)  __array_get(a, i)  __array_push(a, val)
+__array_pop(a)  __array_range(n) → [0..n-1]
 // NOTE: a[i] is desugared to __array_get(a, i) by the parser
 
 // Dict
@@ -155,6 +156,17 @@ __dict_new(field_count)  __dict_get(dict, key)  __dict_set(dict, key, val)
 struct_tag(dict, tag) → new dict with tag
 __match_enum(dict, tag) → bool
 __enum_field(dict, idx) → value
+__enum_unit(tag) → unit variant
+__dict_keys(dict) → array of keys
+
+// Comparison (all return f64: 1.0 or 0.0)
+__eq(a,b)  __cmp_ne(a,b)  __cmp_lt(a,b)  __cmp_gt(a,b)  __cmp_le(a,b)  __cmp_ge(a,b)
+
+// Logic
+__logic_not(x) → !x
+
+// Bitwise
+__bit_or(a,b)  __bit_and(a,b)  __bit_xor(a,b)
 
 // I/O
 emit expr           // print to stdout
@@ -169,8 +181,13 @@ __sha256(str) → 64-char hex string (FIPS 180-4)
 // Error handling
 __throw(msg) → unwind to nearest try/catch
 
+// Type
+__type_of(x) → "number"/"string"/"array"/"dict"/"closure"
+
 // Conversion
 __f64_to_le_bytes(n) → array of 8 bytes
+__to_string(n) → string    __to_number(s) → number
+__char_code(ch) → codepoint number
 ```
 
 ---
@@ -180,11 +197,13 @@ __f64_to_le_bytes(n) → array of 8 bytes
 ### Bytecode opcodes (bc_format=1)
 
 ```
-0x01 Push(str)       0x09 Jmp(offset)     0x13 Store(name)
-0x02 Load(name)      0x0A Jz(offset)      0x14 LoadLocal(name)
-0x06 Emit            0x0B Dup             0x15 PushNum(f64)
-0x07 Call(name)      0x0C Pop             0x25 Closure(body_len)
-0x08 Ret             0x0F Halt            0x0D Swap
+0x01 Push(str)       0x09 Jmp(offset)     0x14 LoadLocal(name)
+0x02 Load(name)      0x0A Jz(offset)      0x15 PushNum(f64)
+0x06 Emit            0x0B Dup             0x19 PushMol(5 bytes)
+0x07 Call(name)      0x0C Pop             0x1A TryBegin(catch_offset)
+0x08 Ret             0x0D Swap            0x1B CatchEnd
+0x09 Jmp(offset)     0x0F Halt            0x1C StoreUpdate(name)
+0x13 Store(name)     0x24 CallClosure     0x25 Closure(body_len)
 ```
 
 ### Scoping
@@ -284,11 +303,48 @@ use(my_var);                   // WRONG VALUE!
 
 ---
 
+## REPL Commands
+
+```
+emit <expr>         Evaluate and print expression
+let x = 42          Define variable
+fn f(x) { ... }     Define function
+encode <text>       Show molecular encoding + intent + tone + context
+respond <text>      Full agent response (with STM memory)
+learn <text>        Teach HomeOS a fact (stored in knowledge base)
+memory              Show STM turns + Silk edges + Knowledge facts
+help                Show available commands
+exit / quit         Exit REPL
+```
+
+## Memory Systems (STM + Silk + Dream + Knowledge)
+
+```
+STM (Short-Term Memory):
+  Global array, max 8 turns. Each: { input, intent, tone, turn }
+  stm_push(), stm_last_input(), stm_count(), stm_find_related()
+
+Silk (Hebbian Learning):
+  Co-activate word bigrams on each input. Max 64 edges.
+  silk_learn_from_text(), silk_find_related(), silk_count()
+
+Dream (Consolidation):
+  Runs every 5 turns. Scans STM for repeated intent patterns.
+  dream_cycle()
+
+Knowledge Store:
+  Learned facts from `learn` command. Max 128 entries.
+  knowledge_learn(), knowledge_search(), knowledge_count()
+  Retrieval: split query → match keywords → best scoring fact
+```
+
+---
+
 ## Build & Test
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~871KB)
+make build                    # → origin_new.olang (~891KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -313,8 +369,8 @@ make check-all
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (952 LOC) |
 | `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,244 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (117 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,304 LOC) |
+| `stdlib/repl.ol` | REPL entry point (131 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,832 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
