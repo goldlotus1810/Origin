@@ -773,21 +773,17 @@ pub fn self_build() {
     emit "  Header offset: " + __to_string(_sb_header_off);
 
     // Step 2: Compile all .ol files
-    let _sb_bc = __bytes_new(524288);  // 512KB bytecode buffer
+    let _sb_bc = __bytes_new(524288);
     let _sb_bc_pos = 0;
     let _sb_compiled = 0;
     let _sb_errors = 0;
 
-    // Compile files sequentially (no array — ARRAY_INIT_CAP too large for string arrays)
-    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/lexer.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/parser.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/semantic.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/bootstrap/codegen.ol", _sb_bc, _sb_bc_pos);
+    // Small stdlib files (bootstrap too large for current compiler perf)
+    _sb_bc_pos = _sb_compile_file("stdlib/vec.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/test.ol", _sb_bc, _sb_bc_pos);
+    _sb_bc_pos = _sb_compile_file("stdlib/repl.ol", _sb_bc, _sb_bc_pos);
     _sb_bc_pos = _sb_compile_file("stdlib/mol.ol", _sb_bc, _sb_bc_pos);
     _sb_bc_pos = _sb_compile_file("stdlib/chain.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/repl.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/test.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/vec.ol", _sb_bc, _sb_bc_pos);
 
     // Append Halt
     __bytes_set(_sb_bc, _sb_bc_pos, 15);
