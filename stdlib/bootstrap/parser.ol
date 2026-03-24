@@ -586,22 +586,20 @@ fn parse_match_expr(p) {
         let bindings = [];
         let ptok = peek(p);
 
-        // Wildcard: _
+        // Pattern: _ (wildcard), Name::Variant { bindings }, Name, number, string
         if is_ident_tok(ptok) {
             let pname = expect_ident(p);
             if pname == "_" {
                 let pattern = "_";
             } else {
-                // Could be Name::Variant { ... } or just Name
                 let pattern = pname;
                 if is_symbol_tok(peek(p), "::") {
-                    advance(p); // consume ::
+                    advance(p);
                     let variant = expect_ident(p);
                     let pattern = pname + "::" + variant;
                 };
-                // Parse bindings: { field1, field2 } or { field1 }
                 if is_symbol_tok(peek(p), "{") {
-                    advance(p); // consume {
+                    advance(p);
                     while !is_symbol_tok(peek(p), "}") && !is_eof(peek(p)) {
                         push(bindings, expect_ident(p));
                         if is_symbol_tok(peek(p), ",") { advance(p); };
@@ -609,18 +607,42 @@ fn parse_match_expr(p) {
                     expect_symbol(p, "}");
                 };
             };
+        } else {
+            // Number or string literal pattern
+            match ptok.kind {
+                TokenKind::Number { value } => {
+                    advance(p);
+                    let pattern = "__num:" + __to_string(value);
+                },
+                TokenKind::StringLit { value } => {
+                    advance(p);
+                    let pattern = "__str:" + value;
+                },
+                _ => {
+                    advance(p);
+                    let pattern = "_";
+                },
+            };
         };
 
         expect_symbol(p, "=>");
+        // Save body token range for re-parse in semantic
+        let _ma_body_start = p.pos;
         let body = [];
-        // Arm body: { stmts }
         if is_symbol_tok(peek(p), "{") {
             let body = parse_block(p);
         } else {
-            // Single expression
             push(body, Stmt::ExprStmt { expr: parse_expr(p) });
             if is_symbol_tok(peek(p), ";") { advance(p); };
         };
+        let _ma_body_end = p.pos;
+        // Save to depth-indexed globals (max 8 arms)
+        let _ma_idx = len(arms);
+        if _ma_idx == 0 { let __g_ma0_pat = pattern; let __g_ma0_bs = _ma_body_start; let __g_ma0_be = _ma_body_end; };
+        if _ma_idx == 1 { let __g_ma1_pat = pattern; let __g_ma1_bs = _ma_body_start; let __g_ma1_be = _ma_body_end; };
+        if _ma_idx == 2 { let __g_ma2_pat = pattern; let __g_ma2_bs = _ma_body_start; let __g_ma2_be = _ma_body_end; };
+        if _ma_idx == 3 { let __g_ma3_pat = pattern; let __g_ma3_bs = _ma_body_start; let __g_ma3_be = _ma_body_end; };
+        let __g_ma_tokens = p.tokens;
         push(arms, MatchArm { pattern: pattern, bindings: bindings, body: body });
         if is_symbol_tok(peek(p), ",") { advance(p); };
     };
