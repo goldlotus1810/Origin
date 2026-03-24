@@ -165,5 +165,8 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Inspect #2: 5/5 tests PASS. DC.1-DC.8 confirmed FIXED. 3 new minor conflicts (DC.9-DC.11).
 2026-03-24  OL.9 DONE: try/catch + __throw(msg). VM try_stack, nested try, unhandled error exit.
 2026-03-24  BUG-1 FIXED: nested for-in works! [11,21,12,22] + 3×3=9 results.
-            Fix: depth-indexed globals for var/iter/inc/jz + pre-emit increment + re-parse iter.
+2026-03-24  BUG-2 FIXED: bare assignment (x = x + 1). Match binding save before parse_expr.
+2026-03-24  BUG-5 FIXED: while accumulator (s = s + i → 3). Consequence of BUG-2 fix.
+2026-03-24  BUG-3 PARTIAL: type/union semicolons fixed. Match on union still segfaults (heap overlap).
+2026-03-24  BUG-4 NOT REPRODUCED: string concat in fn works on current binary.
 ```

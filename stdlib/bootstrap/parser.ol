@@ -753,6 +753,7 @@ pub fn parse_stmt(p) {
             if is_symbol_tok(peek(p), ",") { advance(p); };
         };
         expect_symbol(p, "}");
+        if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::TypeDef { name: name, fields: fields };
     };
 
@@ -791,6 +792,7 @@ pub fn parse_stmt(p) {
             if is_symbol_tok(peek(p), ",") { advance(p); };
         };
         expect_symbol(p, "}");
+        if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::UnionDef { name: name, variants: variants };
     };
 
