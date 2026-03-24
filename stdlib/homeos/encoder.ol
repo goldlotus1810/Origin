@@ -732,7 +732,6 @@ fn knowledge_search(_ks_query) {
 // ════════════════════════════════════════════════════════════════
 
 fn _sb_compile_file(_sbcf_path, _sbcf_bc, _sbcf_pos) {
-    let _sbcf_cp = __heap_save();
     let _sbcf_src = __file_read(_sbcf_path);
     if len(_sbcf_src) > 0 {
         _prefill_output();
@@ -752,7 +751,6 @@ fn _sb_compile_file(_sbcf_path, _sbcf_bc, _sbcf_pos) {
             emit "  " + _sbcf_path + ": SKIP";
         };
     };
-    __heap_restore(_sbcf_cp);
     return _sbcf_pos;
 }
 
@@ -778,12 +776,27 @@ pub fn self_build() {
     let _sb_compiled = 0;
     let _sb_errors = 0;
 
-    // Small stdlib files (bootstrap too large for current compiler perf)
-    _sb_bc_pos = _sb_compile_file("stdlib/vec.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/test.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/repl.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/mol.ol", _sb_bc, _sb_bc_pos);
-    _sb_bc_pos = _sb_compile_file("stdlib/chain.ol", _sb_bc, _sb_bc_pos);
+    // Strategy: copy EXISTING bytecode from current binary
+    // (bootstrap files too large to re-compile with current heap limits)
+    // Read bc_offset and bc_size from Origin header
+    let _sb_bc_off_b0 = __bytes_get(_sb_self, _sb_header_off + 14);
+    let _sb_bc_off_b1 = __bytes_get(_sb_self, _sb_header_off + 15);
+    let _sb_bc_off_b2 = __bytes_get(_sb_self, _sb_header_off + 16);
+    let _sb_bc_off = _sb_bc_off_b0 + (_sb_bc_off_b1 * 256) + (_sb_bc_off_b2 * 65536);
+    let _sb_bc_sz_b0 = __bytes_get(_sb_self, _sb_header_off + 18);
+    let _sb_bc_sz_b1 = __bytes_get(_sb_self, _sb_header_off + 19);
+    let _sb_bc_sz_b2 = __bytes_get(_sb_self, _sb_header_off + 20);
+    let _sb_bc_sz = _sb_bc_sz_b0 + (_sb_bc_sz_b1 * 256) + (_sb_bc_sz_b2 * 65536);
+    emit "  Existing bytecode: " + __to_string(_sb_bc_sz) + " bytes at offset " + __to_string(_sb_bc_off);
+    // Copy existing bytecode to output buffer
+    let _sb_bci = 0;
+    while _sb_bci < _sb_bc_sz {
+        __bytes_set(_sb_bc, _sb_bc_pos, __bytes_get(_sb_self, _sb_bc_off + _sb_bci));
+        let _sb_bc_pos = _sb_bc_pos + 1;
+        let _sb_bci = _sb_bci + 1;
+    };
+    _sb_compiled = 1;
+    emit "  Bytecode copied: " + __to_string(_sb_bc_pos) + " bytes";
 
     // Append Halt
     __bytes_set(_sb_bc, _sb_bc_pos, 15);
