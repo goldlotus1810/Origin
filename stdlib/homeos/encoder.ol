@@ -381,6 +381,30 @@ pub fn stm_topic_repeated(keyword, n) {
     return 0;
 }
 
+// Context summary: summarize conversation themes from STM
+pub fn stm_summary() {
+    let _ss_heal = 0;
+    let _ss_learn = 0;
+    let _ss_tech = 0;
+    let _ss_chat = 0;
+    let _ss_i = 0;
+    while _ss_i < len(__stm) {
+        let _ss_intent = __stm[_ss_i].intent;
+        if _ss_intent == "heal" { _ss_heal = _ss_heal + 1; };
+        if _ss_intent == "learn" { _ss_learn = _ss_learn + 1; };
+        if _ss_intent == "technical" { _ss_tech = _ss_tech + 1; };
+        if _ss_intent == "chat" { _ss_chat = _ss_chat + 1; };
+        let _ss_i = _ss_i + 1;
+    };
+    // Build summary
+    let _ss_result = "";
+    if _ss_heal > 0 { _ss_result = _ss_result + "cam xuc(" + __to_string(_ss_heal) + ") "; };
+    if _ss_learn > 0 { _ss_result = _ss_result + "hoi dap(" + __to_string(_ss_learn) + ") "; };
+    if _ss_tech > 0 { _ss_result = _ss_result + "ky thuat(" + __to_string(_ss_tech) + ") "; };
+    if _ss_chat > 0 { _ss_result = _ss_result + "tro chuyen(" + __to_string(_ss_chat) + ") "; };
+    return _ss_result;
+}
+
 // ════════════════════════════════════════════════════════════════
 // Silk — Hebbian Learning (fire together → wire together)
 // ════════════════════════════════════════════════════════════════
