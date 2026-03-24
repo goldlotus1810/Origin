@@ -916,6 +916,11 @@ op_call:
     cmp     %rdx, %rax
     je      .call_type_of
 
+    # ── Crypto builtins ──
+    movabs  $0x656D6D860AA4E534, %rdx   # __sha256
+    cmp     %rdx, %rax
+    je      .call_sha256
+
     # ── Math builtins ──
     movabs  $0x185FC0C022E829AF, %rdx   # __floor
     cmp     %rdx, %rax
@@ -3009,6 +3014,301 @@ op_ret:
     mov     %rdx, (%rsi)
     jmp     vm_loop
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SHA-256 (FIPS 180-4) — __sha256(string) → hex string (64 chars)
+# ═══════════════════════════════════════════════════════════════════════════
+.call_sha256:
+    add     %rcx, %r13              # skip name bytes
+    # Pop string: ptr=chain ptr, len=mol_count (u16 molecules)
+    mov     (%r14), %rsi            # string ptr (u16 molecules)
+    mov     8(%r14), %rdx           # string len (mol count)
+    add     $16, %r14               # pop
+
+    # Decode u16 string → raw bytes in sha_input buffer
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx              # byte count
+    test    %rdx, %rdx
+    jz      .sha_empty_input
+    mov     %rdx, %r8               # save mol count
+.sha_decode_loop:
+    cmp     %r8, %rcx
+    jge     .sha_decode_done
+    movzbl  (%rsi, %rcx, 2), %eax   # low byte of u16 mol
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .sha_decode_loop
+.sha_decode_done:
+.sha_empty_input:
+    # rcx = input byte count, rdi = sha_input
+    mov     %rcx, %r8               # r8 = msg_len
+
+    # ── SHA-256 core ──
+    # Initialize hash state H[0..7]
+    lea     sha_state(%rip), %rbx
+    movl    $0x6a09e667, 0(%rbx)
+    movl    $0xbb67ae85, 4(%rbx)
+    movl    $0x3c6ef372, 8(%rbx)
+    movl    $0xa54ff53a, 12(%rbx)
+    movl    $0x510e527f, 16(%rbx)
+    movl    $0x9b05688c, 20(%rbx)
+    movl    $0x1f83d9ab, 24(%rbx)
+    movl    $0x5be0cd19, 28(%rbx)
+
+    # Padding: append 0x80, zeros, then 64-bit big-endian length
+    lea     sha_input(%rip), %rdi
+    mov     %r8, %rcx               # msg_len
+    movb    $0x80, (%rdi, %rcx)     # append 0x80
+    inc     %rcx
+    # Pad with zeros until (len % 64) == 56
+.sha_pad_loop:
+    mov     %rcx, %rax
+    and     $63, %rax
+    cmp     $56, %rax
+    je      .sha_pad_done
+    movb    $0, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .sha_pad_loop
+.sha_pad_done:
+    # Append bit length (msg_len * 8) as big-endian u64
+    mov     %r8, %rax
+    shl     $3, %rax                 # bit length
+    bswap   %rax
+    mov     %rax, (%rdi, %rcx)
+    add     $8, %rcx
+    # rcx = total padded length (multiple of 64)
+
+    # Process each 64-byte block
+    lea     sha_input(%rip), %rdi
+    xor     %r9, %r9                 # block offset
+.sha_block_loop:
+    cmp     %rcx, %r9
+    jge     .sha_done
+
+    # Prepare message schedule W[0..63]
+    lea     sha_w(%rip), %r10
+    # W[0..15] = block words (big-endian)
+    xor     %r11, %r11
+.sha_w_init:
+    cmp     $16, %r11
+    jge     .sha_w_extend
+    lea     (%rdi, %r9), %rax
+    mov     (%rax, %r11, 4), %eax
+    bswap   %eax
+    mov     %eax, (%r10, %r11, 4)
+    inc     %r11
+    jmp     .sha_w_init
+
+.sha_w_extend:
+    cmp     $64, %r11
+    jge     .sha_compress
+    # W[i] = σ1(W[i-2]) + W[i-7] + σ0(W[i-15]) + W[i-16]
+    # σ0(x) = ROTR(7,x) ^ ROTR(18,x) ^ SHR(3,x)
+    # σ1(x) = ROTR(17,x) ^ ROTR(19,x) ^ SHR(10,x)
+    lea     -2(%r11), %rax
+    mov     (%r10, %rax, 4), %edx   # W[i-2]
+    mov     %edx, %eax
+    ror     $17, %eax
+    mov     %edx, %ecx
+    ror     $19, %ecx
+    xor     %ecx, %eax
+    mov     %edx, %ecx
+    shr     $10, %ecx
+    xor     %ecx, %eax               # σ1(W[i-2])
+    push    %rax                      # save σ1
+
+    lea     -15(%r11), %rax
+    mov     (%r10, %rax, 4), %edx   # W[i-15]
+    mov     %edx, %eax
+    ror     $7, %eax
+    mov     %edx, %ecx
+    ror     $18, %ecx
+    xor     %ecx, %eax
+    mov     %edx, %ecx
+    shr     $3, %ecx
+    xor     %ecx, %eax               # σ0(W[i-15])
+
+    pop     %rdx                      # σ1
+    add     %edx, %eax               # σ1 + σ0
+    lea     -7(%r11), %edx
+    add     (%r10, %rdx, 4), %eax   # + W[i-7]
+    lea     -16(%r11), %edx
+    add     (%r10, %rdx, 4), %eax   # + W[i-16]
+    mov     %eax, (%r10, %r11, 4)
+    inc     %r11
+    jmp     .sha_w_extend
+
+.sha_compress:
+    # Initialize working variables a..h from state
+    lea     sha_state(%rip), %rbx
+    mov     0(%rbx), %eax            # a
+    push    %rax
+    mov     4(%rbx), %eax            # b
+    push    %rax
+    mov     8(%rbx), %eax            # c
+    push    %rax
+    mov     12(%rbx), %eax           # d
+    push    %rax
+    mov     16(%rbx), %eax           # e
+    push    %rax
+    mov     20(%rbx), %eax           # f
+    push    %rax
+    mov     24(%rbx), %eax           # g
+    push    %rax
+    mov     28(%rbx), %eax           # h
+    push    %rax
+    # Stack: [h, g, f, e, d, c, b, a] (h at top)
+
+    # Use sha_abcdefgh buffer for working vars
+    lea     sha_abcdefgh(%rip), %rbp
+    pop     %rax; mov %eax, 28(%rbp)  # h
+    pop     %rax; mov %eax, 24(%rbp)  # g
+    pop     %rax; mov %eax, 20(%rbp)  # f
+    pop     %rax; mov %eax, 16(%rbp)  # e
+    pop     %rax; mov %eax, 12(%rbp)  # d
+    pop     %rax; mov %eax, 8(%rbp)   # c
+    pop     %rax; mov %eax, 4(%rbp)   # b
+    pop     %rax; mov %eax, 0(%rbp)   # a
+
+    # 64 compression rounds
+    lea     sha_k(%rip), %r10        # K constants
+    lea     sha_w(%rip), %r11        # W schedule
+    xor     %r12d, %r12d             # round counter (TEMP: save/restore r12!)
+    push    %r12                      # save bytecode base
+    xor     %r12d, %r12d
+.sha_round:
+    cmp     $64, %r12d
+    jge     .sha_round_done
+
+    # Σ1(e) = ROTR(6,e) ^ ROTR(11,e) ^ ROTR(25,e)
+    mov     16(%rbp), %eax           # e
+    mov     %eax, %edx
+    ror     $6, %edx
+    mov     %eax, %ecx
+    ror     $11, %ecx
+    xor     %ecx, %edx
+    mov     %eax, %ecx
+    ror     $25, %ecx
+    xor     %ecx, %edx               # Σ1(e)
+
+    # Ch(e,f,g) = (e & f) ^ (~e & g)
+    mov     16(%rbp), %eax           # e
+    mov     20(%rbp), %ecx           # f
+    and     %eax, %ecx               # e & f
+    not     %eax
+    and     24(%rbp), %eax           # ~e & g
+    xor     %eax, %ecx               # Ch
+
+    # T1 = h + Σ1(e) + Ch(e,f,g) + K[i] + W[i]
+    mov     28(%rbp), %eax           # h
+    add     %edx, %eax               # + Σ1
+    add     %ecx, %eax               # + Ch
+    add     (%r10, %r12, 4), %eax   # + K[i]
+    add     (%r11, %r12, 4), %eax   # + W[i]
+    mov     %eax, %esi               # T1
+
+    # Σ0(a) = ROTR(2,a) ^ ROTR(13,a) ^ ROTR(22,a)
+    mov     0(%rbp), %eax            # a
+    mov     %eax, %edx
+    ror     $2, %edx
+    mov     %eax, %ecx
+    ror     $13, %ecx
+    xor     %ecx, %edx
+    mov     %eax, %ecx
+    ror     $22, %ecx
+    xor     %ecx, %edx               # Σ0(a)
+
+    # Maj(a,b,c) = (a & b) ^ (a & c) ^ (b & c)
+    mov     0(%rbp), %eax            # a
+    mov     4(%rbp), %ecx            # b
+    mov     %eax, %edi
+    and     %ecx, %edi               # a & b
+    and     8(%rbp), %eax            # a & c
+    xor     %eax, %edi
+    and     8(%rbp), %ecx            # b & c
+    xor     %ecx, %edi               # Maj
+
+    # T2 = Σ0(a) + Maj(a,b,c)
+    add     %edi, %edx               # T2
+
+    # Shift: h=g, g=f, f=e, e=d+T1, d=c, c=b, b=a, a=T1+T2
+    mov     24(%rbp), %eax; mov %eax, 28(%rbp)  # h = g
+    mov     20(%rbp), %eax; mov %eax, 24(%rbp)  # g = f
+    mov     16(%rbp), %eax; mov %eax, 20(%rbp)  # f = e
+    mov     12(%rbp), %eax
+    add     %esi, %eax
+    mov     %eax, 16(%rbp)                       # e = d + T1
+    mov     8(%rbp), %eax; mov %eax, 12(%rbp)   # d = c
+    mov     4(%rbp), %eax; mov %eax, 8(%rbp)    # c = b
+    mov     0(%rbp), %eax; mov %eax, 4(%rbp)    # b = a
+    lea     (%rsi, %rdx), %eax
+    mov     %eax, 0(%rbp)                        # a = T1 + T2
+
+    inc     %r12d
+    jmp     .sha_round
+
+.sha_round_done:
+    pop     %r12                      # restore bytecode base
+
+    # Add compressed values to state
+    lea     sha_state(%rip), %rbx
+    mov     0(%rbp), %eax;  add %eax, 0(%rbx)    # H[0] += a
+    mov     4(%rbp), %eax;  add %eax, 4(%rbx)    # H[1] += b
+    mov     8(%rbp), %eax;  add %eax, 8(%rbx)    # H[2] += c
+    mov     12(%rbp), %eax; add %eax, 12(%rbx)   # H[3] += d
+    mov     16(%rbp), %eax; add %eax, 16(%rbx)   # H[4] += e
+    mov     20(%rbp), %eax; add %eax, 20(%rbx)   # H[5] += f
+    mov     24(%rbp), %eax; add %eax, 24(%rbx)   # H[6] += g
+    mov     28(%rbp), %eax; add %eax, 28(%rbx)   # H[7] += h
+
+    add     $64, %r9
+    jmp     .sha_block_loop
+
+.sha_done:
+    # Convert state H[0..7] to hex string on heap (u16 molecules)
+    lea     sha_state(%rip), %rbx
+    mov     %r15, %rdi               # output string base on heap
+    movq    $0, %rcx                 # output mol count
+    # 8 words × 8 hex chars = 64 chars
+    xor     %r8d, %r8d               # word index
+.sha_hex_loop:
+    cmp     $8, %r8d
+    jge     .sha_hex_done
+    mov     (%rbx, %r8, 4), %eax
+    bswap   %eax                     # big-endian
+    # Emit 8 hex nibbles
+    mov     $8, %r9d                  # nibble count
+.sha_nibble:
+    test    %r9d, %r9d
+    jz      .sha_next_word
+    dec     %r9d
+    mov     %eax, %edx
+    shr     $28, %edx                # top nibble
+    shl     $4, %eax                 # shift left
+    # Convert nibble to ASCII hex
+    cmp     $10, %edx
+    jl      .sha_digit
+    add     $87, %edx                # 'a' - 10 = 87
+    jmp     .sha_emit_hex
+.sha_digit:
+    add     $48, %edx                # '0' = 48
+.sha_emit_hex:
+    # Emit as u16 molecule: 0x2100 | byte
+    or      $0x2100, %edx
+    movw    %dx, (%r15)
+    add     $2, %r15
+    inc     %rcx
+    jmp     .sha_nibble
+.sha_next_word:
+    inc     %r8d
+    jmp     .sha_hex_loop
+
+.sha_hex_done:
+    # Push result string onto VM stack
+    sub     $16, %r14
+    mov     %rdi, (%r14)             # string ptr
+    mov     %rcx, 8(%r14)            # mol count (64)
+    jmp     vm_loop
+
 .call_floor:
     # __floor(x) → floor(x)
     add     %rcx, %r13
@@ -3111,6 +3411,24 @@ op_ret:
 .section .rodata
 .err_prefix:
     .ascii  "Error: "
+.align 4
+sha_k:
+    .long 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5
+    .long 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5
+    .long 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3
+    .long 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174
+    .long 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc
+    .long 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da
+    .long 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7
+    .long 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967
+    .long 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13
+    .long 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85
+    .long 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3
+    .long 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070
+    .long 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5
+    .long 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3
+    .long 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208
+    .long 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 .section .text
 
 op_try_begin:
@@ -4656,6 +4974,14 @@ try_depth:
     .space 8                            # current try nesting depth (0 = no try)
 throw_buf:
     .space 256                          # temp buffer for error message decoding
+sha_input:
+    .space 1024                         # SHA-256 input buffer (max ~900 bytes after padding)
+sha_state:
+    .space 32                           # H[0..7] (8 × 4 bytes)
+sha_w:
+    .space 256                          # W[0..63] message schedule (64 × 4 bytes)
+sha_abcdefgh:
+    .space 32                           # working variables a..h (8 × 4 bytes)
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
 eval_total:
