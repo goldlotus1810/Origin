@@ -122,8 +122,6 @@ Giải pháp thuần Olang:
 
 | File | Nội dung |
 |------|---------|
-| `article_en.md` | Bài viết tiếng Anh cho HN/Reddit |
-| `article_vi.md` | Bài viết tiếng Việt |
 | `debug.md` | Tổng hợp review + 6 bugs + 8 sections |
 | `OL10_analysis_v2.md` | OL.10 giải pháp chi tiết (heap overlap aware) |
 | `OL1_encoder_analysis.md` | OL.1 thiết kế encoder thuần Olang |
