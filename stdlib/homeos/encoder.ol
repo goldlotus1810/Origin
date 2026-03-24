@@ -382,7 +382,161 @@ pub fn stm_topic_repeated(keyword, n) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Agent v2 — with memory
+// Silk — Hebbian Learning (fire together → wire together)
+// ════════════════════════════════════════════════════════════════
+// Simplified: edges stored as flat array of { from, to, weight, emotion }
+
+let __silk = [];
+let __silk_max = 64;
+
+fn silk_co_activate(word_a, word_b, intent) {
+    // Search for existing edge
+    let i = 0;
+    while i < len(__silk) {
+        let e = __silk[i];
+        if e.from == word_a {
+            if e.to == word_b {
+                // Strengthen: Hebbian update
+                set_at(__silk, i, {
+                    from: word_a, to: word_b,
+                    weight: (e.weight + (0.01 * ((1 - (e.weight * 0.618))))),
+                    emotion: intent, fires: (e.fires + 1)
+                });
+                return;
+            };
+        };
+        let i = i + 1;
+    };
+    // New edge
+    if len(__silk) < __silk_max {
+        push(__silk, { from: word_a, to: word_b, weight: 0.1, emotion: intent, fires: 1 });
+    };
+}
+
+fn silk_learn_from_text(text, intent) {
+    // Co-activate consecutive words (bigrams)
+    let words = [];
+    let current = "";
+    let i = 0;
+    while i < len(text) {
+        let ch = char_at(text, i);
+        if __char_code(ch) == 32 {
+            if len(current) > 0 {
+                push(words, current);
+                current = "";
+            };
+        } else {
+            current = current + ch;
+        };
+        let i = i + 1;
+    };
+    if len(current) > 0 { push(words, current); };
+    // Wire bigrams
+    let j = 0;
+    while (j + 1) < len(words) {
+        silk_co_activate(words[j], words[j + 1], intent);
+        let j = j + 1;
+    };
+}
+
+fn silk_find_related(word) {
+    // Find strongest connection for a word
+    let best = "";
+    let best_w = 0;
+    let i = 0;
+    while i < len(__silk) {
+        let e = __silk[i];
+        if e.from == word {
+            if e.weight > best_w {
+                best_w = e.weight;
+                best = e.to;
+            };
+        };
+        if e.to == word {
+            if e.weight > best_w {
+                best_w = e.weight;
+                best = e.from;
+            };
+        };
+        let i = i + 1;
+    };
+    return best;
+}
+
+pub fn silk_count() { return len(__silk); }
+
+// ════════════════════════════════════════════════════════════════
+// Dream — Consolidation (scan STM → find themes → strengthen Silk)
+// ════════════════════════════════════════════════════════════════
+
+let __dream_count = 0;
+
+fn dream_cycle() {
+    // Run every 5 turns — scan STM for repeated intents, strengthen patterns
+    let __dream_count = __dream_count + 1;
+    if __hyp_mod(__dream_count, 5) != 0 { return; };
+
+    // Count intent frequencies in STM
+    let heal_count = 0;
+    let learn_count = 0;
+    let i = 0;
+    while i < len(__stm) {
+        if __stm[i].intent == "heal" { heal_count = heal_count + 1; };
+        if __stm[i].intent == "learn" { learn_count = learn_count + 1; };
+        let i = i + 1;
+    };
+
+    // If dominant theme → store as consolidated memory
+    if heal_count >= 3 {
+        let __dream_theme = "heal";
+    };
+    if learn_count >= 3 {
+        let __dream_theme = "learn";
+    };
+}
+
+// ════════════════════════════════════════════════════════════════
+// STM Retrieval — search memory for related past turns
+// ════════════════════════════════════════════════════════════════
+
+fn stm_find_related(_sfr_input) {
+    // Split input into words, check each against past inputs
+    // ALL vars use _sfr_ prefix to avoid collision with _a_has params (text, word)
+    let _sfr_text = _sfr_input;
+    let i = 0;
+    let _sfr_limit = stm_count() - 1;
+    while i < _sfr_limit {
+        let _sfr_past = __stm[i].input;
+        let wi = 0;
+        let _sfr_w = "";
+        while wi < len(_sfr_text) {
+            let ch = char_at(_sfr_text, wi);
+            if __char_code(ch) == 32 {
+                if len(_sfr_w) >= 3 {
+                    let _sfr_check = _sfr_w;
+                    if _a_has(_sfr_past, _sfr_check) == 1 {
+                        return _sfr_past;
+                    };
+                };
+                _sfr_w = "";
+            } else {
+                _sfr_w = _sfr_w + ch;
+            };
+            let wi = wi + 1;
+        };
+        if len(_sfr_w) >= 3 {
+            let _sfr_check = _sfr_w;
+            if _a_has(_sfr_past, _sfr_check) == 1 {
+                return _sfr_past;
+            };
+        };
+        let i = i + 1;
+    };
+    return "";
+}
+
+// ════════════════════════════════════════════════════════════════
+// Agent v3 — with memory + Silk + Dream
 // ════════════════════════════════════════════════════════════════
 
 pub fn agent_respond(text) {
@@ -395,25 +549,58 @@ pub fn agent_respond(text) {
     let intent = __g_analysis_intent;
     let tone = __g_analysis_tone;
 
-    // REMEMBER
+    // REMEMBER (STM)
     stm_push(text, intent, tone);
 
-    // CONTEXT from memory
+    // LEARN (Silk — Hebbian co-activation)
+    silk_learn_from_text(text, intent);
+
+    // DREAM (consolidation — every 5 turns)
+    dream_cycle();
+
+    // RETRIEVE — search past memory for related turns
     let memory_context = "";
-    // If same topic repeated 3+ times → deeper acknowledgment
+    if stm_count() >= 2 {
+        let _ar_current = text;
+        let _ar_related = stm_find_related(_ar_current);
+        if len(_ar_related) > 0 {
+            if _ar_related != _ar_current {
+                memory_context = " (Minh nho truoc do ban noi ve: " + _ar_related + ")";
+            };
+        };
+    };
+
+    // CONTEXT — repeated topic detection
     if stm_count() >= 3 {
-        let prev = stm_last_input();
-        if prev == text {
+        if stm_topic_repeated(text, 2) == 1 {
             memory_context = " Minh thay ban nhac lai dieu nay. Minh hieu no quan trong voi ban.";
         };
     };
-    // If returning after heal → check in
+
+    // CONTEXT — heal→ok transition
     if stm_count() >= 2 {
-        if stm_last_intent() == "heal" {
-            if intent != "heal" {
-                memory_context = " Ban co ve da on hon roi.";
+        let _prev_idx = stm_count() - 2;
+        if _prev_idx >= 0 {
+            if __stm[_prev_idx].intent == "heal" {
+                if intent != "heal" {
+                    memory_context = " Ban co ve da on hon roi.";
+                };
             };
         };
+    };
+
+    // SILK — find related concept
+    let silk_related = "";
+    // Split first word and find silk connection
+    let first_word = "";
+    let fi = 0;
+    while fi < len(text) {
+        if __char_code(char_at(text, fi)) == 32 { break; };
+        first_word = first_word + char_at(text, fi);
+        let fi = fi + 1;
+    };
+    if len(first_word) > 2 {
+        silk_related = silk_find_related(first_word);
     };
 
     // RESPOND
