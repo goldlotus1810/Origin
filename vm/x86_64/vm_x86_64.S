@@ -902,6 +902,9 @@ op_call:
     movabs  $0xEA1BDD6D065BF46A, %rdx   # __str_substr (alias)
     cmp     %rdx, %rax
     je      .call_substr
+    movabs  $0x304A3A896BAAE100, %rdx   # substr (short alias)
+    cmp     %rdx, %rax
+    je      .call_substr
     movabs  $0xFBE159BD1C6EBFA7, %rdx   # __str_trim
     cmp     %rdx, %rax
     je      .call_str_trim
@@ -915,6 +918,9 @@ op_call:
     cmp     %rdx, %rax
     je      .call_str_bytes
     movabs  $0x3EA9B2DCA6EB46A2, %rdx   # __to_number
+    cmp     %rdx, %rax
+    je      .call_to_number
+    movabs  $0xE1C2E76089AECDEF, %rdx   # to_num (short alias)
     cmp     %rdx, %rax
     je      .call_to_number
     movabs  $0x3F9867C32BC1B166, %rdx   # __to_string
