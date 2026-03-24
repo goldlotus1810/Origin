@@ -138,6 +138,40 @@ pub fn repl_eval(input) {
     };
   }
 
+  // Check if input looks like code (starts with keyword or symbol)
+  // If not → treat as natural text conversation
+  let _re_first = char_at(src, 0);
+  let _re_is_code = 0;
+  // Code starts with: letter (let/fn/if/emit/match/try/for/while/type/union)
+  // or symbol ([ for array, { for dict, ( for group, " for string, digit)
+  if __char_code(_re_first) >= 48 { if __char_code(_re_first) <= 57 { _re_is_code = 1; }; };
+  if _re_first == "[" { _re_is_code = 1; };
+  if _re_first == "\"" { _re_is_code = 1; };
+  if _re_first == "(" { _re_is_code = 1; };
+  if _re_first == "-" { _re_is_code = 1; };
+  // Check keyword starts
+  if len(src) >= 2 {
+    let _re_2 = __substr(src, 0, 2);
+    if _re_2 == "le" { _re_is_code = 1; };
+    if _re_2 == "fn" { _re_is_code = 1; };
+    if _re_2 == "if" { _re_is_code = 1; };
+    if _re_2 == "em" { _re_is_code = 1; };
+    if _re_2 == "ma" { _re_is_code = 1; };
+    if _re_2 == "tr" { _re_is_code = 1; };
+    if _re_2 == "fo" { _re_is_code = 1; };
+    if _re_2 == "wh" { _re_is_code = 1; };
+    if _re_2 == "ty" { _re_is_code = 1; };
+    if _re_2 == "un" { _re_is_code = 1; };
+    if _re_2 == "pu" { _re_is_code = 1; };
+    if _re_2 == "re" { _re_is_code = 1; };
+    if _re_2 == "__" { _re_is_code = 1; };
+  };
+
+  // Not code → natural text conversation
+  if _re_is_code == 0 {
+    return agent_respond(src);
+  }
+
   // Phase 1: Tokenize
   let tokens = tokenize(src);
   if len(tokens) == 0 { return ""; }
@@ -145,9 +179,9 @@ pub fn repl_eval(input) {
   // Phase 2: Parse
   let ast = parse(tokens);
 
-  // Check for parse errors — abort before analyze/eval to prevent segfault
+  // Parse error → fallback to agent
   if _g_parse_error == 1 {
-    return "";
+    return agent_respond(src);
   }
 
   // Phase 3: Semantic analysis
