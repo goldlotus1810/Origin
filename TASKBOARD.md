@@ -9,14 +9,16 @@
 ## Trạng thái: FULL STACK (2026-03-24)
 
 ```
-origin_new.olang = ~871KB native binary (891,374 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (2,883 LOC Olang)
-  ✅ Intelligence layer: encode + analyze + intent + respond (OL.1-5)
+origin_new.olang = ~928KB native binary (950,469 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (3,013 LOC Olang)
+  ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
   ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
-  ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf...
-  ✅ ASM VM x86_64 (5,031 LOC), no libc, zero dependencies
+  ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 16/16 tests
+  ✅ ASM VM x86_64 (5,471 LOC), no libc, zero dependencies
+  ✅ HomeOS: 43 files, 8,910 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
+  ✅ Self-compile: lexer.ol compiles in 1.0s (nested struct/dict fix)
 ```
 
 ---
@@ -199,11 +201,11 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.43 | DONE ✅ | Tests 14 updated |
 | DC.44 | DONE ✅ | Phase 5 section added to CLAUDE.md |
 | DC.45 | DONE ✅ | Auto-learn documented in Phase 5 section |
-| DC.46 | OPEN | `CLAUDE.md:391` — repl 304→322 LOC |
-| DC.47 | OPEN ⚠️ | `CLAUDE.md:392` — homeos 40→**43 files**, 7,992→**8,910** LOC (+918!) |
-| DC.48 | OPEN | `CLAUDE.md:37,378` — Binary ~901KB→~927KB (949KB) |
-| DC.49 | OPEN | `CLAUDE.md:332` — Tests 14→**16** |
-| DC.50 | OPEN | Phase 5 thiếu: alias, node, UDC decode, UTF-8, emo carry-over, stemming, digest |
+| DC.46 | DONE ✅ | repl 322 LOC updated |
+| DC.47 | DONE ✅ | homeos 43 files, 8,910 LOC updated |
+| DC.48 | DONE ✅ | Binary ~928KB (950,469 bytes) updated |
+| DC.49 | DONE ✅ | Tests 16 updated |
+| DC.50 | DONE ✅ | Phase 5 fully documented: alias, node, UDC decode, UTF-8, emoji, stemming, digest, DN/QR |
 
 ### Spec v3 vs Code (architecture gap — INFO level)
 
@@ -333,6 +335,9 @@ VI PHẠM hiện tại:
 2026-03-24  Inspect #13: 6/6+test 14/14. ZERO CONFLICTS. 45/45 DCs resolved. Docs 100% synced. 923KB.
 2026-03-24  P5.2: emotion carry-over + Vietnamese stemming + digest + UTF-8 decoder.
 2026-03-24  P5.3: full pipeline (alias→UDC→node→DN/QR→decode→emoji). 3 new files. 949KB.
+2026-03-24  Inspect #14: DC.46-50 found (LOC drift, Phase 5 undoc). Spec v3 gap analysis. BUGFIX_ARCHITECTURE.md.
+2026-03-24  BUG FIX: nested struct/dict/enum save-restore (5 sites). lexer.ol compiles! 1.0s.
+2026-03-24  DC.46-DC.50 ALL FIXED. CLAUDE.md + TASKBOARD synced. 950KB. 16/16 tests.
 2026-03-24  Inspect #14: 8/8+test 16/16. DC.46-50 + SC.1-16 + DOC.1-4. Deep Spec v3 audit.
             BUG-V CRITICAL: _amplify_v() dùng TRUNG BÌNH — vi phạm Spec §1.6 + CHECK_TO_PASS §1!
             5 Checkpoints: 0/5 implement. SecurityGate: 2 keywords vs spec 3-layer. Hebbian: no decay.
