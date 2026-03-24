@@ -508,8 +508,19 @@ cg_closure:
     # Push closure marker: body_pc in ptr, param_count in len high bits
     # Encode: ptr = body_pc (current PC = start of body), len = CLOSURE_MARKER
     sub     $16, %r14
-    # Store body_pc as raw u64 (NOT f64, just integer PC offset)
-    mov     %r13, (%r14)                # body_pc = current PC (start of body)
+    # Store body_pc: if in boot context → relative PC, if in eval → absolute address
+    # This allows op_call to distinguish boot vs eval closures
+    lea     boot_bc_base(%rip), %rdx
+    cmp     (%rdx), %r12
+    je      .cg_closure_boot
+    # Eval context: store absolute address (r12 + r13) with high bit set as flag
+    lea     (%r12, %r13), %rdx
+    bts     $63, %rdx                   # set bit 63 as "eval closure" flag
+    mov     %rdx, (%r14)
+    jmp     .cg_closure_done
+.cg_closure_boot:
+    mov     %r13, (%r14)                # boot: relative body_pc
+.cg_closure_done:
     # Store closure marker with param_count encoded
     movq    $CLOSURE_MARKER, 8(%r14)    # len = closure tag
     # Save param_count in the byte after the marker
@@ -1048,7 +1059,7 @@ op_call:
     push    %r13                        # save return address (CPU stack)
     # Scope save: snapshot var_table to heap scope stack.
     # Only for nested eval closures (boot closures don't need scoping).
-    mov     %eax, %edi                  # save body_pc
+    mov     %rax, %rdi                  # save body_pc (full 64-bit, may have bit 63 flag)
     lea     boot_bc_base(%rip), %rsi
     cmp     (%rsi), %r12
     je      .closure_skip_scope
@@ -1084,7 +1095,29 @@ op_call:
     pop     %rdi                        # restore body_pc
 
 .closure_skip_scope:
-    mov     %edi, %r13d                 # PC = body_pc
+    # body_pc in rdi (full 64-bit, saved at line 1051)
+    # Check bit 63: if set → eval closure (absolute address)
+    bt      $63, %rdi
+    jc      .closure_is_eval
+
+    # Boot closure: body_pc is relative to boot_bc_base
+    lea     boot_bc_base(%rip), %rsi
+    mov     (%rsi), %r12               # r12 = boot bytecode base
+    mov     %edi, %r13d                # PC = relative body_pc
+    jmp     vm_loop
+
+.closure_is_eval:
+    # Eval closure: body_pc is absolute address with bit 63 flag
+    btr     $63, %rdi                  # clear flag
+    # rdi = absolute address of body in eval buffer
+    # r12 needs to be set to eval buffer base, r13 = offset
+    # For simplicity: set r12 = 0, r13 = absolute address (hack but works since vm_loop does r12+r13)
+    # Actually: just load from the original r12 saved on stack
+    mov     (%rsp), %r13               # saved return PC (relative to old r12)
+    mov     8(%rsp), %r12              # saved r12 (eval buffer base)
+    # Now compute: body offset = absolute - r12
+    sub     %r12, %rdi
+    mov     %edi, %r13d                # PC = body_pc relative to eval base
     jmp     vm_loop
 
 .call_skip:
