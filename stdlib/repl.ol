@@ -71,6 +71,11 @@ pub fn repl_eval(input) {
     };
   }
 
+  // Build command: self-build (compile all .ol → pack binary)
+  if src == "build" {
+    return self_build();
+  }
+
   // Memory command: show STM + Silk + Knowledge state
   if src == "memory" {
     return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
