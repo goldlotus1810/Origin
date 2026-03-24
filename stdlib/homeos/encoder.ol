@@ -43,10 +43,41 @@ pub fn encode_codepoint(cp) {
     if cp >= 0x2100 && cp <= 0x214F { return _mol_pack(0, 2, 4, 3, 1); };  // Letterlike
     if cp >= 0x2A00 && cp <= 0x2AFF { return _mol_pack(0, 4, 4, 4, 1); };  // Supp Math
 
-    // ── EMOTICON blocks (Valence + Arousal dominant) ──
+    // ── EMOTICON sub-ranges (fine-grained V/A) ──
+    // Happy: 😀😁😂🤣😃😄😅😆😊😋😎 (U+1F600-U+1F60E)
+    if cp >= 0x1F600 && cp <= 0x1F60E { return _mol_pack(0, 0, 7, 6, 2); };
+    // Love: 😍😘😗😙😚 (U+1F60D-U+1F61A)
+    if cp >= 0x1F60D && cp <= 0x1F61A { return _mol_pack(0, 0, 7, 5, 2); };
+    // Sad/Cry: 😢😥😿 (U+1F622,U+1F625)
+    if cp == 0x1F622 { return _mol_pack(0, 0, 2, 4, 2); };  // 😢 crying
+    if cp == 0x1F625 { return _mol_pack(0, 0, 2, 3, 2); };  // 😥 disappointed
+    if cp == 0x1F62D { return _mol_pack(0, 0, 1, 6, 2); };  // 😭 loudly crying
+    if cp == 0x1F629 { return _mol_pack(0, 0, 2, 5, 2); };  // 😩 weary
+    if cp == 0x1F62B { return _mol_pack(0, 0, 2, 6, 2); };  // 😫 tired
+    // Angry: 😠😡🤬 (U+1F620,U+1F621)
+    if cp == 0x1F620 { return _mol_pack(0, 0, 1, 6, 2); };  // 😠 angry
+    if cp == 0x1F621 { return _mol_pack(0, 0, 1, 7, 2); };  // 😡 pouting
+    if cp == 0x1F92C { return _mol_pack(0, 0, 1, 7, 2); };  // 🤬 cursing
+    // Fear/Shock: 😨😰😱 (U+1F628,U+1F630,U+1F631)
+    if cp == 0x1F628 { return _mol_pack(0, 0, 2, 6, 2); };  // 😨 fearful
+    if cp == 0x1F630 { return _mol_pack(0, 0, 2, 6, 2); };  // 😰 anxious
+    if cp == 0x1F631 { return _mol_pack(0, 0, 2, 7, 2); };  // 😱 screaming
+    // Neutral/Thinking: 🤔😐😑 (U+1F914,U+1F610,U+1F611)
+    if cp == 0x1F914 { return _mol_pack(0, 0, 4, 3, 2); };  // 🤔 thinking
+    if cp == 0x1F610 { return _mol_pack(0, 0, 4, 2, 2); };  // 😐 neutral
+    // Heart: ❤ (U+2764)
+    if cp == 0x2764 { return _mol_pack(0, 0, 7, 5, 2); };   // ❤ red heart
+    // Thumbs: 👍👎
+    if cp == 0x1F44D { return _mol_pack(0, 0, 6, 4, 2); };  // 👍 thumbs up
+    if cp == 0x1F44E { return _mol_pack(0, 0, 2, 4, 2); };  // 👎 thumbs down
+    // Fire/Star: 🔥⭐
+    if cp == 0x1F525 { return _mol_pack(8, 5, 6, 7, 2); };  // 🔥 fire
+    if cp == 0x2B50 { return _mol_pack(0, 0, 6, 5, 2); };   // ⭐ star
+    // Remaining emoticons (fallback)
+    if cp >= 0x1F600 && cp <= 0x1F64F { return _mol_pack(0, 0, 5, 5, 2); }; // Emoticons
+    // ── Other symbol blocks ──
     if cp >= 0x2600 && cp <= 0x26FF { return _mol_pack(0, 0, 5, 5, 1); };  // Misc Symbols
     if cp >= 0x1F300 && cp <= 0x1F5FF { return _mol_pack(0, 0, 6, 5, 2); }; // Misc Sym+Pict
-    if cp >= 0x1F600 && cp <= 0x1F64F { return _mol_pack(0, 0, 6, 6, 2); }; // Emoticons
     if cp >= 0x1F680 && cp <= 0x1F6FF { return _mol_pack(7, 5, 5, 5, 2); }; // Transport
     if cp >= 0x1F900 && cp <= 0x1F9FF { return _mol_pack(0, 0, 5, 5, 1); }; // Supp Symbols
 
@@ -107,7 +138,75 @@ pub fn mol_compose_many(mols) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Text → MolecularChain
+// UTF-8 Decoder — reconstruct full Unicode codepoint from bytes
+// ════════════════════════════════════════════════════════════════
+// VM stores strings as u16 molecules (0x2100|byte). Multi-byte UTF-8
+// chars (emoji, Vietnamese diacritics) become separate molecules.
+// This decoder reads byte sequence → full codepoint.
+//
+// UTF-8 layout:
+//   1-byte: 0xxxxxxx                    (0x00-0x7F)
+//   2-byte: 110xxxxx 10xxxxxx           (0xC0-0xDF)
+//   3-byte: 1110xxxx 10xxxxxx 10xxxxxx  (0xE0-0xEF)
+//   4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx (0xF0-0xF7)
+// Bit masking via modulo: b & 0x3F = b % 64, b & 0x1F = b % 32, etc.
+
+pub fn utf8_decode(_ud_text, _ud_i) {
+    let _ud_n = len(_ud_text);
+    if _ud_i >= _ud_n { return { cp: 0, sz: 0 }; };
+    let _ud_b0 = __char_code(char_at(_ud_text, _ud_i));
+    // 1-byte ASCII
+    if _ud_b0 < 128 {
+        return { cp: _ud_b0, sz: 1 };
+    };
+    // 4-byte: emoji, rare CJK (0xF0-0xF7)
+    if _ud_b0 >= 240 {
+        if (_ud_i + 3) >= _ud_n { return { cp: _ud_b0, sz: 1 }; };
+        let _ud_b1 = __char_code(char_at(_ud_text, _ud_i + 1)) % 64;
+        let _ud_b2 = __char_code(char_at(_ud_text, _ud_i + 2)) % 64;
+        let _ud_b3 = __char_code(char_at(_ud_text, _ud_i + 3)) % 64;
+        // cp = (b0 & 0x07)*262144 + b1*4096 + b2*64 + b3
+        // Explicit parens — Rust compiler precedence bug
+        let _ud_cp = ((_ud_b0 % 8) * 262144) + ((_ud_b1 * 4096) + ((_ud_b2 * 64) + _ud_b3));
+        return { cp: _ud_cp, sz: 4 };
+    };
+    // 3-byte: Vietnamese diacritics (0x1EA0-0x1EFF), CJK, misc symbols
+    if _ud_b0 >= 224 {
+        if (_ud_i + 2) >= _ud_n { return { cp: _ud_b0, sz: 1 }; };
+        let _ud_b1 = __char_code(char_at(_ud_text, _ud_i + 1)) % 64;
+        let _ud_b2 = __char_code(char_at(_ud_text, _ud_i + 2)) % 64;
+        let _ud_cp = ((_ud_b0 % 16) * 4096) + ((_ud_b1 * 64) + _ud_b2);
+        return { cp: _ud_cp, sz: 3 };
+    };
+    // 2-byte: Latin extended, accented chars (0xC0-0xDF)
+    if (_ud_i + 1) >= _ud_n { return { cp: _ud_b0, sz: 1 }; };
+    let _ud_b1 = __char_code(char_at(_ud_text, _ud_i + 1)) % 64;
+    let _ud_cp = ((_ud_b0 % 32) * 64) + _ud_b1;
+    return { cp: _ud_cp, sz: 2 };
+}
+
+// Is this codepoint an emoji? (emoticon/symbol blocks with high V/A)
+fn _is_emoji_cp(_iec_cp) {
+    // Emoticons 😀-😿
+    if _iec_cp >= 128512 { if _iec_cp <= 128591 { return 1; }; };
+    // Misc Symbols & Pictographs 🌀-🗿
+    if _iec_cp >= 127744 { if _iec_cp <= 128511 { return 1; }; };
+    // Transport & Map 🚀-🛿
+    if _iec_cp >= 128640 { if _iec_cp <= 128767 { return 1; }; };
+    // Supplemental Symbols 🤀-🧿
+    if _iec_cp >= 129280 { if _iec_cp <= 129535 { return 1; }; };
+    // Misc Symbols ☀-⛿
+    if _iec_cp >= 9728 { if _iec_cp <= 9983 { return 1; }; };
+    // Dingbats ✀-➿
+    if _iec_cp >= 9984 { if _iec_cp <= 10175 { return 1; }; };
+    // Common standalone emoji
+    if _iec_cp == 10084 { return 1; };  // ❤ U+2764
+    if _iec_cp == 11088 { return 1; };  // ⭐ U+2B50
+    return 0;
+}
+
+// ════════════════════════════════════════════════════════════════
+// Text → MolecularChain (UTF-8 aware)
 // ════════════════════════════════════════════════════════════════
 
 pub fn encode_text(text) {
@@ -115,15 +214,53 @@ pub fn encode_text(text) {
     let i = 0;
     let n = len(text);
     while i < n {
-        let cp = __char_code(char_at(text, i));
-        if cp > 32 {
-            push(mols, encode_codepoint(cp));
+        let _et_dec = utf8_decode(text, i);
+        let _et_cp = _et_dec.cp;
+        let _et_sz = _et_dec.sz;
+        if _et_sz == 0 { break; };
+        if _et_cp > 32 {
+            push(mols, encode_codepoint(_et_cp));
         };
-        let i = i + 1;
+        let i = i + _et_sz;
         if len(mols) >= 64 { break; };
     };
     if len(mols) == 0 { return _mol_pack(0, 0, 4, 4, 2); };
     return mol_compose_many(mols);
+}
+
+// Extract emotion directly from Unicode properties of text
+// Emoji carry emotion intrinsically — no hardcoding needed
+pub fn text_emotion_unicode(_teu_text) {
+    let _teu_v = 4;
+    let _teu_a = 4;
+    let _teu_emoji_hits = 0;
+    let _teu_i = 0;
+    let _teu_n = len(_teu_text);
+    while _teu_i < _teu_n {
+        let _teu_dec = utf8_decode(_teu_text, _teu_i);
+        let _teu_cp = _teu_dec.cp;
+        let _teu_sz = _teu_dec.sz;
+        if _teu_sz == 0 { break; };
+        // Multi-byte char (non-ASCII) → check if emoji
+        if _teu_cp > 127 {
+            if _is_emoji_cp(_teu_cp) == 1 {
+                // Use encode_codepoint → extract V/A from molecule
+                let _teu_mol = encode_codepoint(_teu_cp);
+                let _teu_mv = _mol_v(_teu_mol);
+                let _teu_ma = _mol_a(_teu_mol);
+                // Emoji V/A is in 0-7 scale, use directly
+                _teu_v = _teu_mv;
+                _teu_a = _teu_ma;
+                _teu_emoji_hits = _teu_emoji_hits + 1;
+            };
+        } else {
+            // ASCII: punctuation affects arousal
+            if _teu_cp == 33 { _teu_a = _enc_min(7, _teu_a + 1); _teu_v = _enc_min(7, _teu_v + 1); };
+            if _teu_cp == 63 { _teu_a = _enc_min(7, _teu_a + 1); };
+        };
+        let _teu_i = _teu_i + _teu_sz;
+    };
+    return { v: _teu_v, a: _teu_a, emoji_count: _teu_emoji_hits };
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -244,6 +381,19 @@ pub fn text_emotion_v2(_tev_text) {
                     };
                 };
             };
+        };
+    };
+    // Fuse with Unicode/emoji emotion — emoji takes precedence over words
+    let _tev_ue = text_emotion_unicode(_tev_text);
+    if _tev_ue.emoji_count > 0 {
+        // Emoji detected → blend: 70% emoji + 30% word (emoji is more reliable)
+        if _tev_hits > 0 {
+            _tev_v = __floor(( (_tev_ue.v * 7) + (_tev_v * 3) ) / 10);
+            _tev_a = __floor(( (_tev_ue.a * 7) + (_tev_a * 3) ) / 10);
+        } else {
+            // No word hits → use emoji 100%
+            _tev_v = _tev_ue.v;
+            _tev_a = _tev_ue.a;
         };
     };
     return { v: _tev_v, a: _tev_a };
@@ -407,7 +557,7 @@ pub fn encode_event(event) {
 
 pub fn encode(text) {
     let molecule = encode_text(text);
-    let emotion = text_emotion(text);
+    let emotion = text_emotion_v2(text);
     return { molecule: molecule, emotion: emotion, source: "text" };
 }
 
@@ -438,7 +588,7 @@ fn _a_has(text, word) {
 
 pub fn analyze_input(text) {
     let molecule = encode_text(text);
-    let emo = text_emotion(text);
+    let emo = text_emotion_v2(text);
 
     // Context
     let role = "observer";
