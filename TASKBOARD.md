@@ -225,13 +225,22 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.60 | DONE ✅ | ^ (XOR) in precedence table |
 | DC.61 | DONE ✅ | bare return; documented |
 
-### BUG-SORT — Bubble sort regression (NGHIÊM TRỌNG)
+### BUG-INDEX — a[expr] khi expr là BinOp → luôn trả a[0] (NGHIÊM TRỌNG)
 
 ```
-Input:  let a = [5,2,8,1,9]; bubble sort with set_at
-Expect: [1,2,5,8,9]
-Actual: [5,2,5,5,8]
-Status: OPEN — cần điều tra. Có thể liên quan đến parser/semantic refactor.
+ROOT CAUSE (Kira inspect #16):
+  a[j+1], a[1+1], a[x+1] → luôn trả a[0]  ❌
+  a[j], a[x], a[idx]     → hoạt động đúng  ✅
+  Workaround: let idx = j + 1; a[idx]
+
+BUG-SORT là HỆ QUẢ: bubble sort dùng a[j+1] → luôn so sánh/swap với a[0]
+  Input:  [5,2,8,1,9] → [5,2,5,5,8] (sai)
+  Expect: [1,2,5,8,9]
+
+Parser desugar: a[i] → __array_get(a, i)
+Khi i = BinOp (j+1), expression trong [] không evaluate đúng → kết quả = 0
+Regression từ: parser refactor (ac17a15 hoặc gần đó)
+Status: OPEN — cần fix parser hoặc semantic compile cho index expression
 ```
 
 ### Spec v3 vs Code (architecture gap — INFO level)
@@ -375,4 +384,6 @@ VI PHẠM hiện tại:
 2026-03-24  Nox: 100% SELF-COMPILE (48/48). Hex literals, match-as-var, lambda skip, keyword dict fields.
             Parser 988→1136 LOC. Lexer 262→298 LOC. Binary 957KB→964KB.
 2026-03-24  Inspect #15: 4/5 PASS. BUG-SORT REGRESSION (bubble sort broken). DC.51-61. Binary 964,642B.
+2026-03-24  Sora: BUG-VI fixed (7 fn prefix rename). DC.51-61 ALL FIXED. Binary 965,292B.
+2026-03-24  Inspect #16: 4/5 PASS. ROOT CAUSE: a[expr] BinOp → a[0]. Docs 100% synced. ZERO new DC.
 ```
