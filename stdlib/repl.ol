@@ -87,25 +87,37 @@ pub fn repl_eval(input) {
       let _lf_path = __substr(src, 11, len(src));
       let _lf_content = __file_read(_lf_path);
       if len(_lf_content) == 0 { return "Error: cannot read " + _lf_path; };
-      // Split by newlines and learn each line
-      let _lf_line = "";
+      // Split by sentences (. or newline) and learn each
+      let _lf_sent = "";
       let _lf_count = 0;
       let _lf_i = 0;
       while _lf_i < len(_lf_content) {
         let _lf_ch = char_at(_lf_content, _lf_i);
-        if __char_code(_lf_ch) == 10 {
-          if len(_lf_line) > 10 {
-            knowledge_learn(_lf_line);
+        let _lf_code = __char_code(_lf_ch);
+        // Split on: newline, period+space
+        let _lf_split = 0;
+        if _lf_code == 10 { _lf_split = 1; };
+        if _lf_code == 46 {
+          if (_lf_i + 1) < len(_lf_content) {
+            if __char_code(char_at(_lf_content, _lf_i + 1)) == 32 {
+              _lf_split = 1;
+              _lf_sent = _lf_sent + _lf_ch;
+            };
+          };
+        };
+        if _lf_split == 1 {
+          if len(_lf_sent) > 15 {
+            knowledge_learn(_lf_sent);
             _lf_count = _lf_count + 1;
           };
-          _lf_line = "";
+          _lf_sent = "";
         } else {
-          _lf_line = _lf_line + _lf_ch;
+          _lf_sent = _lf_sent + _lf_ch;
         };
         let _lf_i = _lf_i + 1;
       };
-      if len(_lf_line) > 10 {
-        knowledge_learn(_lf_line);
+      if len(_lf_sent) > 15 {
+        knowledge_learn(_lf_sent);
         _lf_count = _lf_count + 1;
       };
       return "Learned " + __to_string(_lf_count) + " facts from " + _lf_path + ". Knowledge: " + __to_string(knowledge_count());

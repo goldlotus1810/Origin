@@ -337,7 +337,7 @@ pub fn compose_reply(intent, tone, text) {
 // Agent can reference previous inputs for context.
 
 let __stm = [];
-let __stm_max = 8;
+let __stm_max = 32;
 
 pub fn stm_push(text, intent, tone) {
     push(__stm, { input: text, intent: intent, tone: tone, turn: len(__stm) });
@@ -624,7 +624,7 @@ pub fn agent_respond(text) {
 // Keywords extracted by splitting on spaces, keeping 3+ char words.
 
 let __knowledge = [];
-let __knowledge_max = 128;
+let __knowledge_max = 512;
 
 pub fn knowledge_learn(text) {
     // Extract keywords (3+ char words)
