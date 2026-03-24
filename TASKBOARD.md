@@ -209,6 +209,31 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.49 | DONE ✅ | Tests 16 updated |
 | DC.50 | DONE ✅ | Phase 5 fully documented: alias, node, UDC decode, UTF-8, emoji, stemming, digest, DN/QR |
 
+### Docs Conflicts — DC.51-DC.61 (phát hiện 2026-03-24 inspect #15)
+
+| # | Mức độ | File | Xung đột |
+|---|--------|------|----------|
+| DC.51 | TRUNG BÌNH | CLAUDE.md + TASKBOARD | Binary ~935KB → thực tế 964,642B (~942KB) |
+| DC.52 | TRUNG BÌNH | CLAUDE.md | lexer 262 LOC → 298 LOC |
+| DC.53 | TRUNG BÌNH | CLAUDE.md | parser 988 LOC → 1,136 LOC |
+| DC.54 | NHẸ | CLAUDE.md | semantic 1,334 LOC → 1,336 LOC |
+| DC.55 | NHẸ | CLAUDE.md | repl 348 LOC → 343 LOC |
+| DC.56 | TRUNG BÌNH | CLAUDE.md | VM 5,522 LOC → 5,634 LOC |
+| DC.57 | TRUNG BÌNH | CLAUDE.md + TASKBOARD | HomeOS 43 files/9,142 LOC → 44 files/9,425 LOC |
+| DC.58 | TRUNG BÌNH | TASKBOARD | Bootstrap 3,013 LOC → 3,542 LOC |
+| DC.59 | NHẸ | CLAUDE.md | Hex literals 0x7F chưa document |
+| DC.60 | NHẸ | CLAUDE.md | ^ (XOR) operator chưa document trong cú pháp |
+| DC.61 | NHẸ | CLAUDE.md | bare return chưa document |
+
+### BUG-SORT — Bubble sort regression (NGHIÊM TRỌNG)
+
+```
+Input:  let a = [5,2,8,1,9]; bubble sort with set_at
+Expect: [1,2,5,8,9]
+Actual: [5,2,5,5,8]
+Status: OPEN — cần điều tra. Có thể liên quan đến parser/semantic refactor.
+```
+
 ### Spec v3 vs Code (architecture gap — INFO level)
 
 | # | Spec Section | Status | Notes |
@@ -347,4 +372,7 @@ VI PHẠM hiện tại:
 2026-03-24  STREAMING COMPILER: parse+compile one stmt at a time. ALL 4 bootstrap files compile!
             lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s. ZERO segfaults. 957KB.
 2026-03-24  Kira: __sleep(ms) + __time() + __write_raw(). terminal.ol 284 LOC (ANSI animations). PR #404.
+2026-03-24  Nox: 100% SELF-COMPILE (48/48). Hex literals, match-as-var, lambda skip, keyword dict fields.
+            Parser 988→1136 LOC. Lexer 262→298 LOC. Binary 957KB→964KB.
+2026-03-24  Inspect #15: 4/5 PASS. BUG-SORT REGRESSION (bubble sort broken). DC.51-61. Binary 964,642B.
 ```
