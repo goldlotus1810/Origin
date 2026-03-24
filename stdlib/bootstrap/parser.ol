@@ -44,6 +44,7 @@ union Stmt {
     UseStmt { path: Str },
     MatchStmt { subject: Expr, arms: Vec[MatchArm] },
     FieldAssign { object: Str, field: Str, value: Expr },
+    TryCatch { try_block: Vec[Stmt], catch_block: Vec[Stmt] },
 }
 
 type Field {
@@ -653,10 +654,25 @@ pub fn parse_stmt(p) {
         advance(p);
         let _ps_fvar = peek(p).text;
         advance(p);
+        // Save var name to individual globals (arrays unsafe — heap overlap)
+        if _g_for_depth == 0 { let __g_fv0 = _ps_fvar; };
+        if _g_for_depth == 1 { let __g_fv1 = _ps_fvar; };
+        if _g_for_depth == 2 { let __g_fv2 = _ps_fvar; };
+        if _g_for_depth == 3 { let __g_fv3 = _ps_fvar; };
         // expect "in" keyword
         advance(p);
+        // Save iter token range (iter Expr gets corrupted by inner ForStmt dicts)
+        let _ps_fi_start = p.pos;
         let _ps_fiter = parse_expr(p);
+        let _ps_fi_end = p.pos;
+        if _g_for_depth == 0 { let __g_fi0s = _ps_fi_start; let __g_fi0e = _ps_fi_end; };
+        if _g_for_depth == 1 { let __g_fi1s = _ps_fi_start; let __g_fi1e = _ps_fi_end; };
+        if _g_for_depth == 2 { let __g_fi2s = _ps_fi_start; let __g_fi2e = _ps_fi_end; };
+        if _g_for_depth == 3 { let __g_fi3s = _ps_fi_start; let __g_fi3e = _ps_fi_end; };
+        let __g_fi_tokens = p.tokens;
+        let _g_for_depth = _g_for_depth + 1;
         let _ps_fbody = parse_block(p);
+        let _g_for_depth = _g_for_depth - 1;
         if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::ForStmt { var: _ps_fvar, iter: _ps_fiter, body: _ps_fbody };
     };
@@ -675,6 +691,19 @@ pub fn parse_stmt(p) {
         let _ps_expr = parse_expr(p);
         if is_symbol_tok(peek(p), ";") { advance(p); };
         return Stmt::EmitStmt { expr: _ps_expr };
+    };
+
+    // try { ... } catch { ... }
+    if is_keyword_tok(tok, "try") {
+        advance(p);
+        let _ps_try = parse_block(p);
+        // expect "catch"
+        if is_keyword_tok(peek(p), "catch") {
+            advance(p);
+        };
+        let _ps_catch = parse_block(p);
+        if is_symbol_tok(peek(p), ";") { advance(p); };
+        return Stmt::TryCatch { try_block: _ps_try, catch_block: _ps_catch };
     };
 
     // break;
