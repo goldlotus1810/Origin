@@ -142,7 +142,12 @@ fn expect_ident(p) {
             return name;
         },
         _ => {
-            emit "Parse error: expected identifier";
+            // Check if it's a keyword used as field name (e.g., msg.type, msg.from)
+            match tok.kind {
+                TokenKind::Keyword { name } => { return name; },
+                _ => {},
+            };
+            emit "Parse error: expected identifier at pos " + __to_string(p.pos) + " got '" + tok.text + "'";
             let _g_parse_error = 1;
             return "";
         },
@@ -250,11 +255,9 @@ fn parse_primary(p) {
             if name == "match" {
                 return parse_match_expr(p);
             };
-            // Other keywords used as identifiers (fallthrough to emit error)
-            emit "Parse error: unexpected keyword '" + name + "'";
-            let _g_parse_error = 1;
+            // Other keywords → treat as identifier (from, type, etc. used as var names)
             advance(p);
-            return Expr::NumLit { value: 0 };
+            let _pp_result = Expr::Ident { name: name };
         },
         TokenKind::Ident { name } => {
             advance(p);
