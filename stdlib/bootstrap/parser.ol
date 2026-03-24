@@ -522,8 +522,9 @@ fn precedence(op) {
     if op == "&&" { return 2; };
     if op == "==" || op == "!=" { return 3; };
     if op == "<" || op == ">" || op == "<=" || op == ">=" { return 4; };
-    if op == "+" || op == "-" { return 5; };
-    if op == "*" || op == "/" || op == "%" { return 6; };
+    if op == "<<" || op == ">>" { return 5; };
+    if op == "+" || op == "-" { return 6; };
+    if op == "*" || op == "/" || op == "%" { return 7; };
     return 0;
 }
 

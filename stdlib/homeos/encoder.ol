@@ -732,10 +732,10 @@ fn knowledge_search(_ks_query) {
 // ════════════════════════════════════════════════════════════════
 
 fn _sb_compile_file(_sbcf_path, _sbcf_bc, _sbcf_pos) {
+    let _sbcf_hp = __heap_save();
     let _sbcf_src = __file_read(_sbcf_path);
     if len(_sbcf_src) > 0 {
         _prefill_output();
-        let _g_pos = 0;
         let _sbcf_tokens = tokenize(_sbcf_src);
         let _sbcf_ast = parse(_sbcf_tokens);
         let _sbcf_state = analyze(_sbcf_ast);
@@ -751,6 +751,7 @@ fn _sb_compile_file(_sbcf_path, _sbcf_bc, _sbcf_pos) {
             emit "  " + _sbcf_path + ": SKIP";
         };
     };
+    __heap_restore(_sbcf_hp);
     return _sbcf_pos;
 }
 
@@ -776,7 +777,8 @@ pub fn self_build() {
     let _sb_compiled = 0;
     let _sb_errors = 0;
 
-    // Strategy: copy EXISTING bytecode from current binary
+    // Strategy: copy existing bytecode from current binary as BASE
+    // Then try re-compiling additional files with heap_restore between each
     // (bootstrap files too large to re-compile with current heap limits)
     // Read bc_offset and bc_size from Origin header
     let _sb_bc_off_b0 = __bytes_get(_sb_self, _sb_header_off + 14);

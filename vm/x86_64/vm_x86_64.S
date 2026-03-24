@@ -1042,6 +1042,12 @@ op_call:
     movabs  $0x4E03A6338DB8ADC8, %rdx   # __bit_xor
     cmp     %rdx, %rax
     je      .call_bit_xor
+    movabs  $0xECF7CD335641730C, %rdx   # __bit_shl
+    cmp     %rdx, %rax
+    je      .call_bit_shl
+    movabs  $0xECF7E3335641986E, %rdx   # __bit_shr
+    cmp     %rdx, %rax
+    je      .call_bit_shr
 
     # ── Struct/enum builtins ──
     movabs  $0x46B6739DEFF894A5, %rdx   # __struct_tag
@@ -2566,6 +2572,32 @@ op_call:
     cvttsd2si %xmm0, %rax
     cvttsd2si %xmm1, %rdx
     and     %rdx, %rax
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bit_shl:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1              # shift amount
+    movsd   16(%r14), %xmm0            # value
+    add     $16, %r14
+    cvttsd2si %xmm0, %rax
+    cvttsd2si %xmm1, %rcx
+    shl     %cl, %rax
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bit_shr:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    cvttsd2si %xmm0, %rax
+    cvttsd2si %xmm1, %rcx
+    shr     %cl, %rax
     cvtsi2sd %rax, %xmm0
     movsd   %xmm0, (%r14)
     movq    $F64_MARKER, 8(%r14)

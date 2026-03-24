@@ -73,13 +73,21 @@ type SemanticState {
     unions: Vec[Str],
 }
 
+let _g_output_ready = 0;
+
 fn _prefill_output() {
-    let _g_output = [];
-    let _pf = 0;
-    while _pf < 16384 {
-        push(_g_output, 0);
-        let _pf = _pf + 1;
+    // Only allocate ONCE — reuse on subsequent calls
+    if _g_output_ready == 0 {
+        let _g_output = [];
+        let _pf = 0;
+        while _pf < 16384 {
+            push(_g_output, 0);
+            let _pf = _pf + 1;
+        };
+        let _g_output_ready = 1;
     };
+    // Just reset position
+    let _g_pos = 0;
 }
 
 fn new_state() {
@@ -402,7 +410,9 @@ fn compile_expr(state, expr) {
         Expr::BinOp { op, lhs, rhs } => {
             // Short-circuit for && and ||
             if op == "&&" {
+                // Short-circuit: Dup → Jz(end) → Pop → rhs → end
                 compile_expr(state, lhs);
+                emit_op(state, make_op_simple("Dup"));
                 let jz_pos = current_pos(state);
                 emit_op(state, make_op_num("Jz", 0));
                 emit_op(state, make_op_simple("Pop"));
@@ -410,7 +420,9 @@ fn compile_expr(state, expr) {
                 patch_jump(state, jz_pos, current_pos(state));
             } else {
                 if op == "||" {
+                    // Short-circuit: Dup → Jz(false) → Jmp(end) → false: Pop → rhs → end
                     compile_expr(state, lhs);
+                    emit_op(state, make_op_simple("Dup"));
                     let jz_pos = current_pos(state);
                     emit_op(state, make_op_num("Jz", 0));
                     let jmp_pos = current_pos(state);
@@ -431,6 +443,8 @@ fn compile_expr(state, expr) {
                     if _binop == "*" { emit_op(state, make_op_name("Call", "__hyp_mul")); };
                     if _binop == "/" { emit_op(state, make_op_name("Call", "__hyp_div")); };
                     if _binop == "%" { emit_op(state, make_op_name("Call", "__hyp_mod")); };
+                    if _binop == "<<" { emit_op(state, make_op_name("Call", "__bit_shl")); };
+                    if _binop == ">>" { emit_op(state, make_op_name("Call", "__bit_shr")); };
                     if _binop == "==" { emit_op(state, make_op_name("Call", "__eq")); };
                     if _binop == "!=" { emit_op(state, make_op_name("Call", "__cmp_ne")); };
                     if _binop == "<" { emit_op(state, make_op_name("Call", "__cmp_lt")); };
