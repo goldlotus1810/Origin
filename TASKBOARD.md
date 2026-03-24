@@ -164,13 +164,23 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.26 | DONE ✅ | Memory systems section: STM, Silk, Dream, Knowledge documented |
 | DC.27 | DEFERRED | PLAN_REWRITE.md — will update at T4 start |
 
-### Pre-T4 Blockers
+### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #6)
 
-| # | Mức độ | Vấn đề |
-|---|--------|--------|
-| BLOCK.1 | **CRITICAL** | BUG-3: match on union segfaults (heap overlap). CUT.1 cần union/match. |
-| BLOCK.2 | CAO | _g_output limit 4096 bytes. CUT.1-2 cần programs lớn hơn. |
-| BLOCK.3 | TRUNG BÌNH | Không có automated test framework. CUT.3 = viết test framework. |
+| # | Mức độ | File | Xung đột |
+|---|--------|------|----------|
+| DC.28 | TRUNG BÌNH | `CLAUDE.md:37,347` | Binary `~891KB` → thực tế ~877KB (897,628 bytes). Sai đơn vị |
+| DC.29 | NHẸ | `CLAUDE.md:200,205` | Opcode 0x09 Jmp duplicate entry |
+| DC.30 | NHẸ | `CLAUDE.md:373` | HomeOS stdlib 7,832 LOC → thực tế 7,701 LOC |
+| DC.31 | **NGHIÊM TRỌNG** | `CLAUDE.md:290` | ARRAY_INIT_CAP = 4096 → thực tế **16384** (doubled twice: 4096→8192→16384) |
+| DC.32 | TRUNG BÌNH | `CLAUDE.md:369-372` | LOC drift: parser 952→974, semantic 1244→1301, repl 131→160 |
+
+### Pre-T4 Blockers — ALL DONE ✅
+
+| # | Status | Fix |
+|---|--------|-----|
+| BLOCK.1 | **DONE** ✅ | Match patterns: numbers, strings, wildcards. Pre-emit Jmp pattern. |
+| BLOCK.2 | **DONE** ✅ | _g_output 4096→8192, ARRAY_INIT_CAP 4096→8192. 8KB bytecode. |
+| BLOCK.3 | **DONE** ✅ | `test` REPL command, 12/12 inline tests. assert_eq framework. |
 
 ---
 
@@ -211,4 +221,10 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  DC.9-DC.20 ALL FIXED. CLAUDE.md + handbook fully synced.
 2026-03-24  STM + Silk + Dream + Knowledge learning. Nó nhớ. Nó biết sách. 891KB.
 2026-03-24  Inspect #5 (pre-T4): 13/13 tests PASS. 7 new conflicts DC.21-DC.27. 3 blockers identified.
+2026-03-24  DC.21-DC.26 FIXED by Nox. DC.27 DEFERRED.
+2026-03-24  Inspect #6: 10/10 PASS. DC.28-DC.30 new (minor: KB unit error, opcode dup, LOC drift).
+2026-03-24  BLOCK.1 DONE: match patterns (num/str/wildcard). BLOCK.2 DONE: 8KB output. BLOCK.3 DONE: test 12/12.
+2026-03-24  Inspect #7: 9/9 PASS + test 12/12. All blockers DONE. DC.31-DC.32 new. READY FOR T4!
+2026-03-24  ARRAY_INIT_CAP 8192→16384 (16KB bytecode). DC.31 updated.
+2026-03-24  Inspect #8: 7/7 PASS + test 12/12. DC.31 now 4096→16384 (4x). No new issues.
 ```
