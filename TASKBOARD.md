@@ -235,6 +235,30 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DOC.3 | TRUNG BÌNH | Handbook vs CLAUDE.md | Opcodes thiếu, binary "806KB" outdated |
 | DOC.4 | NHẸ | CHECK_TO_PASS | check-logic tool (Rust) = dead code |
 
+### Architecture Gap: "Mọi thứ = Node" (Spec v3 §II, §III)
+
+```
+CRITICAL GAP: Code hiện tại chỉ tạo node cho user input text.
+Theo Spec v3, MỌI THỨ phải là node:
+
+  fn = node { dn, mol, body: chain_of_nodes }
+  skill = node { children: [node(fn), node(fn)...] }
+  code = chain of instruction nodes
+  variable = node { dn, value, mol }
+
+Hệ quả:
+  ① Fn có cảm xúc (mol) — heal() V=6, delete() V=2
+  ② Fn có links — add↔subtract, parse↔tokenize
+  ③ Fn có fire_count — hot function = promote QR
+  ④ Fn có maturity — new=Evaluating, stable=Mature
+  ⑤ Skill = composite node — Dream cluster fn → skill
+  ⑥ Code = self-describing chain — inspect, compose, splice
+  ⑦ Gene = data, data = gene — giống DNA
+
+Hiện tại: fn = VM closure (bytecode blob), var = flat hash entry.
+Target:   fn = node trong KnowTree, skill = tree of fn nodes.
+```
+
 ---
 
 ## Log
