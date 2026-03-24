@@ -6,14 +6,17 @@
 
 ---
 
-## Trạng thái: SELF-HOSTING (2026-03-23)
+## Trạng thái: FULL STACK (2026-03-24)
 
 ```
-origin_new.olang = 806KB native binary
-  ✅ Bootstrap compiler: lexer.ol + parser.ol + semantic.ol + codegen.ol
-  ✅ fib(20) = 6,765 | fact(10) = 3,628,800
-  ✅ 27/27 REPL tests pass
-  ✅ ASM VM x86_64, no libc, zero dependencies
+origin_new.olang = 861KB native binary (881,253 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (2,883 LOC Olang)
+  ✅ Intelligence layer: encode + analyze + intent + respond (OL.1-5)
+  ✅ Crypto: SHA-256 FIPS 180-4 in ASM
+  ✅ WASM: runs in browser (3KB)
+  ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
+  ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf...
+  ✅ ASM VM x86_64 (5,031 LOC), no libc, zero dependencies
 ```
 
 ---
@@ -64,7 +67,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | OL.7d | Pretty-print arrays | ~80 LOC | DONE ✅ | `emit [1,2,3]` instead of `[array 3]`. PR #318. |
 | OL.7e | Variable assignment fix | ~5 LOC | DONE ✅ | `let b = b + a` now works. LetStmt name save. PR #320. |
 | OL.7f | FieldAssign fix + audit | ~10 LOC | DONE ✅ | Full 18-site match binding audit. PR #321. |
-| OL.8 | Import/module system | ~300 LOC | DEFERRED | REPL can't call stdlib fns directly. Workaround: same-file + boot context. Tier 1 done without it. |
+| OL.8 | Import/module system | ~37 LOC ASM | DONE ✅ | Boot/eval closure bridge. REPL calls stdlib functions. Bit 63 tag. |
 | OL.9 | Error handling | ~200 LOC | DONE ✅ | `try { ... } catch { ... }` + `__throw(msg)`. VM try_stack + parser + semantic. |
 | OL.10 | Array comprehension | ~150 LOC | DONE ✅ | `[x * 2 for x in items if cond]`. Depth-indexed globals + manual token emit. |
 
@@ -72,11 +75,11 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| OL.11 | ARM64 ASM VM | ~2000 LOC | FREE | vm/aarch64/vm_aarch64.S. asm_emit_arm64.ol có sẵn. |
-| OL.12 | WASM target | ~1000 LOC | FREE | Compile to WASM. wasm_emit.ol có sẵn. |
+| OL.11 | ARM64 ASM VM | ~2000 LOC | WIP | 1,229 LOC. Boots bare. Closures added. Needs builtins+scoping for stdlib. |
+| OL.12 | WASM target | ~1000 LOC | DONE ✅ | `emit 42` + `emit 1+2` works. 3KB binary. Node.js test harness. |
 | OL.13 | Crypto in ASM | ~250 LOC | DONE ✅ (SHA-256) | `__sha256(str)` → 64-char hex. FIPS 180-4. 3/3 vectors pass. |
-| OL.14 | Browser E2E | ~500 LOC | FREE | origin.html + WASM binary. |
-| OL.15 | Mobile (Android/iOS) | ~1000 LOC | FREE | ARM64 native + WASM iOS. |
+| OL.14 | Browser E2E | ~80 LOC | DONE ✅ | origin.html REPL. Dark theme. emit + arithmetic. |
+| OL.15 | Mobile (Android/iOS) | ~1000 LOC | BLOCKED | Needs OL.11 ARM64 complete. |
 
 ### Tier 4 — Cắt dây rốn (hoàn toàn)
 
@@ -132,22 +135,22 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.7 | DONE ✅ | `CLAUDE.md` | `a[i]` noted as desugar to `__array_get(a, i)` |
 | DC.8 | DONE ✅ | `CLAUDE.md` | Binary size 806KB → ~824KB |
 
-### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #4)
+### Docs Conflicts — DC.9-DC.20 DONE ✅ (fixed 2026-03-24 Nox)
 
-| # | Mức độ | File | Xung đột |
-|---|--------|------|----------|
-| DC.9 | **NGHIÊM TRỌNG** | `CLAUDE.md:288-293` | LOC counts rất lỗi thời: lexer 196→258, parser 718→952, semantic 649→1244, codegen 302→429, repl 87→117, VM 4112→4998 |
-| DC.10 | **NGHIÊM TRỌNG** | `olang_handbook.md:1430-1448` | Expr union 6→17 variants. Stmt union 8→17 variants. Thiếu 20 AST nodes |
-| DC.11 | **NGHIÊM TRỌNG** | `CLAUDE.md:294` | HomeOS stdlib 36 files/6,600 LOC → 40 files/7,304 LOC (encoder, fusion, infer, pipeline mới) |
-| DC.12 | **NGHIÊM TRỌNG** | `CLAUDE.md:301-310` | "Chưa port" vẫn liệt kê encoder+analysis = TODO → OL.1-OL.5 ĐÃ DONE |
-| DC.13 | TRUNG BÌNH | `CLAUDE.md:37,268` | Binary size ~824KB → ~861KB (881,253 bytes) |
-| DC.14 | TRUNG BÌNH | `TASKBOARD:12` | Header ghi 806KB → thực tế ~861KB |
-| DC.15 | TRUNG BÌNH | `olang_handbook.md:1436` | MolLiteral { s,r,v,a,t } → thực tế { packed: Num } |
-| DC.16 | NHẸ | `CLAUDE.md:140` | Builtins thiếu __dict_new, __array_new, __throw |
-| DC.17 | NHẸ | `CLAUDE.md:105` | Dict syntax example chỉ show 1 field access |
-| DC.18 | TRUNG BÌNH | `CLAUDE.md` builtins | Thiếu `__sha256(str)` — OL.13 DONE, 250 LOC ASM, FIPS 180-4 |
-| DC.19 | TRUNG BÌNH | `CLAUDE.md` + handbook | Thiếu string interpolation `$"hello {name}"` syntax — OL.7b DONE |
-| DC.20 | NHẸ | `TASKBOARD:12` | Header vẫn ghi `806KB` |
+| # | Status | Fix |
+|---|--------|-----|
+| DC.9 | DONE ✅ | LOC counts updated: lexer 258, parser 952, semantic 1244, codegen 429, repl 117, VM 5031 |
+| DC.10 | DONE ✅ | Expr 6→17 variants, Stmt 8→17 variants — all AST nodes in handbook |
+| DC.11 | DONE ✅ | HomeOS stdlib 40 files, 7,304 LOC |
+| DC.12 | DONE ✅ | "Chưa port" → "Port status" — OL.1-5 marked DONE |
+| DC.13 | DONE ✅ | Binary ~824KB → ~861KB |
+| DC.14 | DONE ✅ | Header updated |
+| DC.15 | DONE ✅ | MolLiteral { packed: Num } |
+| DC.16 | DONE ✅ | Added __dict_new, __array_new, __throw, __floor, __ceil, __sha256 |
+| DC.17 | DONE ✅ | Dict + interpolation + comprehension + try/catch examples |
+| DC.18 | DONE ✅ | __sha256 documented |
+| DC.19 | DONE ✅ | $"hello {name}" documented |
+| DC.20 | DONE ✅ | Binary size updated |
 
 ---
 
@@ -181,4 +184,9 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Inspect #3: 7/7 tests PASS (incl. comprehension + try/catch). 9 new conflicts DC.9-DC.17 (4 NGHIÊM TRỌNG).
 2026-03-24  OL.7b DONE: string interpolation $"hello {name}". OL.13 DONE: SHA-256 in ASM (~250 LOC).
 2026-03-24  Inspect #4: 8/8 tests PASS (incl. interpolation + SHA-256). DC.18-DC.20 new. Binary 881KB.
+2026-03-24  OL.1-5 DONE: Full intelligence layer (encode→analyze→intent→respond).
+2026-03-24  OL.8 DONE: Boot/eval closure bridge. REPL calls stdlib functions.
+2026-03-24  OL.12 DONE: WASM VM works (emit 42, emit 1+2). OL.14 DONE: Browser demo.
+2026-03-24  OL.11 WIP: ARM64 boots bare via QEMU. Needs builtins for stdlib.
+2026-03-24  DC.9-DC.20 ALL FIXED. CLAUDE.md + handbook fully synced.
 ```

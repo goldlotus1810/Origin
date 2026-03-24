@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~824KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~861KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -105,6 +105,18 @@ let config = { name: "HomeOS", version: 5 };
 emit config.name;         // "HomeOS"
 emit config.version;      // 5
 
+// String interpolation
+let name = "World";
+emit $"Hello {name}!";       // Hello World!
+emit $"x = {x}, y = {y}";   // works with any expression
+
+// Array comprehension
+emit [x * 2 for x in [1,2,3]];           // [2, 4, 6]
+emit [x for x in items if x > 3];        // filter
+
+// Try/catch
+try { __throw("error"); } catch { emit "caught"; };
+
 // Types & Unions
 type Point { x: Num, y: Num }
 union Shape {
@@ -135,9 +147,11 @@ __str_is_keyword(s) → bool
 
 // Array
 len(a)  push(a, val)  a[i]  set_at(a, i, val)
+__array_new(count)  __array_get(a, i)  __array_push(a, val)
 // NOTE: a[i] is desugared to __array_get(a, i) by the parser
 
 // Dict
+__dict_new(field_count)  __dict_get(dict, key)  __dict_set(dict, key, val)
 struct_tag(dict, tag) → new dict with tag
 __match_enum(dict, tag) → bool
 __enum_field(dict, idx) → value
@@ -145,6 +159,15 @@ __enum_field(dict, idx) → value
 // I/O
 emit expr           // print to stdout
 __eval_bytecode(bc) // execute compiled bytecode
+
+// Math
+__floor(x)  __ceil(x)
+
+// Crypto
+__sha256(str) → 64-char hex string (FIPS 180-4)
+
+// Error handling
+__throw(msg) → unwind to nearest try/catch
 
 // Conversion
 __f64_to_le_bytes(n) → array of 8 bytes
@@ -265,7 +288,7 @@ use(my_var);                   // WRONG VALUE!
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~824KB)
+make build                    # → origin_new.olang (~861KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -285,30 +308,31 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (4,112 LOC) |
-| `stdlib/bootstrap/lexer.ol` | Tokenizer (196 LOC) |
-| `stdlib/bootstrap/parser.ol` | Parser recursive descent (718 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → IR opcodes (649 LOC) |
-| `stdlib/bootstrap/codegen.ol` | IR → bytecode (302 LOC) |
-| `stdlib/repl.ol` | REPL entry point (87 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (36 files, 6,600 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,031 LOC) |
+| `stdlib/bootstrap/lexer.ol` | Tokenizer (258 LOC) |
+| `stdlib/bootstrap/parser.ol` | Parser recursive descent (952 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,244 LOC) |
+| `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
+| `stdlib/repl.ol` | REPL entry point (117 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,304 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
 
 ---
 
-## Chưa port sang Olang (cần làm)
+## Port status (Rust → Olang)
 
-| Rust module | LOC | Ưu tiên | Olang tương đương |
-|-------------|-----|---------|-------------------|
-| agents/encoder | 1,030 | CAO | text → molecule encoding |
-| context/analysis | 2,108 | CAO | fusion, inference engines |
-| olang/crypto | 2,736 | TRUNG BÌNH | SHA-256, AES, Ed25519 |
-| runtime/core | 7,512 | TRUNG BÌNH | full pipeline orchestration |
-| vsdf/dynamics | 5,125 | THẤP | physics simulation |
-| wasm/lib | 15,270 | THẤP | WASM runtime |
-| hal/detect | 3,500 | THẤP | platform detection |
+| Rust module | Status | Olang files |
+|-------------|--------|-------------|
+| agents/encoder | ✅ DONE (OL.1) | `encoder.ol` — text→molecule, block-range UCD |
+| context/analysis | ✅ DONE (OL.2-3) | `encoder.ol` — fusion, intent, context detect |
+| agents/pipeline | ✅ DONE (OL.4-5) | `encoder.ol` — agent dispatch, response composer |
+| olang/crypto | ✅ SHA-256 (OL.13) | `vm_x86_64.S` — `__sha256()` FIPS 180-4 |
+| runtime/core | PARTIAL | `repl.ol` — REPL + `encode`/`respond` commands |
+| vsdf/dynamics | THẤP | chưa port |
+| wasm/lib | ✅ WASM VM (OL.12) | `vm_wasm.wat` — runs in browser |
+| hal/detect | THẤP | chưa port |
 
 ---
 
