@@ -47,7 +47,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| OL.1 | Encoder: text → molecule (.ol) | ~300 LOC | BLOCKED by OL.8 | encoder.ol written (160 LOC) but REPL can't call stdlib functions. |
+| OL.1 | Encoder: text → molecule (.ol) | ~180 LOC | DONE ✅ | `encode <text>` REPL command. Block-range UCD mapper. LCA compose. Emotion. |
 | OL.2 | Analysis: sentence fusion (.ol) | ~400 LOC | FREE | Port context/analysis. Emotion composition. |
 | OL.3 | Intent inference engine (.ol) | ~300 LOC | FREE | Port intent estimation. Context-aware. |
 | OL.4 | Agents: flesh out stubs (.ol) | ~500 LOC | FREE | chief.ol, leo.ol, worker.ol, gate.ol — real logic. |
