@@ -24,7 +24,7 @@
 
 # ── Constants ────────────────────────────────────────────────────────────
 .equ STACK_SIZE,    0x100000        # 1 MB VM stack
-.equ HEAP_SIZE,     0x4000000       # 64 MB heap arena
+.equ HEAP_SIZE,     0x10000000      # 256 MB heap arena
 .equ HEADER_SIZE,   32
 .equ ELF_HEADER_SIZE, 120           # ELF64 header + 1 program header
 .equ F64_MARKER,    -1              # len = 0xFFFFFFFFFFFFFFFF means f64

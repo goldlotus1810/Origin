@@ -773,7 +773,7 @@ pub fn self_build() {
     emit "  Header offset: " + __to_string(_sb_header_off);
 
     // Step 2: Compile all .ol files
-    let _sb_bc = __bytes_new(65536);
+    let _sb_bc = __bytes_new(524288);  // 512KB bytecode buffer
     let _sb_bc_pos = 0;
     let _sb_compiled = 0;
     let _sb_errors = 0;
