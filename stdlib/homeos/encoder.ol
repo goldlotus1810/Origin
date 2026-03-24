@@ -130,40 +130,127 @@ pub fn encode_text(text) {
 // Word affect table (minimal Vietnamese + English)
 // ════════════════════════════════════════════════════════════════
 
-pub fn word_affect(word) {
-    if word == "buon"  { return { v: 2, a: 2 }; };
-    if word == "vui"   { return { v: 6, a: 5 }; };
-    if word == "gian"  { return { v: 1, a: 6 }; };
-    if word == "so"    { return { v: 2, a: 6 }; };
-    if word == "yeu"   { return { v: 7, a: 4 }; };
-    if word == "ghet"  { return { v: 1, a: 6 }; };
-    if word == "happy" { return { v: 6, a: 5 }; };
-    if word == "sad"   { return { v: 2, a: 2 }; };
-    if word == "angry" { return { v: 1, a: 6 }; };
-    if word == "love"  { return { v: 7, a: 4 }; };
-    if word == "hate"  { return { v: 1, a: 6 }; };
-    if word == "good"  { return { v: 5, a: 3 }; };
-    if word == "bad"   { return { v: 2, a: 3 }; };
-    if word == "fear"  { return { v: 2, a: 6 }; };
-    if word == "joy"   { return { v: 6, a: 6 }; };
+pub fn word_affect(_wa_word) {
+    // Vietnamese — negative
+    if _wa_word == "buon" { return { v: 2, a: 2 }; };
+    if _wa_word == "gian" { return { v: 1, a: 6 }; };
+    if _wa_word == "so" { return { v: 2, a: 6 }; };
+    if _wa_word == "ghet" { return { v: 1, a: 6 }; };
+    if _wa_word == "met" { return { v: 2, a: 2 }; };
+    if _wa_word == "chan" { return { v: 2, a: 1 }; };
+    if _wa_word == "lo" { return { v: 2, a: 5 }; };
+    if _wa_word == "dau" { return { v: 1, a: 5 }; };
+    if _wa_word == "khoc" { return { v: 1, a: 4 }; };
+    if _wa_word == "that" { return { v: 1, a: 3 }; };
+    if _wa_word == "co" { return { v: 2, a: 3 }; };
+    if _wa_word == "kho" { return { v: 2, a: 4 }; };
+    if _wa_word == "nan" { return { v: 1, a: 5 }; };
+    if _wa_word == "mat" { return { v: 1, a: 4 }; };
+    if _wa_word == "xau" { return { v: 2, a: 3 }; };
+    if _wa_word == "tuc" { return { v: 1, a: 6 }; };
+    // Vietnamese — positive
+    if _wa_word == "vui" { return { v: 6, a: 5 }; };
+    if _wa_word == "yeu" { return { v: 7, a: 4 }; };
+    if _wa_word == "thuong" { return { v: 6, a: 3 }; };
+    if _wa_word == "tot" { return { v: 6, a: 3 }; };
+    if _wa_word == "dep" { return { v: 6, a: 3 }; };
+    if _wa_word == "gioi" { return { v: 6, a: 4 }; };
+    if _wa_word == "nho" { return { v: 5, a: 3 }; };
+    if _wa_word == "hanh" { return { v: 6, a: 4 }; };
+    if _wa_word == "phuc" { return { v: 7, a: 3 }; };
+    if _wa_word == "cam" { return { v: 5, a: 3 }; };
+    if _wa_word == "on" { return { v: 5, a: 2 }; };
+    if _wa_word == "hy" { return { v: 5, a: 4 }; };
+    if _wa_word == "vong" { return { v: 5, a: 4 }; };
+    if _wa_word == "thich" { return { v: 6, a: 4 }; };
+    if _wa_word == "suong" { return { v: 7, a: 5 }; };
+    if _wa_word == "tuyet" { return { v: 7, a: 6 }; };
+    // Vietnamese — neutral/state
+    if _wa_word == "nghi" { return { v: 4, a: 2 }; };
+    if _wa_word == "biet" { return { v: 4, a: 3 }; };
+    if _wa_word == "lam" { return { v: 4, a: 4 }; };
+    if _wa_word == "hoc" { return { v: 5, a: 4 }; };
+    if _wa_word == "doc" { return { v: 5, a: 3 }; };
+    // English — negative
+    if _wa_word == "sad" { return { v: 2, a: 2 }; };
+    if _wa_word == "angry" { return { v: 1, a: 6 }; };
+    if _wa_word == "hate" { return { v: 1, a: 6 }; };
+    if _wa_word == "fear" { return { v: 2, a: 6 }; };
+    if _wa_word == "bad" { return { v: 2, a: 3 }; };
+    if _wa_word == "pain" { return { v: 1, a: 5 }; };
+    if _wa_word == "tired" { return { v: 2, a: 2 }; };
+    if _wa_word == "lonely" { return { v: 2, a: 2 }; };
+    if _wa_word == "scared" { return { v: 2, a: 6 }; };
+    if _wa_word == "worried" { return { v: 2, a: 5 }; };
+    if _wa_word == "stressed" { return { v: 2, a: 6 }; };
+    if _wa_word == "depressed" { return { v: 1, a: 1 }; };
+    if _wa_word == "anxious" { return { v: 2, a: 6 }; };
+    if _wa_word == "disappointed" { return { v: 2, a: 3 }; };
+    if _wa_word == "frustrated" { return { v: 2, a: 5 }; };
+    if _wa_word == "hurt" { return { v: 1, a: 4 }; };
+    if _wa_word == "lost" { return { v: 2, a: 3 }; };
+    if _wa_word == "broken" { return { v: 1, a: 3 }; };
+    // English — positive
+    if _wa_word == "happy" { return { v: 6, a: 5 }; };
+    if _wa_word == "love" { return { v: 7, a: 4 }; };
+    if _wa_word == "joy" { return { v: 6, a: 6 }; };
+    if _wa_word == "good" { return { v: 5, a: 3 }; };
+    if _wa_word == "great" { return { v: 6, a: 5 }; };
+    if _wa_word == "wonderful" { return { v: 7, a: 5 }; };
+    if _wa_word == "amazing" { return { v: 7, a: 6 }; };
+    if _wa_word == "beautiful" { return { v: 6, a: 3 }; };
+    if _wa_word == "excited" { return { v: 6, a: 7 }; };
+    if _wa_word == "grateful" { return { v: 6, a: 3 }; };
+    if _wa_word == "proud" { return { v: 6, a: 5 }; };
+    if _wa_word == "hopeful" { return { v: 5, a: 4 }; };
+    if _wa_word == "inspired" { return { v: 6, a: 5 }; };
+    if _wa_word == "peaceful" { return { v: 5, a: 1 }; };
+    if _wa_word == "calm" { return { v: 5, a: 1 }; };
+    if _wa_word == "kind" { return { v: 6, a: 2 }; };
+    if _wa_word == "thank" { return { v: 5, a: 2 }; };
+    if _wa_word == "thanks" { return { v: 5, a: 2 }; };
     return { v: 4, a: 4 };
 }
 
-// Text → emotion { v, a } (scan words for affect)
-pub fn text_emotion(text) {
-    let v = 4;
-    let a = 4;
-    let count = 0;
-    // Simple: check punctuation
-    let i = 0;
-    while i < len(text) {
-        let cp = __char_code(char_at(text, i));
-        if cp == 33 { a = _enc_min(7, a + 1); v = _enc_min(7, v + 1); };
-        if cp == 63 { a = _enc_min(7, a + 1); };
-        if cp == 46 { a = _enc_max(0, a - 1); };
-        i = i + 1;
+// Text → emotion { v, a } (scan words + punctuation)
+pub fn text_emotion(_te_text) {
+    let _te_v = 4;
+    let _te_a = 4;
+    let _te_hits = 0;
+    // Split text into words, check each against word_affect
+    let _te_w = "";
+    let _te_i = 0;
+    while _te_i < len(_te_text) {
+        let _te_ch = char_at(_te_text, _te_i);
+        let _te_code = __char_code(_te_ch);
+        if _te_code == 32 {
+            if len(_te_w) >= 2 {
+                let _te_affect = word_affect(_te_w);
+                if _te_affect.v != 4 {
+                    _te_v = _te_affect.v;
+                    _te_a = _te_affect.a;
+                    _te_hits = _te_hits + 1;
+                };
+            };
+            _te_w = "";
+        } else {
+            // Punctuation
+            if _te_code == 33 { _te_a = _enc_min(7, _te_a + 1); _te_v = _enc_min(7, _te_v + 1); };
+            if _te_code == 63 { _te_a = _enc_min(7, _te_a + 1); };
+            if _te_code == 46 { _te_a = _enc_max(0, _te_a - 1); };
+            _te_w = _te_w + _te_ch;
+        };
+        let _te_i = _te_i + 1;
     };
-    return { v: v, a: a };
+    // Check last word
+    if len(_te_w) >= 2 {
+        let _te_affect = word_affect(_te_w);
+        if _te_affect.v != 4 {
+            _te_v = _te_affect.v;
+            _te_a = _te_affect.a;
+        };
+    };
+    return { v: _te_v, a: _te_a };
 }
 
 // ════════════════════════════════════════════════════════════════
