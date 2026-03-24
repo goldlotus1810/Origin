@@ -106,9 +106,48 @@ fn _mol_v(mol) { return __floor(mol / 32) % 8; }
 fn _mol_a(mol) { return __floor(mol / 4) % 8; }
 fn _mol_t(mol) { return mol % 4; }
 
-fn _amplify_v(va, vb) {
-    // Simple average for now (amplify formula has global var issues in boot context)
-    return __floor((va + vb) / 2);
+// Spec §1.6: amplify(Va, Vb, w) — khuếch đại về phía dominant, KHÔNG trung bình
+// base  = (Va + Vb) / 2
+// boost = |Va − base| × w × 0.5
+// Cv    = base + sign(Va + Vb - 8) × boost   (8 = 2×neutral, sign relative to center)
+// w = 0.618 (golden ratio — biological scaling)
+fn _amplify_v(_av_va, _av_vb) {
+    // Explicit parens — Rust compiler precedence bug
+    let _av_base = __floor((_av_va + _av_vb) / 2);
+    let _av_diff = _enc_abs(_av_va - _av_base);
+    // boost = |Va - base| * 0.618 * 0.5 ≈ |Va - base| * 0.309
+    // Use integer approximation: boost = diff * 3 / 10
+    let _av_boost = __floor((_av_diff * 3) / 10);
+    // sign: if sum > 8 (2*neutral=2*4) → positive direction, else negative
+    let _av_sum = _av_va + _av_vb;
+    if _av_sum > 8 {
+        return _enc_min(7, _av_base + _av_boost);
+    };
+    if _av_sum < 8 {
+        return _enc_max(0, _av_base - _av_boost);
+    };
+    return _av_base;
+}
+
+// Spec §1.6: Compose R — tổ hợp quan hệ (not just average)
+// Compose: if same relation → strengthen, if different → higher-order relation
+fn _compose_r(_cr_ra, _cr_rb) {
+    if _cr_ra == _cr_rb { return _cr_ra; };  // same → keep
+    // Different relations → take the more complex (higher number = more complex)
+    return _enc_max(_cr_ra, _cr_rb);
+}
+
+// Spec §1.6: Union S — SDF hợp nhất (take max shape complexity)
+fn _union_s(_us_sa, _us_sb) {
+    // SDF union: merged shape is the more complex one
+    // In practice with integer shapes: max is good approximation
+    return _enc_max(_us_sa, _us_sb);
+}
+
+// Spec §1.6: dominant T — thời gian lấy chủ đạo
+fn _dominant_t(_dt_ta, _dt_tb) {
+    // Dominant: the one that appears most recently (higher T = faster)
+    return _enc_max(_dt_ta, _dt_tb);
 }
 
 pub fn mol_compose(a, b) {
@@ -118,11 +157,12 @@ pub fn mol_compose(a, b) {
     let _va = _mol_v(a); let _vb = _mol_v(b);
     let _aa = _mol_a(a); let _ab = _mol_a(b);
     let _ta = _mol_t(a); let _tb = _mol_t(b);
-    let cs = _enc_max(_sa, _sb);
-    let cr = __floor((_ra + _rb) / 2);
-    let cv = _amplify_v(_va, _vb);
-    let ca = _enc_max(_aa, _ab);
-    let ct = _enc_max(_ta, _tb);
+    // Spec §1.6 composition rules:
+    let cs = _union_s(_sa, _sb);          // S: Union (SDF merge)
+    let cr = _compose_r(_ra, _rb);        // R: Compose (relation combine)
+    let cv = _amplify_v(_va, _vb);        // V: Amplify (NOT average!)
+    let ca = _enc_max(_aa, _ab);          // A: max (intensity)
+    let ct = _dominant_t(_ta, _tb);       // T: dominant (time)
     return _mol_pack(cs, cr, cv, ca, ct);
 }
 
@@ -1187,25 +1227,113 @@ pub fn agent_respond(text) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Knowledge Store — learned facts (from `learn` command)
+// Knowledge Store — UDC Chain architecture (SC.7)
 // ════════════════════════════════════════════════════════════════
-// Each entry: { text, keywords[] }
-// Keywords extracted by splitting on spaces, keeping 3+ char words.
+// Each entry stores:
+//   text:  original string (for display)
+//   chain: array of u16 molecules (UDC encoding, 2 bytes/word)
+//   mol:   composed molecule for the whole fact (1 u16 for similarity)
+//   words: keyword strings (for backward-compatible text search)
+//
+// Search uses DUAL strategy:
+//   1. Molecule similarity (fast, language-agnostic)
+//   2. Keyword matching (fallback, exact)
+// Best match = max(mol_score × 2, keyword_score)
 
 let __knowledge = [];
 let __knowledge_max = 512;
 
+// Encode text → UDC chain (array of molecules, one per word)
+// Uses lightweight encoding: first 2 chars → codepoint → encode_codepoint
+// This avoids heavy encode_text (which allocates molecule arrays on heap)
+fn _text_to_chain(_ttc_text) {
+    let _ttc_chain = [];
+    let _ttc_w_start = -1;
+    let _ttc_w_len = 0;
+    let _ttc_i = 0;
+    while _ttc_i < len(_ttc_text) {
+        let _ttc_code = __char_code(char_at(_ttc_text, _ttc_i));
+        if _ttc_code == 32 {
+            if _ttc_w_len >= 2 {
+                // Encode word: combine first 2 char codepoints into molecule
+                let _ttc_c0 = __char_code(char_at(_ttc_text, _ttc_w_start));
+                let _ttc_c1 = __char_code(char_at(_ttc_text, _ttc_w_start + 1));
+                let _ttc_m0 = encode_codepoint(_ttc_c0);
+                let _ttc_m1 = encode_codepoint(_ttc_c1);
+                push(_ttc_chain, mol_compose(_ttc_m0, _ttc_m1));
+            };
+            _ttc_w_start = -1;
+            _ttc_w_len = 0;
+        } else {
+            if _ttc_w_start < 0 { _ttc_w_start = _ttc_i; };
+            _ttc_w_len = _ttc_w_len + 1;
+        };
+        let _ttc_i = _ttc_i + 1;
+    };
+    if _ttc_w_len >= 2 {
+        let _ttc_c0 = __char_code(char_at(_ttc_text, _ttc_w_start));
+        let _ttc_c1 = __char_code(char_at(_ttc_text, _ttc_w_start + 1));
+        let _ttc_m0 = encode_codepoint(_ttc_c0);
+        let _ttc_m1 = encode_codepoint(_ttc_c1);
+        push(_ttc_chain, mol_compose(_ttc_m0, _ttc_m1));
+    };
+    return _ttc_chain;
+}
+
+// Molecule distance: |Va-Vb| + |Aa-Ab| (Manhattan on V,A — the emotional axes)
+fn _mol_distance(_md_a, _md_b) {
+    let _md_va = _mol_v(_md_a);
+    let _md_vb = _mol_v(_md_b);
+    let _md_aa = _mol_a(_md_a);
+    let _md_ab = _mol_a(_md_b);
+    return _enc_abs(_md_va - _md_vb) + _enc_abs(_md_aa - _md_ab);
+}
+
+// Similarity: 1.0 - normalized_distance (0..1 scale as integer 0..10)
+fn _mol_similarity(_ms_a, _ms_b) {
+    let _ms_dist = _mol_distance(_ms_a, _ms_b);
+    // Max possible distance = 7+7 = 14. Normalize: sim = 10 - (dist * 10 / 14)
+    let _ms_sim = 10 - __floor((_ms_dist * 10) / 14);
+    if _ms_sim < 0 { return 0; };
+    return _ms_sim;
+}
+
+// Chain similarity: average molecule similarity across chain pairs
+fn _chain_similarity(_cs_a, _cs_b) {
+    let _cs_la = len(_cs_a);
+    let _cs_lb = len(_cs_b);
+    if _cs_la == 0 { return 0; };
+    if _cs_lb == 0 { return 0; };
+    // Compare each mol in A against best match in B
+    let _cs_total = 0;
+    let _cs_i = 0;
+    let _cs_limit = _cs_la;
+    if _cs_limit > 8 { _cs_limit = 8; };  // cap for performance
+    while _cs_i < _cs_limit {
+        let _cs_best = 0;
+        let _cs_j = 0;
+        let _cs_jlim = _cs_lb;
+        if _cs_jlim > 8 { _cs_jlim = 8; };
+        while _cs_j < _cs_jlim {
+            let _cs_sim = _mol_similarity(_cs_a[_cs_i], _cs_b[_cs_j]);
+            if _cs_sim > _cs_best { _cs_best = _cs_sim; };
+            let _cs_j = _cs_j + 1;
+        };
+        _cs_total = _cs_total + _cs_best;
+        let _cs_i = _cs_i + 1;
+    };
+    return __floor(_cs_total / _cs_limit);
+}
+
 pub fn knowledge_learn(text) {
-    // Extract keywords (3+ char words)
+    // Extract keywords (backward compat)
     let _kl_words = [];
     let _kl_w = "";
     let _kl_i = 0;
     while _kl_i < len(text) {
         let _kl_ch = char_at(text, _kl_i);
         if __char_code(_kl_ch) == 32 {
-            if len(_kl_w) >= 3 {
-                push(_kl_words, _kl_w);
-            };
+            if len(_kl_w) >= 3 { push(_kl_words, _kl_w); };
             _kl_w = "";
         } else {
             _kl_w = _kl_w + _kl_ch;
@@ -1214,8 +1342,14 @@ pub fn knowledge_learn(text) {
     };
     if len(_kl_w) >= 3 { push(_kl_words, _kl_w); };
 
-    // Store
-    push(__knowledge, { text: text, words: _kl_words });
+    // UDC chain: each word → molecule (2 bytes semantic address)
+    let _kl_chain = _text_to_chain(text);
+    // Composed molecule: LCA of whole fact
+    let _kl_mol = 0;
+    if len(_kl_chain) > 0 { _kl_mol = mol_compose_many(_kl_chain); };
+
+    // Store: text + chain + mol + words
+    push(__knowledge, { text: text, chain: _kl_chain, mol: _kl_mol, words: _kl_words });
 
     // Wire keywords into Silk
     let _kl_j = 0;
@@ -1241,27 +1375,43 @@ pub fn knowledge_learn(text) {
 pub fn knowledge_count() { return len(__knowledge); }
 
 fn knowledge_search(_ks_query) {
-    // Split query into words, find best matching knowledge entry
+    // DUAL search: molecule similarity + keyword matching
     let _ks_best = "";
     let _ks_best_score = 0;
+
+    // Encode query as chain for molecule comparison
+    let _ks_qchain = _text_to_chain(_ks_query);
+    let _ks_qmol = 0;
+    if len(_ks_qchain) > 0 { _ks_qmol = mol_compose_many(_ks_qchain); };
 
     let _ks_ki = 0;
     while _ks_ki < len(__knowledge) {
         let _ks_entry = __knowledge[_ks_ki];
         let _ks_score = 0;
 
-        // Count word matches between query and entry keywords
+        // Strategy 1: Molecule similarity (language-agnostic)
+        if _ks_qmol > 0 {
+            if _ks_entry.mol > 0 {
+                let _ks_msim = _mol_similarity(_ks_qmol, _ks_entry.mol);
+                // Chain similarity for deeper match
+                let _ks_csim = _chain_similarity(_ks_qchain, _ks_entry.chain);
+                // Combined: mol_sim + chain_sim (weighted)
+                _ks_score = _ks_msim + _ks_csim;
+            };
+        };
+
+        // Strategy 2: Keyword matching (backward compat, exact)
+        let _ks_kwscore = 0;
         let _ks_qi = 0;
         let _ks_qw = "";
         while _ks_qi < len(_ks_query) {
             let _ks_ch = char_at(_ks_query, _ks_qi);
             if __char_code(_ks_ch) == 32 {
                 if len(_ks_qw) >= 3 {
-                    // Check if this word appears in entry keywords
                     let _ks_wi = 0;
                     while _ks_wi < len(_ks_entry.words) {
                         if _ks_entry.words[_ks_wi] == _ks_qw {
-                            _ks_score = _ks_score + 1;
+                            _ks_kwscore = _ks_kwscore + 3;
                         };
                         let _ks_wi = _ks_wi + 1;
                     };
@@ -1272,16 +1422,18 @@ fn knowledge_search(_ks_query) {
             };
             let _ks_qi = _ks_qi + 1;
         };
-        // Check last word
         if len(_ks_qw) >= 3 {
             let _ks_wi = 0;
             while _ks_wi < len(_ks_entry.words) {
                 if _ks_entry.words[_ks_wi] == _ks_qw {
-                    _ks_score = _ks_score + 1;
+                    _ks_kwscore = _ks_kwscore + 3;
                 };
                 let _ks_wi = _ks_wi + 1;
             };
         };
+
+        // Take best of both strategies
+        if _ks_kwscore > _ks_score { _ks_score = _ks_kwscore; };
 
         if _ks_score > _ks_best_score {
             _ks_best_score = _ks_score;
