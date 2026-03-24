@@ -73,13 +73,21 @@ type SemanticState {
     unions: Vec[Str],
 }
 
+let _g_output_ready = 0;
+
 fn _prefill_output() {
-    let _g_output = [];
-    let _pf = 0;
-    while _pf < 16384 {
-        push(_g_output, 0);
-        let _pf = _pf + 1;
+    // Only allocate ONCE — reuse on subsequent calls
+    if _g_output_ready == 0 {
+        let _g_output = [];
+        let _pf = 0;
+        while _pf < 16384 {
+            push(_g_output, 0);
+            let _pf = _pf + 1;
+        };
+        let _g_output_ready = 1;
     };
+    // Just reset position
+    let _g_pos = 0;
 }
 
 fn new_state() {
