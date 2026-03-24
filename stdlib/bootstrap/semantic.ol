@@ -12,8 +12,8 @@ use olang.bootstrap.lexer;
 use olang.bootstrap.parser;
 
 // Explicit save stack for recursive compile_expr (ASM VM has no scoping)
-let _ce_stack = [];
-let _if_stack = [];
+let _ce_stack = __array_with_cap(512);
+let _if_stack = __array_with_cap(512);
 let _break_patches = [];
 let _continue_patches = [];
 let _g_output = [];

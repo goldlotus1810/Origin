@@ -112,6 +112,7 @@ pub fn repl_eval(input) {
       let _rc_src = __file_read(_rc_path);
       if len(_rc_src) == 0 { return "Error: cannot read " + _rc_path; };
       let _rc_tokens = tokenize(_rc_src);
+      emit "  tokens[0]: " + _rc_tokens[0].text + " tokens[1]: " + _rc_tokens[1].text;
       let _rc_ast = parse(_rc_tokens);
       let _rc_state = analyze(_rc_ast);
       return "Compiled " + _rc_path + ": " + __to_string(len(_rc_src)) + " chars → " + __to_string(len(_rc_tokens)) + " tokens → " + __to_string(_g_pos) + " bytes bytecode";

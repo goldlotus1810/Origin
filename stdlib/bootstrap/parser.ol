@@ -522,7 +522,7 @@ fn parse_primary(p) {
             return Expr::NumLit { value: 0 };
         },
         _ => {
-            emit "Parse error: unexpected token";
+            emit "Parse error: unexpected token: " + tok.text + " at pos " + __to_string(p.pos);
             let _g_parse_error = 1;
             advance(p);
             return Expr::NumLit { value: 0 };
@@ -551,7 +551,7 @@ fn is_binop(tok) {
 }
 
 // Explicit save stack for recursive parse_expr_prec (ASM VM has no scoping)
-let _pep_stack = [];
+let _pep_stack = __array_with_cap(512);
 
 fn parse_expr_prec(p, min_prec) {
     let _pep_lhs = parse_primary(p);
@@ -667,7 +667,7 @@ fn parse_match_expr(p) {
 // ── Statement parsing ────────────────────────────────────────────
 
 // Explicit stack for recursive parse_block (ASM VM has no scoping)
-let _pb_stack = [];
+let _pb_stack = __array_with_cap(512);
 
 fn parse_block(p) {
     expect_symbol(p, "{");

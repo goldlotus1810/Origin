@@ -35,7 +35,7 @@
 # Array heap layout: [count:8][elem_0_ptr:8][elem_0_len:8]...
 # When array is relocated by push: old location gets [FORWARD_MARKER:8][new_base:8]
 # Dict heap layout:  [count:8][entry: key_ptr:8 key_len:8 val_ptr:8 val_len:8]...
-.equ ARRAY_INIT_CAP, 4096
+.equ ARRAY_INIT_CAP, 512
 .equ ARRAY_FORWARD_MARKER, -2      # sentinel: array relocated
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
@@ -1014,6 +1014,9 @@ op_call:
     movabs  $0xB56460DC788BF312, %rdx   # __array_range
     cmp     %rdx, %rax
     je      .call_array_range
+    movabs  $0x4A94D43F636D9492, %rdx   # __array_with_cap
+    cmp     %rdx, %rax
+    je      .call_array_with_cap
     movabs  $0xDEE1C66E474DB2AC, %rdx   # __array_len
     cmp     %rdx, %rax
     je      .call_len                    # same as __len
@@ -1467,11 +1470,13 @@ op_call:
     mov     %rax, (%r14)
     jmp     vm_loop
 .call_len_array:
-    # Array: read count from heap (follow forward if relocated)
+    # Array: read count from heap (follow forward chain if relocated)
     mov     (%r14), %rdi               # array base ptr
+.call_len_array_fwd:
     cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
     jne     .call_len_array_direct
     mov     8(%rdi), %rdi              # follow forward
+    jmp     .call_len_array_fwd
 .call_len_array_direct:
     mov     (%rdi), %rax               # count
     cvtsi2sd %rax, %xmm0
@@ -2056,10 +2061,12 @@ op_call:
     test    %rdi, %rdi
     jz      .array_get_empty
 
-    # Follow forward pointer if relocated
+    # Follow forward pointer chain if relocated
+.array_get_fwd:
     cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
     jne     .array_get_direct
-    mov     8(%rdi), %rdi              # follow forward
+    mov     8(%rdi), %rdi
+    jmp     .array_get_fwd
 .array_get_direct:
     # Read count
     mov     (%rdi), %rcx               # count
@@ -2100,10 +2107,12 @@ op_call:
     test    %rdi, %rdi
     jz      .array_set_done
 
-    # Follow forward pointer
+    # Follow forward pointer chain
+.array_set_fwd:
     cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
     jne     .array_set_direct
     mov     8(%rdi), %rdi
+    jmp     .array_set_fwd
 .array_set_direct:
     # Bounds check
     mov     (%rdi), %rcx               # count
@@ -2137,10 +2146,12 @@ op_call:
     test    %rdi, %rdi
     jz      .array_push_create_new
 
-    # Follow forward pointer if array was relocated
+    # Follow forward pointer chain if array was relocated
+.array_push_fwd:
     cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
     jne     .array_push_check
-    mov     8(%rdi), %rdi              # follow forward pointer
+    mov     8(%rdi), %rdi
+    jmp     .array_push_fwd
 .array_push_check:
     # Check if write address is still within safe zone (< r15)
     mov     (%rdi), %rcx               # count
@@ -2191,8 +2202,15 @@ op_call:
     mov     %r9, 8(%r11)
     add     $16, %r11
     # Bump r15 past new array + capacity
+    # Use max(count*2, ARRAY_INIT_CAP) to avoid repeated relocations
     lea     8(%rsi), %rax
-    add     $ARRAY_INIT_CAP * 16, %rax
+    mov     (%rsi), %rdx               # new count (already incremented)
+    shl     $5, %rdx                   # count * 32 = count * 2 * 16 (double capacity)
+    cmp     $ARRAY_INIT_CAP * 16, %rdx
+    jae     .push_reloc_use_count
+    mov     $ARRAY_INIT_CAP * 16, %edx # use ARRAY_INIT_CAP if larger
+.push_reloc_use_count:
+    add     %rdx, %rax                 # base + 8 + capacity
     cmp     %rax, %r11
     jae     .push_reloc_bump
     mov     %rax, %r11
@@ -2229,10 +2247,12 @@ op_call:
 
     test    %rdi, %rdi
     jz      .array_pop_empty
-    # Follow forward
+    # Follow forward chain
+.array_pop_fwd:
     cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
     jne     .array_pop_direct
     mov     8(%rdi), %rdi
+    jmp     .array_pop_fwd
 .array_pop_direct:
     mov     (%rdi), %rcx               # count
     test    %rcx, %rcx
@@ -2255,6 +2275,33 @@ op_call:
     xor     %eax, %eax
     mov     %rax, (%r14)
     mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Array with capacity: __array_with_cap(n) → empty array with n-slot capacity
+# Creates array with count=0, bumps heap by 8 + n*16
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_array_with_cap:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2siq %xmm0, %rcx            # n = requested capacity
+    add     $16, %r14                   # pop arg
+
+    # Create empty array with explicit capacity
+    mov     %r15, %rdi                  # array base
+    movq    $0, (%r15)                  # count = 0 (empty)
+    # Bump heap past capacity zone: base + 8 + n*16
+    mov     %rcx, %rax
+    shl     $4, %rax                    # n * 16
+    add     $8, %rax                    # + header
+    add     %rdi, %rax                  # base + 8 + n*16
+    mov     %rax, %r15                  # bump heap
+
+    # Push array
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3032,10 +3079,12 @@ op_call:
     cmp     $ARRAY_MARKER, %rax
     jne     .eval_bc_raw
 
-    # Follow forward pointer if array was relocated
+    # Follow forward pointer chain if array was relocated
+.eval_bc_fwd:
     cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
     jne     .eval_bc_array
-    mov     8(%rdi), %rdi              # follow forward
+    mov     8(%rdi), %rdi
+    jmp     .eval_bc_fwd
 .eval_bc_array:
     # Array of bytes: convert to contiguous bytecode buffer
     # Array: [count:8][elem_0_ptr:8][elem_0_len:8]...
@@ -3890,10 +3939,12 @@ op_emit:
     # rsi = array base ptr
     test    %rsi, %rsi
     jz      .emit_array_empty
-    # Follow forward pointer
+    # Follow forward pointer chain
+.emit_array_fwd:
     cmpq    $ARRAY_FORWARD_MARKER, (%rsi)
     jne     .emit_array_start
     mov     8(%rsi), %rsi
+    jmp     .emit_array_fwd
 .emit_array_start:
     push    %rbp                        # save rbp (callee-saved, used as elem ptr)
     push    %rsi                        # save array base
