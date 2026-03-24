@@ -81,13 +81,18 @@ fn _amplify_v(va, vb) {
 }
 
 pub fn mol_compose(a, b) {
-    return _mol_pack(
-        _enc_max(_mol_s(a), _mol_s(b)),
-        __floor((_mol_r(a) + _mol_r(b)) / 2),
-        _amplify_v(_mol_v(a), _mol_v(b)),
-        _enc_max(_mol_a(a), _mol_a(b)),
-        _enc_max(_mol_t(a), _mol_t(b))
-    );
+    // Extract dimensions SEPARATELY (nested calls clobber globals)
+    let _sa = _mol_s(a); let _sb = _mol_s(b);
+    let _ra = _mol_r(a); let _rb = _mol_r(b);
+    let _va = _mol_v(a); let _vb = _mol_v(b);
+    let _aa = _mol_a(a); let _ab = _mol_a(b);
+    let _ta = _mol_t(a); let _tb = _mol_t(b);
+    let cs = _enc_max(_sa, _sb);
+    let cr = __floor((_ra + _rb) / 2);
+    let cv = _amplify_v(_va, _vb);
+    let ca = _enc_max(_aa, _ab);
+    let ct = _enc_max(_ta, _tb);
+    return _mol_pack(cs, cr, cv, ca, ct);
 }
 
 pub fn mol_compose_many(mols) {
@@ -96,7 +101,7 @@ pub fn mol_compose_many(mols) {
     let i = 1;
     while i < len(mols) {
         result = mol_compose(result, mols[i]);
-        i = i + 1;
+        let i = i + 1;
     };
     return result;
 }
