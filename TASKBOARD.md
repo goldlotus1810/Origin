@@ -257,6 +257,21 @@ Hệ quả:
 
 Hiện tại: fn = VM closure (bytecode blob), var = flat hash entry.
 Target:   fn = node trong KnowTree, skill = tree of fn nodes.
+
+KEY INSIGHT (từ spec): KHÔNG BAO GIỜ thiếu context/dung lượng vì:
+  - Mọi thứ = u16 links (2 bytes) — 1 sách = 3.4KB
+  - Text tự tách: đoạn → câu → từ → UDC index (2B mỗi từ)
+  - Công thức toán = ĐÃ NẰM TRONG UDC (8,846 SDF, 18KB) — chỉ gọi index
+  - Fn = chain of UDC instructions, gọi = traverse chain
+  - Silk = implicit từ THỨ TỰ trong chain (0 bytes)
+  - Context vô hạn = chỉ cần thêm links (2B mỗi cái)
+
+VI PHẠM hiện tại:
+  - Knowledge lưu nguyên string (10KB/fact) thay vì UDC chain (vài B)
+  - learn_file không tách đoạn→câu→từ
+  - STM max 32, Knowledge max 512 = giới hạn nhân tạo
+  - Fn = opaque bytecode blob, không phải inspectable chain
+  - Silk = explicit bigrams thay vì implicit chain order
 ```
 
 ---
