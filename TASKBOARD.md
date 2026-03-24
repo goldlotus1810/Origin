@@ -152,17 +152,17 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.19 | DONE ✅ | $"hello {name}" documented |
 | DC.20 | DONE ✅ | Binary size updated |
 
-### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #5, pre-T4)
+### Docs Conflicts — DC.21-DC.27 DONE ✅ (fixed 2026-03-24 Nox, pre-T4)
 
-| # | Mức độ | File | Xung đột |
-|---|--------|------|----------|
-| DC.21 | TRUNG BÌNH | `CLAUDE.md:311,316` | LOC drift: VM 5031→5050, repl 117→131, homeos 7304→7701 |
-| DC.22 | TRUNG BÌNH | `CLAUDE.md:291,TASKBOARD:12` | Binary ~861KB → ~870KB (891,374 bytes) |
-| DC.23 | **NGHIÊM TRỌNG** | `CLAUDE.md:182-188` | Opcodes: chỉ 13/38 — thiếu 0x1A try, 0x1B catch, 0x1C store_upd, 0x19 push_mol, 0x24 call_closure |
-| DC.24 | **NGHIÊM TRỌNG** | `CLAUDE.md:134-174` | Builtins: chỉ ~35/54 — thiếu __ne, bit_or/and/xor, logic_not, array_pop/range, dict_keys, type_of |
-| DC.25 | **NGHIÊM TRỌNG** | `CLAUDE.md` | Không đề cập REPL commands: encode, respond, memory, learn, help |
-| DC.26 | **NGHIÊM TRỌNG** | `CLAUDE.md` + handbook | Không đề cập STM, Silk, Dream, Knowledge systems |
-| DC.27 | TRUNG BÌNH | `PLAN_REWRITE.md` | Outdated: binary 616KB→870KB, VM 2500→5050 LOC, bootstrap 1952→2883 LOC |
+| # | Status | Fix |
+|---|--------|-----|
+| DC.21 | DONE ✅ | LOC updated: repl 131, homeos 7,832 |
+| DC.22 | DONE ✅ | Binary ~891KB |
+| DC.23 | DONE ✅ | Opcodes: 18 entries (was 13). Added TryBegin/CatchEnd/StoreUpdate/PushMol/CallClosure |
+| DC.24 | DONE ✅ | Builtins: ~54 documented. Added __cmp_ne, bit ops, logic_not, array_pop/range, type_of, etc |
+| DC.25 | DONE ✅ | REPL commands section: encode, respond, learn, memory, help |
+| DC.26 | DONE ✅ | Memory systems section: STM, Silk, Dream, Knowledge documented |
+| DC.27 | DEFERRED | PLAN_REWRITE.md — will update at T4 start |
 
 ### Pre-T4 Blockers
 
