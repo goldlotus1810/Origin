@@ -603,7 +603,126 @@ pub fn agent_respond(text) {
         silk_related = silk_find_related(first_word);
     };
 
+    // KNOWLEDGE RETRIEVAL — search learned facts
+    let _ar_knowledge = "";
+    if len(__knowledge) > 0 {
+        _ar_knowledge = knowledge_search(_ar_current);
+    };
+
     // RESPOND
     let reply = compose_reply(intent, tone, text);
+    if len(_ar_knowledge) > 0 {
+        return reply + memory_context + " " + _ar_knowledge;
+    };
     return reply + memory_context;
+}
+
+// ════════════════════════════════════════════════════════════════
+// Knowledge Store — learned facts (from `learn` command)
+// ════════════════════════════════════════════════════════════════
+// Each entry: { text, keywords[] }
+// Keywords extracted by splitting on spaces, keeping 3+ char words.
+
+let __knowledge = [];
+let __knowledge_max = 128;
+
+pub fn knowledge_learn(text) {
+    // Extract keywords (3+ char words)
+    let _kl_words = [];
+    let _kl_w = "";
+    let _kl_i = 0;
+    while _kl_i < len(text) {
+        let _kl_ch = char_at(text, _kl_i);
+        if __char_code(_kl_ch) == 32 {
+            if len(_kl_w) >= 3 {
+                push(_kl_words, _kl_w);
+            };
+            _kl_w = "";
+        } else {
+            _kl_w = _kl_w + _kl_ch;
+        };
+        let _kl_i = _kl_i + 1;
+    };
+    if len(_kl_w) >= 3 { push(_kl_words, _kl_w); };
+
+    // Store
+    push(__knowledge, { text: text, words: _kl_words });
+
+    // Wire keywords into Silk
+    let _kl_j = 0;
+    while (_kl_j + 1) < len(_kl_words) {
+        silk_co_activate(_kl_words[_kl_j], _kl_words[_kl_j + 1], "learn");
+        let _kl_j = _kl_j + 1;
+    };
+
+    // Evict oldest if over limit
+    if len(__knowledge) > __knowledge_max {
+        let _kl_new = [];
+        let _kl_k = 1;
+        while _kl_k < len(__knowledge) {
+            push(_kl_new, __knowledge[_kl_k]);
+            let _kl_k = _kl_k + 1;
+        };
+        let __knowledge = _kl_new;
+    };
+
+    return len(__knowledge);
+}
+
+pub fn knowledge_count() { return len(__knowledge); }
+
+fn knowledge_search(_ks_query) {
+    // Split query into words, find best matching knowledge entry
+    let _ks_best = "";
+    let _ks_best_score = 0;
+
+    let _ks_ki = 0;
+    while _ks_ki < len(__knowledge) {
+        let _ks_entry = __knowledge[_ks_ki];
+        let _ks_score = 0;
+
+        // Count word matches between query and entry keywords
+        let _ks_qi = 0;
+        let _ks_qw = "";
+        while _ks_qi < len(_ks_query) {
+            let _ks_ch = char_at(_ks_query, _ks_qi);
+            if __char_code(_ks_ch) == 32 {
+                if len(_ks_qw) >= 3 {
+                    // Check if this word appears in entry keywords
+                    let _ks_wi = 0;
+                    while _ks_wi < len(_ks_entry.words) {
+                        if _ks_entry.words[_ks_wi] == _ks_qw {
+                            _ks_score = _ks_score + 1;
+                        };
+                        let _ks_wi = _ks_wi + 1;
+                    };
+                };
+                _ks_qw = "";
+            } else {
+                _ks_qw = _ks_qw + _ks_ch;
+            };
+            let _ks_qi = _ks_qi + 1;
+        };
+        // Check last word
+        if len(_ks_qw) >= 3 {
+            let _ks_wi = 0;
+            while _ks_wi < len(_ks_entry.words) {
+                if _ks_entry.words[_ks_wi] == _ks_qw {
+                    _ks_score = _ks_score + 1;
+                };
+                let _ks_wi = _ks_wi + 1;
+            };
+        };
+
+        if _ks_score > _ks_best_score {
+            _ks_best_score = _ks_score;
+            _ks_best = _ks_entry.text;
+        };
+        let _ks_ki = _ks_ki + 1;
+    };
+
+    if _ks_best_score > 0 {
+        return "(Minh biet: " + _ks_best + ")";
+    };
+    return "";
 }

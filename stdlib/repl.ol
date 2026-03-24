@@ -29,9 +29,18 @@ pub fn repl_eval(input) {
     };
   }
 
-  // Memory command: show STM + Silk state
+  // Memory command: show STM + Silk + Knowledge state
   if src == "memory" {
-    return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges";
+    return "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
+  }
+
+  // Learn command: teach HomeOS a fact
+  if len(src) > 6 {
+    if __substr(src, 0, 6) == "learn " {
+      let _rl_text = __substr(src, 6, len(src));
+      let _rl_count = knowledge_learn(_rl_text);
+      return "Da hoc. Knowledge: " + __to_string(_rl_count) + " facts.";
+    };
   }
 
   // Encode command: encode <text> → show molecular encoding
