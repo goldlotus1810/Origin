@@ -1430,21 +1430,40 @@ use olang.bootstrap.lexer;
 union Expr {
     Ident { name: Str },
     NumLit { value: Num },
+    StrLit { value: Str },
+    BoolLit { value: Num },
     BinOp { op: Str, lhs: Expr, rhs: Expr },
+    UnaryNot { expr: Expr },
     Call { callee: Expr, args: Vec[Expr] },
     FieldAccess { object: Expr, field: Str },
-    MolLiteral { s: Num, r: Num, v: Num, a: Num, t: Num },
+    Index { object: Expr, index: Expr },
+    ArrayLit { items: Vec[Expr] },
+    PathExpr { base: Str, member: Str },
+    StructLit { path: Str, fields: Vec[FieldInit] },
+    IfExpr { cond: Expr, then_expr: Expr, else_expr: Expr },
+    MolLiteral { packed: Num },
+    MatchExpr { subject: Expr, arms: Vec[MatchArm] },
+    DictLit { fields: Vec[FieldInit] },
+    ArrayComp { var: Str, depth: Num },
 }
 
 union Stmt {
     LetStmt { name: Str, value: Expr },
+    ExprStmt { expr: Expr },
     FnDef { name: Str, params: Vec[Str], body: Vec[Stmt] },
     IfStmt { cond: Expr, then_block: Vec[Stmt], else_block: Vec[Stmt] },
     WhileStmt { cond: Expr, body: Vec[Stmt], cond_start: Num, cond_end: Num, tokens: Vec[Token] },
+    ForStmt { var: Str, iter: Expr, body: Vec[Stmt] },
     ReturnStmt { value: Expr },
     EmitStmt { expr: Expr },
     TypeDef { name: Str, fields: Vec[Field] },
     UnionDef { name: Str, variants: Vec[Variant] },
+    BreakStmt,
+    ContinueStmt,
+    UseStmt { path: Str },
+    MatchStmt { subject: Expr, arms: Vec[MatchArm] },
+    FieldAssign { object: Str, field: Str, value: Expr },
+    TryCatch { try_block: Vec[Stmt], catch_block: Vec[Stmt] },
 }
 
 // Recursive descent parser voi precedence climbing:
