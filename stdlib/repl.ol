@@ -116,29 +116,23 @@ pub fn repl_eval(input) {
       let _rc_ntok = len(_rc_tokens);
       // Stream compile: parse+analyze one statement at a time
       _prefill_output();
-      let _g_pos = 0;  // reset bytecode position for new compilation
+      let _g_pos = 0;
       let _rc_parser = { tokens: _rc_tokens, pos: 0 };
       let _g_parse_error = 0;
       let _rc_stmts = 0;
       while _rc_parser.pos < _rc_ntok {
-        // Check EOF
         let _rc_peek = _rc_tokens[_rc_parser.pos];
         if _rc_peek.text == "" { break; };
-        // Save heap before parse+compile of this statement
         let _rc_hp = __heap_save();
-        // Parse ONE statement
         let _rc_stmt = parse_stmt(_rc_parser);
         if _g_parse_error == 1 {
           _g_parse_error = 0;
           __heap_restore(_rc_hp);
           continue;
         };
-        // Compile this statement → emit bytecode to _g_output
         let _rc_ast1 = [_rc_stmt];
         analyze(_rc_ast1);
         _rc_stmts = _rc_stmts + 1;
-        // DON'T restore heap here — _g_output bytecode must persist
-        // But AST node from parse_stmt is no longer needed
       };
       return "Compiled " + _rc_path + ": " + __to_string(len(_rc_src)) + " chars → " + __to_string(_rc_ntok) + " tokens → " + __to_string(_g_pos) + " bytes (" + __to_string(_rc_stmts) + " stmts)";
     };
