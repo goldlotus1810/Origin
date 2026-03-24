@@ -18,7 +18,23 @@ pub fn repl_eval(input) {
   // Check for REPL commands
   if src == "exit" || src == "quit" { return "__exit__"; }
   if src == "help" {
-    return "Commands: let, fn, emit, if, while, match, exit\nType Olang code or natural text.";
+    return "Commands: let, fn, emit, if, while, match, encode <text>, exit\nType Olang code or natural text.";
+  }
+
+  // Encode command: encode <text> → show molecular encoding
+  if len(src) > 7 {
+    if __substr(src, 0, 7) == "encode " {
+      let _re_text = __substr(src, 7, len(src));
+      let _re_result = encode(_re_text);
+      let _re_mol = _re_result.molecule;
+      return "Mol=" + __to_string(_re_mol) +
+             " S=" + __to_string(_mol_s(_re_mol)) +
+             " R=" + __to_string(_mol_r(_re_mol)) +
+             " V=" + __to_string(_mol_v(_re_mol)) +
+             " A=" + __to_string(_mol_a(_re_mol)) +
+             " T=" + __to_string(_mol_t(_re_mol)) +
+             " Emo=" + __to_string(_re_result.emotion.v) + "/" + __to_string(_re_result.emotion.a);
+    };
   }
 
   // Phase 1: Tokenize
