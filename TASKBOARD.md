@@ -50,8 +50,8 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | OL.1 | Encoder: text → molecule (.ol) | ~180 LOC | DONE ✅ | `encode <text>` REPL command. Block-range UCD mapper. LCA compose. Emotion. |
 | OL.2 | Analysis: sentence fusion (.ol) | ~120 LOC | DONE ✅ | fusion.ol + pipeline in encoder.ol. Context detect + emotion compose. |
 | OL.3 | Intent inference engine (.ol) | ~80 LOC | DONE ✅ | 6 intent types: chat/heal/learn/technical/command + tone selection. |
-| OL.4 | Agents: flesh out stubs (.ol) | ~500 LOC | FREE | chief.ol, leo.ol, worker.ol, gate.ol — real logic. |
-| OL.5 | Response composer (.ol) | ~200 LOC | FREE | Emotion-aware, context-aware response generation. |
+| OL.4 | Agents: dispatch pipeline (.ol) | ~60 LOC | DONE ✅ | gate→encode→analyze→leo dispatch. Crisis detection. `respond` command. |
+| OL.5 | Response composer (.ol) | ~40 LOC | DONE ✅ | compose_reply: ack + follow-up by intent/tone. 5 tone modes. |
 
 ### Tier 2 — Mở rộng ngôn ngữ
 
