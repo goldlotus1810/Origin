@@ -726,3 +726,129 @@ fn knowledge_search(_ks_query) {
     };
     return "";
 }
+
+// ════════════════════════════════════════════════════════════════
+// CUT.4 — Self-Build: origin.olang builds itself
+// ════════════════════════════════════════════════════════════════
+
+pub fn self_build() {
+    emit "=== Self-Build ===";
+
+    // Step 1: Read own binary (VM ELF)
+    let _sb_self = __file_read_bytes("/proc/self/exe");
+    let _sb_self_size = __bytes_len(_sb_self);
+    emit "  VM binary: " + __to_string(_sb_self_size) + " bytes";
+
+    // Find header_offset (last 8 bytes of binary)
+    let _sb_b0 = __bytes_get(_sb_self, _sb_self_size - 8);
+    let _sb_b1 = __bytes_get(_sb_self, _sb_self_size - 7);
+    let _sb_b2 = __bytes_get(_sb_self, _sb_self_size - 6);
+    let _sb_b3 = __bytes_get(_sb_self, _sb_self_size - 5);
+    let _sb_header_off = _sb_b0 + (_sb_b1 * 256) + (_sb_b2 * 65536) + (_sb_b3 * 16777216);
+    emit "  Header offset: " + __to_string(_sb_header_off);
+
+    // Step 2: Compile all .ol files
+    // Single file for now — multi-file needs heap reset between compiles
+    // TODO: implement heap_reset or arena allocator for batch compile
+    let _sb_files = [
+        "stdlib/repl.ol"
+    ];
+
+    let _sb_bc = __bytes_new(1048576);  // 1MB bytecode buffer
+    let _sb_bc_pos = 0;
+    let _sb_fi = 0;
+    let _sb_compiled = 0;
+    let _sb_errors = 0;
+
+    while _sb_fi < len(_sb_files) {
+        let _sb_path = _sb_files[_sb_fi];
+        let _sb_src = __file_read(_sb_path);
+        if len(_sb_src) > 0 {
+            // Reset compiler state
+            _prefill_output();
+            let _g_pos = 0;
+            // Compile
+            let _sb_tokens = tokenize(_sb_src);
+            let _sb_ast = parse(_sb_tokens);
+            let _sb_state = analyze(_sb_ast);
+            // Copy bytecode to output buffer
+            if _g_pos > 0 {
+                let _sb_ci = 0;
+                while _sb_ci < _g_pos {
+                    __bytes_set(_sb_bc, _sb_bc_pos, _g_output[_sb_ci]);
+                    let _sb_bc_pos = _sb_bc_pos + 1;
+                    let _sb_ci = _sb_ci + 1;
+                };
+                _sb_compiled = _sb_compiled + 1;
+                emit "  " + _sb_path + ": " + __to_string(_g_pos) + " bytes";
+            } else {
+                _sb_errors = _sb_errors + 1;
+                emit "  " + _sb_path + ": SKIP (0 bytes)";
+            };
+        };
+        let _sb_fi = _sb_fi + 1;
+    };
+
+    // Append Halt
+    __bytes_set(_sb_bc, _sb_bc_pos, 15);
+    _sb_bc_pos = _sb_bc_pos + 1;
+    emit "  Total bytecode: " + __to_string(_sb_bc_pos) + " bytes (" + __to_string(_sb_compiled) + " files)";
+
+    // Step 3: Pack binary
+    // Output = [VM ELF up to header_offset][Origin header 32B][bytecode][trailer 8B]
+    let _sb_total = _sb_header_off + 32 + _sb_bc_pos + 8;
+    let _sb_out = __bytes_new(_sb_total);
+
+    // Copy VM ELF (bytes 0 to header_offset)
+    let _sb_vi = 0;
+    while _sb_vi < _sb_header_off {
+        __bytes_set(_sb_out, _sb_vi, __bytes_get(_sb_self, _sb_vi));
+        let _sb_vi = _sb_vi + 1;
+    };
+    let _sb_pos = _sb_header_off;
+
+    // Origin header (32 bytes)
+    let _sb_bc_off = _sb_pos + 32;
+    // Magic: ○LNG
+    __bytes_set(_sb_out, _sb_pos, 226);     // 0xE2
+    __bytes_set(_sb_out, _sb_pos + 1, 151); // 0x97
+    __bytes_set(_sb_out, _sb_pos + 2, 139); // 0x8B
+    __bytes_set(_sb_out, _sb_pos + 3, 76);  // 0x4C = 'L'
+    __bytes_set(_sb_out, _sb_pos + 4, 16);  // version 0x10
+    __bytes_set(_sb_out, _sb_pos + 5, 1);   // arch x86_64
+    // bc_offset (bytes 14-17) as u32 LE
+    __bytes_set(_sb_out, _sb_pos + 14, __floor(_sb_bc_off) % 256);
+    __bytes_set(_sb_out, _sb_pos + 15, __floor((_sb_bc_off / 256)) % 256);
+    __bytes_set(_sb_out, _sb_pos + 16, __floor((_sb_bc_off / 65536)) % 256);
+    __bytes_set(_sb_out, _sb_pos + 17, __floor((_sb_bc_off / 16777216)) % 256);
+    // bc_size (bytes 18-21)
+    __bytes_set(_sb_out, _sb_pos + 18, __floor(_sb_bc_pos) % 256);
+    __bytes_set(_sb_out, _sb_pos + 19, __floor((_sb_bc_pos / 256)) % 256);
+    __bytes_set(_sb_out, _sb_pos + 20, __floor((_sb_bc_pos / 65536)) % 256);
+    __bytes_set(_sb_out, _sb_pos + 21, __floor((_sb_bc_pos / 16777216)) % 256);
+    // flags (byte 30): codegen format = 1
+    __bytes_set(_sb_out, _sb_pos + 30, 1);
+    _sb_pos = _sb_pos + 32;
+
+    // Copy bytecode
+    let _sb_bi = 0;
+    while _sb_bi < _sb_bc_pos {
+        __bytes_set(_sb_out, _sb_pos, __bytes_get(_sb_bc, _sb_bi));
+        let _sb_pos = _sb_pos + 1;
+        let _sb_bi = _sb_bi + 1;
+    };
+
+    // Trailer: header_offset as u64 LE (8 bytes)
+    __bytes_set(_sb_out, _sb_pos, __floor(_sb_header_off) % 256);
+    __bytes_set(_sb_out, _sb_pos + 1, __floor((_sb_header_off / 256)) % 256);
+    __bytes_set(_sb_out, _sb_pos + 2, __floor((_sb_header_off / 65536)) % 256);
+    __bytes_set(_sb_out, _sb_pos + 3, __floor((_sb_header_off / 16777216)) % 256);
+    // Upper 4 bytes = 0 (header_offset < 4GB)
+    _sb_pos = _sb_pos + 8;
+
+    // Write output
+    __bytes_write("origin_built.olang", _sb_out, _sb_pos);
+    emit "  Output: origin_built.olang (" + __to_string(_sb_pos) + " bytes)";
+    emit "=== Done ===";
+    return "Built: " + __to_string(_sb_pos) + " bytes (" + __to_string(_sb_compiled) + " files, " + __to_string(_sb_errors) + " errors)";
+}

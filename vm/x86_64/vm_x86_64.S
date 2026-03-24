@@ -3405,14 +3405,14 @@ op_ret:
     mov     %rax, (%r15)            # store size
     add     $8, %r15                # past size header
     # Zero the buffer
-    push    %rdi
-    push    %rax
-    mov     %r15, %rdi
-    xor     %esi, %esi
-    mov     %rax, %rcx
+    push    %rdi                    # save buf base
+    mov     %rax, %rcx              # count = size
+    push    %rcx                    # save size
+    mov     %r15, %rdi              # dest = data start
+    xor     %eax, %eax              # AL = 0 (rep stosb stores AL)
     rep     stosb
-    pop     %rax
-    pop     %rdi
+    pop     %rax                    # restore size
+    pop     %rdi                    # restore buf base
     add     %rax, %r15              # bump heap past buffer
     # Push result
     sub     $16, %r14
