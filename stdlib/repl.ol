@@ -33,23 +33,34 @@ pub fn repl_eval(input) {
   if src == "test" {
     let _tp = 0;
     let _tf = 0;
-    // Arithmetic
+    // Arithmetic (6)
     if (1 + 2) == 3 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: add"; };
     if (10 - 3) == 7 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: sub"; };
     if (4 * 5) == 20 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: mul"; };
     if (10 / 2) == 5 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: div"; };
     if __floor(3.7) == 3 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: floor"; };
     if __ceil(3.2) == 4 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: ceil"; };
-    // Strings
+    // Bit ops (3)
+    if (1 << 4) == 16 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: shl"; };
+    if (255 >> 4) == 15 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: shr"; };
+    if (1 && 2) == 2 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: and"; };
+    // Strings (2)
     if len("hello") == 5 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: strlen"; };
     if __to_string(42) == "42" { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: tostr"; };
-    // Arrays
+    // Arrays (2)
     if len([1,2,3]) == 3 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: arrlen"; };
-    // SHA-256
+    if [x * 2 for x in [1,2,3]][0] == 2 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: comp"; };
+    // SHA-256 (2)
     if len(__sha256("abc")) == 64 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: sha256"; };
     if __sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: sha256val"; };
-    // Encoder
+    // Encoder (2)
     if encode_codepoint(65) == 150 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: encode_A"; };
+    if mol_new(0, 0, 4, 4, 2) == 146 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: mol_new"; };
+    // Sentiment (2)
+    if word_affect("buon").v == 2 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: buon_v"; };
+    if word_affect("happy").v == 6 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: happy_v"; };
+    // File I/O (1)
+    if len(__file_read("TASKBOARD.md")) > 100 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: fileread"; };
     // Summary
     if _tf == 0 {
       return "ALL PASS: " + __to_string(_tp) + "/" + __to_string(_tp + _tf);
@@ -149,40 +160,6 @@ pub fn repl_eval(input) {
              " Tone=" + __g_analysis_tone +
              " Ctx=" + __g_analysis_role + "/" + __g_analysis_source;
     };
-  }
-
-  // Check if input looks like code (starts with keyword or symbol)
-  // If not → treat as natural text conversation
-  let _re_first = char_at(src, 0);
-  let _re_is_code = 0;
-  // Code starts with: letter (let/fn/if/emit/match/try/for/while/type/union)
-  // or symbol ([ for array, { for dict, ( for group, " for string, digit)
-  if __char_code(_re_first) >= 48 { if __char_code(_re_first) <= 57 { _re_is_code = 1; }; };
-  if _re_first == "[" { _re_is_code = 1; };
-  if _re_first == "\"" { _re_is_code = 1; };
-  if _re_first == "(" { _re_is_code = 1; };
-  if _re_first == "-" { _re_is_code = 1; };
-  // Check keyword starts
-  if len(src) >= 2 {
-    let _re_2 = __substr(src, 0, 2);
-    if _re_2 == "le" { _re_is_code = 1; };
-    if _re_2 == "fn" { _re_is_code = 1; };
-    if _re_2 == "if" { _re_is_code = 1; };
-    if _re_2 == "em" { _re_is_code = 1; };
-    if _re_2 == "ma" { _re_is_code = 1; };
-    if _re_2 == "tr" { _re_is_code = 1; };
-    if _re_2 == "fo" { _re_is_code = 1; };
-    if _re_2 == "wh" { _re_is_code = 1; };
-    if _re_2 == "ty" { _re_is_code = 1; };
-    if _re_2 == "un" { _re_is_code = 1; };
-    if _re_2 == "pu" { _re_is_code = 1; };
-    if _re_2 == "re" { _re_is_code = 1; };
-    if _re_2 == "__" { _re_is_code = 1; };
-  };
-
-  // Not code → natural text conversation
-  if _re_is_code == 0 {
-    return agent_respond(src);
   }
 
   // Phase 1: Tokenize
