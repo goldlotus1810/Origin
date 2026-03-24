@@ -192,6 +192,13 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.36 | DONE ✅ | File I/O + bytes + heap builtins documented |
 | DC.37 | DONE ✅ | All REPL commands documented |
 | DC.38 | DONE ✅ | Natural language mode documented |
+| DC.39 | OPEN | `CLAUDE.md:391` — repl 243→**304** LOC (+61: auto-learn, tests, NL fix) |
+| DC.40 | OPEN | `CLAUDE.md:387-389` — lexer 258→259, parser 974→975, semantic 1301→1315 |
+| DC.41 | OPEN | `CLAUDE.md:392` — homeos 7,838→7,992 LOC (+154) |
+| DC.42 | OPEN | `CLAUDE.md:37,366` — Binary ~890KB → ~901KB (922,925 bytes) |
+| DC.43 | OPEN | `CLAUDE.md:332` — Tests 12→14 inline tests |
+| DC.44 | INFO | Thiếu Phase 5 features: word affect, personality, context window |
+| DC.45 | INFO | Thiếu auto-learn training data at boot (_boot_learn) |
 
 ---
 
@@ -245,4 +252,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Inspect #10: 6/6+test 12/12+self-build. CUT.1-4 ALL DONE. DC.33-DC.36 new. Binary 909KB.
 2026-03-24  feat: learn_file command, natural language mode (auto-detect code vs text), 911KB.
 2026-03-24  Inspect #11: 7/7+test 12/12+NL mode. DC.37-DC.38 new (REPL commands, NL mode). repl 243 LOC.
+2026-03-24  Phase 5: word affect 72w, personality templates, context window. Training data 661 entries.
+2026-03-24  REPL fix: << >> && in boot code crashed Rust compiler. Tests 12→14. Auto-learn 166 facts.
+2026-03-24  Inspect #12: 8/8+test 14/14. DC.33-38 FIXED. DC.39-DC.45 new (LOC drift, Phase 5 undoc). 923KB.
 ```
