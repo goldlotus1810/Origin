@@ -152,6 +152,26 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.19 | DONE ✅ | $"hello {name}" documented |
 | DC.20 | DONE ✅ | Binary size updated |
 
+### Docs Conflicts — Mới (phát hiện 2026-03-24 inspect #5, pre-T4)
+
+| # | Mức độ | File | Xung đột |
+|---|--------|------|----------|
+| DC.21 | TRUNG BÌNH | `CLAUDE.md:311,316` | LOC drift: VM 5031→5050, repl 117→131, homeos 7304→7701 |
+| DC.22 | TRUNG BÌNH | `CLAUDE.md:291,TASKBOARD:12` | Binary ~861KB → ~870KB (891,374 bytes) |
+| DC.23 | **NGHIÊM TRỌNG** | `CLAUDE.md:182-188` | Opcodes: chỉ 13/38 — thiếu 0x1A try, 0x1B catch, 0x1C store_upd, 0x19 push_mol, 0x24 call_closure |
+| DC.24 | **NGHIÊM TRỌNG** | `CLAUDE.md:134-174` | Builtins: chỉ ~35/54 — thiếu __ne, bit_or/and/xor, logic_not, array_pop/range, dict_keys, type_of |
+| DC.25 | **NGHIÊM TRỌNG** | `CLAUDE.md` | Không đề cập REPL commands: encode, respond, memory, learn, help |
+| DC.26 | **NGHIÊM TRỌNG** | `CLAUDE.md` + handbook | Không đề cập STM, Silk, Dream, Knowledge systems |
+| DC.27 | TRUNG BÌNH | `PLAN_REWRITE.md` | Outdated: binary 616KB→870KB, VM 2500→5050 LOC, bootstrap 1952→2883 LOC |
+
+### Pre-T4 Blockers
+
+| # | Mức độ | Vấn đề |
+|---|--------|--------|
+| BLOCK.1 | **CRITICAL** | BUG-3: match on union segfaults (heap overlap). CUT.1 cần union/match. |
+| BLOCK.2 | CAO | _g_output limit 4096 bytes. CUT.1-2 cần programs lớn hơn. |
+| BLOCK.3 | TRUNG BÌNH | Không có automated test framework. CUT.3 = viết test framework. |
+
 ---
 
 ## Log
@@ -189,4 +209,6 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  OL.12 DONE: WASM VM works (emit 42, emit 1+2). OL.14 DONE: Browser demo.
 2026-03-24  OL.11 WIP: ARM64 boots bare via QEMU. Needs builtins for stdlib.
 2026-03-24  DC.9-DC.20 ALL FIXED. CLAUDE.md + handbook fully synced.
+2026-03-24  STM + Silk + Dream + Knowledge learning. Nó nhớ. Nó biết sách. 891KB.
+2026-03-24  Inspect #5 (pre-T4): 13/13 tests PASS. 7 new conflicts DC.21-DC.27. 3 blockers identified.
 ```
