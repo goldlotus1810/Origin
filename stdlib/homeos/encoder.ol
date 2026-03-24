@@ -605,23 +605,23 @@ pub fn encode(text) {
 // Analysis pipeline (inline — avoids cross-file function issues)
 // ════════════════════════════════════════════════════════════════
 
-fn _a_has(text, word) {
-    let tlen = len(text);
-    let wlen = len(word);
-    if wlen > tlen { return 0; };
-    let i = 0;
-    while i <= (tlen - wlen) {
+fn _a_has(_ah_text, _ah_word) {
+    let _ah_tlen = len(_ah_text);
+    let _ah_wlen = len(_ah_word);
+    if _ah_wlen > _ah_tlen { return 0; };
+    let _ah_i = 0;
+    while _ah_i <= (_ah_tlen - _ah_wlen) {
         let _ah_match = 1;
-        let j = 0;
-        while j < wlen {
-            if char_at(text, (i + j)) != char_at(word, j) {
+        let _ah_j = 0;
+        while _ah_j < _ah_wlen {
+            if char_at(_ah_text, (_ah_i + _ah_j)) != char_at(_ah_word, _ah_j) {
                 _ah_match = 0;
                 break;
             };
-            let j = j + 1;
+            let _ah_j = _ah_j + 1;
         };
         if _ah_match == 1 { return 1; };
-        let i = i + 1;
+        let _ah_i = _ah_i + 1;
     };
     return 0;
 }
@@ -820,17 +820,16 @@ fn _emo_bias_tone(tone) {
     return tone;
 }
 
-pub fn stm_push(text, intent, tone) {
-    push(__stm, { input: text, intent: intent, tone: tone, turn: len(__stm) });
-    // Evict oldest if over limit
+pub fn stm_push(_sp_text, _sp_intent, _sp_tone) {
+    push(__stm, { input: _sp_text, intent: _sp_intent, tone: _sp_tone, turn: len(__stm) });
     if len(__stm) > __stm_max {
-        let __stm_new = [];
-        let i = 1;
-        while i < len(__stm) {
-            push(__stm_new, __stm[i]);
-            let i = i + 1;
+        let _sp_new = [];
+        let _sp_i = 1;
+        while _sp_i < len(__stm) {
+            push(_sp_new, __stm[_sp_i]);
+            let _sp_i = _sp_i + 1;
         };
-        let __stm = __stm_new;
+        let __stm = _sp_new;
     };
 }
 
@@ -849,16 +848,16 @@ pub fn stm_count() {
 }
 
 // Check if topic repeated N+ times
-pub fn stm_topic_repeated(keyword, n) {
-    let count = 0;
-    let i = 0;
-    while i < len(__stm) {
-        if _a_has(__stm[i].input, keyword) == 1 {
-            count = count + 1;
+pub fn stm_topic_repeated(_str_keyword, _str_n) {
+    let _str_count = 0;
+    let _str_i = 0;
+    while _str_i < len(__stm) {
+        if _a_has(__stm[_str_i].input, _str_keyword) == 1 {
+            _str_count = _str_count + 1;
         };
-        let i = i + 1;
+        let _str_i = _str_i + 1;
     };
-    if count >= n { return 1; };
+    if _str_count >= _str_n { return 1; };
     return 0;
 }
 
@@ -954,29 +953,26 @@ let __silk = [];
 let __silk_max = 128;
 let __silk_decay_counter = 0;
 
-fn silk_co_activate(word_a, word_b, intent) {
-    // Search for existing edge
-    let i = 0;
-    while i < len(__silk) {
-        let e = __silk[i];
-        if e.from == word_a {
-            if e.to == word_b {
-                // Strengthen: Hebbian update (bounded by 1.0)
-                let _sca_new_w = e.weight + (0.01 * (1 - (e.weight * 0.618)));
+fn silk_co_activate(_sca_wa, _sca_wb, _sca_intent) {
+    let _sca_i = 0;
+    while _sca_i < len(__silk) {
+        let _sca_e = __silk[_sca_i];
+        if _sca_e.from == _sca_wa {
+            if _sca_e.to == _sca_wb {
+                let _sca_new_w = _sca_e.weight + (0.01 * (1 - (_sca_e.weight * 0.618)));
                 if _sca_new_w > 1 { _sca_new_w = 1; };
-                set_at(__silk, i, {
-                    from: word_a, to: word_b,
+                set_at(__silk, _sca_i, {
+                    from: _sca_wa, to: _sca_wb,
                     weight: _sca_new_w,
-                    emotion: intent, fires: (e.fires + 1)
+                    emotion: _sca_intent, fires: (_sca_e.fires + 1)
                 });
                 return;
             };
         };
-        let i = i + 1;
+        let _sca_i = _sca_i + 1;
     };
-    // New edge
     if len(__silk) < __silk_max {
-        push(__silk, { from: word_a, to: word_b, weight: 0.1, emotion: intent, fires: 1 });
+        push(__silk, { from: _sca_wa, to: _sca_wb, weight: 0.1, emotion: _sca_intent, fires: 1 });
     };
 }
 
@@ -1012,54 +1008,51 @@ fn silk_decay() {
     };
 }
 
-fn silk_learn_from_text(text, intent) {
-    // Co-activate consecutive words (bigrams)
-    let words = [];
-    let current = "";
-    let i = 0;
-    while i < len(text) {
-        let ch = char_at(text, i);
-        if __char_code(ch) == 32 {
-            if len(current) > 0 {
-                push(words, current);
-                current = "";
+fn silk_learn_from_text(_slt_text, _slt_intent) {
+    let _slt_words = [];
+    let _slt_cur = "";
+    let _slt_i = 0;
+    while _slt_i < len(_slt_text) {
+        let _slt_ch = char_at(_slt_text, _slt_i);
+        if __char_code(_slt_ch) == 32 {
+            if len(_slt_cur) > 0 {
+                push(_slt_words, _slt_cur);
+                _slt_cur = "";
             };
         } else {
-            current = current + ch;
+            _slt_cur = _slt_cur + _slt_ch;
         };
-        let i = i + 1;
+        let _slt_i = _slt_i + 1;
     };
-    if len(current) > 0 { push(words, current); };
-    // Wire bigrams
-    let j = 0;
-    while (j + 1) < len(words) {
-        silk_co_activate(words[j], words[j + 1], intent);
-        let j = j + 1;
+    if len(_slt_cur) > 0 { push(_slt_words, _slt_cur); };
+    let _slt_j = 0;
+    while (_slt_j + 1) < len(_slt_words) {
+        silk_co_activate(_slt_words[_slt_j], _slt_words[_slt_j + 1], _slt_intent);
+        let _slt_j = _slt_j + 1;
     };
 }
 
-fn silk_find_related(word) {
-    // Find strongest connection for a word
-    let best = "";
-    let best_w = 0;
-    let i = 0;
-    while i < len(__silk) {
-        let e = __silk[i];
-        if e.from == word {
-            if e.weight > best_w {
-                best_w = e.weight;
-                best = e.to;
+fn silk_find_related(_sfrel_word) {
+    let _sfrel_best = "";
+    let _sfrel_bw = 0;
+    let _sfrel_i = 0;
+    while _sfrel_i < len(__silk) {
+        let _sfrel_e = __silk[_sfrel_i];
+        if _sfrel_e.from == _sfrel_word {
+            if _sfrel_e.weight > _sfrel_bw {
+                _sfrel_bw = _sfrel_e.weight;
+                _sfrel_best = _sfrel_e.to;
             };
         };
-        if e.to == word {
-            if e.weight > best_w {
-                best_w = e.weight;
-                best = e.from;
+        if _sfrel_e.to == _sfrel_word {
+            if _sfrel_e.weight > _sfrel_bw {
+                _sfrel_bw = _sfrel_e.weight;
+                _sfrel_best = _sfrel_e.from;
             };
         };
-        let i = i + 1;
+        let _sfrel_i = _sfrel_i + 1;
     };
-    return best;
+    return _sfrel_best;
 }
 
 pub fn silk_count() { return len(__silk); }
@@ -1121,18 +1114,16 @@ fn dream_cycle() {
 // ════════════════════════════════════════════════════════════════
 
 fn stm_find_related(_sfr_input) {
-    // Split input into words, check each against past inputs
-    // ALL vars use _sfr_ prefix to avoid collision with _a_has params (text, word)
     let _sfr_text = _sfr_input;
-    let i = 0;
+    let _sfr_i = 0;
     let _sfr_limit = stm_count() - 1;
-    while i < _sfr_limit {
-        let _sfr_past = __stm[i].input;
-        let wi = 0;
+    while _sfr_i < _sfr_limit {
+        let _sfr_past = __stm[_sfr_i].input;
+        let _sfr_wi = 0;
         let _sfr_w = "";
-        while wi < len(_sfr_text) {
-            let ch = char_at(_sfr_text, wi);
-            if __char_code(ch) == 32 {
+        while _sfr_wi < len(_sfr_text) {
+            let _sfr_ch = char_at(_sfr_text, _sfr_wi);
+            if __char_code(_sfr_ch) == 32 {
                 if len(_sfr_w) >= 3 {
                     let _sfr_check = _sfr_w;
                     if _a_has(_sfr_past, _sfr_check) == 1 {
@@ -1141,9 +1132,9 @@ fn stm_find_related(_sfr_input) {
                 };
                 _sfr_w = "";
             } else {
-                _sfr_w = _sfr_w + ch;
+                _sfr_w = _sfr_w + _sfr_ch;
             };
-            let wi = wi + 1;
+            let _sfr_wi = _sfr_wi + 1;
         };
         if len(_sfr_w) >= 3 {
             let _sfr_check = _sfr_w;
@@ -1151,7 +1142,7 @@ fn stm_find_related(_sfr_input) {
                 return _sfr_past;
             };
         };
-        let i = i + 1;
+        let _sfr_i = _sfr_i + 1;
     };
     return "";
 }

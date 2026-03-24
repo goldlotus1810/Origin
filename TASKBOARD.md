@@ -213,17 +213,17 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | # | Mức độ | File | Xung đột |
 |---|--------|------|----------|
-| DC.51 | TRUNG BÌNH | CLAUDE.md + TASKBOARD | Binary ~935KB → thực tế 964,642B (~942KB) |
-| DC.52 | TRUNG BÌNH | CLAUDE.md | lexer 262 LOC → 298 LOC |
-| DC.53 | TRUNG BÌNH | CLAUDE.md | parser 988 LOC → 1,136 LOC |
-| DC.54 | NHẸ | CLAUDE.md | semantic 1,334 LOC → 1,336 LOC |
-| DC.55 | NHẸ | CLAUDE.md | repl 348 LOC → 343 LOC |
-| DC.56 | TRUNG BÌNH | CLAUDE.md | VM 5,522 LOC → 5,634 LOC |
-| DC.57 | TRUNG BÌNH | CLAUDE.md + TASKBOARD | HomeOS 43 files/9,142 LOC → 44 files/9,425 LOC |
-| DC.58 | TRUNG BÌNH | TASKBOARD | Bootstrap 3,013 LOC → 3,542 LOC |
-| DC.59 | NHẸ | CLAUDE.md | Hex literals 0x7F chưa document |
-| DC.60 | NHẸ | CLAUDE.md | ^ (XOR) operator chưa document trong cú pháp |
-| DC.61 | NHẸ | CLAUDE.md | bare return chưa document |
+| DC.51 | DONE ✅ | Binary ~943KB (965,292B) updated |
+| DC.52 | DONE ✅ | lexer 298 LOC updated |
+| DC.53 | DONE ✅ | parser 1,136 LOC updated |
+| DC.54 | DONE ✅ | semantic 1,336 LOC updated |
+| DC.55 | DONE ✅ | repl 343 LOC updated |
+| DC.56 | DONE ✅ | VM 5,634 LOC (already correct) |
+| DC.57 | DONE ✅ | HomeOS 44 files, 9,416 LOC updated |
+| DC.58 | DONE ✅ | Bootstrap 3,542 LOC (lexer+parser+semantic+codegen) |
+| DC.59 | DONE ✅ | Hex 0xFF documented in cú pháp |
+| DC.60 | DONE ✅ | ^ (XOR) in precedence table |
+| DC.61 | DONE ✅ | bare return; documented |
 
 ### BUG-SORT — Bubble sort regression (NGHIÊM TRỌNG)
 

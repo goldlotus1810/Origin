@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~935KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~943KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -73,6 +73,7 @@ closure: ptr = body_pc,  len = CLOSURE_MARKER (-2)
 ```olang
 // Variables
 let x = 42;
+let hex = 0xFF;          // hex literals
 let name = "hello";
 
 // Functions
@@ -398,7 +399,7 @@ Self-Compile:      ALL 4 bootstrap files compile (streaming, zero segfaults):
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~935KB)
+make build                    # → origin_new.olang (~943KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -419,12 +420,12 @@ make check-all
 | File | Vai trò |
 |------|---------|
 | `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,634 LOC) |
-| `stdlib/bootstrap/lexer.ol` | Tokenizer (262 LOC) |
-| `stdlib/bootstrap/parser.ol` | Parser recursive descent (988 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,334 LOC) |
+| `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
+| `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,136 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,336 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (348 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,426 LOC) |
+| `stdlib/repl.ol` | REPL entry point (343 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,416 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
