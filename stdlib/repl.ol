@@ -136,7 +136,9 @@ pub fn repl_eval(input) {
     let _rm_emo = emo_state();
     let _rm_d = stm_digest();
     let _rm_out = "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
+    _rm_out = _rm_out + " | Nodes: " + __to_string(node_count());
     _rm_out = _rm_out + " | Emo: V=" + __to_string(_rm_emo.v) + " A=" + __to_string(_rm_emo.a) + " streak=" + __to_string(_rm_emo.streak);
+    _rm_out = _rm_out + " " + emoji_for_emotion(_rm_emo.v, _rm_emo.a);
     if len(_rm_d) > 0 { _rm_out = _rm_out + " | Digest: " + _rm_d; };
     _rm_out = _rm_out + " | Themes: " + _rm_s;
     return _rm_out;

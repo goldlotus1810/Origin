@@ -1069,52 +1069,85 @@ fn stm_find_related(_sfr_input) {
 // ════════════════════════════════════════════════════════════════
 
 pub fn agent_respond(text) {
-    // GATE
+    // ══════════════════════════════════════════════════════
+    // FULL PIPELINE: input → alias → emoji → UDC encode →
+    //   create node → Learning → DN/QR ← UDC decode →
+    //   emoji → alias → output
+    // ══════════════════════════════════════════════════════
+
+    // ── GATE ──
     if _a_has(text, "tu tu") == 1 { return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc."; };
     if _a_has(text, "kill myself") == 1 { return "Ban dang trai qua khoang khac kho khan. Goi 1800 599 920 (VN) hoac 988 (US). Ban khong don doc."; };
 
-    // ENCODE + ANALYZE
-    let mol = analyze_input(text);
+    // ── 1. ALIAS (input normalization) ──
+    let _ar_norm = alias_normalize(text);
+
+    // ── 2. EMOJI (UTF-8 decode → extract emotion from Unicode) ──
+    let _ar_emo_uni = text_emotion_unicode(_ar_norm);
+
+    // ── 3. UDC ENCODE (text → molecule) ──
+    let mol = analyze_input(_ar_norm);
     let intent = __g_analysis_intent;
     let tone = __g_analysis_tone;
 
-    // EMOTION CARRY-OVER — update running state + bias tone
-    let _ar_emo = text_emotion_v2(text);
+    // ── EMOTION CARRY-OVER ──
+    let _ar_emo = text_emotion_v2(_ar_norm);
     _emo_update(_ar_emo.v, _ar_emo.a);
     tone = _emo_bias_tone(tone);
 
-    // REMEMBER (STM)
-    stm_push(text, intent, tone);
+    // ── 4. CREATE NODE (DN = SHA-256 address) ──
+    let _ar_node = node_create(_ar_norm, mol, _ar_emo, intent);
 
-    // DIGEST — compress older turns when STM gets full
+    // ── 5. LEARNING (STM + Silk + Dream + Knowledge) ──
+    stm_push(_ar_norm, intent, tone);
     _stm_maybe_digest();
-
-    // LEARN (Silk — Hebbian co-activation)
-    silk_learn_from_text(text, intent);
-
-    // DREAM (consolidation — every 5 turns)
+    silk_learn_from_text(_ar_norm, intent);
     dream_cycle();
 
-    // RETRIEVE — search past memory for related turns
-    let memory_context = "";
+    // Link current node to previous (if exists)
     if stm_count() >= 2 {
-        let _ar_current = text;
-        let _ar_related = stm_find_related(_ar_current);
+        let _ar_prev_input = stm_last_input();
+        if len(_ar_prev_input) > 0 {
+            let _ar_prev_dn = __sha256(_ar_prev_input);
+            node_link(_ar_prev_dn, _ar_node.dn);
+        };
+    };
+
+    // ── 6. DN/QR RETRIEVAL ──
+    let memory_context = "";
+
+    // Search past STM for related turns
+    if stm_count() >= 2 {
+        let _ar_related = stm_find_related(_ar_norm);
         if len(_ar_related) > 0 {
-            if _ar_related != _ar_current {
+            if _ar_related != _ar_norm {
                 memory_context = __tpl_remember + _ar_related + ")";
             };
         };
     };
 
-    // CONTEXT — repeated topic detection
+    // QR search: find related node in graph
+    if len(memory_context) == 0 {
+        if node_count() >= 3 {
+            let _ar_qr = qr_search(_ar_norm);
+            if len(_ar_qr.text) > 0 {
+                if _ar_qr.text != _ar_norm {
+                    if _ar_qr.fires > 1 {
+                        memory_context = __tpl_remember + _ar_qr.text + ")";
+                    };
+                };
+            };
+        };
+    };
+
+    // Repeated topic detection
     if stm_count() >= 3 {
-        if stm_topic_repeated(text, 2) == 1 {
+        if stm_topic_repeated(_ar_norm, 2) == 1 {
             memory_context = __tpl_topic_repeat;
         };
     };
 
-    // CONTEXT — heal→ok transition
+    // Heal→OK transition
     if stm_count() >= 2 {
         let _prev_idx = stm_count() - 2;
         if _prev_idx >= 0 {
@@ -1126,32 +1159,31 @@ pub fn agent_respond(text) {
         };
     };
 
-    // SILK — find related concept
-    let silk_related = "";
-    // Split first word and find silk connection
-    let first_word = "";
-    let fi = 0;
-    while fi < len(text) {
-        if __char_code(char_at(text, fi)) == 32 { break; };
-        first_word = first_word + char_at(text, fi);
-        let fi = fi + 1;
-    };
-    if len(first_word) > 2 {
-        silk_related = silk_find_related(first_word);
-    };
-
-    // KNOWLEDGE RETRIEVAL — search learned facts
+    // Knowledge retrieval
     let _ar_knowledge = "";
     if len(__knowledge) > 0 {
-        _ar_knowledge = knowledge_search(_ar_current);
+        _ar_knowledge = knowledge_search(_ar_norm);
     };
 
-    // RESPOND
-    let reply = compose_reply(intent, tone, text);
+    // ── 7. UDC DECODE (molecule → mood label) ──
+    let _ar_mood = udc_describe(mol);
+
+    // ── 8. OUTPUT EMOJI (emotion → emoji) ──
+    let _ar_out_emoji = emoji_for_emotion(_ar_emo.v, _ar_emo.a);
+
+    // ── 9. ALIAS OUTPUT ──
+    let reply = compose_reply(intent, tone, _ar_norm);
+
+    // ── 10. COMPOSE FINAL OUTPUT ──
+    let _ar_out = _ar_out_emoji + " " + reply;
     if len(_ar_knowledge) > 0 {
-        return reply + memory_context + " " + _ar_knowledge;
+        _ar_out = _ar_out + memory_context + " " + _ar_knowledge;
+    } else {
+        if len(memory_context) > 0 {
+            _ar_out = _ar_out + memory_context;
+        };
     };
-    return reply + memory_context;
+    return _ar_out;
 }
 
 // ════════════════════════════════════════════════════════════════
