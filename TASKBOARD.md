@@ -192,13 +192,13 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.36 | DONE ✅ | File I/O + bytes + heap builtins documented |
 | DC.37 | DONE ✅ | All REPL commands documented |
 | DC.38 | DONE ✅ | Natural language mode documented |
-| DC.39 | OPEN | `CLAUDE.md:391` — repl 243→**304** LOC (+61: auto-learn, tests, NL fix) |
-| DC.40 | OPEN | `CLAUDE.md:387-389` — lexer 258→259, parser 974→975, semantic 1301→1315 |
-| DC.41 | OPEN | `CLAUDE.md:392` — homeos 7,838→7,992 LOC (+154) |
-| DC.42 | OPEN | `CLAUDE.md:37,366` — Binary ~890KB → ~901KB (922,925 bytes) |
-| DC.43 | OPEN | `CLAUDE.md:332` — Tests 12→14 inline tests |
-| DC.44 | INFO | Thiếu Phase 5 features: word affect, personality, context window |
-| DC.45 | INFO | Thiếu auto-learn training data at boot (_boot_learn) |
+| DC.39 | DONE ✅ | repl 304 LOC updated |
+| DC.40 | DONE ✅ | lexer 259, parser 975, semantic 1315 updated |
+| DC.41 | DONE ✅ | homeos 7,992 LOC updated |
+| DC.42 | DONE ✅ | Binary ~901KB updated |
+| DC.43 | DONE ✅ | Tests 14 updated |
+| DC.44 | DONE ✅ | Phase 5 section added to CLAUDE.md |
+| DC.45 | DONE ✅ | Auto-learn documented in Phase 5 section |
 
 ---
 
@@ -255,4 +255,6 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 2026-03-24  Phase 5: word affect 72w, personality templates, context window. Training data 661 entries.
 2026-03-24  REPL fix: << >> && in boot code crashed Rust compiler. Tests 12→14. Auto-learn 166 facts.
 2026-03-24  Inspect #12: 8/8+test 14/14. DC.33-38 FIXED. DC.39-DC.45 new (LOC drift, Phase 5 undoc). 923KB.
+2026-03-24  DC.39-DC.45 ALL FIXED. CLAUDE.md fully synced: LOC, binary, tests, Phase 5.
+2026-03-24  Inspect #13: 6/6+test 14/14. ZERO CONFLICTS. 45/45 DCs resolved. Docs 100% synced. 923KB.
 ```
