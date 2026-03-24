@@ -322,22 +322,43 @@
 
   ;; 0x06: Emit — write to host AND capture to output buffer
   (func $op_emit
+    (local $fptr i32)
+    (local $flen i32)
     (call $vm_pop)
     (if (i32.gt_u (global.get $tmp_len) (i32.const 0))
       (then
-        ;; Write to host (for direct display)
-        (drop (call $host_write (global.get $tmp_ptr) (global.get $tmp_len)))
-        ;; Also capture to output buffer (for get_output)
-        (if (i32.lt_u
-              (i32.add (global.get $out_len) (global.get $tmp_len))
-              (global.get $out_max))
+        ;; Check if f64 (len == 8 and stored as raw double)
+        (if (i32.eq (global.get $tmp_len) (i32.const 8))
           (then
-            (memory.copy
-              (i32.add (global.get $out_base) (global.get $out_len))
-              (global.get $tmp_ptr)
-              (global.get $tmp_len))
-            (global.set $out_len
-              (i32.add (global.get $out_len) (global.get $tmp_len))))))))
+            ;; Format f64 as decimal string
+            (call $fmt_f64 (f64.load (global.get $tmp_ptr)))
+            (local.set $flen)
+            (local.set $fptr)
+            (drop (call $host_write (local.get $fptr) (local.get $flen)))
+            ;; Capture
+            (if (i32.lt_u
+                  (i32.add (global.get $out_len) (local.get $flen))
+                  (global.get $out_max))
+              (then
+                (memory.copy
+                  (i32.add (global.get $out_base) (global.get $out_len))
+                  (local.get $fptr)
+                  (local.get $flen))
+                (global.set $out_len
+                  (i32.add (global.get $out_len) (local.get $flen))))))
+          (else
+            ;; String/chain: write raw bytes
+            (drop (call $host_write (global.get $tmp_ptr) (global.get $tmp_len)))
+            (if (i32.lt_u
+                  (i32.add (global.get $out_len) (global.get $tmp_len))
+                  (global.get $out_max))
+              (then
+                (memory.copy
+                  (i32.add (global.get $out_base) (global.get $out_len))
+                  (global.get $tmp_ptr)
+                  (global.get $tmp_len))
+                (global.set $out_len
+                  (i32.add (global.get $out_len) (global.get $tmp_len))))))))))
 
   ;; 0x07: Call [name_len:1][name:N]
   (func $op_call
@@ -928,4 +949,76 @@
 
   (func $get_steps (export "get_steps") (result i32)
     (global.get $steps))
+
+  ;; ═══════════════════════════════════════════════════════════════════════
+  ;; f64 → decimal string (integer part only, for emit)
+  ;; ═══════════════════════════════════════════════════════════════════════
+  (func $fmt_f64 (param $val f64) (result i32 i32)  ;; returns (ptr, len)
+    (local $buf i32)
+    (local $n i64)
+    (local $neg i32)
+    (local $pos i32)
+    (local $digit i32)
+    (local $start i32)
+    (local $end i32)
+    (local $tmp i32)
+
+    (local.set $buf (call $heap_alloc (i32.const 32)))
+    (local.set $neg (i32.const 0))
+
+    ;; Handle negative
+    (if (f64.lt (local.get $val) (f64.const 0))
+      (then
+        (local.set $neg (i32.const 1))
+        (local.set $val (f64.neg (local.get $val)))))
+
+    ;; Convert to integer
+    (local.set $n (i64.trunc_f64_s (local.get $val)))
+    (local.set $pos (i32.const 0))
+
+    ;; Handle zero
+    (if (i64.eqz (local.get $n))
+      (then
+        (i32.store8 (i32.add (local.get $buf) (local.get $pos)) (i32.const 48))
+        (local.set $pos (i32.add (local.get $pos) (i32.const 1)))
+        (return (local.get $buf) (local.get $pos))))
+
+    ;; Extract digits (reverse order)
+    (block $done
+      (loop $digits
+        (br_if $done (i64.eqz (local.get $n)))
+        (local.set $digit (i32.wrap_i64 (i64.rem_u (local.get $n) (i64.const 10))))
+        (i32.store8
+          (i32.add (local.get $buf) (local.get $pos))
+          (i32.add (local.get $digit) (i32.const 48)))
+        (local.set $pos (i32.add (local.get $pos) (i32.const 1)))
+        (local.set $n (i64.div_u (local.get $n) (i64.const 10)))
+        (br $digits)))
+
+    ;; Add minus sign
+    (if (local.get $neg)
+      (then
+        (i32.store8 (i32.add (local.get $buf) (local.get $pos)) (i32.const 45))
+        (local.set $pos (i32.add (local.get $pos) (i32.const 1)))))
+
+    ;; Reverse the string in-place
+    (local.set $start (i32.const 0))
+    (local.set $end (i32.sub (local.get $pos) (i32.const 1)))
+    (block $rev_done
+      (loop $rev
+        (br_if $rev_done (i32.ge_s (local.get $start) (local.get $end)))
+        (local.set $tmp
+          (i32.load8_u (i32.add (local.get $buf) (local.get $start))))
+        (i32.store8
+          (i32.add (local.get $buf) (local.get $start))
+          (i32.load8_u (i32.add (local.get $buf) (local.get $end))))
+        (i32.store8
+          (i32.add (local.get $buf) (local.get $end))
+          (local.get $tmp))
+        (local.set $start (i32.add (local.get $start) (i32.const 1)))
+        (local.set $end (i32.sub (local.get $end) (i32.const 1)))
+        (br $rev)))
+
+    (local.get $buf)
+    (local.get $pos))
 )
