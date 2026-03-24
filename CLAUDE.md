@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~890KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~901KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -329,7 +329,7 @@ learn <text>             Teach HomeOS a fact
 learn_file <path>        Read file and learn each line as fact
 compile <path>           Compile .ol file → show bytecode size
 build                    Self-build: compile + pack → origin_built.olang
-test                     Run 12 inline tests
+test                     Run 14 inline tests
 memory                   Show STM turns + Silk edges + Knowledge facts
 help                     Show available commands
 exit / quit              Exit REPL
@@ -340,7 +340,7 @@ exit / quit              Exit REPL
 
 ```
 STM (Short-Term Memory):
-  Global array, max 8 turns. Each: { input, intent, tone, turn }
+  Global array, max 32 turns. Each: { input, intent, tone, turn }
   stm_push(), stm_last_input(), stm_count(), stm_find_related()
 
 Silk (Hebbian Learning):
@@ -352,9 +352,21 @@ Dream (Consolidation):
   dream_cycle()
 
 Knowledge Store:
-  Learned facts from `learn` command. Max 128 entries.
+  Learned facts from `learn` command. Max 512 entries.
   knowledge_learn(), knowledge_search(), knowledge_count()
   Retrieval: split query → match keywords → best scoring fact
+```
+
+## Phase 5 — Intelligence Layer (P5)
+
+```
+Word Affect:       72 entries (Vietnamese + English), 50-language expansion planned
+Personality:       14 template globals, set_personality("empathetic"|"formal"|"playful")
+Context Window:    STM max 32 turns (expanded from 8)
+Auto-Learn:        _boot_learn() loads training data on first REPL call
+Training Data:     docs/training/ — 6 files (about, world knowledge, dialog patterns)
+                   661 entries auto-loaded at boot
+Sentiment:         text_emotion() — word-level affect scoring from word_affect table
 ```
 
 ---
@@ -363,7 +375,7 @@ Knowledge Store:
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~890KB)
+make build                    # → origin_new.olang (~901KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -384,12 +396,12 @@ make check-all
 | File | Vai trò |
 |------|---------|
 | `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,471 LOC) |
-| `stdlib/bootstrap/lexer.ol` | Tokenizer (258 LOC) |
-| `stdlib/bootstrap/parser.ol` | Parser recursive descent (974 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,301 LOC) |
+| `stdlib/bootstrap/lexer.ol` | Tokenizer (259 LOC) |
+| `stdlib/bootstrap/parser.ol` | Parser recursive descent (975 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,315 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (243 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,838 LOC) |
+| `stdlib/repl.ol` | REPL entry point (304 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (40 files, 7,992 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
