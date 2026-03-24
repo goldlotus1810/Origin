@@ -20,6 +20,7 @@ let _g_output = [];
 let _g_pos = 0;
 let _g_for_depth = 0;
 let __g_for_vars = ["", "", "", "", "", "", "", ""];  // max 8 nesting levels
+let _g_comp_depth = 0;
 
 // ── IR Opcode representation ────────────────────────────────────
 // We represent opcodes as structs with an "op" tag string + args.
@@ -552,6 +553,194 @@ fn compile_expr(state, expr) {
             };
             emit_op(state, make_op_num("PushNum", len(fields)));
             emit_op(state, make_op_name("Call", "__dict_new"));
+        },
+        Expr::ArrayComp { var, depth } => {
+            // ArrayComp: [expr for var in iter if filter]
+            // [expr for var in iter if filter]
+            // Read depth-indexed globals (set by parser)
+            let _cc_var = "";
+            let _cc_es = 0; let _cc_ee = 0;
+            let _cc_is = 0; let _cc_ie = 0;
+            let _cc_fs = -1; let _cc_fe = -1;
+            if depth == 0 {
+                let _cc_var = __g_cv0;
+                let _cc_es = __g_ce0s; let _cc_ee = __g_ce0e;
+                let _cc_is = __g_ci0s; let _cc_ie = __g_ci0e;
+                let _cc_fs = __g_cf0s; let _cc_fe = __g_cf0e;
+            };
+            if depth == 1 {
+                let _cc_var = __g_cv1;
+                let _cc_es = __g_ce1s; let _cc_ee = __g_ce1e;
+                let _cc_is = __g_ci1s; let _cc_ie = __g_ci1e;
+                let _cc_fs = __g_cf1s; let _cc_fe = __g_cf1e;
+            };
+            if depth == 2 {
+                let _cc_var = __g_cv2;
+                let _cc_es = __g_ce2s; let _cc_ee = __g_ce2e;
+                let _cc_is = __g_ci2s; let _cc_ie = __g_ci2e;
+                let _cc_fs = __g_cf2s; let _cc_fe = __g_cf2e;
+            };
+            if depth == 3 {
+                let _cc_var = __g_cv3;
+                let _cc_es = __g_ce3s; let _cc_ee = __g_ce3e;
+                let _cc_is = __g_ci3s; let _cc_ie = __g_ci3e;
+                let _cc_fs = __g_cf3s; let _cc_fe = __g_cf3e;
+            };
+
+            // Unique runtime var names
+            let _cc_d = __to_string(depth);
+            let _cc_result = "__comp_" + _cc_d + "_r";
+            let _cc_arr = "__comp_" + _cc_d + "_a";
+            let _cc_len = "__comp_" + _cc_d + "_l";
+            let _cc_idx = "__comp_" + _cc_d + "_i";
+
+            // Empty result array
+            emit_op(state, make_op_num("PushNum", 0));
+            emit_op(state, make_op_name("Call", "__array_new"));
+            emit_op(state, make_op_name("Store", _cc_result));
+
+            // Compile iter (re-parse from tokens)
+            let _cc_p = new_parser(__g_comp_tokens);
+            _cc_p.pos = _cc_is;
+            let _cc_iter_ast = parse_expr(_cc_p);
+            compile_expr(state, _cc_iter_ast);
+            emit_op(state, make_op_name("Store", _cc_arr));
+
+            // len
+            emit_op(state, make_op_name("Load", _cc_arr));
+            emit_op(state, make_op_name("Call", "__array_len"));
+            emit_op(state, make_op_name("Store", _cc_len));
+
+            // idx = 0
+            emit_op(state, make_op_num("PushNum", 0));
+            emit_op(state, make_op_name("Store", _cc_idx));
+
+            // Loop condition
+            let _cc_loop = current_pos(state);
+            emit_op(state, make_op_name("Load", _cc_idx));
+            emit_op(state, make_op_name("Load", _cc_len));
+            emit_op(state, make_op_name("Call", "__cmp_lt"));
+            let _cc_exit_jz = current_pos(state);
+            emit_op(state, make_op_num("Jz", 0));
+
+            // var = arr[idx]
+            emit_op(state, make_op_name("Load", _cc_arr));
+            emit_op(state, make_op_name("Load", _cc_idx));
+            emit_op(state, make_op_name("Call", "__array_get"));
+            emit_op(state, make_op_name("Store", _cc_var));
+
+            // Pre-emit increment (before body — same pattern as for-in fix)
+            let _cc_body_jmp = current_pos(state);
+            emit_jmp(state, 0);
+            let _cc_inc = current_pos(state);
+            emit_op(state, make_op_name("Load", _cc_idx));
+            emit_op(state, make_op_num("PushNum", 1));
+            emit_op(state, make_op_name("Call", "__hyp_add"));
+            emit_op(state, make_op_name("Store", _cc_idx));
+            emit_jmp(state, _cc_loop);
+            let _cc_body_start = current_pos(state);
+            patch_jump(state, _cc_body_jmp, _cc_body_start);
+
+            // Save inc/exit_jz to depth-indexed globals
+            if depth == 0 { let __g_cc_inc0 = _cc_inc; let __g_cc_jz0 = _cc_exit_jz; };
+            if depth == 1 { let __g_cc_inc1 = _cc_inc; let __g_cc_jz1 = _cc_exit_jz; };
+            if depth == 2 { let __g_cc_inc2 = _cc_inc; let __g_cc_jz2 = _cc_exit_jz; };
+            if depth == 3 { let __g_cc_inc3 = _cc_inc; let __g_cc_jz3 = _cc_exit_jz; };
+
+            // Optional filter (re-parse from tokens)
+            if _cc_fs >= 0 {
+                let _cc_fp = new_parser(__g_comp_tokens);
+                _cc_fp.pos = _cc_fs;
+                let _cc_filter_ast = parse_expr(_cc_fp);
+                compile_expr(state, _cc_filter_ast);
+                let _cc_filter_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                if depth == 0 { let __g_cc_fjz0 = _cc_filter_jz; };
+                if depth == 1 { let __g_cc_fjz1 = _cc_filter_jz; };
+                if depth == 2 { let __g_cc_fjz2 = _cc_filter_jz; };
+                if depth == 3 { let __g_cc_fjz3 = _cc_filter_jz; };
+            };
+
+            // Emit expr bytecode MANUALLY from token info in globals
+            // NO compile_expr, NO parse_expr — pure emit_op calls
+            // Supports: single token (Load var / PushNum), binary op (lhs op rhs)
+            emit_op(state, make_op_name("Load", _cc_result));
+            // Read expr tokens from globals (saved by parser)
+            let _cc_expr_ntoks = _cc_ee - _cc_es;
+            // expr_ntoks determines emit strategy: 1=identity, 3=binop, 4=fn(arg)
+            if _cc_expr_ntoks == 1 {
+                // Single token: just Load var
+                emit_op(state, make_op_name("Load", _cc_var));
+            };
+            if _cc_expr_ntoks == 3 {
+                // lhs op rhs — read from token array directly
+                // Token at _cc_es = lhs, _cc_es+1 = op, _cc_es+2 = rhs
+                let _cc_t0 = __g_comp_tokens[_cc_es];
+                let _cc_t1 = __g_comp_tokens[_cc_es + 1];
+                let _cc_t2 = __g_comp_tokens[_cc_es + 2];
+                // Emit lhs
+                match _cc_t0.kind {
+                    TokenKind::Ident { name } => { emit_op(state, make_op_name("Load", name)); },
+                    TokenKind::Number { value } => { emit_op(state, make_op_num("PushNum", value)); },
+                    _ => {},
+                };
+                // Emit rhs
+                match _cc_t2.kind {
+                    TokenKind::Ident { name } => { emit_op(state, make_op_name("Load", name)); },
+                    TokenKind::Number { value } => { emit_op(state, make_op_num("PushNum", value)); },
+                    _ => {},
+                };
+                // Emit op
+                match _cc_t1.kind {
+                    TokenKind::Symbol { ch } => {
+                        if ch == "+" { emit_op(state, make_op_name("Call", "__hyp_add")); };
+                        if ch == "-" { emit_op(state, make_op_name("Call", "__hyp_sub")); };
+                        if ch == "*" { emit_op(state, make_op_name("Call", "__hyp_mul")); };
+                        if ch == "/" { emit_op(state, make_op_name("Call", "__hyp_div")); };
+                        if ch == "%" { emit_op(state, make_op_name("Call", "__hyp_mod")); };
+                    },
+                    _ => {},
+                };
+            };
+            if _cc_expr_ntoks == 4 {
+                // fn(arg) pattern: id ( arg )
+                let _cc_t0 = __g_comp_tokens[_cc_es];
+                let _cc_t2 = __g_comp_tokens[_cc_es + 2];
+                match _cc_t2.kind {
+                    TokenKind::Ident { name } => { emit_op(state, make_op_name("Load", name)); },
+                    TokenKind::Number { value } => { emit_op(state, make_op_num("PushNum", value)); },
+                    _ => {},
+                };
+                match _cc_t0.kind {
+                    TokenKind::Ident { name } => { emit_op(state, make_op_name("Call", name)); },
+                    _ => {},
+                };
+            };
+            emit_op(state, make_op_name("Call", "__array_push"));
+            emit_op(state, make_op_name("Store", _cc_result));
+
+            // Patch filter skip
+            if _cc_fs >= 0 {
+                let _cc_fjz_val = -1;
+                if depth == 0 { let _cc_fjz_val = __g_cc_fjz0; };
+                if depth == 1 { let _cc_fjz_val = __g_cc_fjz1; };
+                if depth == 2 { let _cc_fjz_val = __g_cc_fjz2; };
+                if depth == 3 { let _cc_fjz_val = __g_cc_fjz3; };
+                patch_jump(state, _cc_fjz_val, current_pos(state));
+            };
+
+            // Jump to increment (restore from globals)
+            let _cc_inc_r = 0; let _cc_exit_jz_r = 0;
+            if depth == 0 { let _cc_inc_r = __g_cc_inc0; let _cc_exit_jz_r = __g_cc_jz0; };
+            if depth == 1 { let _cc_inc_r = __g_cc_inc1; let _cc_exit_jz_r = __g_cc_jz1; };
+            if depth == 2 { let _cc_inc_r = __g_cc_inc2; let _cc_exit_jz_r = __g_cc_jz2; };
+            if depth == 3 { let _cc_inc_r = __g_cc_inc3; let _cc_exit_jz_r = __g_cc_jz3; };
+            emit_jmp(state, _cc_inc_r);
+
+            // Exit
+            patch_jump(state, _cc_exit_jz_r, current_pos(state));
+            emit_op(state, make_op_name("Load", _cc_result));
+            let _g_comp_depth = _g_comp_depth - 1;
         },
         Expr::IfExpr { cond, then_expr, else_expr } => {
             compile_expr(state, cond);
