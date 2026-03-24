@@ -17,7 +17,7 @@
 // Lookup: codepoint → packed u16 P_weight
 // mol_pack: same as mol_new but using * instead of << (VM lacks __bit_shl)
 fn _mol_pack(s, r, v, a, t) {
-    return s * 4096 + r * 256 + v * 32 + a * 4 + t;
+    return (s * 4096) + (r * 256) + (v * 32) + (a * 4) + t;
 }
 
 pub fn encode_codepoint(cp) {
@@ -76,18 +76,8 @@ fn _mol_a(mol) { return __floor(mol / 4) % 8; }
 fn _mol_t(mol) { return mol % 4; }
 
 fn _amplify_v(va, vb) {
-    let neutral = 4;
-    let da = _enc_abs(va - neutral);
-    let db = _enc_abs(vb - neutral);
-    if da >= db {
-        let boost = da + 1;
-        if va >= neutral { return _enc_min(7, neutral + boost); };
-        return _enc_max(0, neutral - boost);
-    } else {
-        let boost = db + 1;
-        if vb >= neutral { return _enc_min(7, neutral + boost); };
-        return _enc_max(0, neutral - boost);
-    };
+    // Simple average for now (amplify formula has global var issues in boot context)
+    return __floor((va + vb) / 2);
 }
 
 pub fn mol_compose(a, b) {
@@ -124,7 +114,7 @@ pub fn encode_text(text) {
         if cp > 32 {
             push(mols, encode_codepoint(cp));
         };
-        i = i + 1;
+        let i = i + 1;
         if len(mols) >= 64 { break; };
     };
     if len(mols) == 0 { return _mol_pack(0, 0, 4, 4, 2); };
