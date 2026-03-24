@@ -10,7 +10,44 @@
 // REPL eval — main entry point
 // ════════════════════════════════════════════════════════
 
+let __boot_learned = 0;
+
+fn _boot_learn() {
+    if __boot_learned == 1 { return; };
+    let __boot_learned = 1;
+    // Auto-load training data if available
+    let _bl_src = __file_read("docs/training/05_about_origin.md");
+    if len(_bl_src) > 0 { _learn_text(_bl_src); };
+    let _bl_src = __file_read("docs/training/03_world_knowledge.md");
+    if len(_bl_src) > 0 { _learn_text(_bl_src); };
+    let _bl_src = __file_read("docs/training/04_dialog_patterns.md");
+    if len(_bl_src) > 0 { _learn_text(_bl_src); };
+}
+
+fn _learn_text(_lt_content) {
+    let _lt_sent = "";
+    let _lt_i = 0;
+    while _lt_i < len(_lt_content) {
+        let _lt_ch = char_at(_lt_content, _lt_i);
+        let _lt_code = __char_code(_lt_ch);
+        if _lt_code == 10 {
+            if len(_lt_sent) > 15 {
+                // Skip comment lines starting with #
+                if char_at(_lt_sent, 0) != "#" {
+                    knowledge_learn(_lt_sent);
+                };
+            };
+            _lt_sent = "";
+        } else {
+            _lt_sent = _lt_sent + _lt_ch;
+        };
+        let _lt_i = _lt_i + 1;
+    };
+}
+
 pub fn repl_eval(input) {
+  // Auto-learn on first call
+  _boot_learn();
   // Strip trailing newline if present (use ASM builtin __str_trim)
   let src = __str_trim(input);
   if len(src) == 0 { return ""; }
