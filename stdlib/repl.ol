@@ -56,62 +56,7 @@ fn _boot_embedded_kt() {
     kt_learn("Moi function trong Olang tu dong dang ky thanh node voi mol va fire count");
 }
 
-fn _boot_embedded() {
-    // Core identity
-    knowledge_learn("Origin la du an tao ngon ngu lap trinh tu hosting ten Olang");
-    knowledge_learn("Olang tu compile chinh minh trong 966 kilobyte khong dependency");
-    knowledge_learn("VM cua Olang viet bang x86 64 assembly khoang 5700 dong code");
-    knowledge_learn("Compiler cua Olang gom lexer parser semantic va codegen");
-    knowledge_learn("HomeOS la he dieu hanh tri thuc chay tren Olang");
-    knowledge_learn("HomeOS biet doc sach nho va tra loi tu tri thuc da hoc");
-    knowledge_learn("goldlotus1810 la nguoi tao du an Origin va dan duong cac AI session");
-    knowledge_learn("Origin bat dau ngay 11 thang 3 nam 2026");
-    knowledge_learn("Tu hosting dat duoc ngay 23 thang 3 nam 2026 sau 13 ngay");
-    // Vietnam geography
-    knowledge_learn("Viet Nam la quoc gia o Dong Nam A voi thu do Ha Noi");
-    knowledge_learn("Ho Chi Minh City la thanh pho lon nhat cua Viet Nam");
-    knowledge_learn("Da Nang la thanh pho bien dep nam giua Viet Nam");
-    knowledge_learn("Vinh Ha Long la di san the gioi UNESCO o Quang Ninh");
-    knowledge_learn("Phu Quoc la dao lon nhat cua Viet Nam o Kien Giang");
-    // World knowledge
-    knowledge_learn("Trai Dat quay quanh Mat Troi mat 365 ngay mot vong");
-    knowledge_learn("Nuoc soi o 100 do C va dong bang o 0 do C");
-    knowledge_learn("Einstein phat minh thuyet tuong doi nam 1905");
-    knowledge_learn("Newton phat minh luc hap dan khi thay tao roi");
-    knowledge_learn("DNA la phan tu mang thong tin di truyen cua moi sinh vat");
-    knowledge_learn("Internet bat dau tu ARPANET nam 1969");
-    // Dialog patterns
-    knowledge_learn("khi nguoi ta chao nen chao lai than thien va hoi ho the nao");
-    knowledge_learn("khi nguoi ta buon nen lang nghe va dong cam truoc khi khuyen");
-    knowledge_learn("khi nguoi ta hoi ve ban than nen tra loi trung thuc va khiem ton");
-    knowledge_learn("khi nguoi ta cam on nen nhan va chuc ho tot dep");
-    knowledge_learn("khi nguoi ta gian nen binh tinh lang nghe va khong phan ung gay gat");
-    // Tech
-    knowledge_learn("SHA-256 la thuat toan bam mat ma tao chuoi 64 ky tu hex");
-    knowledge_learn("Olang co map filter reduce any all va pipe cho functional programming");
-    knowledge_learn("Moi function trong Olang tu dong dang ky thanh node voi mol va fire count");
-}
-
-fn _learn_text(_lt_content) {
-    let _lt_sent = "";
-    let _lt_i = 0;
-    while _lt_i < len(_lt_content) {
-        let _lt_ch = char_at(_lt_content, _lt_i);
-        let _lt_code = __char_code(_lt_ch);
-        if _lt_code == 10 {
-            if len(_lt_sent) > 15 {
-                // Skip comment lines starting with #
-                if char_at(_lt_sent, 0) != "#" {
-                    knowledge_learn(_lt_sent);
-                };
-            };
-            _lt_sent = "";
-        } else {
-            _lt_sent = _lt_sent + _lt_ch;
-        };
-        let _lt_i = _lt_i + 1;
-    };
-}
+// _boot_embedded and _learn_text REMOVED — KnowTree only (Sprint 5)
 
 pub fn repl_eval(input) {
   // Auto-learn on first call
@@ -124,22 +69,11 @@ pub fn repl_eval(input) {
   if src == "exit" || src == "quit" { return "__exit__"; }
   // Persistent knowledge: save/load
   if src == "save" {
-    let _sv_out = "";
-    let _sv_i = 0;
-    while _sv_i < knowledge_count() {
-        if _sv_i > 0 { _sv_out = _sv_out + "\n"; };
-        _sv_out = _sv_out + __knowledge[_sv_i].text;
-        let _sv_i = _sv_i + 1;
-    };
-    __file_write("homeos.knowledge", _sv_out);
-    return "Saved " + __to_string(knowledge_count()) + " facts to homeos.knowledge";
+    return kt_save("homeos.knowledge");
   }
   if src == "load" {
-    let _ld_src = __file_read("homeos.knowledge");
-    if len(_ld_src) > 0 {
-        _learn_text(_ld_src);
-        return "Loaded knowledge. Total: " + __to_string(knowledge_count()) + " facts.";
-    };
+    let _ld_n = kt_load("homeos.knowledge");
+    if _ld_n > 0 { return "Loaded " + __to_string(_ld_n) + " facts. " + kt_stats(); };
     return "No homeos.knowledge file found.";
   }
   if src == "help" {
@@ -266,7 +200,7 @@ pub fn repl_eval(input) {
     let _rm_s = stm_summary();
     let _rm_emo = emo_state();
     let _rm_d = stm_digest();
-    let _rm_out = "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
+    let _rm_out = "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | " + kt_stats();
     _rm_out = _rm_out + " | Nodes: " + __to_string(node_count());
     _rm_out = _rm_out + " | Fn: " + __to_string(fn_node_count());
     _rm_out = _rm_out + "\nEmo: V=" + __to_string(_rm_emo.v) + " A=" + __to_string(_rm_emo.a) + " f'=" + __to_string(__emo_deriv) + " f''=" + __to_string(__emo_accel) + " var=" + __to_string(__emo_variance) + " FE=" + __to_string(__free_energy) + " " + emoji_for_emotion(_rm_emo.v, _rm_emo.a);
@@ -283,46 +217,10 @@ pub fn repl_eval(input) {
     };
   }
 
-  // Learn file: read file and split into sentences for knowledge
+  // Learn file: redirect to kt_read_book
   if len(src) > 11 {
     if __substr(src, 0, 11) == "learn_file " {
-      let _lf_path = __substr(src, 11, len(src));
-      let _lf_content = __file_read(_lf_path);
-      if len(_lf_content) == 0 { return "Error: cannot read " + _lf_path; };
-      // Split by sentences (. or newline) and learn each
-      let _lf_sent = "";
-      let _lf_count = 0;
-      let _lf_i = 0;
-      while _lf_i < len(_lf_content) {
-        let _lf_ch = char_at(_lf_content, _lf_i);
-        let _lf_code = __char_code(_lf_ch);
-        // Split on: newline, period+space
-        let _lf_split = 0;
-        if _lf_code == 10 { _lf_split = 1; };
-        if _lf_code == 46 {
-          if (_lf_i + 1) < len(_lf_content) {
-            if __char_code(char_at(_lf_content, _lf_i + 1)) == 32 {
-              _lf_split = 1;
-              _lf_sent = _lf_sent + _lf_ch;
-            };
-          };
-        };
-        if _lf_split == 1 {
-          if len(_lf_sent) > 15 {
-            knowledge_learn(_lf_sent);
-            _lf_count = _lf_count + 1;
-          };
-          _lf_sent = "";
-        } else {
-          _lf_sent = _lf_sent + _lf_ch;
-        };
-        let _lf_i = _lf_i + 1;
-      };
-      if len(_lf_sent) > 15 {
-        knowledge_learn(_lf_sent);
-        _lf_count = _lf_count + 1;
-      };
-      return "Learned " + __to_string(_lf_count) + " facts from " + _lf_path + ". Knowledge: " + __to_string(knowledge_count());
+      return kt_read_book(__substr(src, 11, len(src)));
     };
   }
 

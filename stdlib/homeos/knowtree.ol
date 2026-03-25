@@ -231,6 +231,48 @@ pub fn kt_stats() {
 }
 
 // ════════════════════════════════════════════════════════════════
+// Save / Load — persistent KnowTree
+// ════════════════════════════════════════════════════════════════
+
+pub fn kt_save(_ks_path) {
+    let _ks_out = "";
+    let _ks_i = 0;
+    while _ks_i < len(__kt_facts) {
+        if _ks_i > 0 { _ks_out = _ks_out + "\n"; };
+        _ks_out = _ks_out + __kt_facts[_ks_i].text;
+        let _ks_i = _ks_i + 1;
+    };
+    __file_write(_ks_path, _ks_out);
+    return "Saved " + __to_string(len(__kt_facts)) + " facts to " + _ks_path;
+}
+
+pub fn kt_load(_kl_path) {
+    let _kl_content = __file_read(_kl_path);
+    if len(_kl_content) == 0 { return 0; };
+    let _kl_sent = "";
+    let _kl_count = 0;
+    let _kl_i = 0;
+    while _kl_i < len(_kl_content) {
+        let _kl_ch = __char_code(char_at(_kl_content, _kl_i));
+        if _kl_ch == 10 {
+            if len(_kl_sent) > 5 {
+                if _kl_count < 30 { kt_learn(_kl_sent); };
+                _kl_count = _kl_count + 1;
+            };
+            _kl_sent = "";
+        } else {
+            _kl_sent = _kl_sent + char_at(_kl_content, _kl_i);
+        };
+        let _kl_i = _kl_i + 1;
+    };
+    if len(_kl_sent) > 5 {
+        if _kl_count < 30 { kt_learn(_kl_sent); };
+        _kl_count = _kl_count + 1;
+    };
+    return _kl_count;
+}
+
+// ════════════════════════════════════════════════════════════════
 // Book ingest — read file → paragraphs → sentences → words → nodes
 // Hierarchy: book → paragraph → sentence → word → char
 // Each level = node. Silk connects within level.
