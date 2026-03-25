@@ -9,16 +9,17 @@
 ## Trạng thái: FULL STACK (2026-03-25)
 
 ```
-origin_new.olang = ~969KB native binary (992,115 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (3,850 LOC Olang)
+origin_new.olang = ~972KB native binary (995,032 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (3,893 LOC Olang)
   ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
   ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
   ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 20/20 tests
-  ✅ ASM VM x86_64 (5,774 LOC), no libc, zero dependencies
-  ✅ HomeOS: 44 files, 9,690 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
+  ✅ ASM VM x86_64 (5,776 LOC), no libc, zero dependencies
+  ✅ HomeOS: 44 files, 9,696 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
   ✅ P0 blockers FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
+  ✅ P1 fixes: reduce 3-arg, knowledge-first response, contradiction instinct, fns command
   ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
      lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
   ✅ Lambda + map/filter/reduce/any/all/pipe (inline compiler builtins)
@@ -365,6 +366,19 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.92 | DONE ✅ | CLAUDE.md | REPL Commands: added `personality` command |
 | DC.93 | INFO | — | P0-B side-effect: set_at() auto-emits in loops (known, documented) |
 
+### Docs Conflicts — DC.94-DC.101 (phát hiện 2026-03-25 inspect #21)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.94 | DONE ✅ | CLAUDE.md | Binary ~969KB → ~972KB (995,032 bytes) |
+| DC.95 | DONE ✅ | CLAUDE.md | vm_x86_64.S 5,774 → 5,776 LOC (+2 from help text) |
+| DC.96 | DONE ✅ | CLAUDE.md | semantic.ol 1,596 → 1,628 LOC (+32 from reduce 3-arg) |
+| DC.97 | DONE ✅ | CLAUDE.md | repl.ol 395 → 406 LOC (+11 from fns cmd + memory) |
+| DC.98 | DONE ✅ | CLAUDE.md | HomeOS 9,690 → 9,696 LOC (+6 from contradiction) |
+| DC.99 | DONE ✅ | CLAUDE.md | `reduce(arr, f, init)` 3-arg documented |
+| DC.100 | DONE ✅ | CLAUDE.md | `fns` REPL command documented |
+| DC.101 | DONE ✅ | CLAUDE.md | Instinct #2 Contradiction detection documented |
+
 ### BUG-INDEX / BUG-SORT — FIXED ✅ (2026-03-25 Nox)
 
 ```
@@ -538,4 +552,6 @@ VI PHẠM hiện tại:
 2026-03-25  Kira: Inspect #19 — 6/6 PASS. DC.80-84 found+fixed. LG.1-5 ALL DONE. 965KB.
 2026-03-25  Sora: P0-B ExprStmt auto-emit + P0-C div/0 safe. P0-A embedded knowledge (28 facts). 969KB.
 2026-03-25  Kira: Inspect #20 — 5/5+2 PASS. DC.85-93 found+fixed (P0-A/B/C undocumented, LOC drift). 969KB.
+2026-03-25  Sora: P1-E/F knowledge-first + reduce 3-arg. P1-I help text. Contradiction instinct. fns command. 972KB.
+2026-03-25  Kira: Inspect #21 — 6/6 PASS. DC.94-101 found+fixed (reduce 3-arg, fns, contradiction undoc). 972KB.
 ```

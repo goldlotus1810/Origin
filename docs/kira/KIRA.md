@@ -147,3 +147,4 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
 | 18 | 2026-03-25 | 7/7 ✅ | DC.75-79 | pipe()+LG.1/5 undoc, LOC drift. ALL FIXED. |
 | 19 | 2026-03-25 | 6/6 ✅ | DC.80-84 | LG.3/4 undoc, HomeOS +99. Phase 5D COMPLETE. |
 | 20 | 2026-03-25 | 7/7 ✅ | DC.85-93 | P0-A/B/C undoc, LOC drift. ALL FIXED. 969KB. |
+| 21 | 2026-03-25 | 6/6 ✅ | DC.94-101 | reduce 3-arg, fns cmd, contradiction undoc. ALL FIXED. 972KB. |
