@@ -116,6 +116,19 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | ST.3 | any/all + min/max/sum (boot) | ~80 LOC | DONE ✅ | Inline any/all compiler builtins. min_val/max_val/sum from iter.ol. |
 | ST.4 | Regression test suite 20/20 | ~30 LOC | DONE ✅ | +4: idx_binop, idx_var_add, sort_first, sort_last. |
 
+#### Phase 5A+ — Fix Intelligence (T5 Layer 1)
+
+| ID | Task | Effort | Status | Notes |
+|----|------|--------|--------|-------|
+| KN.1 | _mol_distance 5D | +5 LOC | DONE ✅ | S+R+V+A+T Manhattan, max 47 |
+| KN.2 | _mol_similarity max 47 | +0 LOC | DONE ✅ | Was 14, now 47 |
+| KN.3 | _text_to_chain all chars | +10 LOC | DONE ✅ | Was only first 2 chars per word |
+| KN.4 | knowledge_search additive | +1 LOC | DONE ✅ | keyword×5 + mol_sim (was max) |
+| IN.1 | Inline honesty instinct | +25 LOC | DONE ✅ | Confidence: [fact/opinion/hypothesis] |
+| IN.2 | Curiosity for unknowns | +5 LOC | DONE ✅ | "chủ đề mới" when novelty > 7 |
+| UT.1 | r_dispatch(r) | +20 LOC | DONE ✅ | 16 relation types → behavior tag |
+| UT.2 | temporal_tag(t) | +8 LOC | DONE ✅ | 4 time levels → description |
+
 #### Phase 5B — Node-native (1 LOC = 1 node = 16 bits)
 
 | ID | Task | Effort | Status | Notes |
@@ -456,4 +469,7 @@ VI PHẠM hiện tại:
 2026-03-25  Nox: Lambda expressions + closure calls. fn(x){body} parsed+compiled. Higher-order functions.
 2026-03-25  Nox: Inline map/filter/reduce compiler builtins. Functional pipeline works.
 2026-03-25  Nox: any/all builtins. Test suite 16→20. Phase 5A COMPLETE.
+2026-03-25  Nox: T5 Layer 1 — BUG-KNOWLEDGE fixed (5D mol, all-chars chain, additive keyword×5).
+            Knowledge retrieval correct: Einstein→Einstein, Vietnam→Vietnam.
+            Instinct: [fact/opinion/hypothesis] labels. Curiosity. r_dispatch + temporal_tag.
 ```
