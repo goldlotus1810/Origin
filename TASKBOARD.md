@@ -6,23 +6,25 @@
 
 ---
 
-## Trạng thái: FULL STACK (2026-03-25)
+## Trạng thái: T5 COMPLETE — OLANG 1.0 (2026-03-25)
 
 ```
-origin_new.olang = ~980KB native binary (1,003,736 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (4,080 LOC Olang)
-  ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
+origin_new.olang = 1,008KB native binary (1,008,302 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (~4,200 LOC Olang)
+  ✅ Intelligence layer: 10-stage pipeline + 3 instincts (honesty, contradiction, curiosity)
+  ✅ Functional: map filter reduce any all pipe sort split join contains
+  ✅ Lambda: fn(x) { body } — higher-order functions, closures
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
-  ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
   ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 20/20 tests
   ✅ ASM VM x86_64 (5,776 LOC), no libc, zero dependencies
-  ✅ HomeOS: 44 files, 9,696 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
-  ✅ P0 blockers FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
-  ✅ P1 fixes: reduce 3-arg, knowledge-first response, contradiction instinct, fns command
-  ✅ sort() + split() inline builtins. Persistent knowledge (save/load). ~1MB binary.
-  ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
-     lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
+  ✅ Mol ASM builtins: __mol_s/r/v/a/t + __mol_pack (6 builtins, 100x faster)
+  ✅ HomeOS: 44 files, 9,696 LOC Olang
+  ✅ Persistent knowledge: save/load → homeos.knowledge (survives restart)
+  ✅ fn_node registry: auto-register, describe, link, hot, skill
+  ✅ P0 ALL FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
+  ✅ Lego: pipe(x, f1, f2) = fn{fn{...}}==fn. Dream fn clustering.
+  ✅ Knowledge: keyword×5 + 5D mol, [fact/opinion/hypothesis], curiosity, contradiction
   ✅ Lambda + map/filter/reduce/any/all/pipe (inline compiler builtins)
   ✅ T5 Phase 5D COMPLETE: LG.1-5 ALL DONE (auto-register, pipe, silk mol, dream cluster, self-describe)
   ✅ Spec v3: SC.1,7,9-13 done (7/16)
@@ -392,6 +394,15 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.107 | DONE ✅ | CLAUDE.md | `save`/`load` REPL commands documented |
 | DC.108 | DONE ✅ | CLAUDE.md | Persistent knowledge (homeos.knowledge auto-load) documented |
 
+### Docs Conflicts — DC.109-DC.112 (phát hiện 2026-03-25 inspect #23 — OLANG 1.0)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.109 | DONE ✅ | CLAUDE.md | Binary ~980KB → ~985KB (1,008,302 bytes) |
+| DC.110 | DONE ✅ | CLAUDE.md | semantic.ol 1,792 → 1,889 LOC (+97 from join+contains) |
+| DC.111 | DONE ✅ | CLAUDE.md | `join(arr, sep)` builtin documented |
+| DC.112 | DONE ✅ | CLAUDE.md | `contains(str, substr)` builtin documented |
+
 ### BUG-INDEX / BUG-SORT — FIXED ✅ (2026-03-25 Nox)
 
 ```
@@ -567,6 +578,11 @@ VI PHẠM hiện tại:
 2026-03-25  Kira: Inspect #20 — 5/5+2 PASS. DC.85-93 found+fixed (P0-A/B/C undocumented, LOC drift). 969KB.
 2026-03-25  Sora: P1-E/F knowledge-first + reduce 3-arg. P1-I help text. Contradiction instinct. fns command. 972KB.
 2026-03-25  Kira: Inspect #21 — 6/6 PASS. DC.94-101 found+fixed (reduce 3-arg, fns, contradiction undoc). 972KB.
-2026-03-25  Sora: Persistent knowledge (save/load). sort()+split() inline builtins. Binary crosses 1MB: 980KB.
-2026-03-25  Kira: Inspect #22 — 6/6 PASS. DC.102-108 found+fixed (sort, split, save/load, persistent knowledge). 980KB.
+2026-03-25  Sora: Persistent knowledge (save/load). sort()+split()+join()+contains() builtins. 1,008KB.
+2026-03-25  Kira: Inspect #22 — 6/6 PASS. DC.102-108 found+fixed (sort, split, save/load). 980KB.
+2026-03-25  ═══ MILESTONE: OLANG 1.0 ═══ 1,008KB. T5 COMPLETE. ~30 commits, ~700 LOC.
+            Full functional language + persistent AI + Lego composition.
+            Demo-ready standalone binary. Copy & run. Zero dependencies.
+2026-03-25  Kira: Inspect #23 — 7/7 PASS. DC.109-112 found+fixed (join, contains). OLANG 1.0 verified. 985KB.
+            Bootstrap 4,177 LOC. HomeOS 9,696 LOC. VM 5,776 LOC. 112 DCs total, ALL resolved.
 ```

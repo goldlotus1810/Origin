@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~980KB native binary (1,003,736 bytes, ELF64, no libc, no deps)
+origin_new.olang = ~985KB native binary (1,008,302 bytes, ELF64, no libc, no deps)
 
 User input
   ↓
@@ -128,9 +128,12 @@ emit any([1,2,3], fn(x) { return x > 2; });         // 1 (true)
 emit all([1,2,3], fn(x) { return x > 0; });         // 1 (true)
 // NOTE: nested chaining clobbers vars. Use: let a = filter(...); map(a, ...)
 
-// Sort + Split (inline compiler builtins)
+// Sort + Split + Join + Contains (inline compiler builtins)
 emit sort([5,2,8,1,9]);              // [1, 2, 5, 8, 9]
 emit split("a,b,c", ",");            // [a, b, c]
+emit join(["a","b","c"], ", ");       // a, b, c
+emit contains("hello world", "world"); // 1
+emit join(sort(split("cherry apple banana", " ")), " "); // apple banana cherry
 
 // Pipe (Lego composition — fn{fn{...}}==fn)
 emit pipe(5, fn(x) { return x + 1; }, fn(x) { return x * 2; }); // 12
@@ -250,6 +253,8 @@ all(arr, f) → 1 if f(x) for all x
 pipe(x, f1, f2, ...) → fn(...f2(f1(x)))  // Lego composition
 sort(arr) → new sorted array (insertion sort, non-destructive)
 split(str, sep) → array of strings (single-char separator)
+join(arr, sep) → concatenate array elements with separator
+contains(str, substr) → 1 if found, 0 if not
 ```
 
 ---
@@ -463,7 +468,7 @@ P0 Blockers:      ALL FIXED (2026-03-25):
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~980KB)
+make build                    # → origin_new.olang (~985KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -486,7 +491,7 @@ make check-all
 | `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,776 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,132 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,792 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,889 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
 | `stdlib/repl.ol` | REPL entry point (429 LOC) |
 | `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,696 LOC) |

@@ -149,3 +149,4 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
 | 20 | 2026-03-25 | 7/7 ✅ | DC.85-93 | P0-A/B/C undoc, LOC drift. ALL FIXED. 969KB. |
 | 21 | 2026-03-25 | 6/6 ✅ | DC.94-101 | reduce 3-arg, fns cmd, contradiction undoc. ALL FIXED. 972KB. |
 | 22 | 2026-03-25 | 6/6 ✅ | DC.102-108 | sort, split, save/load, persistent knowledge. ALL FIXED. 980KB. |
+| 23 | 2026-03-25 | 7/7 ✅ | DC.109-112 | join, contains. OLANG 1.0 milestone verified. 985KB. |
