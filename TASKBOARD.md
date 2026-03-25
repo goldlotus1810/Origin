@@ -158,10 +158,9 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 |----|------|--------|--------|-------|
 | LG.1 | fn auto-register as node | ~15 LOC | DONE ✅ | Compiler emits fn_node_register after FnDef. Auto-tracked. |
 | LG.2 | pipe() — Lego operator | ~15 LOC | DONE ✅ | `pipe(x, f1, f2, fn)` → fn(...f2(f1(x))). fn{fn{...}}==fn. |
-| LG.3 | Silk = implicit từ chain order | ~40 LOC | TODO | Hybrid: implicit intra-chain + explicit inter-chain |
-| LG.4 | Dream = cluster fn → skill | ~60 LOC | TODO | fn_node_hot(min) → cluster → promote to skill |
+| LG.3 | Silk mol-keyed edges | ~30 LOC | DONE ✅ | Words→mol. Number compare (1 cycle). 24B/edge. Max 256. |
+| LG.4 | Dream fn clustering + skill | ~70 LOC | DONE ✅ | fn_dream_cluster(min) + skill_promote(name, fns). |
 | LG.5 | fn self-describe | ~30 LOC | DONE ✅ | fn_node_describe: lazy mol + 5D metadata (V/A/R/T). |
-| LG.5 | Self-describe: fn biết mình là gì | ~40 LOC | TODO | fn.mol → cảm xúc, fn.fire → hot function, fn.links → related fns |
 
 ---
 
