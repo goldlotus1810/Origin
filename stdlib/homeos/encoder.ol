@@ -1344,6 +1344,15 @@ pub fn agent_respond(text) {
         _ar_novelty = 10 - _ar_best_sim;
     };
 
+    // ── 7b. INSTINCT: Contradiction detection ──
+    let _ar_contradiction = "";
+    if len(_ar_knowledge) > 0 {
+        // Check if input contains negation near a known keyword
+        if _a_has(_ar_norm, "khong") == 1 || _a_has(_ar_norm, "sai") == 1 || _a_has(_ar_norm, "phang") == 1 || _a_has(_ar_norm, "not") == 1 || _a_has(_ar_norm, "wrong") == 1 || _a_has(_ar_norm, "false") == 1 {
+            _ar_contradiction = "Minh thay co dieu khac voi nhung gi minh biet.";
+        };
+    };
+
     // ── 8. UDC DECODE (molecule → mood label) ──
     let _ar_mood = udc_describe(mol);
 
@@ -1361,6 +1370,7 @@ pub fn agent_respond(text) {
         // Append confidence
         if _ar_conf >= 90 { _ar_out = _ar_out + " [fact]"; };
         if _ar_conf >= 70 { if _ar_conf < 90 { _ar_out = _ar_out + " [opinion]"; }; };
+        if len(_ar_contradiction) > 0 { _ar_out = _ar_out + " [!] " + _ar_contradiction; };
         if len(memory_context) > 0 { _ar_out = _ar_out + memory_context; };
     } else {
         _ar_out = _ar_out_emoji + " " + reply;
