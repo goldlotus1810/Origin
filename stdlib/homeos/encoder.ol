@@ -1319,10 +1319,12 @@ pub fn agent_respond(text) {
         };
     };
 
-    // Knowledge retrieval
+    // Knowledge retrieval — GATE: skip for emotional/heal intent (no random facts for "toi buon")
     let _ar_knowledge = "";
     if len(__knowledge) > 0 {
-        _ar_knowledge = knowledge_search(_ar_norm);
+        if intent != "heal" {
+            _ar_knowledge = knowledge_search(_ar_norm);
+        };
     };
 
     // ── 7. INSTINCT: Honesty + Curiosity (inline, T5) ──
