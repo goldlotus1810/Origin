@@ -1197,6 +1197,11 @@ fn compile_stmt(state, stmt) {
             set_at(_g_output, _fn_bpos + 3, (_fn_body_len / 16777216) % 256);
             // Store closure in var_table
             emit_op(state, make_op_name("Store", _fn_name));
+            // T5 LG.1: Auto-register fn as node (name + param count)
+            emit_op(state, make_op_name("Push", _fn_name));
+            emit_op(state, make_op_num("PushNum", _fn_pcnt));
+            emit_op(state, make_op_name("Call", "fn_node_register"));
+            emit_op(state, make_op_simple("Pop"));
         },
         Stmt::ReturnStmt { value } => {
             compile_expr(state, value);

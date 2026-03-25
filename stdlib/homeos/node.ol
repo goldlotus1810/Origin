@@ -220,23 +220,16 @@ pub fn node_stats() {
 let __fn_nodes = [];
 
 pub fn fn_node_register(_fnr_name, _fnr_param_count) {
+    // Simple registration: just name + param count. Mol computed lazily by fn_node_describe.
+    // Avoids calling encode_codepoint/mol_compose which clobber globals in boot context.
     let _fnr_i = 0;
     while _fnr_i < len(__fn_nodes) {
         if __fn_nodes[_fnr_i].name == _fnr_name { return; };
         let _fnr_i = _fnr_i + 1;
     };
-    let _fnr_mol = 0;
-    if len(_fnr_name) >= 1 {
-        _fnr_mol = encode_codepoint(__char_code(char_at(_fnr_name, 0)));
-        let _fnr_ci = 1;
-        while _fnr_ci < len(_fnr_name) {
-            _fnr_mol = mol_compose(_fnr_mol, encode_codepoint(__char_code(char_at(_fnr_name, _fnr_ci))));
-            let _fnr_ci = _fnr_ci + 1;
-        };
-    };
     push(__fn_nodes, {
         name: _fnr_name,
-        mol: _fnr_mol,
+        mol: 0,
         fires: 0,
         params: _fnr_param_count,
         links: []
@@ -279,4 +272,43 @@ pub fn fn_node_hot(_fnh_min_fires) {
         let _fnh_i = _fnh_i + 1;
     };
     return _fnh_result;
+}
+
+// LG.5: Self-describe — fn knows what it is
+pub fn fn_node_describe(_fnd_name) {
+    let _fnd_i = 0;
+    while _fnd_i < len(__fn_nodes) {
+        if __fn_nodes[_fnd_i].name == _fnd_name {
+            let _fnd_n = __fn_nodes[_fnd_i];
+            // Lazy mol computation: encode name → mol on first describe
+            let _fnd_mol = _fnd_n.mol;
+            if _fnd_mol == 0 {
+                if len(_fnd_name) >= 1 {
+                    _fnd_mol = encode_codepoint(__char_code(char_at(_fnd_name, 0)));
+                    let _fnd_ci = 1;
+                    while _fnd_ci < len(_fnd_name) {
+                        _fnd_mol = mol_compose(_fnd_mol, encode_codepoint(__char_code(char_at(_fnd_name, _fnd_ci))));
+                        let _fnd_ci = _fnd_ci + 1;
+                    };
+                };
+                __fn_nodes[_fnd_i].mol = _fnd_mol;
+            };
+            let _fnd_v = __mol_v(_fnd_mol);
+            let _fnd_a = __mol_a(_fnd_mol);
+            let _fnd_r = r_dispatch(__mol_r(_fnd_mol));
+            let _fnd_t = temporal_tag(__mol_t(_fnd_mol));
+            return {
+                name: _fnd_name,
+                params: _fnd_n.params,
+                fires: _fnd_n.fires,
+                valence: _fnd_v,
+                arousal: _fnd_a,
+                relation: _fnd_r,
+                tempo: _fnd_t,
+                links: _fnd_n.links
+            };
+        };
+        let _fnd_i = _fnd_i + 1;
+    };
+    return { name: _fnd_name, params: 0, fires: 0, valence: 4, arousal: 4, relation: "unknown", tempo: "static", links: [] };
 }
