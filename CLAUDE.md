@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~943KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~963KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -114,6 +114,21 @@ emit $"x = {x}, y = {y}";   // works with any expression
 // Array comprehension
 emit [x * 2 for x in [1,2,3]];           // [2, 4, 6]
 emit [x for x in items if x > 3];        // filter
+
+// Lambda (anonymous function)
+let f = fn(x) { return x * 2; };
+emit f(21);                          // 42
+
+// Higher-order: map, filter, reduce, any, all
+emit map([1,2,3], fn(x) { return x * 10; });       // [10, 20, 30]
+emit filter([1,2,3,4,5], fn(x) { return x > 3; }); // [4, 5]
+emit reduce([1,2,3,4,5], fn(a,b) { return a+b; }); // 15
+emit any([1,2,3], fn(x) { return x > 2; });         // 1 (true)
+emit all([1,2,3], fn(x) { return x > 0; });         // 1 (true)
+// NOTE: nested chaining clobbers vars. Use: let a = filter(...); map(a, ...)
+
+// Pipe (Lego composition — fn{fn{...}}==fn)
+emit pipe(5, fn(x) { return x + 1; }, fn(x) { return x * 2; }); // 12
 
 // Try/catch
 try { __throw("error"); } catch { emit "caught"; };
@@ -211,6 +226,22 @@ __array_with_cap(n) → empty array with n-slot pre-allocated capacity
 __sleep(ms) → sleep for ms milliseconds (nanosleep)
 __time() → current time in milliseconds (CLOCK_MONOTONIC)
 __write_raw(str) → write string to stdout (ANSI escape support)
+
+// Molecule (T5 ND.2 — bit extract, no __floor needed)
+__mol_s(m) → (m >> 12) & 0x0F   (shape, 4 bits)
+__mol_r(m) → (m >> 8) & 0x0F    (relation, 4 bits)
+__mol_v(m) → (m >> 5) & 0x07    (valence, 3 bits)
+__mol_a(m) → (m >> 2) & 0x07    (arousal, 3 bits)
+__mol_t(m) → m & 0x03           (temporal, 2 bits)
+__mol_pack(s,r,v,a,t) → s*4096 + r*256 + v*32 + a*4 + t
+
+// Higher-order (inline compiler builtins, not ASM)
+map(arr, f) → [f(x) for x in arr]
+filter(arr, f) → [x for x in arr if f(x)]
+reduce(arr, f) → fold left (acc=arr[0])
+any(arr, f) → 1 if f(x) for some x
+all(arr, f) → 1 if f(x) for all x
+pipe(x, f1, f2, ...) → fn(...f2(f1(x)))  // Lego composition
 ```
 
 ---
@@ -237,6 +268,10 @@ Nested eval closures: FULL scoping via heap scope stack
   op_call: snapshot var_table → scope_frame_ptrs[depth]
   op_ret:  if depth > 0, restore var_table from snapshot
   4MB scope stack, 256 max depth
+Cross-boundary closures (boot↔eval):
+  eval_bc_base global saved by __eval_bytecode
+  Closure body_pc: bit 63 set = eval closure (absolute addr)
+  cg_call_closure checks bit 63 → use eval_bc_base as r12
 ```
 
 ### Debug
@@ -338,7 +373,7 @@ learn <text>             Teach HomeOS a fact
 learn_file <path>        Read file and learn each line as fact
 compile <path>           Compile .ol file → show bytecode size
 build                    Self-build: compile + pack → origin_built.olang
-test                     Run 16 inline tests
+test                     Run 20 inline tests
 memory                   Show STM turns + Silk edges + Knowledge facts
 help                     Show available commands
 exit / quit              Exit REPL
@@ -391,6 +426,15 @@ Self-Compile:      ALL 4 bootstrap files compile (streaming, zero segfaults):
                    lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
                    __array_with_cap(n) builtin for explicit capacity allocation
                    ARRAY_INIT_CAP=512, recursive forward pointer following
+Lambda+HOF:       fn(x) { body } → Expr::Lambda. Inline map/filter/reduce/any/all.
+                   Cross-boundary: eval_bc_base global, bit 63 closure tag.
+T5 Layer 1:       BUG-KNOWLEDGE fixed: 5D mol distance, all-chars chain, additive scoring.
+                   Instincts: [fact/opinion/hypothesis] labels. Curiosity for unknowns.
+T5 ND.2:          __mol_s/r/v/a/t + __mol_pack (6 ASM builtins, 100x faster).
+T5 ND.4:          fn_node registry: register/fire/link/hot. fn has mol + fire_count.
+T5 LG.1:          Compiler auto-emits fn_node_register() after every FnDef.
+T5 LG.2:          pipe(x, f1, f2, ...) — Lego operator. fn{fn{...}}==fn.
+T5 LG.5:          fn_node_describe(name) → lazy mol + 5D metadata (V/A/R/T).
 ```
 
 ---
@@ -399,7 +443,7 @@ Self-Compile:      ALL 4 bootstrap files compile (streaming, zero segfaults):
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~943KB)
+make build                    # → origin_new.olang (~963KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -419,13 +463,13 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,634 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,767 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
-| `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,136 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,336 LOC) |
+| `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,132 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,594 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (343 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,416 LOC) |
+| `stdlib/repl.ol` | REPL entry point (355 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,591 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
