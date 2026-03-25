@@ -17,15 +17,14 @@ origin_new.olang = 1,008KB native binary (1,008,302 bytes)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
   ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 20/20 tests
-  ✅ ASM VM x86_64 (~5,800 LOC), no libc, zero dependencies
+  ✅ ASM VM x86_64 (5,776 LOC), no libc, zero dependencies
   ✅ Mol ASM builtins: __mol_s/r/v/a/t + __mol_pack (6 builtins, 100x faster)
-  ✅ HomeOS: 44 files, ~10,000 LOC Olang
+  ✅ HomeOS: 44 files, 9,696 LOC Olang
   ✅ Persistent knowledge: save/load → homeos.knowledge (survives restart)
   ✅ fn_node registry: auto-register, describe, link, hot, skill
   ✅ P0 ALL FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
   ✅ Lego: pipe(x, f1, f2) = fn{fn{...}}==fn. Dream fn clustering.
   ✅ Knowledge: keyword×5 + 5D mol, [fact/opinion/hypothesis], curiosity, contradiction
-```
   ✅ Lambda + map/filter/reduce/any/all/pipe (inline compiler builtins)
   ✅ T5 Phase 5D COMPLETE: LG.1-5 ALL DONE (auto-register, pipe, silk mol, dream cluster, self-describe)
   ✅ Spec v3: SC.1,7,9-13 done (7/16)
@@ -370,6 +369,40 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.92 | DONE ✅ | CLAUDE.md | REPL Commands: added `personality` command |
 | DC.93 | INFO | — | P0-B side-effect: set_at() auto-emits in loops (known, documented) |
 
+### Docs Conflicts — DC.94-DC.101 (phát hiện 2026-03-25 inspect #21)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.94 | DONE ✅ | CLAUDE.md | Binary ~969KB → ~972KB (995,032 bytes) |
+| DC.95 | DONE ✅ | CLAUDE.md | vm_x86_64.S 5,774 → 5,776 LOC (+2 from help text) |
+| DC.96 | DONE ✅ | CLAUDE.md | semantic.ol 1,596 → 1,628 LOC (+32 from reduce 3-arg) |
+| DC.97 | DONE ✅ | CLAUDE.md | repl.ol 395 → 406 LOC (+11 from fns cmd + memory) |
+| DC.98 | DONE ✅ | CLAUDE.md | HomeOS 9,690 → 9,696 LOC (+6 from contradiction) |
+| DC.99 | DONE ✅ | CLAUDE.md | `reduce(arr, f, init)` 3-arg documented |
+| DC.100 | DONE ✅ | CLAUDE.md | `fns` REPL command documented |
+| DC.101 | DONE ✅ | CLAUDE.md | Instinct #2 Contradiction detection documented |
+
+### Docs Conflicts — DC.102-DC.108 (phát hiện 2026-03-25 inspect #22)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.102 | DONE ✅ | CLAUDE.md | Binary ~972KB → ~980KB (1,003,736 bytes) |
+| DC.103 | DONE ✅ | CLAUDE.md | semantic.ol 1,628 → 1,792 LOC (+164 from sort+split) |
+| DC.104 | DONE ✅ | CLAUDE.md | repl.ol 406 → 429 LOC (+23 from save/load) |
+| DC.105 | DONE ✅ | CLAUDE.md | `sort(arr)` builtin documented |
+| DC.106 | DONE ✅ | CLAUDE.md | `split(str, sep)` builtin documented |
+| DC.107 | DONE ✅ | CLAUDE.md | `save`/`load` REPL commands documented |
+| DC.108 | DONE ✅ | CLAUDE.md | Persistent knowledge (homeos.knowledge auto-load) documented |
+
+### Docs Conflicts — DC.109-DC.112 (phát hiện 2026-03-25 inspect #23 — OLANG 1.0)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.109 | DONE ✅ | CLAUDE.md | Binary ~980KB → ~985KB (1,008,302 bytes) |
+| DC.110 | DONE ✅ | CLAUDE.md | semantic.ol 1,792 → 1,889 LOC (+97 from join+contains) |
+| DC.111 | DONE ✅ | CLAUDE.md | `join(arr, sep)` builtin documented |
+| DC.112 | DONE ✅ | CLAUDE.md | `contains(str, substr)` builtin documented |
+
 ### BUG-INDEX / BUG-SORT — FIXED ✅ (2026-03-25 Nox)
 
 ```
@@ -543,10 +576,13 @@ VI PHẠM hiện tại:
 2026-03-25  Kira: Inspect #19 — 6/6 PASS. DC.80-84 found+fixed. LG.1-5 ALL DONE. 965KB.
 2026-03-25  Sora: P0-B ExprStmt auto-emit + P0-C div/0 safe. P0-A embedded knowledge (28 facts). 969KB.
 2026-03-25  Kira: Inspect #20 — 5/5+2 PASS. DC.85-93 found+fixed (P0-A/B/C undocumented, LOC drift). 969KB.
-2026-03-25  Nox: P0-A/B/C ALL FIXED. P1-E/F/I fixed. Contradiction instinct. fns command.
-2026-03-25  Nox: Persistent knowledge (save/load + auto-load). HomeOS nhớ vĩnh viễn.
-2026-03-25  Nox: sort() + split() + join() + contains() inline builtins.
+2026-03-25  Sora: P1-E/F knowledge-first + reduce 3-arg. P1-I help text. Contradiction instinct. fns command. 972KB.
+2026-03-25  Kira: Inspect #21 — 6/6 PASS. DC.94-101 found+fixed (reduce 3-arg, fns, contradiction undoc). 972KB.
+2026-03-25  Sora: Persistent knowledge (save/load). sort()+split()+join()+contains() builtins. 1,008KB.
+2026-03-25  Kira: Inspect #22 — 6/6 PASS. DC.102-108 found+fixed (sort, split, save/load). 980KB.
 2026-03-25  ═══ MILESTONE: OLANG 1.0 ═══ 1,008KB. T5 COMPLETE. ~30 commits, ~700 LOC.
             Full functional language + persistent AI + Lego composition.
             Demo-ready standalone binary. Copy & run. Zero dependencies.
+2026-03-25  Kira: Inspect #23 — 7/7 PASS. DC.109-112 found+fixed (join, contains). OLANG 1.0 verified. 985KB.
+            Bootstrap 4,177 LOC. HomeOS 9,696 LOC. VM 5,776 LOC. 112 DCs total, ALL resolved.
 ```

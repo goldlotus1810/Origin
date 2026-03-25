@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~969KB native binary (992,115 bytes, ELF64, no libc, no deps)
+origin_new.olang = ~985KB native binary (1,008,302 bytes, ELF64, no libc, no deps)
 
 User input
   ↓
@@ -123,9 +123,17 @@ emit f(21);                          // 42
 emit map([1,2,3], fn(x) { return x * 10; });       // [10, 20, 30]
 emit filter([1,2,3,4,5], fn(x) { return x > 3; }); // [4, 5]
 emit reduce([1,2,3,4,5], fn(a,b) { return a+b; }); // 15
+emit reduce([1,2,3,4], fn(a,x) { return a+x; }, 100); // 110 (with init)
 emit any([1,2,3], fn(x) { return x > 2; });         // 1 (true)
 emit all([1,2,3], fn(x) { return x > 0; });         // 1 (true)
 // NOTE: nested chaining clobbers vars. Use: let a = filter(...); map(a, ...)
+
+// Sort + Split + Join + Contains (inline compiler builtins)
+emit sort([5,2,8,1,9]);              // [1, 2, 5, 8, 9]
+emit split("a,b,c", ",");            // [a, b, c]
+emit join(["a","b","c"], ", ");       // a, b, c
+emit contains("hello world", "world"); // 1
+emit join(sort(split("cherry apple banana", " ")), " "); // apple banana cherry
 
 // Pipe (Lego composition — fn{fn{...}}==fn)
 emit pipe(5, fn(x) { return x + 1; }, fn(x) { return x * 2; }); // 12
@@ -239,9 +247,14 @@ __mol_pack(s,r,v,a,t) → s*4096 + r*256 + v*32 + a*4 + t
 map(arr, f) → [f(x) for x in arr]
 filter(arr, f) → [x for x in arr if f(x)]
 reduce(arr, f) → fold left (acc=arr[0])
+reduce(arr, f, init) → fold left with initial value (acc=init)
 any(arr, f) → 1 if f(x) for some x
 all(arr, f) → 1 if f(x) for all x
 pipe(x, f1, f2, ...) → fn(...f2(f1(x)))  // Lego composition
+sort(arr) → new sorted array (insertion sort, non-destructive)
+split(str, sep) → array of strings (single-char separator)
+join(arr, sep) → concatenate array elements with separator
+contains(str, substr) → 1 if found, 0 if not
 ```
 
 ---
@@ -374,7 +387,10 @@ learn_file <path>        Read file and learn each line as fact
 compile <path>           Compile .ol file → show bytecode size
 build                    Self-build: compile + pack → origin_built.olang
 test                     Run 20 inline tests
-memory                   Show STM turns + Silk edges + Knowledge facts
+memory                   Show STM turns + Silk edges + Knowledge facts + Fn nodes
+fns                      List registered fn_nodes (name, params, fires)
+save                     Save knowledge to homeos.knowledge (persistent)
+load                     Load knowledge from homeos.knowledge
 help                     Show available commands
 personality <mode>       Set personality: "formal", "casual", "english"
 exit / quit              Exit REPL
@@ -400,6 +416,7 @@ Knowledge Store:
   Learned facts from `learn` command. Max 512 entries.
   knowledge_learn(), knowledge_search(), knowledge_count()
   Retrieval: split query → match keywords → best scoring fact
+  Persistent: `save` → homeos.knowledge, `load` → restore. Auto-load on boot.
 ```
 
 ## Phase 5 — Intelligence Layer (P5)
@@ -430,7 +447,7 @@ Self-Compile:      ALL 4 bootstrap files compile (streaming, zero segfaults):
 Lambda+HOF:       fn(x) { body } → Expr::Lambda. Inline map/filter/reduce/any/all.
                    Cross-boundary: eval_bc_base global, bit 63 closure tag.
 T5 Layer 1:       BUG-KNOWLEDGE fixed: 5D mol distance, all-chars chain, additive scoring.
-                   Instincts: [fact/opinion/hypothesis] labels. Curiosity for unknowns.
+                   Instincts: [fact/opinion/hypothesis] + [!] contradiction detection. Curiosity.
 T5 ND.2:          __mol_s/r/v/a/t + __mol_pack (6 ASM builtins, 100x faster).
 T5 ND.4:          fn_node registry: register/fire/link/hot. fn has mol + fire_count.
 T5 LG.1:          Compiler auto-emits fn_node_register() after every FnDef.
@@ -451,7 +468,7 @@ P0 Blockers:      ALL FIXED (2026-03-25):
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~969KB)
+make build                    # → origin_new.olang (~985KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -471,13 +488,13 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,774 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,776 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,132 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,596 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,889 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (395 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,690 LOC) |
+| `stdlib/repl.ol` | REPL entry point (429 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,696 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |
