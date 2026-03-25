@@ -614,46 +614,72 @@ emit q.len();                 // 1
 
 ---
 
-## 9. Iterator va Closure
+## 9. Lambda, HOF va Functional Programming
 
-### Closure (ham vo danh)
+### Lambda (ham vo danh) — fn(params) { body }
 
 ```olang
-let double = |x| { x * 2 };
+let double = fn(x) { return x * 2; };
 emit double(21);               // 42
 
-let add = |a, b| { a + b };
+let add = fn(a, b) { return a + b; };
 emit add(3, 4);                // 7
 ```
 
-### Array voi closure
+### Higher-Order Functions (inline compiler builtins)
 
 ```olang
 let scores = [3, 1, 4, 1, 5, 9, 2, 6];
 
 // Map — bien doi moi phan tu
-let doubled = scores.map(|s| { s * 2 });
+emit map(scores, fn(s) { return s * 2; });
 // [6, 2, 8, 2, 10, 18, 4, 12]
 
 // Filter — loc theo dieu kien
-let high = scores.filter(|s| { s > 3 });
+emit filter(scores, fn(s) { return s > 3; });
 // [4, 5, 9, 6]
 
-// Fold — gop thanh 1 gia tri
-let sum = scores.fold(0, |acc, s| { acc + s });
+// Reduce — gop thanh 1 gia tri (2 args: acc = arr[0])
+emit reduce(scores, fn(acc, s) { return acc + s; });
 // 31
 
+// Reduce voi init (3 args)
+emit reduce(scores, fn(acc, s) { return acc + s; }, 100);
+// 131
+
 // Any / All — kiem tra dieu kien
-emit scores.any(|s| { s > 8 });   // true (9 > 8)
-emit scores.all(|s| { s > 0 });   // true
+emit any(scores, fn(s) { return s > 8; });   // 1 (true)
+emit all(scores, fn(s) { return s > 0; });   // 1 (true)
 
-// Find — tim phan tu dau tien thoa man
-let first_big = scores.find(|s| { s > 5 });
-// 9
+// Sort — sap xep (insertion sort, tra array moi)
+emit sort([5, 2, 8, 1, 9]);    // [1, 2, 5, 8, 9]
 
-// Count — dem so phan tu thoa man
-let count = scores.count(|s| { s > 3 });
-// 4
+// Pipe — Lego composition: fn{fn{...}} == fn
+fn double(x) { return x * 2; };
+fn add1(x) { return x + 1; };
+emit pipe(5, double, add1);     // 11
+emit pipe(5, fn(x) { return x + 1; }, fn(x) { return x * 2; }); // 12
+```
+
+### String operations
+
+```olang
+emit split("hello world foo", " ");    // [hello, world, foo]
+emit join(["a", "b", "c"], ", ");      // a, b, c
+emit contains("hello world", "world"); // 1
+emit len("hello");                      // 5
+emit char_at("hello", 1);              // e
+```
+
+### Luu y
+
+```
+- map/filter/reduce/any/all/pipe/sort/split/join/contains la INLINE compiler builtins
+- Chung duoc compile thanh loop bytecode, khong phai function call
+- Nested chaining (map(filter(...))) co the clobber global vars → dung 2 buoc:
+    let filtered = filter(arr, fn(x) { return x > 3; });
+    let mapped = map(filtered, fn(x) { return x * 10; });
+```
 
 // Enumerate — them index
 let indexed = scores.enumerate();
@@ -1901,6 +1927,70 @@ poem([
     "Gio thoang huong thom",
     "Long ta nhe nhang",
 ]);
+```
+
+---
+
+---
+
+## 23. REPL Commands + KnowTree (Olang 1.0)
+
+### REPL Commands
+
+```
+Code:    let fn emit if while for match lambda
+HOF:     map filter reduce pipe any all sort
+String:  split join contains
+AI:      learn <fact>  respond <text>  read <file>  memory  fns
+Persist: save  load
+System:  test  build  compile <path>  help  exit
+```
+
+### KnowTree — Tri thuc = cay
+
+```olang
+// Hoc 1 fact
+learn Ha Noi la thu do cua Viet Nam
+// → Da hoc. KnowTree: 8 words, 1 facts (F:1 B:0 C:0)
+
+// Doc sach
+read docs/sora/knowledge.md
+// → Read ...: 49 sentences. KnowTree: 410 words, 78 facts (F:29 B:49 C:0)
+
+// Hoi
+respond Ha Noi o dau
+// → (Minh biet: Ha Noi la thu do cua Viet Nam) [fact]
+
+// Luu (persistent across restarts)
+save
+// → Saved 78 facts to homeos.knowledge
+
+// Stats
+memory
+// → STM: 5 turns | Silk: 4 edges | KnowTree: 412 words, 83 facts (F:29 B:49 C:5)
+//   Emo: V=4 A=4 f'=0 f''=0
+```
+
+### Molecule builtins (ASM, 1 cycle)
+
+```olang
+let m = __mol_pack(1, 2, 4, 3, 1);  // pack 5D → u16
+emit __mol_s(m);    // 1 (Shape)
+emit __mol_r(m);    // 2 (Relation)
+emit __mol_v(m);    // 4 (Valence)
+emit __mol_a(m);    // 3 (Arousal)
+emit __mol_t(m);    // 1 (Time)
+
+// UTF-8 decode
+emit __utf8_cp("Việt", 2);  // 7879 (U+1EC7, ệ)
+emit __utf8_len("Việt", 2); // 3 (bytes)
+```
+
+### Dict pretty-print
+
+```olang
+emit { name: "Olang", version: 1, self_hosting: 1 };
+// {name: Olang, version: 1, self_hosting: 1}
 ```
 
 ---
