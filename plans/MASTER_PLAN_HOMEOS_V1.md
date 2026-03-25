@@ -1,169 +1,171 @@
-# MASTER PLAN — HomeOS v1.0 trên Olang 1.0
+# MASTER PLAN — HomeOS v1.0
 
-> **Nox (builder) — 2026-03-25, cap nhat lien tuc**
-> **Tong hop: Spec v3, PLAN_REWRITE (7 giai doan DONE), Sora + Kira feedback**
+> **Nox — 2026-03-25. Cap nhat lien tuc.**
+> **Tong hop: Spec v3, Sora "Buc Tranh Tong The", PLAN_REWRITE, Kira findings.**
 
 ---
 
-## I. DA HOAN THANH
+## HIEN TRANG SAU VM SCOPE FIX
 
 ```
-PLAN_REWRITE 7 giai doan:              ALL DONE ✅
-  0. Bootstrap compiler loop            ✅ Olang tu compile
-  1. vm_x86_64.S (5,987 LOC)           ✅ Native ASM VM
-  2. Stdlib + HomeOS logic              ✅ 10,042 LOC Olang
-  3. Self-sufficient builder            ✅ Cat day ron Rust
-  4. Multi-arch (ARM64 skeleton)        ✅ Boots bare
-  5. WASM target                        ✅ 3KB browser
-  6. Optimization                       ✅ 3.7x speedup
-  7. Self-evolution (self-compile)      ✅ 3 doi verified
+VM scope bug: FIXED ✅ (op_ret chi restore khi return TO eval, khong boot→boot)
+  Truoc: eval→boot→boot sub-fn → eval vars WIPED
+  Sau:   eval→boot→boot sub-fn → eval vars PRESERVED
 
-Olang 1.0:                              DONE ✅
-  1,021KB binary, 20/20 tests, zero deps
-  Lambda, HOF, pipe, sort, split, join, contains
-  UTF-8 decode, dict pretty-print, persistent knowledge
+Silk:   9→17 edges (5 turns) — ALIVE (truoc: 9→10, 10 turns — DEAD)
+Mol:    compose hoat dong (truoc: moi word = 146)
+Search: keyword ×5 + mol — dung fact (truoc: random)
 
-T5 UDC-native:                          DONE ✅
-  Mol ASM builtins, fn_node registry, Silk mol-keyed
-  Dream fn clustering, 7/7 instincts, 5/5 checkpoints
-  SC.4 Immune, SC.5 Homeostasis, SC.6 DNA Repair
-
-HomeOS v1.0 Sprints 1-5:               DONE ✅
-  Classifier, greeting router, gate heal, search improvement, math strip
-```
-
-## II. CON CAN FIX (Sora/Kira feedback 2026-03-25)
-
-```
-FIX-1: "viet nam o dau?" → sai fact (lowercase "viet" ≠ "Viet" trong word[])
-  Root cause: _a_has case-insensitive OK, nhung word[] exact match van case-sensitive
-  Fix: lowercase query words TRUOC khi compare voi word[]
-  Effort: ~10 LOC
-
-FIX-2: "ha noi?" → sai fact (keyword qua ngan, nhieu entry co "ha")
-  Root cause: 2-char words match too many entries
-  Fix: 2-char words can match nhung ONLY neu entry text cung co word do
-  Effort: ~5 LOC
-
-FIX-3: "asdfghjk" → van tra fact (gate chua block zero-score)
-  Root cause: mol_similarity > 0 cho moi text → luon co score
-  Fix: gate threshold: if kwscore == 0 AND mol_only → skip fact
-  Effort: ~5 LOC
-
-FIX-4: Persistence dupes (28 embedded + N saved → tang moi restart)
-  Root cause: _boot_embedded() chay truoc load, roi load them
-  Fix: skip _boot_embedded() neu homeos.knowledge file exists
-  Effort: ~3 LOC
-
-FIX-5: set_at/push noise (auto-emit side effect)
-  Root cause: ExprStmt Emit thay vi Pop → set_at result duoc print
-  Fix: chi emit khi CUOI statement, khong emit cho side-effect calls
-  Effort: complex (~20 LOC semantic.ol) — DEFER, workaround: dung sort() builtin
-```
-
-## III. LO TRINH PRODUCT (tu PLAN_REWRITE mo rong)
-
-### Release 1.0 — "It speaks" (CURRENT — 2026-03-25)
-
-```
-✅ Binary chay doc lap, zero deps
-✅ REPL: code + natural text + commands
-✅ Knowledge: learn/respond/save/load
-✅ Emotion: V/A tracking, heal mode, greeting/goodbye
-✅ Instincts: 7/7 + 5/5 checkpoints
-✅ Functional: map/filter/reduce/pipe/sort/split/join
-✅ Demo: copy 1 file, run, interact
-```
-
-### Release 1.1 — "It understands" (NEXT — ~3 sessions)
-
-```
-Target: Knowledge search DUNG cho moi truong hop.
-        Gate THUC SU quyet dinh: tra loi / hoi lai / im.
-
-Tasks:
-  □ FIX-1: Case-insensitive word[] match
-  □ FIX-2: Short word disambiguation
-  □ FIX-3: Gate zero-score → ask_back
-  □ FIX-4: No persistence dupes
-  □ knowledge_search_scored() → return {text, score}
-  □ gate_decide() voi threshold: HIGH/LOW/ZERO
-  □ Instinct → action refactor (silence/respond/ask/explore)
-  □ Compose v2: response = f(knowledge, emotion, context)
-  □ 50+ integration test scenarios
-
-Measure: "viet nam?" → dung, "asdfghjk" → "Minh chua hieu", "hi" → greeting
-```
-
-### Release 1.2 — "It reasons" (~3 sessions)
-
-```
-Target: Formula dispatch. Mol khong chi la number — la BEHAVIOR.
-
-Tasks:
-  □ r_eval(R, a, b) → compose theo relation type
-  □ v_behavior(V) → approach/avoid/neutral
-  □ a_urgency(A) → calm/normal/alert/urgent
-  □ Formula-driven compose: mol_compose theo R dispatch
-  □ Causal chain: A causes B → Silk directed edge
-  □ Analogy engine: A:B :: C:? via 5D delta
-
-Measure: respond "tai sao troi mua" → causal explanation from knowledge
-```
-
-### Release 1.3 — "It grows" (~2 sessions)
-
-```
-Target: Self-improvement. Dream cluster → skill promotion.
-
-Tasks:
-  □ fn_node_fire wiring (track call counts)
-  □ Dream: cluster hot functions → promote to skill
-  □ Silk optimization: compact edges, prune weak
-  □ Knowledge compression: merge similar facts
-  □ Auto-save on exit (if changed)
-
-Measure: after 100 interactions, HomeOS responds BETTER than at start
-```
-
-### Release 2.0 — "It connects" (future)
-
-```
-Target: Multi-device, browser, mobile.
-
-Tasks:
-  □ ARM64 VM complete (builtins + scoping)
-  □ WASM update (all features)
-  □ ISL protocol (TCP + WebSocket)
-  □ Server mode (multi-user)
-  □ Browser demo (WebGL?)
-
-Measure: same knowledge, accessed from phone + laptop + browser
+Binary: 1,021KB | Tests: 20/20 | Self-build: 3 doi
 ```
 
 ---
 
-## IV. NGUYEN TAC BAT BIEN
+## KIEN TRUC MUC TIEU (tu Sora "Buc Tranh Tong The")
 
 ```
-1. Structure = Meaning     — cau truc TU MO TA
-2. Handcode == Zero        — intelligence tu data + algorithm
-3. Gate truoc, tra loi sau — phan loai TRUOC response
-4. DNA = HomeOS            — 8,846 UDC = 8,846 cong thuc
-5. Compose ≠ Average       — khuech dai dominant (φ⁻¹)
-6. fn{fn{...}} == fn       — ∞-1, stream/accumulate
-7. ∫ encode, ∂ decode      — cung chain, context khac = ket qua khac
+MOI THU = NODE. Compose len. Link ngang.
+
+L1: 172,849 char nodes (lazy create — 0 boot cost)
+L5+: word nodes = chain(char nodes)
+L6+: fact nodes = chain(word nodes)
+L7+: skill nodes = chain(fn nodes)
+
+Search = walk tree: query → char path → word node → fact links
+         O(word_length), khong O(knowledge_count)
+
+KHONG keyword scan. KHONG mol similarity. TREE IS INDEX.
 ```
 
 ---
 
-## V. METRIC
+## LO TRINH — 5 GIAI DOAN
+
+### GD.1: Xuong Song — KnowTree that (~200 LOC, 3-5 sessions)
+
+> Muc tieu: Moi input = walk tree. Khong keyword scan.
+
+| # | Task | Effort | Dep | Status |
+|---|------|--------|-----|--------|
+| N.1 | Lazy char node: gap char → tao node (hash table) | ~40 LOC | VM fix ✅ | TODO |
+| N.2 | Word node: chain(char nodes) + bidirectional links | ~40 LOC | N.1 | TODO |
+| N.3 | Fact node: chain(word nodes) + reverse links word↔fact | ~30 LOC | N.2 | TODO |
+| N.4 | Tree search: query → char path → word → fact links | ~40 LOC | N.3 | TODO |
+| N.5 | Replace __knowledge[] → tree storage | ~30 LOC | N.4 | TODO |
+| N.6 | learn/respond dung tree thay keyword scan | ~20 LOC | N.5 | TODO |
+
+### GD.2: Tuan Hoan — Neuron model (~150 LOC, 2-3 sessions)
+
+> Muc tieu: STM → Silk → Dream → QR. Vong doi tri thuc.
+
+| # | Task | Effort | Dep | Status |
+|---|------|--------|-----|--------|
+| NR.1 | STM = dendrites: node-based, evict oldest | ~30 LOC | GD.1 | TODO |
+| NR.2 | Silk = synapse: Hebbian on nodes (khong string) | ~30 LOC | NR.1 | TODO |
+| NR.3 | Dream = cluster STM by LCA, fibonacci folding | ~40 LOC | NR.2 | TODO |
+| NR.4 | QR = axon: propose → approve → append-only | ~30 LOC | NR.3 | TODO |
+| NR.5 | SilkWalk amplify: traverse graph, accumulate emotion | ~20 LOC | NR.2 | TODO |
+
+### GD.3: Tu Duy — Skills + Instincts (~100 LOC, 2 sessions)
+
+> Muc tieu: 7 instincts = 7 Skills (QT4). Stateless, isolated.
+
+| # | Task | Effort | Dep | Status |
+|---|------|--------|-----|--------|
+| SK.1 | Skill trait: stateless, ExecContext | ~20 LOC | GD.2 | TODO |
+| SK.2 | Honesty: confidence → fact/opinion/silence | ~15 LOC | SK.1 | ⚠️ partial |
+| SK.3 | Contradiction: valence opposition | ~10 LOC | SK.1 | ⚠️ partial |
+| SK.4 | Causality: temporal + coactivation | ~15 LOC | SK.1 | ⚠️ partial |
+| SK.5 | Abstraction: LCA + variance | ~15 LOC | SK.1 | TODO |
+| SK.6 | Analogy: A:B :: C:? = C + (B-A) 5D | ~15 LOC | SK.1 | TODO |
+| SK.7 | Curiosity + Reflection | ~10 LOC | SK.1 | ⚠️ partial |
+
+### GD.4: Cam Xuc — ConversationCurve (~80 LOC, 1-2 sessions)
+
+> Muc tieu: f(x), f'(x), f''(x). Trajectory, khong snapshot.
+
+| # | Task | Effort | Dep | Status |
+|---|------|--------|-----|--------|
+| CC.1 | V(t) + derivatives (toc do + gia toc) | ~20 LOC | GD.3 | TODO |
+| CC.2 | Window variance (emotional instability) | ~15 LOC | CC.1 | TODO |
+| CC.3 | Tone from derivatives (khong tu V hien tai) | ~15 LOC | CC.2 | TODO |
+| CC.4 | SilkWalk amplify context | ~15 LOC | CC.3 | TODO |
+| CC.5 | Cross-modal weight (bio > audio > text) | ~15 LOC | CC.4 | TODO |
+
+### GD.5: Xa Hoi — Agents + ISL (future)
+
+> Muc tieu: AAM → LeoAI → Chiefs → Workers.
+
+| # | Task | Effort | Dep | Status |
+|---|------|--------|-----|--------|
+| AG.1 | AAM: stateless approve/reject | ~20 LOC | GD.4 | TODO |
+| AG.2 | LeoAI: orchestrate Skills | ~40 LOC | AG.1 | TODO |
+| AG.3 | ISL: 4-byte addr, AES-256-GCM | ~100 LOC | AG.2 | TODO |
+| AG.4 | Worker: HomeOS thu nho | ~50 LOC | AG.3 | TODO |
+
+---
+
+## TRUOC KHI BAT DAU GD.1
+
+### Da fix:
+```
+✅ VM eval↔boot scope bug (op_ret check r12 == boot_bc_base)
+✅ Case-insensitive _a_has (inline lowercase)
+✅ Gate zero-score → khong tra random fact
+✅ Persistence no dupes
+✅ Greeting/goodbye router
+✅ Math ?/= strip
+✅ Dict pretty-print
+✅ UTF-8 __utf8_cp/__utf8_len builtins
+```
+
+### Con fix cho v1.1 (song song voi GD.1):
+```
+□ sort_by boot closure (van chua work — khac issue voi scope)
+□ set_at/push auto-emit noise
+□ fn_node_fire wiring
+```
+
+---
+
+## NGUYEN TAC BAT BIEN
 
 ```
-Binary size:    1,021KB (target: < 1.5MB for v1.x)
-Tests:          20/20 (target: 50+ for v1.1)
-Knowledge:      28 embedded (target: 100+ curated for v1.1)
-LOC total:      21,559 (VM 5,987 + Olang 15,572)
-Self-build:     3 doi verified
-Platforms:      x86_64 (ARM64 skeleton, WASM skeleton)
+1. Unicode la nguon su that DUY NHAT
+2. Moi thu = node. Compose len. Link ngang.
+3. 0 hardcoded molecule. 0 keyword hack.
+4. Tree IS index. Walk tree. Khong scan array.
+5. Im lang khi khong biet. Hoi lai khi khong chac.
+6. Compose ≠ Average. Khuech dai dominant (φ⁻¹).
+7. fn{fn{...}} == fn. ∞-1.
+8. Viet bang Olang. Khong Rust moi.
+9. Moi module = 1 file .ol. Test rieng duoc.
+10. Node truoc. Agent sau. Tree truoc. Search sau.
 ```
+
+---
+
+## METRIC
+
+```
+Hien tai:
+  Binary: 1,021KB | Tests: 20/20 | LOC: 21,559
+  Knowledge: 28 embedded + 166 training (flat array)
+  Silk: 17 edges (mol-keyed, working after scope fix)
+  Nodes: linear growth (1 per input)
+
+Muc tieu GD.1:
+  Knowledge: tree-based (lazy nodes)
+  Search: O(word_length) tree walk
+  0 keyword scan. 0 __knowledge[] array.
+
+Muc tieu GD.5:
+  Agents: AAM → LeoAI → Workers
+  ISL: cross-device messaging
+  0 hardcoded anything
+```
+
+---
+
+*"Chua co linh hon. Gio xay." — Sora*
+*"VM scope fix = mo khoa. Tree = xuong song." — Nox*
