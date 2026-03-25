@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~963KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~965KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -388,7 +388,7 @@ STM (Short-Term Memory):
   stm_push(), stm_last_input(), stm_count(), stm_find_related()
 
 Silk (Hebbian Learning):
-  Co-activate word bigrams on each input. Max 64 edges.
+  Co-activate word bigrams on each input. Max 256 edges. Mol-keyed (u16).
   silk_learn_from_text(), silk_find_related(), silk_count()
 
 Dream (Consolidation):
@@ -434,6 +434,8 @@ T5 ND.2:          __mol_s/r/v/a/t + __mol_pack (6 ASM builtins, 100x faster).
 T5 ND.4:          fn_node registry: register/fire/link/hot. fn has mol + fire_count.
 T5 LG.1:          Compiler auto-emits fn_node_register() after every FnDef.
 T5 LG.2:          pipe(x, f1, f2, ...) — Lego operator. fn{fn{...}}==fn.
+T5 LG.3:          Silk edges mol-keyed (number compare, ~24B/edge, max 256).
+T5 LG.4:          fn_dream_cluster(min_fires) + skill_promote(). Phase 5D COMPLETE.
 T5 LG.5:          fn_node_describe(name) → lazy mol + 5D metadata (V/A/R/T).
 ```
 
@@ -443,7 +445,7 @@ T5 LG.5:          fn_node_describe(name) → lazy mol + 5D metadata (V/A/R/T).
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~963KB)
+make build                    # → origin_new.olang (~965KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -469,7 +471,7 @@ make check-all
 | `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,594 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
 | `stdlib/repl.ol` | REPL entry point (355 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,591 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,690 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |

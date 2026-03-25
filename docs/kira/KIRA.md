@@ -143,3 +143,4 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
 | 16 | 2026-03-24 | 4/5 ❌ | ZERO | ROOT CAUSE: a[BinOp]→a[0] |
 | 17 | 2026-03-25 | 10/10 ✅ | DC.62-74 | Lambda+HOF+mol undoc, LOC drift. ALL FIXED. |
 | 18 | 2026-03-25 | 7/7 ✅ | DC.75-79 | pipe()+LG.1/5 undoc, LOC drift. ALL FIXED. |
+| 19 | 2026-03-25 | 6/6 ✅ | DC.80-84 | LG.3/4 undoc, HomeOS +99. Phase 5D COMPLETE. |
