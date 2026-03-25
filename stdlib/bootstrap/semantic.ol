@@ -585,6 +585,26 @@ fn compile_expr(state, expr) {
                 emit_op(state, make_op_name("Load", "__rc"));
                 return;
             };
+            if _ce_fname == "pipe" && len(args) >= 2 {
+                // pipe(x, f1, f2, ..., fn) → fn(...f2(f1(x)))
+                // The Lego operator: chain functions together
+                // First arg = initial value, rest = functions to apply
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__pp_val"));
+                let _pp_i = 1;
+                while _pp_i < len(args) {
+                    push(_ce_stack, _pp_i);
+                    compile_expr(state, args[_pp_i]);
+                    let _pp_i = pop(_ce_stack);
+                    emit_op(state, make_op_name("Store", "__pp_fn"));
+                    emit_op(state, make_op_name("Load", "__pp_val"));
+                    emit_op(state, make_op_name("Call", "__pp_fn"));
+                    emit_op(state, make_op_name("Store", "__pp_val"));
+                    let _pp_i = _pp_i + 1;
+                };
+                emit_op(state, make_op_name("Load", "__pp_val"));
+                return;
+            };
             if _ce_fname == "any" && len(args) == 2 {
                 // any(arr, f) → true if f(x) for some x in arr
                 compile_expr(state, args[0]);
@@ -1197,6 +1217,11 @@ fn compile_stmt(state, stmt) {
             set_at(_g_output, _fn_bpos + 3, (_fn_body_len / 16777216) % 256);
             // Store closure in var_table
             emit_op(state, make_op_name("Store", _fn_name));
+            // T5 LG.1: Auto-register fn as node (name + param count)
+            emit_op(state, make_op_name("Push", _fn_name));
+            emit_op(state, make_op_num("PushNum", _fn_pcnt));
+            emit_op(state, make_op_name("Call", "fn_node_register"));
+            emit_op(state, make_op_simple("Pop"));
         },
         Stmt::ReturnStmt { value } => {
             compile_expr(state, value);
