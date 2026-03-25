@@ -248,7 +248,7 @@ pub fn repl_eval(input) {
     let _rm_out = "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
     _rm_out = _rm_out + " | Nodes: " + __to_string(node_count());
     _rm_out = _rm_out + " | Fn: " + __to_string(fn_node_count());
-    _rm_out = _rm_out + "\nEmo: V=" + __to_string(_rm_emo.v) + " A=" + __to_string(_rm_emo.a) + " streak=" + __to_string(_rm_emo.streak) + " FE=" + __to_string(__free_energy) + " " + emoji_for_emotion(_rm_emo.v, _rm_emo.a);
+    _rm_out = _rm_out + "\nEmo: V=" + __to_string(_rm_emo.v) + " A=" + __to_string(_rm_emo.a) + " f'=" + __to_string(__emo_deriv) + " f''=" + __to_string(__emo_accel) + " var=" + __to_string(__emo_variance) + " FE=" + __to_string(__free_energy) + " " + emoji_for_emotion(_rm_emo.v, _rm_emo.a);
     if len(_rm_d) > 0 { _rm_out = _rm_out + "\nDigest: " + _rm_d; };
     if len(_rm_s) > 0 { _rm_out = _rm_out + "\nThemes: " + _rm_s; };
     return _rm_out;

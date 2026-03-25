@@ -817,16 +817,31 @@ let __stm_max = 32;
 let __emo_v = 4;  // valence (1=neg, 4=neutral, 7=pos)
 let __emo_a = 4;  // arousal (1=calm, 4=neutral, 7=excited)
 let __emo_streak = 0;  // consecutive same-valence turns
+// GD.4 CC.1: ConversationCurve — derivatives
+let __emo_v_prev = 4;   // previous V (for f' calculation)
+let __emo_deriv = 0;     // f'(t) = V(t) - V(t-1) — velocity of emotion
+let __emo_deriv_prev = 0; // previous derivative (for f'' calculation)
+let __emo_accel = 0;     // f''(t) = f'(t) - f'(t-1) — acceleration
+let __emo_variance = 0;  // CC.2: window variance (stability measure)
 // SC.5: Homeostasis — Free Energy (surprise tracking)
-let __free_energy = 0;  // 0=stable, high=surprised/unstable
+let __free_energy = 0;
 let __prev_intent = "chat";
 
 fn _emo_update(new_v, new_a) {
-    // EMA: 60% old + 40% new → smooth carry-over
-    // MUST use explicit parens — Rust compiler precedence bug: a*b+c*d → (a*b+c)*d
+    // Save previous state for derivatives
+    let __emo_v_prev = __emo_v;
+    let __emo_deriv_prev = __emo_deriv;
+    // EMA: 60% old + 40% new
     let __emo_v = __floor(( (__emo_v * 6) + (new_v * 4) ) / 10);
     let __emo_a = __floor(( (__emo_a * 6) + (new_a * 4) ) / 10);
-    // Track streak: same direction (pos/neg) for 3+ turns → amplify
+    // CC.1: Derivatives — trajectory, not snapshot
+    let __emo_deriv = __emo_v - __emo_v_prev;     // f'(t): velocity
+    let __emo_accel = __emo_deriv - __emo_deriv_prev; // f''(t): acceleration
+    // CC.2: Variance — emotional stability (|deriv| rolling)
+    let _eu_abs_d = __emo_deriv;
+    if _eu_abs_d < 0 { _eu_abs_d = 0 - _eu_abs_d; };
+    let __emo_variance = __floor(( (__emo_variance * 7) + (_eu_abs_d * 3) ) / 10);
+    // Streak tracking
     if new_v >= 5 {
         if __emo_streak >= 0 { let __emo_streak = __emo_streak + 1; }
         else { let __emo_streak = 1; };
@@ -835,7 +850,6 @@ fn _emo_update(new_v, new_a) {
             if __emo_streak <= 0 { let __emo_streak = __emo_streak - 1; }
             else { let __emo_streak = -1; };
         } else {
-            // Neutral → decay streak toward 0
             if __emo_streak > 0 { let __emo_streak = __emo_streak - 1; };
             if __emo_streak < 0 { let __emo_streak = __emo_streak + 1; };
         };
@@ -848,13 +862,20 @@ pub fn emo_state() {
 
 // Emotion-aware tone override: when streak strong, bias the tone
 fn _emo_bias_tone(tone) {
-    // 3+ positive turns → empathetic/gentle tone
+    // CC.3: Tone from DERIVATIVES, not just current V
+    // f' < -1 → dropping fast → "supportive" (catch them)
+    if __emo_deriv <= -1 { return "empathetic"; };
+    // f' > 1 → improving → "reinforcing" (encourage)
+    if __emo_deriv >= 1 { return "gentle"; };
+    // f'' < -1 → accelerating negative → URGENT
+    if __emo_accel <= -1 { return "empathetic"; };
+    // High variance → emotionally unstable → gentle
+    if __emo_variance >= 2 { return "gentle"; };
+    // 3+ negative streak → empathetic
+    if __emo_streak <= -3 { return "empathetic"; };
+    // 3+ positive streak → gentle
     if __emo_streak >= 3 {
         if tone == "precise" { return "gentle"; };
-    };
-    // 3+ negative turns → empathetic (even if analysis says precise)
-    if __emo_streak <= -3 {
-        return "empathetic";
     };
     return tone;
 }
