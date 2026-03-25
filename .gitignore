@@ -1,16 +1,6 @@
-# Build
-*.exe
-*.test
-/homeos-bin
-
-# IDE
-.idea/
-.vscode/
+*.o
+*.core
+/target/
+/tmp/
+*.bak
 *.swp
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Go
-vendor/

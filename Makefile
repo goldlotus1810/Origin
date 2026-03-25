@@ -1,22 +1,91 @@
-.PHONY: build run dev clean test
+# HomeOS — origin.olang build system
+# Usage:
+#   make              — build origin.olang
+#   make test         — run all Rust tests
+#   make clean        — remove build artifacts
+#   make vm           — assemble + link VM only
 
-# One-liner install (giống Docker)
-# curl -fsSL https://raw.githubusercontent.com/goldlotus1810/Origin/main/install.sh | bash
+AS       = as
+LD       = ld
+CARGO    = cargo
 
-build:
-	go build -o homeos ./cmd/homeos/
+VM_SRC   = vm/x86_64/vm_x86_64.S
+VM_OBJ   = vm/x86_64/vm_x86_64.o
+VM_BIN   = vm/x86_64/vm_x86_64
+STDLIB   = stdlib
+KNOWLEDGE = origin.olang
+OUTPUT   = origin_new.olang
 
-run: build
-	HOMEOS_STATIC=web/static ./homeos
+.PHONY: all vm build test intg clean clippy eval smoke smoke-binary verify demo check-all
 
-dev:
-	HOMEOS_STATIC=web/static go run ./cmd/homeos/
+all: build
 
-clean:
-	rm -f homeos
+# Assemble VM
+$(VM_OBJ): $(VM_SRC)
+	$(AS) --64 -o $@ $<
 
+# Link VM (static, no libc)
+$(VM_BIN): $(VM_OBJ)
+	$(LD) -static -nostdlib -o $@ $<
+
+vm: $(VM_BIN)
+
+# Build origin.olang
+build: $(VM_BIN)
+	$(CARGO) run -p builder -- \
+		--vm $(VM_BIN) --wrap \
+		--stdlib $(STDLIB) \
+		--knowledge $(KNOWLEDGE) \
+		--codegen \
+		-o $(OUTPUT)
+	chmod +x $(OUTPUT)
+	@echo "Built: $(OUTPUT) ($$(stat -c%s $(OUTPUT)) bytes)"
+
+# Run tests
 test:
-	go test ./...
+	$(CARGO) test --workspace
 
-lint:
-	go vet ./...
+# Integration tests only
+intg:
+	$(CARGO) test -p intg -- --show-output
+
+# Clippy
+clippy:
+	$(CARGO) clippy --workspace
+
+# Eval mode — pipe input to server
+eval:
+	@$(CARGO) run -p server -- --eval
+
+# Quick smoke test
+smoke:
+	@echo 'hello' | $(CARGO) run -p server -- --eval
+
+# Smoke test: native binary boots and shows prompt
+smoke-binary: build
+	@echo "Testing origin_new.olang boots..." && \
+	OUTPUT=$$(echo 'exit' | ./$(OUTPUT) 2>&1) && \
+	echo "$$OUTPUT" | grep -q "HomeOS" && \
+	echo "PASS: origin_new.olang boots OK" || \
+	(echo "FAIL: origin_new.olang did not boot"; exit 1)
+
+# E2E demo — 10 scenarios (requires tools/demo/scenarios.sh)
+demo:
+	@bash tools/demo/scenarios.sh
+
+# E2E automated verification (Rust tests)
+verify:
+	@$(CARGO) test -p intg --test t16_e2e_demo -- --show-output
+
+# Logic check: v2 spec validation (6 bug patterns + 5 checkpoints + invariants + data)
+check-logic:
+	$(CARGO) run -p check_logic
+
+# Full check: unit + integration + E2E + binary boot + logic
+check-all: test intg verify smoke-binary check-logic
+	@echo "ALL CHECKS PASSED"
+
+# Clean
+clean:
+	$(CARGO) clean
+	rm -f $(VM_OBJ) $(VM_BIN) $(OUTPUT)
