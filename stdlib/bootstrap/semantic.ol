@@ -464,6 +464,127 @@ fn compile_expr(state, expr) {
                 Expr::Ident { name } => { let _ce_fname = name; },
                 _ => {},
             };
+            // ── Inline higher-order builtins: map, filter, reduce ──
+            if _ce_fname == "map" && len(args) == 2 {
+                // map(arr, f) → inline loop: result=[], for i in arr { push(result, f(arr[i])) }
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__ma"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__mf"));
+                // result = []
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Call", "__array_new"));
+                emit_op(state, make_op_name("Store", "__mr"));
+                // i = 0
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__mi"));
+                // loop: if i >= len(arr) → exit
+                let _mp_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__mi"));
+                emit_op(state, make_op_name("Load", "__ma"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _mp_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // push(result, f(arr[i]))
+                emit_op(state, make_op_name("Load", "__mr"));
+                emit_op(state, make_op_name("Load", "__ma"));
+                emit_op(state, make_op_name("Load", "__mi"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__mf"));
+                emit_op(state, make_op_name("Call", "__array_push"));
+                emit_op(state, make_op_name("Store", "__mr"));
+                // i = i + 1
+                emit_op(state, make_op_name("Load", "__mi"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__mi"));
+                emit_jmp(state, _mp_loop);
+                patch_jump(state, _mp_jz, current_pos(state));
+                emit_op(state, make_op_name("Load", "__mr"));
+                return;
+            };
+            if _ce_fname == "filter" && len(args) == 2 {
+                // filter(arr, f) → inline loop: result=[], for x in arr { if f(x) push(result, x) }
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__fa"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__ff"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Call", "__array_new"));
+                emit_op(state, make_op_name("Store", "__fr"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__fi"));
+                let _fp_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__fi"));
+                emit_op(state, make_op_name("Load", "__fa"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _fp_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // x = arr[i]
+                emit_op(state, make_op_name("Load", "__fa"));
+                emit_op(state, make_op_name("Load", "__fi"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Store", "__fx"));
+                // if f(x) { push(result, x) }
+                emit_op(state, make_op_name("Load", "__fx"));
+                emit_op(state, make_op_name("Call", "__ff"));
+                let _fp_skip = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_name("Load", "__fr"));
+                emit_op(state, make_op_name("Load", "__fx"));
+                emit_op(state, make_op_name("Call", "__array_push"));
+                emit_op(state, make_op_name("Store", "__fr"));
+                patch_jump(state, _fp_skip, current_pos(state));
+                // i++
+                emit_op(state, make_op_name("Load", "__fi"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__fi"));
+                emit_jmp(state, _fp_loop);
+                patch_jump(state, _fp_jz, current_pos(state));
+                emit_op(state, make_op_name("Load", "__fr"));
+                return;
+            };
+            if _ce_fname == "reduce" && len(args) == 2 {
+                // reduce(arr, f) → acc=arr[0], for i=1..len { acc=f(acc,arr[i]) }
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__ra"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__rf"));
+                // acc = arr[0]
+                emit_op(state, make_op_name("Load", "__ra"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Store", "__rc"));
+                // i = 1
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Store", "__ri"));
+                let _rp_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__ri"));
+                emit_op(state, make_op_name("Load", "__ra"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _rp_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // acc = f(acc, arr[i])
+                emit_op(state, make_op_name("Load", "__rc"));
+                emit_op(state, make_op_name("Load", "__ra"));
+                emit_op(state, make_op_name("Load", "__ri"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__rf"));
+                emit_op(state, make_op_name("Store", "__rc"));
+                // i++
+                emit_op(state, make_op_name("Load", "__ri"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__ri"));
+                emit_jmp(state, _rp_loop);
+                patch_jump(state, _rp_jz, current_pos(state));
+                emit_op(state, make_op_name("Load", "__rc"));
+                return;
+            };
             // Save fname+args before compiling (inner Call overwrites them!)
             let _ce_saved_fname = _ce_fname;
             let _ce_saved_args = args;
