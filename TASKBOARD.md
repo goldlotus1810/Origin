@@ -53,11 +53,11 @@ origin_new.olang = 1,008KB native binary (ELF64 x86_64, no libc)
 | # | Spec Section | Status | Notes |
 |---|-------------|--------|-------|
 | SC.2 | Fusion (multi-modality) | ❌ | text-only for now |
-| SC.3 | 7 Instincts | ⚠️ 3/7 | Honesty+Contradiction+Curiosity done. 4 remaining. |
+| SC.3 | 7 Instincts | ✅ 7/7 | All active: Honesty+Contradiction+Causality+Abstraction+Analogy+Curiosity+Reflection |
 | SC.4 | Immune Selection N=3 | ❌ | single-branch inference |
 | SC.5 | Homeostasis (Free Energy) | ❌ | no F tracking |
 | SC.6 | DNA Repair (self_correct) | ❌ | no critique loop |
-| SC.16 | 5 Checkpoints | ⚠️ 1/5 | SecurityGate only |
+| SC.16 | 5 Checkpoints | ✅ 5/5 | Gate+Encode+Infer+Promote+Response |
 
 ### Known Limitations
 
