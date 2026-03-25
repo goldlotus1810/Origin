@@ -1371,11 +1371,18 @@ op_call:
     movsd   (%r14), %xmm1              # b (divisor)
     xorpd   %xmm2, %xmm2
     ucomisd %xmm2, %xmm1
-    je      vm_error_div_zero
+    je      .div_by_zero               # P0-C: return 0 instead of halt
     movsd   16(%r14), %xmm0            # a (dividend)
     add     $16, %r14
     divsd   %xmm1, %xmm0              # a / b
     movsd   %xmm0, (%r14)
+    jmp     vm_loop
+.div_by_zero:
+    # Return 0 instead of killing REPL
+    add     $16, %r14                   # pop divisor
+    xorpd   %xmm0, %xmm0             # 0.0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
 .call_mod:

@@ -1545,7 +1545,9 @@ fn compile_stmt(state, stmt) {
         },
         Stmt::ExprStmt { expr } => {
             compile_expr(state, expr);
-            emit_op(state, make_op_simple("Pop"));
+            // P0-B: Auto-emit bare expressions (like Python/Node REPL)
+            // "2+3" → prints 5 instead of silently discarding
+            emit_op(state, make_op_simple("Emit"));
         },
         _ => {
             add_error(state, "Unknown statement type");
