@@ -5639,8 +5639,8 @@ msg_prompt:
 msg_help:
     .ascii "Code: let fn emit if while for match lambda\n"
     .ascii "HOF:  map filter reduce pipe any all\n"
-    .ascii "AI:   learn <fact>  respond <text>  memory\n"
-    .ascii "Sys:  test  build  compile <path>  exit\n"
+    .ascii "AI:   learn <fact>  respond <text>  memory  fns\n"
+    .ascii "Sys:  test  build  save  load  compile <path>  exit\n"
 .equ msg_help_len, . - msg_help
 
 # ── Keyword hash table for __str_is_keyword ────────────────────────────

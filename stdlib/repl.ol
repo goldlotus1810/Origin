@@ -26,6 +26,9 @@ fn _boot_learn() {
     if knowledge_count() == 0 {
         _boot_embedded();
     };
+    // Auto-load persistent knowledge if available
+    let _bl_persist = __file_read("homeos.knowledge");
+    if len(_bl_persist) > 0 { _learn_text(_bl_persist); };
 }
 
 fn _boot_embedded() {
@@ -94,6 +97,26 @@ pub fn repl_eval(input) {
 
   // Check for REPL commands
   if src == "exit" || src == "quit" { return "__exit__"; }
+  // Persistent knowledge: save/load
+  if src == "save" {
+    let _sv_out = "";
+    let _sv_i = 0;
+    while _sv_i < knowledge_count() {
+        if _sv_i > 0 { _sv_out = _sv_out + "\n"; };
+        _sv_out = _sv_out + __knowledge[_sv_i].text;
+        let _sv_i = _sv_i + 1;
+    };
+    __file_write("homeos.knowledge", _sv_out);
+    return "Saved " + __to_string(knowledge_count()) + " facts to homeos.knowledge";
+  }
+  if src == "load" {
+    let _ld_src = __file_read("homeos.knowledge");
+    if len(_ld_src) > 0 {
+        _learn_text(_ld_src);
+        return "Loaded knowledge. Total: " + __to_string(knowledge_count()) + " facts.";
+    };
+    return "No homeos.knowledge file found.";
+  }
   if src == "help" {
     return "Code: let fn emit if while for match lambda | HOF: map filter reduce pipe any all | AI: learn respond memory | test build exit";
   }

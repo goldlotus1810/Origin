@@ -713,6 +713,170 @@ fn compile_expr(state, expr) {
                 patch_jump(state, _lp_done, current_pos(state));
                 return;
             };
+            if _ce_fname == "sort" && len(args) == 1 {
+                // sort(arr) → new sorted array (insertion sort, in-place on copy)
+                // Copy arr → __sa, then insertion sort __sa
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__sa_src"));
+                // result = []; copy all elements
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Call", "__array_new"));
+                emit_op(state, make_op_name("Store", "__sa"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__sa_ci"));
+                // copy loop
+                let _sa_copy = current_pos(state);
+                emit_op(state, make_op_name("Load", "__sa_ci"));
+                emit_op(state, make_op_name("Load", "__sa_src"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _sa_copy_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_name("Load", "__sa"));
+                emit_op(state, make_op_name("Load", "__sa_src"));
+                emit_op(state, make_op_name("Load", "__sa_ci"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__array_push"));
+                emit_op(state, make_op_name("Store", "__sa"));
+                emit_op(state, make_op_name("Load", "__sa_ci"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__sa_ci"));
+                emit_jmp(state, _sa_copy);
+                patch_jump(state, _sa_copy_jz, current_pos(state));
+                // Insertion sort: i=1..len, key=a[i], j=i-1, while j>=0 && a[j]>key: a[j+1]=a[j], j--; a[j+1]=key
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Store", "__sa_i"));
+                let _sa_outer = current_pos(state);
+                emit_op(state, make_op_name("Load", "__sa_i"));
+                emit_op(state, make_op_name("Load", "__sa"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _sa_outer_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // key = a[i]
+                emit_op(state, make_op_name("Load", "__sa"));
+                emit_op(state, make_op_name("Load", "__sa_i"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Store", "__sa_key"));
+                // j = i - 1
+                emit_op(state, make_op_name("Load", "__sa_i"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_sub"));
+                emit_op(state, make_op_name("Store", "__sa_j"));
+                // inner loop: while j >= 0 && a[j] > key
+                let _sa_inner = current_pos(state);
+                emit_op(state, make_op_name("Load", "__sa_j"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Call", "__cmp_ge"));
+                let _sa_inner_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_name("Load", "__sa"));
+                emit_op(state, make_op_name("Load", "__sa_j"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Load", "__sa_key"));
+                emit_op(state, make_op_name("Call", "__cmp_gt"));
+                let _sa_noswap = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // a[j+1] = a[j]
+                emit_op(state, make_op_name("Load", "__sa"));
+                emit_op(state, make_op_name("Load", "__sa_j"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Load", "__sa"));
+                emit_op(state, make_op_name("Load", "__sa_j"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__array_set"));
+                emit_op(state, make_op_simple("Pop"));
+                // j--
+                emit_op(state, make_op_name("Load", "__sa_j"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_sub"));
+                emit_op(state, make_op_name("Store", "__sa_j"));
+                emit_jmp(state, _sa_inner);
+                patch_jump(state, _sa_inner_jz, current_pos(state));
+                patch_jump(state, _sa_noswap, current_pos(state));
+                // a[j+1] = key
+                emit_op(state, make_op_name("Load", "__sa"));
+                emit_op(state, make_op_name("Load", "__sa_j"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Load", "__sa_key"));
+                emit_op(state, make_op_name("Call", "__array_set"));
+                emit_op(state, make_op_simple("Pop"));
+                // i++
+                emit_op(state, make_op_name("Load", "__sa_i"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__sa_i"));
+                emit_jmp(state, _sa_outer);
+                patch_jump(state, _sa_outer_jz, current_pos(state));
+                emit_op(state, make_op_name("Load", "__sa"));
+                return;
+            };
+            if _ce_fname == "split" && len(args) == 2 {
+                // split(str, sep) → array of strings
+                // Only supports single-char separator
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__sp_str"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__sp_sep"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Call", "__array_new"));
+                emit_op(state, make_op_name("Store", "__sp_r"));
+                emit_op(state, make_op_name("Push", ""));
+                emit_op(state, make_op_name("Store", "__sp_cur"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__sp_i"));
+                let _sp_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__sp_i"));
+                emit_op(state, make_op_name("Load", "__sp_str"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _sp_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // ch = str[i]
+                emit_op(state, make_op_name("Load", "__sp_str"));
+                emit_op(state, make_op_name("Load", "__sp_i"));
+                emit_op(state, make_op_name("Call", "__str_char_at"));
+                emit_op(state, make_op_name("Store", "__sp_ch"));
+                // if ch == sep → push cur, reset
+                emit_op(state, make_op_name("Load", "__sp_ch"));
+                emit_op(state, make_op_name("Load", "__sp_sep"));
+                emit_op(state, make_op_name("Call", "__eq"));
+                let _sp_nosplit = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // split: push cur to result
+                emit_op(state, make_op_name("Load", "__sp_r"));
+                emit_op(state, make_op_name("Load", "__sp_cur"));
+                emit_op(state, make_op_name("Call", "__array_push"));
+                emit_op(state, make_op_name("Store", "__sp_r"));
+                emit_op(state, make_op_name("Push", ""));
+                emit_op(state, make_op_name("Store", "__sp_cur"));
+                let _sp_cont = current_pos(state);
+                emit_op(state, make_op_num("Jmp", 0));
+                patch_jump(state, _sp_nosplit, current_pos(state));
+                // no split: cur = cur + ch
+                emit_op(state, make_op_name("Load", "__sp_cur"));
+                emit_op(state, make_op_name("Load", "__sp_ch"));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__sp_cur"));
+                patch_jump(state, _sp_cont, current_pos(state));
+                // i++
+                emit_op(state, make_op_name("Load", "__sp_i"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__sp_i"));
+                emit_jmp(state, _sp_loop);
+                patch_jump(state, _sp_jz, current_pos(state));
+                // push last segment
+                emit_op(state, make_op_name("Load", "__sp_r"));
+                emit_op(state, make_op_name("Load", "__sp_cur"));
+                emit_op(state, make_op_name("Call", "__array_push"));
+                emit_op(state, make_op_name("Store", "__sp_r"));
+                emit_op(state, make_op_name("Load", "__sp_r"));
+                return;
+            };
             // enumerate/zip deferred — nested array creation in loops triggers heap overlap
             // Workaround: use for i in range(len(arr)) with arr[i], or manual loops
             // Save fname+args before compiling (inner Call overwrites them!)
