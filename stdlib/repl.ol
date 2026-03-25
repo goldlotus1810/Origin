@@ -364,15 +364,23 @@ pub fn repl_eval(input) {
     return agent_respond(src);
   }
 
+  // Strip trailing ? = ! for math expressions (P1-D: "2+1?" → "2+1")
+  let _re_code = src;
+  let _re_last_c = __char_code(char_at(src, len(src) - 1));
+  if _re_last_c == 63 { _re_code = __substr(src, 0, len(src) - 1); };  // ?
+  if _re_last_c == 61 { _re_code = __substr(src, 0, len(src) - 1); };  // =
+  if len(_re_code) == 0 { return ""; };
+
   // Phase 1: Tokenize
-  let tokens = tokenize(src);
+  let tokens = tokenize(_re_code);
   if len(tokens) == 0 { return ""; }
 
   // Phase 2: Parse
   let ast = parse(tokens);
 
-  // Parse error → fallback to agent
+  // Parse error → try agent, or show helpful message
   if _g_parse_error == 1 {
+    let _g_parse_error = 0;
     return agent_respond(src);
   }
 
