@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~972KB native binary (995,032 bytes, ELF64, no libc, no deps)
+origin_new.olang = ~980KB native binary (1,003,736 bytes, ELF64, no libc, no deps)
 
 User input
   ↓
@@ -127,6 +127,10 @@ emit reduce([1,2,3,4], fn(a,x) { return a+x; }, 100); // 110 (with init)
 emit any([1,2,3], fn(x) { return x > 2; });         // 1 (true)
 emit all([1,2,3], fn(x) { return x > 0; });         // 1 (true)
 // NOTE: nested chaining clobbers vars. Use: let a = filter(...); map(a, ...)
+
+// Sort + Split (inline compiler builtins)
+emit sort([5,2,8,1,9]);              // [1, 2, 5, 8, 9]
+emit split("a,b,c", ",");            // [a, b, c]
 
 // Pipe (Lego composition — fn{fn{...}}==fn)
 emit pipe(5, fn(x) { return x + 1; }, fn(x) { return x * 2; }); // 12
@@ -244,6 +248,8 @@ reduce(arr, f, init) → fold left with initial value (acc=init)
 any(arr, f) → 1 if f(x) for some x
 all(arr, f) → 1 if f(x) for all x
 pipe(x, f1, f2, ...) → fn(...f2(f1(x)))  // Lego composition
+sort(arr) → new sorted array (insertion sort, non-destructive)
+split(str, sep) → array of strings (single-char separator)
 ```
 
 ---
@@ -378,6 +384,8 @@ build                    Self-build: compile + pack → origin_built.olang
 test                     Run 20 inline tests
 memory                   Show STM turns + Silk edges + Knowledge facts + Fn nodes
 fns                      List registered fn_nodes (name, params, fires)
+save                     Save knowledge to homeos.knowledge (persistent)
+load                     Load knowledge from homeos.knowledge
 help                     Show available commands
 personality <mode>       Set personality: "formal", "casual", "english"
 exit / quit              Exit REPL
@@ -403,6 +411,7 @@ Knowledge Store:
   Learned facts from `learn` command. Max 512 entries.
   knowledge_learn(), knowledge_search(), knowledge_count()
   Retrieval: split query → match keywords → best scoring fact
+  Persistent: `save` → homeos.knowledge, `load` → restore. Auto-load on boot.
 ```
 
 ## Phase 5 — Intelligence Layer (P5)
@@ -454,7 +463,7 @@ P0 Blockers:      ALL FIXED (2026-03-25):
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~972KB)
+make build                    # → origin_new.olang (~980KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -477,9 +486,9 @@ make check-all
 | `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,776 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,132 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,628 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,792 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (406 LOC) |
+| `stdlib/repl.ol` | REPL entry point (429 LOC) |
 | `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,696 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |

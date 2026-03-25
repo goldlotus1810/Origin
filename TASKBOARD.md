@@ -9,8 +9,8 @@
 ## Trạng thái: FULL STACK (2026-03-25)
 
 ```
-origin_new.olang = ~972KB native binary (995,032 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (3,893 LOC Olang)
+origin_new.olang = ~980KB native binary (1,003,736 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (4,080 LOC Olang)
   ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
@@ -20,6 +20,7 @@ origin_new.olang = ~972KB native binary (995,032 bytes)
   ✅ HomeOS: 44 files, 9,696 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
   ✅ P0 blockers FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
   ✅ P1 fixes: reduce 3-arg, knowledge-first response, contradiction instinct, fns command
+  ✅ sort() + split() inline builtins. Persistent knowledge (save/load). ~1MB binary.
   ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
      lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
   ✅ Lambda + map/filter/reduce/any/all/pipe (inline compiler builtins)
@@ -379,6 +380,18 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.100 | DONE ✅ | CLAUDE.md | `fns` REPL command documented |
 | DC.101 | DONE ✅ | CLAUDE.md | Instinct #2 Contradiction detection documented |
 
+### Docs Conflicts — DC.102-DC.108 (phát hiện 2026-03-25 inspect #22)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.102 | DONE ✅ | CLAUDE.md | Binary ~972KB → ~980KB (1,003,736 bytes) |
+| DC.103 | DONE ✅ | CLAUDE.md | semantic.ol 1,628 → 1,792 LOC (+164 from sort+split) |
+| DC.104 | DONE ✅ | CLAUDE.md | repl.ol 406 → 429 LOC (+23 from save/load) |
+| DC.105 | DONE ✅ | CLAUDE.md | `sort(arr)` builtin documented |
+| DC.106 | DONE ✅ | CLAUDE.md | `split(str, sep)` builtin documented |
+| DC.107 | DONE ✅ | CLAUDE.md | `save`/`load` REPL commands documented |
+| DC.108 | DONE ✅ | CLAUDE.md | Persistent knowledge (homeos.knowledge auto-load) documented |
+
 ### BUG-INDEX / BUG-SORT — FIXED ✅ (2026-03-25 Nox)
 
 ```
@@ -554,4 +567,6 @@ VI PHẠM hiện tại:
 2026-03-25  Kira: Inspect #20 — 5/5+2 PASS. DC.85-93 found+fixed (P0-A/B/C undocumented, LOC drift). 969KB.
 2026-03-25  Sora: P1-E/F knowledge-first + reduce 3-arg. P1-I help text. Contradiction instinct. fns command. 972KB.
 2026-03-25  Kira: Inspect #21 — 6/6 PASS. DC.94-101 found+fixed (reduce 3-arg, fns, contradiction undoc). 972KB.
+2026-03-25  Sora: Persistent knowledge (save/load). sort()+split() inline builtins. Binary crosses 1MB: 980KB.
+2026-03-25  Kira: Inspect #22 — 6/6 PASS. DC.102-108 found+fixed (sort, split, save/load, persistent knowledge). 980KB.
 ```
