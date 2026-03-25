@@ -15,33 +15,43 @@ let __boot_learned = 0;
 fn _boot_learn() {
     if __boot_learned == 1 { return; };
     let __boot_learned = 1;
-    // Try loading training data from files (in-repo)
-    let _bl_src = __file_read("docs/training/05_about_origin.md");
-    if len(_bl_src) > 0 { _learn_text(_bl_src); };
-    let _bl_src = __file_read("docs/training/03_world_knowledge.md");
-    if len(_bl_src) > 0 { _learn_text(_bl_src); };
-    let _bl_src = __file_read("docs/training/04_dialog_patterns.md");
-    if len(_bl_src) > 0 { _learn_text(_bl_src); };
-    // Auto-load persistent knowledge FIRST (if saved previously)
-    let _bl_persist = __file_read("homeos.knowledge");
-    if len(_bl_persist) > 0 {
-        _learn_text(_bl_persist);
-    };
-    // FIX-4: only load embedded if NO other source loaded anything
-    if knowledge_count() == 0 {
-        _boot_embedded();
-    };
-    // N.5: Seed KnowTree from embedded facts only (28 facts, safe)
-    // Full 166 training facts deferred — heap pressure too high
+    // Load persistent KnowTree first
+    kt_load("homeos.knowledge");
+    // If empty, load embedded facts directly into KnowTree
     if len(__kt_facts) == 0 {
-        let _bl_ki = 0;
-        let _bl_max = knowledge_count();
-        if _bl_max > 30 { _bl_max = 30; };  // cap at 30 to avoid heap crash
-        while _bl_ki < _bl_max {
-            kt_learn(__knowledge[_bl_ki].text);
-            let _bl_ki = _bl_ki + 1;
-        };
+        _boot_embedded_kt();
     };
+}
+
+fn _boot_embedded_kt() {
+    kt_learn("Origin la du an tao ngon ngu lap trinh tu hosting ten Olang");
+    kt_learn("Olang tu compile chinh minh trong 1021 kilobyte khong dependency");
+    kt_learn("VM cua Olang viet bang x86 64 assembly khoang 5987 dong code");
+    kt_learn("Compiler cua Olang gom lexer parser semantic va codegen");
+    kt_learn("HomeOS la he dieu hanh tri thuc chay tren Olang");
+    kt_learn("HomeOS biet doc sach nho va tra loi tu tri thuc da hoc");
+    kt_learn("goldlotus1810 la nguoi tao du an Origin va dan duong cac AI session");
+    kt_learn("Origin bat dau ngay 11 thang 3 nam 2026");
+    kt_learn("Tu hosting dat duoc ngay 23 thang 3 nam 2026 sau 13 ngay");
+    kt_learn("Viet Nam la quoc gia o Dong Nam A voi thu do Ha Noi");
+    kt_learn("Ho Chi Minh City la thanh pho lon nhat cua Viet Nam");
+    kt_learn("Da Nang la thanh pho bien dep nam giua Viet Nam");
+    kt_learn("Vinh Ha Long la di san the gioi UNESCO o Quang Ninh");
+    kt_learn("Phu Quoc la dao lon nhat cua Viet Nam o Kien Giang");
+    kt_learn("Trai Dat quay quanh Mat Troi mat 365 ngay mot vong");
+    kt_learn("Nuoc soi o 100 do C va dong bang o 0 do C");
+    kt_learn("Einstein phat minh thuyet tuong doi nam 1905");
+    kt_learn("Newton phat minh luc hap dan khi thay tao roi");
+    kt_learn("DNA la phan tu mang thong tin di truyen cua moi sinh vat");
+    kt_learn("Internet bat dau tu ARPANET nam 1969");
+    kt_learn("khi nguoi ta chao nen chao lai than thien va hoi ho the nao");
+    kt_learn("khi nguoi ta buon nen lang nghe va dong cam truoc khi khuyen");
+    kt_learn("khi nguoi ta hoi ve ban than nen tra loi trung thuc va khiem ton");
+    kt_learn("khi nguoi ta cam on nen nhan va chuc ho tot dep");
+    kt_learn("khi nguoi ta gian nen binh tinh lang nghe va khong phan ung gay gat");
+    kt_learn("SHA-256 la thuat toan bam mat ma tao chuoi 64 ky tu hex");
+    kt_learn("Olang co map filter reduce any all va pipe cho functional programming");
+    kt_learn("Moi function trong Olang tu dong dang ky thanh node voi mol va fire count");
 }
 
 fn _boot_embedded() {
@@ -318,9 +328,8 @@ pub fn repl_eval(input) {
   if len(src) > 6 {
     if __substr(src, 0, 6) == "learn " {
       let _rl_text = __substr(src, 6, len(src));
-      let _rl_count = knowledge_learn(_rl_text);
       kt_learn(_rl_text);
-      return "Da hoc. " + kt_stats() + " | Legacy: " + __to_string(_rl_count);
+      return "Da hoc. " + kt_stats();
     };
   }
 
