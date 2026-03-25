@@ -31,6 +31,8 @@ fn _boot_learn() {
     if knowledge_count() == 0 {
         _boot_embedded();
     };
+    // N.5: KnowTree grows from user 'learn' commands (not boot seeded)
+    // Boot seeding 166 facts crashes (heap/scope). Tree grows organically.
 }
 
 fn _boot_embedded() {
@@ -300,7 +302,8 @@ pub fn repl_eval(input) {
     if __substr(src, 0, 6) == "learn " {
       let _rl_text = __substr(src, 6, len(src));
       let _rl_count = knowledge_learn(_rl_text);
-      return "Da hoc. Knowledge: " + __to_string(_rl_count) + " facts.";
+      kt_learn(_rl_text);
+      return "Da hoc. " + kt_stats() + " | Legacy: " + __to_string(_rl_count);
     };
   }
 

@@ -1347,19 +1347,26 @@ pub fn agent_respond(text) {
         };
     };
 
-    // Knowledge retrieval — GATE: skip for heal, gate by score
+    // Knowledge retrieval — KnowTree PRIMARY, legacy FALLBACK
     let _ar_knowledge = "";
     let __g_ks_score = 0;
-    if len(__knowledge) > 0 {
-        if intent != "heal" {
-            _ar_knowledge = knowledge_search(_ar_norm);
+    if intent != "heal" {
+        // N.6: Try KnowTree first (tree walk, no keyword scan)
+        let _ar_kt = kt_search(_ar_norm);
+        if _ar_kt.score > 0 {
+            _ar_knowledge = "(Minh biet: " + _ar_kt.text + ")";
+            let __g_ks_score = _ar_kt.score;
+        } else {
+            // Fallback: legacy keyword search
+            if len(__knowledge) > 0 {
+                _ar_knowledge = knowledge_search(_ar_norm);
+            };
         };
-    };
-    // GT.1: Gate threshold — LOW score → don't attach fact, ask instead
-    if __g_ks_score > 0 {
-        if __g_ks_score < 10 {
-            // Low confidence match — don't present as fact
-            _ar_knowledge = "";
+        // GT.1: Gate threshold
+        if __g_ks_score > 0 {
+            if __g_ks_score < 10 {
+                _ar_knowledge = "";
+            };
         };
     };
 
