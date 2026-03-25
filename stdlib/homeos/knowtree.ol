@@ -192,3 +192,83 @@ pub fn kt_stats() {
            __to_string(len(__kt_words)) + " words, " +
            __to_string(len(__kt_facts)) + " facts";
 }
+
+// ════════════════════════════════════════════════════════════════
+// Book ingest — read file → paragraphs → sentences → words → nodes
+// Hierarchy: book → paragraph → sentence → word → char
+// Each level = node. Silk connects within level.
+// ════════════════════════════════════════════════════════════════
+
+pub fn kt_read_book(_rb_path) {
+    let _rb_content = __file_read(_rb_path);
+    if len(_rb_content) == 0 { return "Error: cannot read " + _rb_path; };
+    // Split into sentences (by newline or period+space)
+    let _rb_sent = "";
+    let _rb_count = 0;
+    let _rb_prev_fact = -1;
+    let _rb_i = 0;
+    while _rb_i < len(_rb_content) {
+        let _rb_ch = __char_code(char_at(_rb_content, _rb_i));
+        let _rb_split = 0;
+        if _rb_ch == 10 { _rb_split = 1; };  // newline
+        if _rb_ch == 46 {                      // period
+            if (_rb_i + 1) < len(_rb_content) {
+                let _rb_next = __char_code(char_at(_rb_content, _rb_i + 1));
+                if _rb_next == 32 { _rb_split = 1; };  // ". "
+                if _rb_next == 10 { _rb_split = 1; };  // ".\n"
+            };
+        };
+        if _rb_split == 1 {
+            if len(_rb_sent) > 10 {
+                // Skip comment lines
+                if __char_code(char_at(_rb_sent, 0)) != 35 {  // not #
+                    let _rb_fid = len(__kt_facts);
+                    kt_learn(_rb_sent);
+                    // Silk: connect consecutive sentences (implicit paragraph structure)
+                    if _rb_prev_fact >= 0 {
+                        if _rb_fid < len(__kt_facts) {
+                            // Co-activate words from consecutive sentences
+                            _kt_silk_sentences(_rb_prev_fact, _rb_fid);
+                        };
+                    };
+                    _rb_prev_fact = _rb_fid;
+                    _rb_count = _rb_count + 1;
+                };
+            };
+            _rb_sent = "";
+        } else {
+            _rb_sent = _rb_sent + char_at(_rb_content, _rb_i);
+        };
+        let _rb_i = _rb_i + 1;
+    };
+    // Last sentence
+    if len(_rb_sent) > 10 {
+        if __char_code(char_at(_rb_sent, 0)) != 35 {
+            kt_learn(_rb_sent);
+            _rb_count = _rb_count + 1;
+        };
+    };
+    return "Read " + _rb_path + ": " + __to_string(_rb_count) + " sentences. " + kt_stats();
+}
+
+fn _kt_silk_sentences(_kss_f1, _kss_f2) {
+    // Cross-sentence Silk: connect shared words between consecutive sentences
+    if _kss_f1 >= len(__kt_facts) { return; };
+    if _kss_f2 >= len(__kt_facts) { return; };
+    let _kss_w1 = __kt_facts[_kss_f1].words;
+    let _kss_w2 = __kt_facts[_kss_f2].words;
+    // For each word in sentence 1, check if also in sentence 2
+    let _kss_i = 0;
+    while _kss_i < len(_kss_w1) {
+        let _kss_j = 0;
+        while _kss_j < len(_kss_w2) {
+            if _kss_w1[_kss_i] == _kss_w2[_kss_j] {
+                // Same word in both sentences → strong Silk connection
+                let _kss_wtext = __kt_words[_kss_w1[_kss_i]].text;
+                silk_co_activate(_kss_wtext, _kss_wtext, "read");
+            };
+            let _kss_j = _kss_j + 1;
+        };
+        let _kss_i = _kss_i + 1;
+    };
+}

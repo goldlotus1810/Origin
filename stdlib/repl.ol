@@ -263,6 +263,14 @@ pub fn repl_eval(input) {
     return _rm_out;
   }
 
+  // Read book: ingest file into KnowTree (hierarchical nodes + Silk)
+  if len(src) > 5 {
+    if __substr(src, 0, 5) == "read " {
+      let _rd_path = __substr(src, 5, len(src));
+      return kt_read_book(_rd_path);
+    };
+  }
+
   // Learn file: read file and split into sentences for knowledge
   if len(src) > 11 {
     if __substr(src, 0, 11) == "learn_file " {
