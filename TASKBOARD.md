@@ -9,15 +9,16 @@
 ## Trạng thái: FULL STACK (2026-03-25)
 
 ```
-origin_new.olang = ~965KB native binary (988,381 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (3,453 LOC Olang)
+origin_new.olang = ~969KB native binary (992,115 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (3,850 LOC Olang)
   ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
   ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
   ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 20/20 tests
-  ✅ ASM VM x86_64 (5,767 LOC), no libc, zero dependencies
+  ✅ ASM VM x86_64 (5,774 LOC), no libc, zero dependencies
   ✅ HomeOS: 44 files, 9,690 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
+  ✅ P0 blockers FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
   ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
      lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
   ✅ Lambda + map/filter/reduce/any/all/pipe (inline compiler builtins)
@@ -350,6 +351,20 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.83 | DONE ✅ | CLAUDE.md | LG.4 fn_dream_cluster + skill_promote documented |
 | DC.84 | DONE ✅ | TASKBOARD | Phase 5D COMPLETE updated |
 
+### Docs Conflicts — DC.85-DC.93 (phát hiện 2026-03-25 inspect #20)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.85 | DONE ✅ | CLAUDE.md | Binary ~965KB → ~969KB (992,115 bytes) |
+| DC.86 | DONE ✅ | CLAUDE.md | vm_x86_64.S 5,767 → 5,774 LOC (+7 from P0-C) |
+| DC.87 | DONE ✅ | CLAUDE.md | semantic.ol 1,594 → 1,596 LOC (+2 from P0-B) |
+| DC.88 | DONE ✅ | CLAUDE.md | repl.ol 355 → 395 LOC (+40 from P0-A embedded) |
+| DC.89 | DONE ✅ | CLAUDE.md | P0-B documented: ExprStmt Pop→Emit (bare expr auto-print) |
+| DC.90 | DONE ✅ | CLAUDE.md | P0-C documented: div/0 returns 0 (was halt) |
+| DC.91 | DONE ✅ | CLAUDE.md | P0-A documented: _boot_embedded() 28 facts fallback |
+| DC.92 | DONE ✅ | CLAUDE.md | REPL Commands: added `personality` command |
+| DC.93 | INFO | — | P0-B side-effect: set_at() auto-emits in loops (known, documented) |
+
 ### BUG-INDEX / BUG-SORT — FIXED ✅ (2026-03-25 Nox)
 
 ```
@@ -521,4 +536,6 @@ VI PHẠM hiện tại:
 2026-03-25  Kira: Inspect #18 — 7/7 PASS (incl. pipe). DC.75-79 found+fixed. 963KB.
 2026-03-25  Nox: T5 LG.3 Silk mol-keyed (256 edges) + LG.4 Dream fn clustering. Phase 5D COMPLETE.
 2026-03-25  Kira: Inspect #19 — 6/6 PASS. DC.80-84 found+fixed. LG.1-5 ALL DONE. 965KB.
+2026-03-25  Sora: P0-B ExprStmt auto-emit + P0-C div/0 safe. P0-A embedded knowledge (28 facts). 969KB.
+2026-03-25  Kira: Inspect #20 — 5/5+2 PASS. DC.85-93 found+fixed (P0-A/B/C undocumented, LOC drift). 969KB.
 ```

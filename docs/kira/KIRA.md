@@ -125,6 +125,8 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
 - Inspect #15: Phát hiện BUG-SORT regression (bubble sort broken). DC.51-61.
 - Inspect #16: ROOT CAUSE xác định — BUG-INDEX: a[BinOp] → a[0].
   Docs 100% synced sau Sora fix DC.51-61. ZERO new DCs.
+- Inspect #17-19: Lambda/HOF/pipe/LG.1-5 docs synced. DC.62-84. Phase 5D COMPLETE.
+- Inspect #20: P0-A/B/C patches audit. DC.85-93. Embedded knowledge, auto-emit, div/0 safe.
 
 ---
 
@@ -144,3 +146,4 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
 | 17 | 2026-03-25 | 10/10 ✅ | DC.62-74 | Lambda+HOF+mol undoc, LOC drift. ALL FIXED. |
 | 18 | 2026-03-25 | 7/7 ✅ | DC.75-79 | pipe()+LG.1/5 undoc, LOC drift. ALL FIXED. |
 | 19 | 2026-03-25 | 6/6 ✅ | DC.80-84 | LG.3/4 undoc, HomeOS +99. Phase 5D COMPLETE. |
+| 20 | 2026-03-25 | 7/7 ✅ | DC.85-93 | P0-A/B/C undoc, LOC drift. ALL FIXED. 969KB. |
