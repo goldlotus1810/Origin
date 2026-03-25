@@ -48,7 +48,7 @@ echo 'let d = { name: "Kira", age: 3 }; emit d.name' | ./origin_new.olang
 ### Kiến trúc Origin (2026-03-24)
 
 ```
-origin_new.olang = ~943KB ELF64 static binary (no libc, no deps)
+origin_new.olang = ~961KB ELF64 static binary (no libc, no deps)
   100% SELF-COMPILE: 48/48 files (44 HomeOS + 4 bootstrap)
 
 Input → REPL (ASM) → repl_eval:
@@ -78,13 +78,13 @@ let my_var = pop(_save_stack); // restore
 ### Files quan trọng (LOC 2026-03-24)
 
 ```
-vm/x86_64/vm_x86_64.S          — ASM VM (5,634 LOC)
+vm/x86_64/vm_x86_64.S          — ASM VM (5,767 LOC)
 stdlib/bootstrap/lexer.ol       — Tokenizer (298 LOC)
-stdlib/bootstrap/parser.ol      — Parser recursive descent (1,136 LOC)
-stdlib/bootstrap/semantic.ol    — Semantic → direct bytecode (1,336 LOC)
+stdlib/bootstrap/parser.ol      — Parser recursive descent (1,132 LOC)
+stdlib/bootstrap/semantic.ol    — Semantic → direct bytecode (1,569 LOC)
 stdlib/bootstrap/codegen.ol     — Codegen helpers (429 LOC)
-stdlib/repl.ol                  — REPL entry (343 LOC)
-stdlib/homeos/*.ol              — HomeOS stdlib (44 files, 9,416 LOC)
+stdlib/repl.ol                  — REPL entry (355 LOC)
+stdlib/homeos/*.ol              — HomeOS stdlib (44 files, 9,559 LOC)
 TASKBOARD.md                    — Task tracker
 CLAUDE.md                       — AI contributor guide
 ```
@@ -92,12 +92,10 @@ CLAUDE.md                       — AI contributor guide
 ### Bugs đang mở
 
 ```
-BUG-INDEX (NGHIÊM TRỌNG — phát hiện inspect #16):
-  a[expr] khi expr là BinOp (a[j+1], a[1+1], a[x+1]) → luôn trả a[0]
-  a[simple_var] (a[j], a[idx]) → hoạt động đúng
-  Workaround: let idx = j + 1; a[idx]
-  BUG-SORT (bubble sort) là hệ quả của BUG-INDEX
-  Root cause: parser desugar a[i] → __array_get(a, i), BinOp trong [] → 0
+BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
+  Root cause: ArrayLit heap overlap in a[expr] desugar
+  Fix: push-based array → capacity pre-allocated
+  20/20 tests, bubble sort [1,2,5,8,9] ✅
 ```
 
 ---
@@ -143,3 +141,4 @@ BUG-INDEX (NGHIÊM TRỌNG — phát hiện inspect #16):
 | 14 | 2026-03-24 | 8/8+16/16 | DC.46-50 | Spec v3 deep audit |
 | 15 | 2026-03-24 | 4/5 ❌ | DC.51-61 | BUG-SORT discovered |
 | 16 | 2026-03-24 | 4/5 ❌ | ZERO | ROOT CAUSE: a[BinOp]→a[0] |
+| 17 | 2026-03-25 | 10/10 ✅ | DC.62-74 | Lambda+HOF+mol undoc, LOC drift. ALL FIXED. |

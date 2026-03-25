@@ -6,20 +6,22 @@
 
 ---
 
-## Trạng thái: FULL STACK (2026-03-24)
+## Trạng thái: FULL STACK (2026-03-25)
 
 ```
-origin_new.olang = ~935KB native binary (957,442 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (3,013 LOC Olang)
+origin_new.olang = ~961KB native binary (983,424 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen (3,428 LOC Olang)
   ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
   ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
-  ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 16/16 tests
-  ✅ ASM VM x86_64 (5,522 LOC), no libc, zero dependencies
-  ✅ HomeOS: 43 files, 9,142 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
+  ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 20/20 tests
+  ✅ ASM VM x86_64 (5,767 LOC), no libc, zero dependencies
+  ✅ HomeOS: 44 files, 9,559 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
   ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
      lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
+  ✅ Lambda + map/filter/reduce/any/all (inline compiler builtins)
+  ✅ T5 Layer 1: Knowledge fix, Instincts, mol builtins, fn_node registry
   ✅ Spec v3: SC.1,7,9-13 done (7/16)
 ```
 
@@ -310,6 +312,24 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.60 | DONE ✅ | ^ (XOR) in precedence table |
 | DC.61 | DONE ✅ | bare return; documented |
 
+### Docs Conflicts — DC.62-DC.74 (phát hiện 2026-03-25 inspect #17)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.62 | DONE ✅ | CLAUDE.md | parser.ol 1,136 → 1,132 LOC |
+| DC.63 | DONE ✅ | CLAUDE.md | semantic.ol 1,336 → 1,569 LOC (+233) |
+| DC.64 | DONE ✅ | CLAUDE.md | repl.ol 343 → 355 LOC |
+| DC.65 | DONE ✅ | CLAUDE.md | VM 5,634 → 5,767 LOC (+133) |
+| DC.66 | DONE ✅ | CLAUDE.md | HomeOS 9,416 → 9,559 LOC |
+| DC.67 | DONE ✅ | CLAUDE.md | Binary ~943KB → ~961KB |
+| DC.68 | DONE ✅ | CLAUDE.md | Lambda syntax + AST added |
+| DC.69 | DONE ✅ | CLAUDE.md | map/filter/reduce/any/all documented |
+| DC.70 | DONE ✅ | CLAUDE.md | __mol_s/r/v/a/t + __mol_pack documented |
+| DC.71 | DONE ✅ | CLAUDE.md | T5 ND.4 fn_node API noted in Phase 5 |
+| DC.72 | DONE ✅ | CLAUDE.md | eval_bc_base cross-boundary mechanism |
+| DC.73 | DONE ✅ | TASKBOARD | Header stats updated |
+| DC.74 | DONE ✅ | CLAUDE.md | Tests 16→20 updated |
+
 ### BUG-INDEX / BUG-SORT — FIXED ✅ (2026-03-25 Nox)
 
 ```
@@ -474,4 +494,6 @@ VI PHẠM hiện tại:
             Instinct: [fact/opinion/hypothesis] labels. Curiosity. r_dispatch + temporal_tag.
 2026-03-25  Nox: T5 ND.2 mol ASM builtins (__mol_s/r/v/a/t + __mol_pack). 100x faster extract.
             ND.4 fn_node metadata registry (register/fire/link/hot). Phase 5B core DONE.
+2026-03-25  Kira: Inspect #17 — 10/10 PASS (5 core + 4 new HOF + test 20/20).
+            DC.62-74 found+fixed (LOC drift, lambda/HOF/mol undocumented). 961KB.
 ```
