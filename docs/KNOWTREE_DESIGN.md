@@ -1,301 +1,284 @@
-# KnowTree Design — o{} → Ln-1
+# KnowTree Design — o{P{P{...}}}
 
-> **Nox — 2026-03-25, sửa theo Lupin**
-> **L0 = cây tổng. L1 = nhánh chính. Ln-1 = lá.**
+> **Nox — 2026-03-25, v3 theo Lupin**
 
 ---
 
-## I. L0 — KnowTree GỐC
+## HÌNH DUNG
 
 ```
-L0 = o{KnowTree}
-  Đây là CÂY TỔNG chứa MỌI THỨ.
-  Mỗi nhánh L0 = 1 loại tri thức.
+CÂY:
+  L0-L1 = RỄ CÂY      — bộ não, cơ chế, engine (cố định, nhỏ)
+  L2→Ln-1 = THÂN + TÁN LÁ — thư viện tri thức (phát triển, vô hạn)
 
-o{KnowTree} = [
-    UDC,            // 9,584 SDF gốc — SEALED, immutable
-    Emoji_UTF32,    // 155,000+ alias → trỏ về UDC
-    Learning,       // tri thức học được (facts, books, conversations)
-    Memory,         // STM, Silk edges, Dream clusters — working memory
-    Agent,          // AAM, LeoAI, Chiefs, Workers
-    Skill,          // 7 instincts + learned skills
-    Code,           // fn nodes, bytecode chains
-    Program,        // origin.olang, tools, configs
-    Device,         // hardware: sensors, display, network interfaces
-]
+MỖI NHÁNH = 1 array tối đa 65,536 phần tử (u16 address space).
+Mỗi phần tử = 1 nhánh con, cũng là array 65,536.
+Lồng nhau. Fractal.
 
-Mỗi phần tử = u16 index trỏ đến nhánh L1 tương ứng.
-Kích thước L0: 9 × 2B = 18 bytes
+  65,536 × 65,536 × 65,536 × ... = ∞
+
+DNA: 4 bases, chuỗi vô hạn.
+KnowTree: 65,536 slots/nhánh, lồng vô hạn.
 ```
 
 ---
 
-## II. L1 — NHÁNH CHÍNH (phân loại từ L0)
+## L0 — RỄ: BỘ NÃO
 
 ```
-Mỗi nhánh L0 phân thành các nhóm chính ở L1:
+L0 = nơi chứa:
+  - Bộ não (engine đọc/ghi KnowTree)
+  - Bản năng (7 instincts, hardcoded)
+  - Các cơ chế (14 DNA mechanisms)
+  - UDC (9,584 công thức SDF — bảng tuần hoàn)
+  - Công thức toán (compose, amplify, distance, entropy)
+  - Encoder ∫ (đọc input → ghi vào KnowTree)
+  - Decoder ∂ (đọc KnowTree → output)
 
-L0:UDC → L1[
-    SDF,        // 14 blocks, 1,838 chars (Shape)
-    MATH,       // 21 blocks, 2,563 chars (Relation)
-    EMOTICON,   // 17 blocks, 3,487 chars (Valence + Arousal)
-    MUSICAL,    // 7 blocks, 958 chars (Time)
-]
+L0 KHÔNG PHẢI dữ liệu. L0 LÀ ENGINE.
+L0 đọc từ L2+. L0 ghi lên L2+.
+L0 = ribosome. L2+ = DNA.
 
-L0:Emoji_UTF32 → L1[
-    Emoji_faces,        // 😀😂😭😡... → alias trỏ về E.09
-    Emoji_people,       // 👨👩👶🧑... → alias trỏ về E.08
-    Emoji_animals,      // 🐱🐶🦁... → alias trỏ về E.08
-    Emoji_objects,      // 🔥⭐💎... → alias trỏ về E.08
-    Emoji_symbols,      // ❤✅❌... → alias trỏ về E.02
-    UTF32_latin,        // 172,849 Unicode assigned chars
-    UTF32_cjk,          // 97,000 CJK ideographs
-    UTF32_hangul,       // 11,172 Hangul syllables
-    UTF32_other_scripts,// Arabic, Cyrillic, Thai...
-]
-
-L0:Learning → L1[
-    facts,              // "Ha Noi la thu do cua Viet Nam"
-    books,              // "Cuon Theo Chieu Gio"
-    conversations,      // session history
-    observations,       // sensor data learned
-]
-
-L0:Memory → L1[
-    STM,                // short-term: last 32 turns
-    Silk,               // Hebbian edges (cross-branch)
-    Dream,              // consolidated clusters
-    QR,                 // promoted, append-only, immutable
-]
-
-L0:Agent → L1[
-    AAM,                // approve/reject (tier 0)
-    LeoAI,              // learn+dream+curate (tier 1)
-    HomeChief,          // quản lý Worker nhà
-    VisionChief,        // quản lý Worker camera
-    NetworkChief,       // quản lý Worker network
-]
-
-L0:Skill → L1[
-    Honesty,            // instinct #1
-    Contradiction,      // instinct #2
-    Causality,          // instinct #3
-    Abstraction,        // instinct #4
-    Analogy,            // instinct #5
-    Curiosity,          // instinct #6
-    Reflection,         // instinct #7
-    learned_skills,     // Dream promoted skill clusters
-]
-
-L0:Code → L1[
-    fn_nodes,           // user-defined functions
-    builtin_nodes,      // map, filter, reduce, sort...
-    lambda_nodes,       // anonymous closures
-]
-
-L0:Program → L1[
-    origin_binary,      // origin.olang metadata
-    config,             // settings, personality
-    training_data,      // docs/training/*.md
-]
-
-L0:Device → L1[
-    x86_64,             // current platform
-    arm64,              // mobile (skeleton)
-    wasm,               // browser (skeleton)
-    sensors,            // future: camera, mic, bio
-]
+Kích thước L0: CỐ ĐỊNH.
+  UDC: 9,584 × 2B = ~20 KB
+  Cơ chế: code trong origin.olang
+  Instincts: code trong origin.olang
+  Engine: code trong origin.olang
+  → L0 = binary + 20 KB UDC data
 ```
 
 ---
 
-## III. L2 → L3 → ... → Ln-2 — PHÂN NHÁNH TIẾP
+## L1 — RỄ: VẬN HÀNH
 
 ```
-Mỗi nhánh L1 tiếp tục phân thành L2 (nhóm con).
-Mỗi nhóm L2 tiếp tục phân thành L3 (nhánh con).
-Cứ thế cho đến khi KHÔNG THỂ PHÂN NỮA.
+L1 = mọi thứ để HomeOS vận hành:
+  - Compiler pipeline (lexer → parser → semantic → codegen)
+  - VM runtime (opcodes, stack, heap)
+  - REPL loop (read → classify → route → respond)
+  - Intelligence pipeline (encode → instinct → gate → compose)
+  - Silk engine (structural + Hebbian)
+  - Dream engine (cluster → promote → prune)
+  - SecurityGate (3 layers)
+  - ConversationCurve (f, f', f'')
+  - Personality (templates, tone)
 
-Ví dụ UDC:
+L1 = hệ điều hành. Chạy trên L0 (engine).
+L1 đọc/ghi L2+ (thư viện).
+L1 = riêng tư cho từng instance HomeOS.
 
-L1:SDF → L2[
-    Arrows,             // S.01, 112 chars
-    Misc_Technical,     // S.02, 256 chars
-    Box_Drawing,        // S.03, 128 chars
-    Block_Elements,     // S.04, 32 chars
-    Geometric_Shapes,   // S.05, 96 chars
-    Dingbats,           // S.06, 192 chars
-    ...14 blocks total
-]
+Kích thước L1: CỐ ĐỊNH.
+  origin.olang binary: ~1 MB
+  Working memory: STM 32 turns, Silk ~40 KB
+  → L1 = binary footprint
+```
 
-L2:Arrows → L3[
-    Leftwards,          // ← ⇐ ↞ ↢ ... (11 chars)
-    Rightwards,         // → ⇒ ↠ ↣ ... (11 chars)
-    Bidirectional,      // ↔ ⇔ ↭ ... (8 chars)
-    Upwards,            // ↑ ⇑ ↟ ... (6 chars)
-    Downwards,          // ↓ ⇓ ↡ ... (7 chars)
-    Diagonal,           // ↗ ↘ ↙ ↖ ... (8 chars)
-    Curved,             // ↩ ↪ ...
-    Dashed,             // ⇠ ⇢ ...
-    Heavy,              // ➡ ➜ ...
-    Wave,               // ↝ ...
-]
+---
 
-L3:Leftwards → Ln-1[
-    ← (U+2190),        // LEFTWARDS ARROW
-    ⇐ (U+21D0),        // LEFTWARDS DOUBLE ARROW
-    ↞ (U+219E),        // LEFTWARDS TWO HEADED ARROW
-    ...11 leaves
-]
+## L2 → Ln-1 — THÂN CÂY + TÁN LÁ: THƯ VIỆN
 
-Ví dụ Learning:
+```
+L2 = gốc thư viện. ĐÂY là nơi KnowTree BẮT ĐẦU PHÁT TRIỂN.
 
-L1:facts → L2[
-    geography,          // "Ha Noi la...", "Viet Nam o..."
-    science,            // "Einstein phat minh...", "DNA la..."
-    history,            // "Origin bat dau ngay 11..."
-    dialog_patterns,    // "khi nguoi ta chao..."
-    tech,               // "SHA-256 la..."
-]
+L2 = array[65,536] — tối đa 65,536 NHÁNH CHÍNH:
+  [0] = facts          (tri thức đã học)
+  [1] = books          (sách đã đọc)
+  [2] = conversations  (lịch sử hội thoại)
+  [3] = skills         (kỹ năng đã tổng hợp)
+  [4] = people         (người đã gặp)
+  [5] = places         (nơi đã biết)
+  [6] = events         (sự kiện đã xảy ra)
+  [7] = emotions       (ký ức cảm xúc)
+  [8] = songs          (âm nhạc đã nghe)
+  [9] = images         (hình ảnh đã thấy)
+  ...
+  [N] = bất kỳ loại tri thức nào HomeOS học được
+  ...
+  → CÒN TRỐNG hàng chục ngàn slots cho tương lai
 
-L2:geography → L3[
-    Vietnam,            // facts about Vietnam
-    Japan,              // facts about Japan
-    USA,                // facts about USA
+Mỗi slot L2 = 1 nhánh chính.
+Mỗi nhánh = array[65,536] nhánh con.
+Mỗi nhánh con = array[65,536] nhánh con nữa.
+...đến Ln-1 (lá).
+
+Kích thước L2+: PHÁT TRIỂN MỖI NGÀY.
+  Bắt đầu: 0 bytes (chưa học gì)
+  Sau 1 ngày: vài KB
+  Sau 1 năm: vài MB
+  Sau 1 đời: vài chục MB
+  Không bao giờ đầy: 65,536^depth = ∞ thực tế
+```
+
+---
+
+## CẤU TRÚC MỘT NHÁNH
+
+```
+Mỗi nhánh = o{} = array tối đa 65,536 phần tử.
+Mỗi phần tử = 2 bytes (u16 P_weight HOẶC u16 index trỏ đến nhánh con).
+
+Phần tử là LÁ khi: nó là P_weight cuối cùng, không trỏ đi đâu.
+Phần tử là NHÁNH khi: nó trỏ đến 1 array con.
+
+o{books}                              ← L2, 1 array
+  [0] = "Cuon Theo Chieu Gio"        ← nhánh, trỏ đến array con
+    [0] = Loi_Gioi_Thieu             ← nhánh
+      [0] = "Margaret Mitchell..."    ← nhánh
+        [0] = "Margaret"              ← nhánh
+          [0] = M                     ← LÁ (Ln-1), P_weight, hết
+          [1] = a                     ← LÁ
+          [2] = r                     ← LÁ
+          ...
+        [1] = "Mitchell"              ← nhánh
+          [0] = M                     ← LÁ
+          [1] = i                     ← LÁ
+          ...
+      [1] = "Ba sinh nam 1900..."     ← nhánh → words → chars → LÁ
+    [1] = Chuong_1                    ← nhánh
+      [0] = Doan_1                    ← nhánh
+        ...đến chars → LÁ
     ...
-]
-
-L3:Vietnam → Ln-1[
-    "Viet Nam la quoc gia o Dong Nam A voi thu do Ha Noi"   ← LÁ
-    "Ho Chi Minh City la thanh pho lon nhat cua Viet Nam"   ← LÁ
-    "Da Nang la thanh pho bien dep nam giua Viet Nam"       ← LÁ
+    [62] = Chuong_63                  ← nhánh
+  [1] = "Hoang Tu Be"                ← nhánh khác
     ...
-]
 
-Ví dụ Sách:
-
-L1:books → L2[
-    "Cuon Theo Chieu Gio",
-    "Hoang Tu Be",
-    ...
-]
-
-L2:"Cuon Theo Chieu Gio" → L3[
-    Loi_Gioi_Thieu,
-    Chuong_1,
-    Chuong_2,
-    ...
-    Chuong_63,
-]
-
-L3:Chuong_1 → L4[
-    Doan_1,
-    Doan_2,
-    ...
-]
-
-L4:Doan_1 → L5[
-    Cau_1,
-    Cau_2,
-    ...
-]
-
-L5:Cau_1 → L6[
-    Tu_1, Tu_2, Tu_3, ...    ← words
-]
-
-L6:Tu_1 → Ln-1[
-    char_1, char_2, char_3, ...    ← LÁ (Unicode codepoints)
-]
+THỨ TỰ TRONG ARRAY = STRUCTURAL SILK = 0 BYTES.
+Chương 1 TRƯỚC chương 2 vì index [0] < [1].
 ```
 
 ---
 
-## IV. Ln-1 = LÁ — CÁ THỂ CUỐI CÙNG
+## FRACTAL: 65,536^N
 
 ```
-Ln-1 = node KHÔNG THỂ PHÂN TIẾP NỮA.
+Depth 1: 65,536 nhánh
+Depth 2: 65,536 × 65,536 = 4,294,967,296 (4.3 tỷ)
+Depth 3: 65,536^3 = 281 nghìn tỷ
+Depth 4: 65,536^4 = 18.4 triệu tỷ tỷ
 
-Mỗi lá = 1 P_weight (2 bytes).
-Lá KHÔNG có con. Lá IS giá trị.
+Thực tế: không bao giờ dùng hết.
+1 cuốn sách 100 trang:
+  ~60 chương × ~50 đoạn × ~5 câu × ~10 từ × ~5 ký tự
+  = ~750,000 lá
+  = 0.001% của depth 2 (4.3 tỷ)
 
-Ví dụ lá:
-  ← (U+2190) = P_weight [S:1, R:5, V:4, A:4, T:2]     ← UDC char, immutable
-  "tình yêu"  = P_weight [S:0, R:0, V:7, A:5, T:2]     ← learned word
-  fn fib      = P_weight [S:0, R:0, V:4, A:4, T:3]     ← fn node
-  "Ha Noi..." = P_weight [S:0, R:2, V:5, A:3, T:0]     ← fact node
+1 đời đọc 200 cuốn:
+  = 150,000,000 lá
+  = 3.5% của depth 2
 
-Khi 1 node có thể phân tiếp → nó KHÔNG phải lá → nó là nhánh.
-Khi 1 node KHÔNG thể phân → nó LÀ lá = Ln-1.
-
-Depth khác nhau cho từng nhánh:
-  UDC char: L0 → L1 → L2 → L3 → Ln-1=L4 (depth 4)
-  Sách câu: L0 → L1 → L2 → L3 → L4 → L5 → L6 → Ln-1=L7 (depth 7)
-  Fn node:  L0 → L1 → Ln-1=L2 (depth 2)
-
-CÂY KHÔNG CÓ DEPTH CỐ ĐỊNH.
-Mỗi nhánh phân đến khi hết phân.
-Ln-1 ở bất kỳ depth nào.
+CÂY KHÔNG BAO GIỜ ĐẦY.
+Giống DNA: genome 3.2 tỷ base pairs, nhưng KHÔNG GIAN tiềm năng
+  = 4^3,200,000,000 ≈ ∞
+  Sinh vật chỉ dùng 1 giọt trong đại dương.
 ```
 
 ---
 
-## V. SILK TRONG CÂY
+## SILK TRONG CÂY FRACTAL
 
 ```
-Structural Silk = thứ tự trong array = 0 bytes
-  chain[A, B, C] → A→B→C implicit
+Structural Silk = thứ tự trong array = 0 bytes.
+  Chương 1 trước chương 2. Từ "Hà" trước "Nội".
+  Engine chạy thẳng từ đầu đến cuối → ra giá trị.
 
-Hebbian Silk = NỐI NHÁNH KHÁC NHAU
-  "Scarlett" ở L3:Chuong_1 ↔ "Scarlett" ở L3:Chuong_30
-  "buồn" ở L1:Memory:STM ↔ "mất việc" ở L1:Learning:facts
+Hebbian Silk = NỐI NHÁNH KHÁC NHAU.
+  "Scarlett" ở L2:books:"Cuon Theo Chieu Gio":Chuong_1
+  ↔
+  "Scarlett" ở L2:books:"Cuon Theo Chieu Gio":Chuong_30
 
-  Hebbian TẠO NODE MỚI ở Ln-1:
-    co_activate("buồn", "mất_việc")
-    → nếu w ≥ φ⁻¹ → Dream promote
-    → node mới "mất_mát" ở L1:Learning
-    → LÁ MỚI ở Ln-1 đúng vị trí trong cây
+  "buồn" ở L2:conversations:session_1:turn_5
+  ↔
+  "mất việc" ở L2:facts:personal
 
-  8 bytes/edge: from(2B) + to(2B) + weight(2B) + emotion(2B)
-```
+  Hebbian = cầu nối NGANG giữa các nhánh.
+  Structural = đường đi DỌC trong 1 nhánh.
 
----
-
-## VI. DUNG LƯỢNG
-
-```
-L0 root:           18 bytes (9 nhánh × 2B)
-L1 branches:      ~100 nhánh × 2B = 200 bytes
-L2 groups:        ~500 nhóm × 2B = 1 KB
-L3 sub-groups:    ~2,000 nhánh × 2B = 4 KB
-L4+ leaves:       ~10,000 lá × 2B = 20 KB
-───────────────────────────────────────
-TOTAL TREE:       ~25 KB (fits L1 cache)
-
-Alias table:      ~1 MB (riêng biệt)
-Chain data:       2 bytes/link (biến thiên theo nội dung)
-Hebbian Silk:     ~40 KB (5,000 edges × 8B)
-
-1 cuốn sách thêm: ~400 KB chain data
-1 đời: ~80 MB
-256 MB heap: đủ cho 3 đời
+  Khi Hebbian edge đủ mạnh (w ≥ φ⁻¹) + fire ≥ Fib(n):
+    → Dream promote → TẠO NODE MỚI
+    → Node mới = LÁ MỚI ở đúng vị trí trong cây
+    → "mất_mát" = LCA("buồn", "mất_việc") → learned concept
 ```
 
 ---
 
-## VII. NGUYÊN TẮC
+## ENCODER ∫ — L0 GHI LÊN L2+
 
 ```
-1. L0 = MỌI THỨ. Không có gì ngoài L0.
-2. Mỗi nhánh phân đến khi hết phân → Ln-1 = lá.
-3. Depth không cố định. Mỗi nhánh có depth riêng.
-4. Lá = 2 bytes (P_weight). Không phân tiếp.
-5. Thứ tự trong array = Structural Silk = 0 bytes.
-6. Hebbian = CHỈ cross-branch. Tạo lá mới khi chín.
-7. UDC lá = SEALED. Learning lá = Hebbian → Dream → QR → SEALED.
-8. Traverse: L0 → L1 → ... → Ln-1 = O(depth). depth < 10 thực tế.
+Input text → L0 engine processes:
+  1. Tokenize (L0:compiler)
+  2. Alias lookup (L0:UDC + L1:alias_table)
+  3. Compose → P_weight (L0:compose formula)
+  4. GHI vào L2+ (KnowTree grows)
+
+"learn Ha Noi la thu do cua Viet Nam"
+  → L0 tokenize → ["Ha", "Noi", "la", "thu", "do", "cua", "Viet", "Nam"]
+  → L0 compose → P_weight for sentence
+  → GHI vào L2:facts:geography:Vietnam → LÁ MỚI
+  → Silk: co_activate("Ha Noi", "thu do") — Hebbian cross-word
 ```
 
 ---
 
-*o{}, chain(), splice(), φ⁻¹. Hết.*
+## DECODER ∂ — L0 ĐỌC TỪ L2+
+
+```
+Query "Ha Noi o dau?"
+  → L0 tokenize → ["Ha", "Noi", "o", "dau"]
+  → L0 tìm trong L2+:
+    L2:facts → search("Ha Noi") → walk tree → tìm nhánh Vietnam
+    → traverse → lá "Ha Noi la thu do cua Viet Nam"
+  → L0 decode → output text
+
+Search = walk tree O(depth).
+KHÔNG scan toàn bộ. Walk từ gốc L2 xuống lá.
+```
+
+---
+
+## DUNG LƯỢNG
+
+```
+L0 (engine + UDC):    ~1 MB (binary) + 20 KB (UDC data) = CỐ ĐỊNH
+L1 (runtime):         ~40 KB working memory = CỐ ĐỊNH
+L2+ (thư viện):       PHÁT TRIỂN
+
+  1 lá = 2 bytes
+  1 nhánh header = 2 bytes (count)
+  1 link trong chain = 2 bytes
+
+  1 cuốn sách:
+    Chains: ~350 KB
+    New leaves: ~10 KB
+    Hebbian edges: ~40 KB
+    Total: ~400 KB
+
+  256 MB heap:
+    L0+L1: ~1.1 MB
+    Còn lại cho L2+: ~255 MB
+    = ~637 cuốn sách
+    = 1 đời đọc sách dư sức
+
+  16 GB disk:
+    = ~40,000 cuốn sách
+    = thư viện nhỏ
+```
+
+---
+
+## NGUYÊN TẮC
+
+```
+1. L0-L1 = RỄ (engine, cố định). L2-Ln-1 = TÁN LÁ (data, phát triển).
+2. Mỗi nhánh = array[65,536]. Lồng nhau = fractal = ∞.
+3. Ln-1 = lá = 2 bytes = KHÔNG phân tiếp.
+4. Thứ tự = Structural Silk = 0 bytes.
+5. Hebbian = cross-branch chỉ. Tạo lá mới khi chín.
+6. L0 engine đọc/ghi L2+. L2+ không biết L0.
+7. Depth không cố định. Mỗi nhánh phân đến hết.
+8. 65,536^N = không bao giờ đầy.
+```
+
+---
+
+*L0 = ribosome. L2+ = DNA. Engine đọc công thức. Thư viện chứa đời.*
+*o{P{P{...}}} — fractal vô hạn từ hữu hạn.*
