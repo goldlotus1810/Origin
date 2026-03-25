@@ -246,30 +246,30 @@ pub fn kt_save(_ks_path) {
     return "Saved " + __to_string(len(__kt_facts)) + " facts to " + _ks_path;
 }
 
-pub fn kt_load(_kl_path) {
-    let _kl_content = __file_read(_kl_path);
-    if len(_kl_content) == 0 { return 0; };
-    let _kl_sent = "";
-    let _kl_count = 0;
-    let _kl_i = 0;
-    while _kl_i < len(_kl_content) {
-        let _kl_ch = __char_code(char_at(_kl_content, _kl_i));
-        if _kl_ch == 10 {
-            if len(_kl_sent) > 5 {
-                if _kl_count < 30 { kt_learn(_kl_sent); };
-                _kl_count = _kl_count + 1;
+pub fn kt_load(_kld_path) {
+    let _kld_content = __file_read(_kld_path);
+    if len(_kld_content) == 0 { return 0; };
+    let _kld_sent = "";
+    let _kld_count = 0;
+    let _kld_i = 0;
+    while _kld_i < len(_kld_content) {
+        let _kld_ch = __char_code(char_at(_kld_content, _kld_i));
+        if _kld_ch == 10 {
+            if len(_kld_sent) > 5 {
+                kt_learn(_kld_sent);
+                _kld_count = _kld_count + 1;
             };
-            _kl_sent = "";
+            _kld_sent = "";
         } else {
-            _kl_sent = _kl_sent + char_at(_kl_content, _kl_i);
+            _kld_sent = _kld_sent + char_at(_kld_content, _kld_i);
         };
-        let _kl_i = _kl_i + 1;
+        let _kld_i = _kld_i + 1;
     };
-    if len(_kl_sent) > 5 {
-        if _kl_count < 30 { kt_learn(_kl_sent); };
-        _kl_count = _kl_count + 1;
+    if len(_kld_sent) > 5 {
+        kt_learn(_kld_sent);
+        _kld_count = _kld_count + 1;
     };
-    return _kl_count;
+    return _kld_count;
 }
 
 // ════════════════════════════════════════════════════════════════
