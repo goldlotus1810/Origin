@@ -110,7 +110,9 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
 | ST.1 | BUG-INDEX/BUG-SORT fix | — | DONE ✅ | a[expr] heap overlap. ArrayLit→push. |
-| ST.2 | map/filter/reduce stdlib | ~50 LOC | TODO | Functional pipeline thay vì manual loops |
+| ST.2 | map/filter/reduce | ~120 LOC | DONE ✅ | Inline compiler builtins. Lambda expressions + closure calls. |
+| ST.2b | Lambda expressions | ~60 LOC | DONE ✅ | `fn(x) { body }` parsed + compiled. Higher-order functions work. |
+| ST.2c | Cross-boundary closures | ~20 LOC ASM | DONE ✅ | eval_bc_base global. Boot↔eval closure calls fixed. |
 | ST.3 | min/max/any/all/zip/enumerate | ~40 LOC | TODO | Utility functions cơ bản |
 | ST.4 | Regression test suite | ~100 LOC | TODO | 30+ tests covering a[expr], sort, nested loops, closures |
 
@@ -451,4 +453,6 @@ VI PHẠM hiện tại:
 2026-03-24  Sora: BUG-VI fixed (7 fn prefix rename). DC.51-61 ALL FIXED. Binary 965,292B.
 2026-03-24  Inspect #16: 4/5 PASS. ROOT CAUSE: a[expr] BinOp → a[0]. Docs 100% synced. ZERO new DC.
 2026-03-25  Nox: BUG-INDEX/BUG-SORT FIXED — ArrayLit→push in parser.ol. [1,2,5,8,9] ✅. 16/16 tests.
+2026-03-25  Nox: Lambda expressions + closure calls. fn(x){body} parsed+compiled. Higher-order functions.
+2026-03-25  Nox: Inline map/filter/reduce compiler builtins. Functional pipeline works.
 ```
