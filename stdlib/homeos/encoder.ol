@@ -1530,20 +1530,34 @@ let __knowledge_max = 512;
 // Uses lightweight encoding: first 2 chars → codepoint → encode_codepoint
 // This avoids heavy encode_text (which allocates molecule arrays on heap)
 fn _text_to_chain(_ttc_text) {
+    // UTF-8 aware: decode full codepoints, use for mol composition
+    // "Việt" → cp[86, 105, 7879, 116] — each char unique
     let _ttc_chain = [];
     let _ttc_w_start = -1;
     let _ttc_w_len = 0;
     let _ttc_i = 0;
     while _ttc_i < len(_ttc_text) {
-        let _ttc_code = __char_code(char_at(_ttc_text, _ttc_i));
-        if _ttc_code == 32 {
+        let _ttc_byte = __char_code(char_at(_ttc_text, _ttc_i));
+        if _ttc_byte == 32 {
+            // Space → end of word, encode word to chain
             if _ttc_w_len >= 1 {
-                // Encode ALL chars in word, compose sequentially
-                let _ttc_wm = encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start)));
-                let _ttc_ci = 1;
-                while _ttc_ci < _ttc_w_len {
-                    _ttc_wm = mol_compose(_ttc_wm, encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start + _ttc_ci))));
-                    let _ttc_ci = _ttc_ci + 1;
+                // Compose word: first codepoint as seed, compose rest
+                let _ttc_wpos = _ttc_w_start;
+                let _ttc_cp0 = __utf8_cp(_ttc_text, _ttc_wpos);
+                let _ttc_cp0_len = __utf8_len(_ttc_text, _ttc_wpos);
+                // Use codepoint directly as mol seed (not encode_codepoint)
+                // This gives UNIQUE fingerprint per character
+                let _ttc_wm = encode_codepoint(_ttc_cp0);
+                // Mix in codepoint identity: different chars → different composition
+                if _ttc_cp0 > 127 { _ttc_wm = _ttc_cp0 % 65536; };
+                let _ttc_wpos = _ttc_wpos + _ttc_cp0_len;
+                while _ttc_wpos < _ttc_i {
+                    let _ttc_cpn = __utf8_cp(_ttc_text, _ttc_wpos);
+                    let _ttc_cpn_len = __utf8_len(_ttc_text, _ttc_wpos);
+                    let _ttc_mn = encode_codepoint(_ttc_cpn);
+                    if _ttc_cpn > 127 { _ttc_mn = _ttc_cpn % 65536; };
+                    _ttc_wm = mol_compose(_ttc_wm, _ttc_mn);
+                    let _ttc_wpos = _ttc_wpos + _ttc_cpn_len;
                 };
                 push(_ttc_chain, _ttc_wm);
             };
@@ -1556,11 +1570,20 @@ fn _text_to_chain(_ttc_text) {
         let _ttc_i = _ttc_i + 1;
     };
     if _ttc_w_len >= 1 {
-        let _ttc_wm = encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start)));
-        let _ttc_ci = 1;
-        while _ttc_ci < _ttc_w_len {
-            _ttc_wm = mol_compose(_ttc_wm, encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start + _ttc_ci))));
-            let _ttc_ci = _ttc_ci + 1;
+        let _ttc_wpos = _ttc_w_start;
+        let _ttc_cp0 = __utf8_cp(_ttc_text, _ttc_wpos);
+        let _ttc_cp0_len = __utf8_len(_ttc_text, _ttc_wpos);
+        let _ttc_wm = encode_codepoint(_ttc_cp0);
+        if _ttc_cp0 > 127 { _ttc_wm = _ttc_cp0 % 65536; };
+        let _ttc_wpos = _ttc_wpos + _ttc_cp0_len;
+        let _ttc_end = _ttc_w_start + _ttc_w_len;
+        while _ttc_wpos < _ttc_end {
+            let _ttc_cpn = __utf8_cp(_ttc_text, _ttc_wpos);
+            let _ttc_cpn_len = __utf8_len(_ttc_text, _ttc_wpos);
+            let _ttc_mn = encode_codepoint(_ttc_cpn);
+            if _ttc_cpn > 127 { _ttc_mn = _ttc_cpn % 65536; };
+            _ttc_wm = mol_compose(_ttc_wm, _ttc_mn);
+            let _ttc_wpos = _ttc_wpos + _ttc_cpn_len;
         };
         push(_ttc_chain, _ttc_wm);
     };

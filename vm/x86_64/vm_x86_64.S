@@ -1132,6 +1132,14 @@ op_call:
     cmp     %rdx, %rax
     je      .call_mol_pack
 
+    # ── UTF-8 builtins ──
+    movabs  $0x4878D01FD4BD5E1A, %rdx   # __utf8_cp(str, pos) → codepoint
+    cmp     %rdx, %rax
+    je      .call_utf8_cp
+    movabs  $0xB7114D166502D5D0, %rdx   # __utf8_len(str, pos) → byte count (1-4)
+    cmp     %rdx, %rax
+    je      .call_utf8_len
+
     # ── Eval bytecode (nested execution) ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
     cmp     %rdx, %rax
@@ -3851,6 +3859,104 @@ op_ret:
     add     %edx, %eax
     # Push result as f64
     cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── UTF-8 decoding builtins ──────────────────────────────────────────────
+# __utf8_cp(str, pos) → Unicode codepoint at byte position pos
+# __utf8_len(str, pos) → number of bytes in UTF-8 sequence (1-4)
+# Strings are u16 molecules: each byte = 0x2100 | byte_value
+
+.call_utf8_cp:
+    add     %rcx, %r13
+    # Pop pos (f64)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # pos
+    add     $16, %r14
+    # Pop str (chain ptr + mol_count)
+    mov     (%r14), %rsi               # str ptr (u16 molecules)
+    # Read byte at pos: molecule = 0x2100 | byte, so byte = mol & 0xFF
+    movzwl  (%rsi, %rdx, 2), %eax     # read u16 molecule at pos
+    and     $0xFF, %eax                # extract byte value
+    # Check UTF-8 lead byte
+    cmp     $0x80, %eax
+    jb      .utf8_cp_1byte             # 0xxxxxxx → 1 byte (ASCII)
+    cmp     $0xE0, %eax
+    jb      .utf8_cp_2byte             # 110xxxxx → 2 bytes
+    cmp     $0xF0, %eax
+    jb      .utf8_cp_3byte             # 1110xxxx → 3 bytes
+    # 4 byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+    and     $0x07, %eax                # keep low 3 bits
+    shl     $18, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    shl     $12, %ecx
+    or      %ecx, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    shl     $6, %ecx
+    or      %ecx, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    or      %ecx, %eax
+    jmp     .utf8_cp_done
+.utf8_cp_3byte:
+    and     $0x0F, %eax                # keep low 4 bits
+    shl     $12, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    shl     $6, %ecx
+    or      %ecx, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    or      %ecx, %eax
+    jmp     .utf8_cp_done
+.utf8_cp_2byte:
+    and     $0x1F, %eax                # keep low 5 bits
+    shl     $6, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    or      %ecx, %eax
+    jmp     .utf8_cp_done
+.utf8_cp_1byte:
+    # eax already has the byte value (ASCII)
+.utf8_cp_done:
+    # Push codepoint as f64
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_utf8_len:
+    add     %rcx, %r13
+    # Pop pos (f64)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # pos
+    add     $16, %r14
+    # Pop str
+    mov     (%r14), %rsi               # str ptr
+    movzwl  (%rsi, %rdx, 2), %eax     # read u16 molecule at pos
+    and     $0xFF, %eax                # byte value
+    # Return byte count based on lead byte
+    mov     $1, %ecx                    # default 1
+    cmp     $0x80, %eax
+    jb      .utf8_len_done
+    mov     $2, %ecx
+    cmp     $0xE0, %eax
+    jb      .utf8_len_done
+    mov     $3, %ecx
+    cmp     $0xF0, %eax
+    jb      .utf8_len_done
+    mov     $4, %ecx
+.utf8_len_done:
+    cvtsi2sd %ecx, %xmm0
     movsd   %xmm0, (%r14)
     movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
