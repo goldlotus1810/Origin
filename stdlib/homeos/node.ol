@@ -312,3 +312,83 @@ pub fn fn_node_describe(_fnd_name) {
     };
     return { name: _fnd_name, params: 0, fires: 0, valence: 4, arousal: 4, relation: "unknown", tempo: "static", links: [] };
 }
+
+// ════════════════════════════════════════════════════════════════
+// LG.4: Dream cluster fn → skill
+// Group hot functions by mol similarity → promote to named skill
+// ════════════════════════════════════════════════════════════════
+
+let __skills = [];
+
+pub fn fn_dream_cluster(_fdc_min_fires) {
+    // Find hot functions, cluster by mol similarity
+    let _fdc_hot = [];
+    let _fdc_i = 0;
+    while _fdc_i < len(__fn_nodes) {
+        if __fn_nodes[_fdc_i].fires >= _fdc_min_fires {
+            // Ensure mol is computed
+            if __fn_nodes[_fdc_i].mol == 0 {
+                let _fdc_n = __fn_nodes[_fdc_i].name;
+                if len(_fdc_n) >= 1 {
+                    let _fdc_m = encode_codepoint(__char_code(char_at(_fdc_n, 0)));
+                    let _fdc_ci = 1;
+                    while _fdc_ci < len(_fdc_n) {
+                        _fdc_m = mol_compose(_fdc_m, encode_codepoint(__char_code(char_at(_fdc_n, _fdc_ci))));
+                        let _fdc_ci = _fdc_ci + 1;
+                    };
+                    __fn_nodes[_fdc_i].mol = _fdc_m;
+                };
+            };
+            push(_fdc_hot, __fn_nodes[_fdc_i]);
+        };
+        let _fdc_i = _fdc_i + 1;
+    };
+    if len(_fdc_hot) < 2 { return []; };
+
+    // Simple greedy clustering by mol similarity (threshold = 5/10)
+    let _fdc_clusters = [];
+    let _fdc_used = [];
+    let _fdc_j = 0;
+    while _fdc_j < len(_fdc_hot) { push(_fdc_used, 0); let _fdc_j = _fdc_j + 1; };
+
+    let _fdc_j = 0;
+    while _fdc_j < len(_fdc_hot) {
+        if _fdc_used[_fdc_j] == 0 {
+            let _fdc_cl = [_fdc_hot[_fdc_j].name];
+            set_at(_fdc_used, _fdc_j, 1);
+            let _fdc_k = _fdc_j + 1;
+            while _fdc_k < len(_fdc_hot) {
+                if _fdc_used[_fdc_k] == 0 {
+                    let _fdc_sim = _mol_similarity(_fdc_hot[_fdc_j].mol, _fdc_hot[_fdc_k].mol);
+                    if _fdc_sim >= 5 {
+                        push(_fdc_cl, _fdc_hot[_fdc_k].name);
+                        set_at(_fdc_used, _fdc_k, 1);
+                    };
+                };
+                let _fdc_k = _fdc_k + 1;
+            };
+            if len(_fdc_cl) >= 2 {
+                push(_fdc_clusters, _fdc_cl);
+            };
+        };
+        let _fdc_j = _fdc_j + 1;
+    };
+    return _fdc_clusters;
+}
+
+pub fn skill_promote(_sp_name, _sp_fns) {
+    // Promote a cluster of functions to a named skill
+    push(__skills, { name: _sp_name, functions: _sp_fns, fires: 0 });
+    // Link all functions in the skill bidirectionally
+    let _sp_i = 0;
+    while _sp_i < len(_sp_fns) {
+        let _sp_j = _sp_i + 1;
+        while _sp_j < len(_sp_fns) {
+            fn_node_link(_sp_fns[_sp_i], _sp_fns[_sp_j]);
+            let _sp_j = _sp_j + 1;
+        };
+        let _sp_i = _sp_i + 1;
+    };
+}
+
+pub fn skill_count() { return len(__skills); }

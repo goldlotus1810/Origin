@@ -980,21 +980,27 @@ pub fn stm_digest() { return __stm_digest; }
 // Simplified: edges stored as flat array of { from, to, weight, emotion }
 
 let __silk = [];
-let __silk_max = 128;
+let __silk_max = 256;
 let __silk_decay_counter = 0;
 
+// LG.3: Silk edges use mol (u16 number) instead of string keys
+// Comparison = number compare (1 cycle) vs string compare (N cycles)
+// Storage: ~24 bytes/edge (was 50+)
 fn silk_co_activate(_sca_wa, _sca_wb, _sca_intent) {
+    // Encode words → mol for compact storage + fast compare
+    let _sca_ma = _word_to_mol(_sca_wa);
+    let _sca_mb = _word_to_mol(_sca_wb);
     let _sca_i = 0;
     while _sca_i < len(__silk) {
         let _sca_e = __silk[_sca_i];
-        if _sca_e.from == _sca_wa {
-            if _sca_e.to == _sca_wb {
+        if _sca_e.from == _sca_ma {
+            if _sca_e.to == _sca_mb {
                 let _sca_new_w = _sca_e.weight + (0.01 * (1 - (_sca_e.weight * 0.618)));
                 if _sca_new_w > 1 { _sca_new_w = 1; };
                 set_at(__silk, _sca_i, {
-                    from: _sca_wa, to: _sca_wb,
+                    from: _sca_ma, to: _sca_mb,
                     weight: _sca_new_w,
-                    emotion: _sca_intent, fires: (_sca_e.fires + 1)
+                    fires: (_sca_e.fires + 1)
                 });
                 return;
             };
@@ -1002,8 +1008,20 @@ fn silk_co_activate(_sca_wa, _sca_wb, _sca_intent) {
         let _sca_i = _sca_i + 1;
     };
     if len(__silk) < __silk_max {
-        push(__silk, { from: _sca_wa, to: _sca_wb, weight: 0.1, emotion: _sca_intent, fires: 1 });
+        push(__silk, { from: _sca_ma, to: _sca_mb, weight: 0.1, fires: 1 });
     };
+}
+
+// Encode word → mol (single u16). Used by Silk for compact edges.
+fn _word_to_mol(_wtm_w) {
+    if len(_wtm_w) == 0 { return 0; };
+    let _wtm_m = encode_codepoint(__char_code(char_at(_wtm_w, 0)));
+    let _wtm_i = 1;
+    while _wtm_i < len(_wtm_w) {
+        _wtm_m = mol_compose(_wtm_m, encode_codepoint(__char_code(char_at(_wtm_w, _wtm_i))));
+        let _wtm_i = _wtm_i + 1;
+    };
+    return _wtm_m;
 }
 
 // SC.12: Decay φ⁻¹ — all edges lose weight over time (forgetting)
@@ -1024,8 +1042,7 @@ fn silk_decay() {
             // Keep edge with decayed weight
             set_at(__silk, _sd_i, {
                 from: _sd_e.from, to: _sd_e.to,
-                weight: _sd_decayed,
-                emotion: _sd_e.emotion, fires: _sd_e.fires
+                weight: _sd_decayed, fires: _sd_e.fires
             });
             push(_sd_new, __silk[_sd_i]);
         };
@@ -1063,18 +1080,20 @@ fn silk_learn_from_text(_slt_text, _slt_intent) {
 }
 
 fn silk_find_related(_sfrel_word) {
-    let _sfrel_best = "";
+    // LG.3: Compare by mol (number) — fast
+    let _sfrel_mol = _word_to_mol(_sfrel_word);
+    let _sfrel_best = 0;
     let _sfrel_bw = 0;
     let _sfrel_i = 0;
     while _sfrel_i < len(__silk) {
         let _sfrel_e = __silk[_sfrel_i];
-        if _sfrel_e.from == _sfrel_word {
+        if _sfrel_e.from == _sfrel_mol {
             if _sfrel_e.weight > _sfrel_bw {
                 _sfrel_bw = _sfrel_e.weight;
                 _sfrel_best = _sfrel_e.to;
             };
         };
-        if _sfrel_e.to == _sfrel_word {
+        if _sfrel_e.to == _sfrel_mol {
             if _sfrel_e.weight > _sfrel_bw {
                 _sfrel_bw = _sfrel_e.weight;
                 _sfrel_best = _sfrel_e.from;
