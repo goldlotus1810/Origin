@@ -15,6 +15,8 @@ let __boot_learned = 0;
 fn _boot_learn() {
     if __boot_learned == 1 { return; };
     let __boot_learned = 1;
+    // Init L2 tree structure
+    _kt_boot_tree();
     // Load persistent KnowTree first
     kt_load("homeos.knowledge");
     // If empty, load embedded facts directly into KnowTree

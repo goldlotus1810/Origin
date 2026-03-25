@@ -54,19 +54,43 @@ pub fn kt_word(_kw_text) {
 
 let __kt_facts = [];        // [{text, words, mol}]
 
-// L2 branches: each branch = list of fact_ids
-let __kt_br_facts = [];         // general knowledge
-let __kt_br_books = [];         // books read
-let __kt_br_convs = [];         // conversations
-let __kt_br_skills = [];        // learned skills
-let __kt_br_personal = [];      // personal info
+// L2 tree: each branch = { name, children, facts, mol }
+// children = array of sub-nodes (cây con)
+// facts = array of fact_ids (lá ở tầng cuối)
+let __kt_tree = [];
+
+fn _kt_boot_tree() {
+    push(__kt_tree, { name: "facts", children: [], facts: [], mol: 0 });
+    push(__kt_tree, { name: "books", children: [], facts: [], mol: 0 });
+    push(__kt_tree, { name: "conversations", children: [], facts: [], mol: 0 });
+    push(__kt_tree, { name: "skills", children: [], facts: [], mol: 0 });
+    push(__kt_tree, { name: "personal", children: [], facts: [], mol: 0 });
+}
+
+fn kt_sub_branch(_ksb_parent_idx, _ksb_name) {
+    let _ksb_node = { name: _ksb_name, children: [], facts: [], mol: 0 };
+    push(__kt_tree[_ksb_parent_idx].children, _ksb_node);
+    return len(__kt_tree[_ksb_parent_idx].children) - 1;
+}
 
 pub fn kt_learn(_kl_text) {
-    return _kt_learn_branch(_kl_text, "facts");
+    return kt_learn_to(_kl_text, "facts");
 }
 
 pub fn kt_learn_to(_klt_text, _klt_branch) {
-    return _kt_learn_branch(_klt_text, _klt_branch);
+    let _klt_fid = _kt_learn_branch(_klt_text, _klt_branch);
+    // Attach to tree branch
+    let _klt_bi = 0;
+    while _klt_bi < len(__kt_tree) {
+        if __kt_tree[_klt_bi].name == _klt_branch {
+            push(__kt_tree[_klt_bi].facts, _klt_fid);
+            return _klt_fid;
+        };
+        let _klt_bi = _klt_bi + 1;
+    };
+    // Default: attach to facts[0]
+    if len(__kt_tree) > 0 { push(__kt_tree[0].facts, _klt_fid); };
+    return _klt_fid;
 }
 
 fn _kt_learn_branch(_kl_text, _kl_branch) {
@@ -111,12 +135,6 @@ fn _kt_learn_branch(_kl_text, _kl_branch) {
         push(__kt_words[_kl_wids[_kl_li]].facts, _kl_fid);
         let _kl_li = _kl_li + 1;
     };
-    // L2 branch assignment
-    if _kl_branch == "facts" { push(__kt_br_facts, _kl_fid); };
-    if _kl_branch == "books" { push(__kt_br_books, _kl_fid); };
-    if _kl_branch == "conversations" { push(__kt_br_convs, _kl_fid); };
-    if _kl_branch == "skills" { push(__kt_br_skills, _kl_fid); };
-    if _kl_branch == "personal" { push(__kt_br_personal, _kl_fid); };
     return len(__kt_facts);
 }
 
@@ -201,11 +219,15 @@ fn _kt_score_word(_ksw_word) {
 // ════════════════════════════════════════════════════════════════
 
 pub fn kt_stats() {
+    let _kst_f = 0; let _kst_b = 0; let _kst_c = 0;
+    if len(__kt_tree) > 0 { _kst_f = len(__kt_tree[0].facts); };
+    if len(__kt_tree) > 1 { _kst_b = len(__kt_tree[1].facts); };
+    if len(__kt_tree) > 2 { _kst_c = len(__kt_tree[2].facts); };
     return "KnowTree: " + __to_string(len(__kt_words)) + " words, " +
            __to_string(len(__kt_facts)) + " facts (" +
-           "F:" + __to_string(len(__kt_br_facts)) +
-           " B:" + __to_string(len(__kt_br_books)) +
-           " C:" + __to_string(len(__kt_br_convs)) + ")";
+           "F:" + __to_string(_kst_f) +
+           " B:" + __to_string(_kst_b) +
+           " C:" + __to_string(_kst_c) + ")";
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -217,6 +239,10 @@ pub fn kt_stats() {
 pub fn kt_read_book(_rb_path) {
     let _rb_content = __file_read(_rb_path);
     if len(_rb_content) == 0 { return "Error: cannot read " + _rb_path; };
+    // Create book sub-node under L2:books (index 1)
+    if len(__kt_tree) > 1 {
+        kt_sub_branch(1, _rb_path);
+    };
     // Split into sentences (by newline or period+space)
     let _rb_sent = "";
     let _rb_count = 0;
