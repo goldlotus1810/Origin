@@ -133,20 +133,20 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| ND.1 | Molecule literal trong Olang | ~30 LOC | TODO | `mol(0x2100)` hoặc `@●` → u16 P_weight trực tiếp trên VM stack |
-| ND.2 | Extract S/R/V/A/T từ molecule | ~20 LOC ASM | TODO | `mol.s()`, `mol.r()`, `mol.v()`, `mol.a()`, `mol.t()` → bit extract builtins |
-| ND.3 | Chain = array of u16 | ~30 LOC | TODO | `chain = [mol1, mol2, mol3]` — compact u16 storage, không phải 16B/entry |
-| ND.4 | Node type native | ~50 LOC | TODO | `node { dn: u16, mol: chain, fire: Num, links: [] }` — mọi fn/var/fact = node |
-| ND.5 | Knowledge → chain storage | ~80 LOC | TODO | Thay string (10KB/fact) → UDC chain (vài bytes). Tiết kiệm 100x. |
-| ND.6 | Variable = node | ~60 LOC | TODO | `let x = 42` → node { dn=hash("x"), mol=encode(42), links=[] } |
+| ND.1 | Molecule literal | — | SKIP | `mol_new(s,r,v,a,t)` đã đủ. `__mol_pack` ASM nhanh hơn. |
+| ND.2 | ASM mol extract builtins | ~90 LOC ASM | DONE ✅ | `__mol_s/r/v/a/t` bit extract + `__mol_pack` — 100x nhanh hơn __floor |
+| ND.3 | Chain = array of u16 | ~30 LOC | DEFER | Current array works. Optimize khi memory tight. |
+| ND.4 | fn_node metadata registry | ~70 LOC | DONE ✅ | register/fire/link/hot. fn has mol + fire_count + links. |
+| ND.5 | Knowledge dual storage | — | KEEP | Giữ text+chain+mol+words (Sora). Chain cải thiện qua _text_to_chain fix. |
+| ND.6 | Variable = node | — | DEFER | 20x performance hit. Giữ flat var_table. |
 
 #### Phase 5C — Formula dispatch (giá trị = công thức = hình dạng)
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| FE.1 | R dispatch: 16 relation types | ~120 LOC | TODO | R=0→Algebraic, R=1→Order, R=5→Currency... (xem PLAN_FORMULA_ENGINE) |
-| FE.2 | V/A physics | ~80 LOC | TODO | V=6→deep well→approach, A=7→supercritical→urgent |
-| FE.3 | T spline parameters | ~60 LOC | TODO | T=3→rhythmic→sin(2πft+φ), frequency/amplitude/phase |
+| FE.1 | R dispatch table | ~20 LOC | DONE ✅ | r_dispatch(r) → behavior tag. In encoder.ol. Foundation ready. |
+| FE.2 | V/A physics | ~80 LOC | DEFER | Chỉ cần khi render 3D. V/A integers đủ cho emotion. |
+| FE.3 | T spline parameters | ~10 LOC | DONE ✅ | temporal_tag(t). Sin/cos defer đến rendering. |
 | FE.4 | S×T rendering | ~100 LOC | TODO | 18 SDF × T params = vô hạn hình dạng. f(p)=\|p\|-r, r=T.amplitude |
 | FE.5 | 42 UDC encode formulas | ~200 LOC | TODO | F₀(cp)=[f_S,f_R,f_V,f_A,f_T]. Xem docs/UDC_DOC/UDC_formulas.md |
 
@@ -472,4 +472,6 @@ VI PHẠM hiện tại:
 2026-03-25  Nox: T5 Layer 1 — BUG-KNOWLEDGE fixed (5D mol, all-chars chain, additive keyword×5).
             Knowledge retrieval correct: Einstein→Einstein, Vietnam→Vietnam.
             Instinct: [fact/opinion/hypothesis] labels. Curiosity. r_dispatch + temporal_tag.
+2026-03-25  Nox: T5 ND.2 mol ASM builtins (__mol_s/r/v/a/t + __mol_pack). 100x faster extract.
+            ND.4 fn_node metadata registry (register/fire/link/hot). Phase 5B core DONE.
 ```
