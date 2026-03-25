@@ -636,6 +636,7 @@ pub fn encode(text) {
 // ════════════════════════════════════════════════════════════════
 
 fn _a_has(_ah_text, _ah_word) {
+    // Case-insensitive substring search (inline lowercase, no function calls)
     let _ah_tlen = len(_ah_text);
     let _ah_wlen = len(_ah_word);
     if _ah_wlen > _ah_tlen { return 0; };
@@ -644,7 +645,12 @@ fn _a_has(_ah_text, _ah_word) {
         let _ah_match = 1;
         let _ah_j = 0;
         while _ah_j < _ah_wlen {
-            if char_at(_ah_text, (_ah_i + _ah_j)) != char_at(_ah_word, _ah_j) {
+            let _ah_tc = __char_code(char_at(_ah_text, (_ah_i + _ah_j)));
+            let _ah_wc = __char_code(char_at(_ah_word, _ah_j));
+            // Inline lowercase: A-Z (65-90) → a-z (97-122)
+            if _ah_tc >= 65 { if _ah_tc <= 90 { _ah_tc = _ah_tc + 32; }; };
+            if _ah_wc >= 65 { if _ah_wc <= 90 { _ah_wc = _ah_wc + 32; }; };
+            if _ah_tc != _ah_wc {
                 _ah_match = 0;
                 break;
             };
@@ -1685,23 +1691,26 @@ fn knowledge_search(_ks_query) {
             };
         };
 
-        // Strategy 2: Keyword matching — substring search in full text (case-sensitive but catches more)
-        // Also search query words in entry text directly using _a_has (works in boot)
+        // Strategy 2: Keyword matching — case-insensitive substring search
         let _ks_kwscore = 0;
+        let _ks_match_count = 0;  // number of query words that matched
         let _ks_qi = 0;
         let _ks_qw = "";
         while _ks_qi < len(_ks_query) {
             let _ks_ch = char_at(_ks_query, _ks_qi);
             if __char_code(_ks_ch) == 32 {
                 if len(_ks_qw) >= 2 {
-                    // Check in word list (exact match)
                     let _ks_wi = 0;
                     while _ks_wi < len(_ks_entry.words) {
                         if _ks_entry.words[_ks_wi] == _ks_qw { _ks_kwscore = _ks_kwscore + 3; };
                         let _ks_wi = _ks_wi + 1;
                     };
-                    // Also check as substring in full text (catches case differences)
-                    if _a_has(_ks_entry.text, _ks_qw) == 1 { _ks_kwscore = _ks_kwscore + 2; };
+                    if _a_has(_ks_entry.text, _ks_qw) == 1 {
+                        _ks_kwscore = _ks_kwscore + 2;
+                        _ks_match_count = _ks_match_count + 1;
+                        // Longer words = more specific = bonus
+                        if len(_ks_qw) >= 4 { _ks_kwscore = _ks_kwscore + 3; };
+                    };
                 };
                 _ks_qw = "";
             } else {
@@ -1715,11 +1724,16 @@ fn knowledge_search(_ks_query) {
                 if _ks_entry.words[_ks_wi] == _ks_qw { _ks_kwscore = _ks_kwscore + 3; };
                 let _ks_wi = _ks_wi + 1;
             };
-            if _a_has(_ks_entry.text, _ks_qw) == 1 { _ks_kwscore = _ks_kwscore + 2; };
+            if _a_has(_ks_entry.text, _ks_qw) == 1 {
+                _ks_kwscore = _ks_kwscore + 2;
+                _ks_match_count = _ks_match_count + 1;
+                if len(_ks_qw) >= 4 { _ks_kwscore = _ks_kwscore + 3; };
+            };
         };
+        // Multi-word bonus: 2+ matching words in same entry = much more relevant
+        if _ks_match_count >= 2 { _ks_kwscore = _ks_kwscore + (_ks_match_count * 10); };
 
-        // Take best of both strategies
-        // Additive: keyword ×5 + mol_score — keyword match ALWAYS boosts score
+        // Additive: keyword ×5 + mol_score
         _ks_score = (_ks_kwscore * 5) + _ks_score;
 
         if _ks_score > _ks_best_score {

@@ -364,11 +364,18 @@ pub fn repl_eval(input) {
     return agent_respond(src);
   }
 
-  // Strip trailing ? = ! for math expressions (P1-D: "2+1?" → "2+1")
+  // Strip ALL trailing ? = ! for math expressions ("2+3=?" → "2+3")
   let _re_code = src;
-  let _re_last_c = __char_code(char_at(src, len(src) - 1));
-  if _re_last_c == 63 { _re_code = __substr(src, 0, len(src) - 1); };  // ?
-  if _re_last_c == 61 { _re_code = __substr(src, 0, len(src) - 1); };  // =
+  let _re_strip = 1;
+  while _re_strip == 1 {
+    _re_strip = 0;
+    if len(_re_code) > 0 {
+        let _re_lc = __char_code(char_at(_re_code, len(_re_code) - 1));
+        if _re_lc == 63 { _re_code = __substr(_re_code, 0, len(_re_code) - 1); _re_strip = 1; };  // ?
+        if _re_lc == 61 { _re_code = __substr(_re_code, 0, len(_re_code) - 1); _re_strip = 1; };  // =
+        if _re_lc == 33 { _re_code = __substr(_re_code, 0, len(_re_code) - 1); _re_strip = 1; };  // !
+    };
+  };
   if len(_re_code) == 0 { return ""; };
 
   // Phase 1: Tokenize
