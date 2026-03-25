@@ -811,6 +811,9 @@ let __stm_max = 32;
 let __emo_v = 4;  // valence (1=neg, 4=neutral, 7=pos)
 let __emo_a = 4;  // arousal (1=calm, 4=neutral, 7=excited)
 let __emo_streak = 0;  // consecutive same-valence turns
+// SC.5: Homeostasis — Free Energy (surprise tracking)
+let __free_energy = 0;  // 0=stable, high=surprised/unstable
+let __prev_intent = "chat";
 
 fn _emo_update(new_v, new_a) {
     // EMA: 60% old + 40% new → smooth carry-over
@@ -1260,9 +1263,19 @@ pub fn agent_respond(text) {
     tone = _emo_bias_tone(tone);
 
     // ── SC.16 CHECKPOINT 3: Infer ──
-    // Verify intent is valid
     if len(intent) == 0 { intent = "chat"; };
     if len(tone) == 0 { tone = "neutral"; };
+
+    // ── SC.5: Homeostasis — Free Energy update ──
+    // Surprise = intent change + emotion delta
+    let _ar_fe = 0;
+    if intent != __prev_intent { _ar_fe = _ar_fe + 3; };  // intent shift = surprise
+    let _ar_vdelta = _ar_emo.v - __emo_v;
+    if _ar_vdelta < 0 { _ar_vdelta = 0 - _ar_vdelta; };
+    _ar_fe = _ar_fe + _ar_vdelta;  // emotion delta = surprise
+    // EMA: 70% old + 30% new
+    let __free_energy = __floor((__free_energy * 7 + _ar_fe * 3) / 10);
+    let __prev_intent = intent;
 
     // ── 4. CREATE NODE (DN = SHA-256 address) ──
     let _ar_node = node_create(_ar_norm, mol, _ar_emo, intent);
@@ -1432,8 +1445,59 @@ pub fn agent_respond(text) {
         if len(memory_context) > 0 { _ar_out = _ar_out + memory_context; };
     };
 
+    // ── SC.6: DNA Repair (self-correction) ──
+    // If contradiction detected AND we have high confidence knowledge → correct
+    if len(_ar_contradiction) > 0 {
+        if _ar_conf >= 70 {
+            // We're confident in our knowledge AND user contradicts → gently correct
+            _ar_contradiction = "Theo nhung gi minh biet, dieu nay co ve khac. Minh co the sai — ban co the giai thich them?";
+        };
+    };
+    // If free energy too high (system unstable) → add stabilizing note
+    if __free_energy >= 5 {
+        if len(_ar_reflect) == 0 {
+            _ar_reflect = " (He thong dang thich nghi voi thay doi.)";
+        };
+    };
+
+    // ── SC.4: Immune Selection N=3 ──
+    // Generate 3 candidate responses, score, pick best
+    // Candidate 1: current _ar_out (knowledge-based or template)
+    // Candidate 2: STM-based (related previous input)
+    // Candidate 3: Silk-based (associated concept)
+    let _ar_c1_score = len(_ar_out);  // longer = more informative
+    if _ar_conf >= 90 { _ar_c1_score = _ar_c1_score + 50; };
+    if _ar_conf >= 70 { _ar_c1_score = _ar_c1_score + 30; };
+
+    // Candidate 2: if STM has related context, might be better
+    let _ar_c2 = "";
+    let _ar_c2_score = 0;
+    if stm_count() >= 2 {
+        let _ar_stm_rel = stm_find_related(_ar_norm);
+        if len(_ar_stm_rel) > 0 {
+            if _ar_stm_rel != _ar_norm {
+                _ar_c2 = _ar_out_emoji + " " + reply + " (Lien quan den: " + _ar_stm_rel + ")";
+                _ar_c2_score = len(_ar_c2) + 10;  // bonus for context
+            };
+        };
+    };
+
+    // Candidate 3: Silk-associated word
+    let _ar_c3 = "";
+    let _ar_c3_score = 0;
+    let _ar_silk_rel = silk_find_related(_ar_norm);
+    if _ar_silk_rel > 0 {
+        // Silk returns mol (number), not string — can't display directly
+        // But it means there IS an association → boost candidate 1
+        _ar_c1_score = _ar_c1_score + 5;
+    };
+
+    // Select best candidate
+    if _ar_c2_score > _ar_c1_score {
+        if _ar_c2_score > _ar_c3_score { _ar_out = _ar_c2; };
+    };
+
     // ── SC.16 CHECKPOINT 5: Response ──
-    // Final validation: don't return empty response
     if len(_ar_out) == 0 { _ar_out = ask_back(); };
 
     return _ar_out;
