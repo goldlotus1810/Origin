@@ -1309,11 +1309,13 @@ pub fn agent_respond(text) {
     // ── 4. CREATE NODE (DN = SHA-256 address) ──
     let _ar_node = node_create(_ar_norm, mol, _ar_emo, intent);
 
-    // ── 5. LEARNING (STM + Silk + Dream + Knowledge) ──
+    // ── 5. LEARNING (STM + Silk + Dream + KnowTree) ──
     stm_push(_ar_norm, intent, tone);
     _stm_maybe_digest();
     silk_learn_from_text(_ar_norm, intent);
     dream_cycle();
+    // Store turn in KnowTree conversations branch
+    kt_learn_to(_ar_norm, "conversations");
 
     // Link current node to previous (if exists)
     if stm_count() >= 2 {
