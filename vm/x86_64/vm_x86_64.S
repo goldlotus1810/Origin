@@ -3203,7 +3203,12 @@ op_ret:
     pop     %rax                        # saved PC
     pop     %r12                        # saved bytecode base
     mov     %eax, %r13d                 # PC = return address
-    # Scope restore: if depth > 0, restore var_table from heap scope stack
+    # Scope restore: ONLY if returning TO eval context (not boot→boot)
+    # Check: is restored r12 the eval buffer? If r12 == boot_bc_base → boot context → skip
+    lea     boot_bc_base(%rip), %rdi
+    cmp     (%rdi), %r12
+    je      vm_loop                     # returning to boot → no scope restore needed
+    # Returning to eval context: restore if depth > 0
     lea     closure_depth(%rip), %rsi
     cmpq    $0, (%rsi)
     je      vm_loop
