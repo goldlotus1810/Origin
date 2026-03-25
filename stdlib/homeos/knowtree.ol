@@ -172,24 +172,16 @@ fn _kt_score_word(_ksw_word) {
     while len(__kt_search_scores) < len(__kt_facts) {
         push(__kt_search_scores, 0);
     };
-    // Find word node (exact or CI)
+    // Find word node — case-insensitive via _a_has (inline lowercase)
     let _ksw_wi = -1;
     let _ksw_i = 0;
     while _ksw_i < len(__kt_words) {
-        if __kt_words[_ksw_i].text == _ksw_word { _ksw_wi = _ksw_i; break; };
-        let _ksw_i = _ksw_i + 1;
-    };
-    // CI fallback
-    if _ksw_wi < 0 {
-        let _ksw_i = 0;
-        while _ksw_i < len(__kt_words) {
-            if _a_has(__kt_words[_ksw_i].text, _ksw_word) == 1 {
-                if len(__kt_words[_ksw_i].text) == len(_ksw_word) {
-                    _ksw_wi = _ksw_i; break;
-                };
+        if _a_has(__kt_words[_ksw_i].text, _ksw_word) == 1 {
+            if len(__kt_words[_ksw_i].text) == len(_ksw_word) {
+                _ksw_wi = _ksw_i; break;
             };
-            let _ksw_i = _ksw_i + 1;
         };
+        let _ksw_i = _ksw_i + 1;
     };
     if _ksw_wi < 0 { return; };
     // Score linked facts

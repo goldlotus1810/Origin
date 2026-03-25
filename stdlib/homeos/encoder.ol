@@ -1314,8 +1314,6 @@ pub fn agent_respond(text) {
     _stm_maybe_digest();
     silk_learn_from_text(_ar_norm, intent);
     dream_cycle();
-    // Store turn in KnowTree conversations branch
-    kt_learn_to(_ar_norm, "conversations");
 
     // Link current node to previous (if exists)
     if stm_count() >= 2 {
@@ -1541,6 +1539,9 @@ pub fn agent_respond(text) {
         _ar_out = _ar_out_emoji + " Minh chua hieu ro. Ban muon hoi ve dieu gi?";
     };
     if len(_ar_out) == 0 { _ar_out = _ar_out_emoji + " Minh nghe roi."; };
+
+    // Store turn AFTER search (so query doesn't find itself)
+    kt_learn_to(_ar_norm, "conversations");
 
     return _ar_out;
 }
