@@ -97,6 +97,18 @@ pub fn repl_eval(input) {
     // Emotion v2: "khong vui" → negated positive → v < 4
     let _t_emo2 = text_emotion_v2("khong vui");
     if _t_emo2.v < 4 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: emo_v2_negate"; };
+    // a[expr] BinOp (BUG-INDEX regression)
+    let _t_arr = [10,20,30];
+    if _t_arr[0 + 1] == 20 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: idx_binop"; };
+    let _t_j = 0;
+    if _t_arr[_t_j + 2] == 30 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: idx_var_add"; };
+    // Bubble sort (BUG-SORT regression)
+    let _t_sa = [5,2,8,1,9]; let _t_sn = 5; let _t_si = 0;
+    while _t_si < _t_sn - 1 { let _t_sj = 0; while _t_sj < _t_sn - 1 - _t_si { if _t_sa[_t_sj] > _t_sa[_t_sj + 1] { let _t_tmp = _t_sa[_t_sj]; set_at(_t_sa, _t_sj, _t_sa[_t_sj + 1]); set_at(_t_sa, _t_sj + 1, _t_tmp); }; _t_sj = _t_sj + 1; }; _t_si = _t_si + 1; };
+    if _t_sa[0] == 1 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: sort_first"; };
+    if _t_sa[4] == 9 { _tp = _tp + 1; } else { _tf = _tf + 1; emit "FAIL: sort_last"; };
+    // Lambda + map/filter/reduce/any/all: tested via REPL eval context only
+    // Boot context cannot call eval closures (known VM limitation)
     // Summary
     if _tf == 0 {
       return "ALL PASS: " + __to_string(_tp) + "/" + __to_string(_tp + _tf);

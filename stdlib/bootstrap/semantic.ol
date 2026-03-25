@@ -585,6 +585,84 @@ fn compile_expr(state, expr) {
                 emit_op(state, make_op_name("Load", "__rc"));
                 return;
             };
+            if _ce_fname == "any" && len(args) == 2 {
+                // any(arr, f) → true if f(x) for some x in arr
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__ya"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__yf"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__yi"));
+                let _yp_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__yi"));
+                emit_op(state, make_op_name("Load", "__ya"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _yp_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_name("Load", "__ya"));
+                emit_op(state, make_op_name("Load", "__yi"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__yf"));
+                let _yp_false = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // found true → return 1
+                emit_op(state, make_op_num("PushNum", 1));
+                let _yp_done = current_pos(state);
+                emit_op(state, make_op_num("Jmp", 0));
+                patch_jump(state, _yp_false, current_pos(state));
+                // i++
+                emit_op(state, make_op_name("Load", "__yi"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__yi"));
+                emit_jmp(state, _yp_loop);
+                // not found → return 0
+                patch_jump(state, _yp_jz, current_pos(state));
+                emit_op(state, make_op_num("PushNum", 0));
+                patch_jump(state, _yp_done, current_pos(state));
+                return;
+            };
+            if _ce_fname == "all" && len(args) == 2 {
+                // all(arr, f) → true if f(x) for all x in arr
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__la"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__lf"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__li"));
+                let _lp_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__li"));
+                emit_op(state, make_op_name("Load", "__la"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _lp_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_name("Load", "__la"));
+                emit_op(state, make_op_name("Load", "__li"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__lf"));
+                let _lp_true = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // still true → i++
+                emit_op(state, make_op_name("Load", "__li"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__li"));
+                emit_jmp(state, _lp_loop);
+                // found false → return 0
+                patch_jump(state, _lp_true, current_pos(state));
+                emit_op(state, make_op_num("PushNum", 0));
+                let _lp_done = current_pos(state);
+                emit_op(state, make_op_num("Jmp", 0));
+                // all passed → return 1
+                patch_jump(state, _lp_jz, current_pos(state));
+                emit_op(state, make_op_num("PushNum", 1));
+                patch_jump(state, _lp_done, current_pos(state));
+                return;
+            };
+            // enumerate/zip deferred — nested array creation in loops triggers heap overlap
+            // Workaround: use for i in range(len(arr)) with arr[i], or manual loops
             // Save fname+args before compiling (inner Call overwrites them!)
             let _ce_saved_fname = _ce_fname;
             let _ce_saved_args = args;

@@ -74,4 +74,33 @@ fn test_features() {
     assert_eq(d.x, 42, "dict");
     // SHA-256
     assert_eq(len(__sha256("abc")), 64, "sha256len");
+    // Marker test to verify new tests run
+    emit "NEW_TESTS_RUNNING";
+    assert_eq(2 + 2, 4, "extra_add");
+    // a[expr] with BinOp (BUG-INDEX regression)
+    let arr = [10,20,30];
+    assert_eq(arr[0 + 1], 20, "idx_binop");
+    assert_eq(arr[2 - 1], 20, "idx_sub");
+    let j = 0;
+    assert_eq(arr[j + 2], 30, "idx_var_add");
+    // Bubble sort (BUG-SORT regression)
+    let sa = [5,2,8,1,9]; let sn = 5; let si = 0;
+    while si < sn - 1 { let sj = 0; while sj < sn - 1 - si { if sa[sj] > sa[sj + 1] { let tmp = sa[sj]; set_at(sa, sj, sa[sj + 1]); set_at(sa, sj + 1, tmp); }; sj = sj + 1; }; si = si + 1; };
+    assert_eq(sa[0], 1, "sort_first");
+    assert_eq(sa[4], 9, "sort_last");
+    // Nested while
+    let nw = 0; let ni = 0;
+    while ni < 3 { let nj = 0; while nj < 3 { nw = nw + 1; nj = nj + 1; }; ni = ni + 1; };
+    assert_eq(nw, 9, "nested_while");
+    // String concat (interpolation tested via REPL)
+    let iname = "world";
+    assert_eq("hi " + iname, "hi world", "str_concat");
+    // set_at
+    let sa2 = [10,20,30];
+    set_at(sa2, 1, 99);
+    assert_eq(sa2[1], 99, "set_at");
+    // min_val / max_val / sum (boot stdlib)
+    assert_eq(min_val([5,2,8]), 2, "min_val");
+    assert_eq(max_val([5,2,8]), 8, "max_val");
+    assert_eq(sum([1,2,3,4]), 10, "sum");
 }
