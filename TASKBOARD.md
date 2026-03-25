@@ -87,6 +87,9 @@ Binary chay doc lap. REPL. Knowledge. Emotion. 7 instincts. Persistent.
 | SC.16 | 5 Checkpoints | ✅ 5/5 |
 | SC.2 | Fusion (multi-modal) | ❌ text-only |
 
+> Tier 1-5 ALL DONE. 117 DCs fixed. 24 inspections by Kira.
+> Details: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
+
 ---
 
 ## Known Limitations
@@ -104,11 +107,12 @@ Binary chay doc lap. REPL. Knowledge. Emotion. 7 instincts. Persistent.
 ## Log
 
 ```
-2026-03-23  SELF-HOSTING. 806KB.
-2026-03-24  100% SELF-COMPILE. Intelligence pipeline. 964KB.
-2026-03-25  OLANG 1.0 + HomeOS 1.0. ~50 commits. 1,021KB.
-            T5 complete. All P0+P1 fixed. 7/7 instincts. 5/5 checkpoints.
-            UTF-8 pipeline. Dict pretty-print. Persistent knowledge.
-            Classifier → Router → Gate architecture.
-            MASTER PLAN written. Release roadmap: v1.0→v1.1→v1.2→v1.3→v2.0.
+2026-03-23  SELF-HOSTING. 806KB. 27/27 tests.
+2026-03-24  100% SELF-COMPILE (48/48). Intelligence pipeline. 964KB.
+2026-03-25  OLANG 1.0 + HomeOS 1.0. ~50 commits. 965→1,021KB.
+            T5 complete. 7/7 instincts. 5/5 checkpoints. SC.4+5+6.
+            Lambda, HOF, pipe, sort/split/join/contains, UTF-8, dict print.
+            Persistent knowledge. Classifier → Router → Gate.
+            117 DCs fixed (Kira #24). All P0+P1 resolved.
+            MASTER PLAN + release roadmap: v1.0→v1.1→v1.2→v1.3→v2.0.
 ```

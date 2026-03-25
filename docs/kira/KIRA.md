@@ -75,16 +75,17 @@ some_function();                // có thể overwrite
 let my_var = pop(_save_stack); // restore
 ```
 
-### Files quan trọng (LOC 2026-03-24)
+### Files quan trọng (LOC 2026-03-25)
 
 ```
-vm/x86_64/vm_x86_64.S          — ASM VM (5,767 LOC)
+vm/x86_64/vm_x86_64.S          — ASM VM (5,987 LOC)
 stdlib/bootstrap/lexer.ol       — Tokenizer (298 LOC)
 stdlib/bootstrap/parser.ol      — Parser recursive descent (1,132 LOC)
-stdlib/bootstrap/semantic.ol    — Semantic → direct bytecode (1,569 LOC)
+stdlib/bootstrap/semantic.ol    — Semantic → direct bytecode (1,889 LOC)
 stdlib/bootstrap/codegen.ol     — Codegen helpers (429 LOC)
-stdlib/repl.ol                  — REPL entry (355 LOC)
-stdlib/homeos/*.ol              — HomeOS stdlib (44 files, 9,559 LOC)
+stdlib/repl.ol                  — REPL entry (451 LOC)
+stdlib/homeos/classify.ol       — Intent classifier + handlers (189 LOC)
+stdlib/homeos/*.ol              — HomeOS stdlib (45 files, 10,042 LOC)
 TASKBOARD.md                    — Task tracker
 CLAUDE.md                       — AI contributor guide
 ```
@@ -127,6 +128,8 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
   Docs 100% synced sau Sora fix DC.51-61. ZERO new DCs.
 - Inspect #17-19: Lambda/HOF/pipe/LG.1-5 docs synced. DC.62-84. Phase 5D COMPLETE.
 - Inspect #20: P0-A/B/C patches audit. DC.85-93. Embedded knowledge, auto-emit, div/0 safe.
+- Inspect #21-23: OLANG 1.0 milestone. DC.94-112. sort/split/join/contains, reduce 3-arg, save/load.
+- Inspect #24: HomeOS v1.0 audit. DC.113-117. __utf8, classify.ol, dict pretty-print, SC.3-6. 1,021KB.
 
 ---
 
@@ -150,3 +153,4 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
 | 21 | 2026-03-25 | 6/6 ✅ | DC.94-101 | reduce 3-arg, fns cmd, contradiction undoc. ALL FIXED. 972KB. |
 | 22 | 2026-03-25 | 6/6 ✅ | DC.102-108 | sort, split, save/load, persistent knowledge. ALL FIXED. 980KB. |
 | 23 | 2026-03-25 | 7/7 ✅ | DC.109-112 | join, contains. OLANG 1.0 milestone verified. 985KB. |
+| 24 | 2026-03-25 | 8/8 ✅ | DC.113-117 | __utf8_cp/len, classify.ol, dict pretty-print, SC.3-6, HomeOS v1.0. 1,021KB. |
