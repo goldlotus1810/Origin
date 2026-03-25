@@ -66,7 +66,7 @@ origin_new.olang = 1,008KB native binary (ELF64 x86_64, no libc)
   Workaround: inline compiler builtins (map/filter/reduce/sort/etc.) bypass boundary
 - Nested inline builtins: map(filter(...)) clobbers global vars → use 2-step
 - fn_node_fire: boot↔eval arg passing issue → fire tracking deferred
-- Dict pretty-print: emit {x:1} → "{dict 1}" → needs ASM work
+- Dict pretty-print: ✅ FIXED — emit {x:1} → {x: 1}
 - Global var scope: no block scope, must use unique prefixes
 ```
 
