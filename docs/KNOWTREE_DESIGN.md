@@ -1,458 +1,301 @@
-# KnowTree Design — o{} → ∞
+# KnowTree Design — o{} → Ln-1
 
-> **Nox — 2026-03-25**
-> **Từ Spec v2.7, v3.1, UDC_DOC, Sora "Bức Tranh Tổng Thể"**
-> **Nguyên tắc: 1 node = 2 bytes. Thứ tự = Silk. 0 bytes overhead.**
-
----
-
-## I. CẤU TRÚC GỐC: o{}
-
-```
-o{} = 1 array u16, tối đa 65,536 phần tử
-
-  Index = vị trí trong array = IMPLICIT (không lưu)
-  Value = P_weight (u16) = [S:4][R:4][V:3][A:3][T:2] = 16 bits
-
-  o{}[0x1F525] = P(🔥)     ← O(1) lookup, không hash
-  o{}[0x25CF]  = P(●)      ← vị trí IS địa chỉ
-
-  Kích thước 1 nhánh: 65,536 × 2B = 128 KB
-  Thực tế dùng: ~10,000 slots (L0 9,584 + learned) = ~20 KB
-```
+> **Nox — 2026-03-25, sửa theo Lupin**
+> **L0 = cây tổng. L1 = nhánh chính. Ln-1 = lá.**
 
 ---
 
-## II. PHÂN TẦNG: o{o{o{...}}}
-
-### Tầng L0 — Gốc (5 nhóm)
+## I. L0 — KnowTree GỐC
 
 ```
-o{ROOT} = array[5]
-  [0] = SDF group      (S)    → trỏ đến o{SDF}
-  [1] = MATH group     (R)    → trỏ đến o{MATH}
-  [2] = EMOTICON group (V+A)  → trỏ đến o{EMO}
-  [3] = MUSICAL group  (T)    → trỏ đến o{MUS}
-  [4] = LEARNED group  (L5+)  → trỏ đến o{LEARNED}
+L0 = o{KnowTree}
+  Đây là CÂY TỔNG chứa MỌI THỨ.
+  Mỗi nhánh L0 = 1 loại tri thức.
 
-Kích thước: 5 × 2B = 10 bytes
-```
+o{KnowTree} = [
+    UDC,            // 9,584 SDF gốc — SEALED, immutable
+    Emoji_UTF32,    // 155,000+ alias → trỏ về UDC
+    Learning,       // tri thức học được (facts, books, conversations)
+    Memory,         // STM, Silk edges, Dream clusters — working memory
+    Agent,          // AAM, LeoAI, Chiefs, Workers
+    Skill,          // 7 instincts + learned skills
+    Code,           // fn nodes, bytecode chains
+    Program,        // origin.olang, tools, configs
+    Device,         // hardware: sensors, display, network interfaces
+]
 
-### Tầng L1 — Blocks (59 blocks)
-
-```
-o{SDF} = array[14]      ← 14 SDF blocks
-  [0]  = S.01 Arrows           (112 chars)
-  [1]  = S.02 Misc Technical   (256 chars)
-  [2]  = S.03 Box Drawing      (128 chars)
-  ...
-  [13] = S.14 Control Pictures (64 chars)
-
-o{MATH} = array[21]     ← 21 MATH blocks
-  [0]  = M.01 Superscripts     (48 chars)
-  [1]  = M.02 Letterlike       (80 chars)
-  ...
-  [20] = M.21 Arabic Math      (256 chars)
-
-o{EMO} = array[17]      ← 17 EMOTICON blocks
-  [0]  = E.01 Enclosed Alpha   (160 chars)
-  ...
-  [16] = E.17 Misc Sym+Arrows  (256 chars)
-
-o{MUS} = array[7]       ← 7 MUSICAL blocks
-  [0]  = T.01 Hexagram         (64 chars)
-  ...
-  [6]  = T.07 Tai Xuan Jing   (96 chars)
-
-o{LEARNED} = array[N]   ← grows dynamically
-  Learned words, facts, skills, agents...
-
-Kích thước L1: (14+21+17+7) × 2B = 118 bytes
-```
-
-### Tầng L2 — Sub-ranges (~200)
-
-```
-o{S.01_Arrows} = array[~10]    ← sub-groups within Arrows block
-  [0] = LEFTWARDS (11 chars)
-  [1] = RIGHTWARDS (11 chars)
-  [2] = LEFT RIGHT (8 chars)
-  [3] = DOWNWARDS (7 chars)
-  ...
-
-Mỗi sub-range = 1 array, index = vị trí trong sub
-
-Kích thước L2: ~200 × 2B = 400 bytes
-```
-
-### Tầng L3 — Ký tự UDC (9,584 leaves)
-
-```
-o{LEFTWARDS_ARROWS} = array[11]
-  [0] = P(←)  = [S:1, R:5, V:4, A:4, T:2]
-  [1] = P(⇐)  = [S:1, R:5, V:4, A:5, T:2]
-  ...
-
-Mỗi ký tự = 1 P_weight = 2 bytes
-SEALED at bootstrap. IMMUTABLE.
-
-Kích thước L3: 9,584 × 2B = 19,168 bytes ≈ 19 KB
-```
-
-### Tầng L4+ — Learned (dynamic)
-
-```
-Khi HomeOS học:
-  "Hà Nội" → word node → P_weight computed via compose
-  "Einstein" → word node → P_weight computed
-
-Mỗi learned node = 2 bytes (P_weight)
-Vị trí trong o{LEARNED} = index
-
-o{LEARNED} grows: push new P_weight → len() increases
+Mỗi phần tử = u16 index trỏ đến nhánh L1 tương ứng.
+Kích thước L0: 9 × 2B = 18 bytes
 ```
 
 ---
 
-## III. TỔNG DUNG LƯỢNG KNOWTREE
+## II. L1 — NHÁNH CHÍNH (phân loại từ L0)
 
 ```
-L0 Root:          10 bytes
-L1 Blocks:       118 bytes
-L2 Sub-ranges:   400 bytes
-L3 UDC chars:  19,168 bytes
-Alias table:    giữ riêng (xem Section VI)
-─────────────────────────────
-TỔNG TREE:    19,696 bytes ≈ 20 KB
+Mỗi nhánh L0 phân thành các nhóm chính ở L1:
 
-So sánh: L1 cache CPU = 32-64 KB
-→ TOÀN BỘ KnowTree nằm trong L1 cache
-→ Mọi lookup = O(1) memory access
-```
+L0:UDC → L1[
+    SDF,        // 14 blocks, 1,838 chars (Shape)
+    MATH,       // 21 blocks, 2,563 chars (Relation)
+    EMOTICON,   // 17 blocks, 3,487 chars (Valence + Arousal)
+    MUSICAL,    // 7 blocks, 958 chars (Time)
+]
 
----
+L0:Emoji_UTF32 → L1[
+    Emoji_faces,        // 😀😂😭😡... → alias trỏ về E.09
+    Emoji_people,       // 👨👩👶🧑... → alias trỏ về E.08
+    Emoji_animals,      // 🐱🐶🦁... → alias trỏ về E.08
+    Emoji_objects,      // 🔥⭐💎... → alias trỏ về E.08
+    Emoji_symbols,      // ❤✅❌... → alias trỏ về E.02
+    UTF32_latin,        // 172,849 Unicode assigned chars
+    UTF32_cjk,          // 97,000 CJK ideographs
+    UTF32_hangul,       // 11,172 Hangul syllables
+    UTF32_other_scripts,// Arabic, Cyrillic, Thai...
+]
 
-## IV. CHAIN = CHUỖI u16
+L0:Learning → L1[
+    facts,              // "Ha Noi la thu do cua Viet Nam"
+    books,              // "Cuon Theo Chieu Gio"
+    conversations,      // session history
+    observations,       // sensor data learned
+]
 
-### Cấu trúc
+L0:Memory → L1[
+    STM,                // short-term: last 32 turns
+    Silk,               // Hebbian edges (cross-branch)
+    Dream,              // consolidated clusters
+    QR,                 // promoted, append-only, immutable
+]
 
-```
-Chain = array[u16]
+L0:Agent → L1[
+    AAM,                // approve/reject (tier 0)
+    LeoAI,              // learn+dream+curate (tier 1)
+    HomeChief,          // quản lý Worker nhà
+    VisionChief,        // quản lý Worker camera
+    NetworkChief,       // quản lý Worker network
+]
 
-Mỗi u16 = index vào KnowTree
-Thứ tự trong array = Structural Silk = 0 bytes overhead
+L0:Skill → L1[
+    Honesty,            // instinct #1
+    Contradiction,      // instinct #2
+    Causality,          // instinct #3
+    Abstraction,        // instinct #4
+    Analogy,            // instinct #5
+    Curiosity,          // instinct #6
+    Reflection,         // instinct #7
+    learned_skills,     // Dream promoted skill clusters
+]
 
-Ví dụ:
-  "Hà Nội là thủ đô" = chain[w_HaNoi, w_la, w_thuDo]
-  Mỗi w_xxx = u16 index vào o{LEARNED}
+L0:Code → L1[
+    fn_nodes,           // user-defined functions
+    builtin_nodes,      // map, filter, reduce, sort...
+    lambda_nodes,       // anonymous closures
+]
 
-  1 link = 2 bytes
-  1 câu  = ~10 links = 20 bytes
-  1 sách = ~5,000 links = 10 KB
-```
+L0:Program → L1[
+    origin_binary,      // origin.olang metadata
+    config,             // settings, personality
+    training_data,      // docs/training/*.md
+]
 
-### Hierarchical chains (sách)
-
-```
-o{book} = chain[chap₁_idx, chap₂_idx, ..., chap₆₀_idx]
-  Thứ tự = structural silk = 0 bytes
-
-o{chap₁} = chain[para₁_idx, para₂_idx, ..., para₅₀_idx]
-
-o{para₁} = chain[sent₁_idx, sent₂_idx, ..., sent₅_idx]
-
-o{sent₁} = chain[word₁_idx, word₂_idx, ..., word₁₀_idx]
-
-o{word₁} = chain[char₁_idx, char₂_idx, ..., char₅_idx]
-  Hoặc: word₁ = 1 P_weight (compose of chars) → 2 bytes
-
-Mỗi level = 1 array. Index = position = Silk.
-```
-
----
-
-## V. SILK — 2 LOẠI, COST KHÁC NHAU
-
-### Structural Silk = 0 bytes
-
-```
-chain[A, B, C] → A→B implicit, B→C implicit
-
-Ribosome chạy thẳng. Engine chạy thẳng.
-Thứ tự IS quan hệ. Không lưu gì thêm.
-
-"Hà Nội là thủ đô" → chain order = "Hà Nội" TRƯỚC "là" TRƯỚC "thủ đô"
-Silk = vị trí. 0 bytes.
-```
-
-### Hebbian Silk = cross-branch connections
-
-```
-CHỈ dùng khi nối 2 nodes ở NHÁNH KHÁC NHAU:
-
-  "Scarlett" ở chương 1 ↔ "Scarlett" ở chương 30
-  "buồn" ở turn 5 ↔ "mất việc" ở turn 3
-  "tình yêu" trong sách A ↔ "tình yêu" trong sách B
-
-Mỗi edge:
-  from_idx: u16 (2 bytes)
-  to_idx:   u16 (2 bytes)
-  weight:   u16 (2 bytes, fixed-point 0.000-1.000 → 0-65535)
-  emotion:  u16 (2 bytes, V:8+A:8 tại thời điểm co-activate)
-  ─────────────────
-  Total: 8 bytes/edge
-
-SilkGraph max: ~5,000 edges × 8B = 40 KB
-
-co_activate(A, B):
-  emotion_factor = (|A.V| + |B.V|) / 2 × max(A.A, B.A) / 255
-  Δw = emotion_factor × (1 − w_AB) × 0.1
-  w_AB ← w_AB + Δw
-
-decay(w, Δt):
-  w ← w × φ⁻¹^(Δt/24h)    φ⁻¹ ≈ 0.618
+L0:Device → L1[
+    x86_64,             // current platform
+    arm64,              // mobile (skeleton)
+    wasm,               // browser (skeleton)
+    sensors,            // future: camera, mic, bio
+]
 ```
 
 ---
 
-## VI. ALIAS TABLE — Riêng biệt
+## III. L2 → L3 → ... → Ln-2 — PHÂN NHÁNH TIẾP
 
 ```
-Alias = text → u16 index vào KnowTree
+Mỗi nhánh L1 tiếp tục phân thành L2 (nhóm con).
+Mỗi nhóm L2 tiếp tục phân thành L3 (nhánh con).
+Cứ thế cho đến khi KHÔNG THỂ PHÂN NỮA.
 
-155,000 aliases (vi + en + ja + zh + emoji sequences)
-Mỗi alias entry:
-  text_hash: u32 (4 bytes, FNV-1a)
-  kt_index:  u16 (2 bytes)
-  ─────────────────
-  Total: 6 bytes/alias
+Ví dụ UDC:
 
-Alias table: 155,000 × 6B = 930 KB ≈ 1 MB
+L1:SDF → L2[
+    Arrows,             // S.01, 112 chars
+    Misc_Technical,     // S.02, 256 chars
+    Box_Drawing,        // S.03, 128 chars
+    Block_Elements,     // S.04, 32 chars
+    Geometric_Shapes,   // S.05, 96 chars
+    Dingbats,           // S.06, 192 chars
+    ...14 blocks total
+]
 
-Lookup: hash(text) → scan bucket → u16 index → O(1) KnowTree
-Bloom filter: 200 KB, false positive < 1%, 99% queries = O(1)
+L2:Arrows → L3[
+    Leftwards,          // ← ⇐ ↞ ↢ ... (11 chars)
+    Rightwards,         // → ⇒ ↠ ↣ ... (11 chars)
+    Bidirectional,      // ↔ ⇔ ↭ ... (8 chars)
+    Upwards,            // ↑ ⇑ ↟ ... (6 chars)
+    Downwards,          // ↓ ⇓ ↡ ... (7 chars)
+    Diagonal,           // ↗ ↘ ↙ ↖ ... (8 chars)
+    Curved,             // ↩ ↪ ...
+    Dashed,             // ⇠ ⇢ ...
+    Heavy,              // ➡ ➜ ...
+    Wave,               // ↝ ...
+]
 
-Alias KHÔNG NẰM TRONG KnowTree.
-Alias = cầu nối ngôn ngữ → tọa độ 5D.
-P_weight của alias = COPY từ canonical UDC → SEALED.
-```
+L3:Leftwards → Ln-1[
+    ← (U+2190),        // LEFTWARDS ARROW
+    ⇐ (U+21D0),        // LEFTWARDS DOUBLE ARROW
+    ↞ (U+219E),        // LEFTWARDS TWO HEADED ARROW
+    ...11 leaves
+]
 
----
+Ví dụ Learning:
 
-## VII. TÍNH TOÁN: 1 CUỐN SÁCH
+L1:facts → L2[
+    geography,          // "Ha Noi la...", "Viet Nam o..."
+    science,            // "Einstein phat minh...", "DNA la..."
+    history,            // "Origin bat dau ngay 11..."
+    dialog_patterns,    // "khi nguoi ta chao..."
+    tech,               // "SHA-256 la..."
+]
 
-### "Cuốn Theo Chiều Gió" (3.2 MB raw text)
+L2:geography → L3[
+    Vietnam,            // facts about Vietnam
+    Japan,              // facts about Japan
+    USA,                // facts about USA
+    ...
+]
 
-```
-Layer         Elements     × 2B each    Subtotal
-──────────────────────────────────────────────────
-Book:         1 chain      × 60 chaps   120 B
-Chapters:     60 chains    × 50 paras   6 KB
-Paragraphs:   3,000 chains × 5 sents    30 KB
-Sentences:    15,000 chains× 10 words   300 KB
-Words:        5,000 unique × 1 P_weight 10 KB
-──────────────────────────────────────────────────
-Chain data:                              346 KB
+L3:Vietnam → Ln-1[
+    "Viet Nam la quoc gia o Dong Nam A voi thu do Ha Noi"   ← LÁ
+    "Ho Chi Minh City la thanh pho lon nhat cua Viet Nam"   ← LÁ
+    "Da Nang la thanh pho bien dep nam giua Viet Nam"       ← LÁ
+    ...
+]
 
-KnowTree (shared, fixed):               20 KB
-Structural Silk:                          0 KB
-Hebbian Silk (cross-chapter):            40 KB
-──────────────────────────────────────────────────
-TOTAL:                                  406 KB
+Ví dụ Sách:
 
-Raw text: 3,200 KB → 406 KB = 7.9× compression
-WITH more information (links, Silk, mol, 5D coordinates)
-```
+L1:books → L2[
+    "Cuon Theo Chieu Gio",
+    "Hoang Tu Be",
+    ...
+]
 
-### Scale
+L2:"Cuon Theo Chieu Gio" → L3[
+    Loi_Gioi_Thieu,
+    Chuong_1,
+    Chuong_2,
+    ...
+    Chuong_63,
+]
 
-```
-1 cuốn sách  = 406 KB
-256 MB heap  = 645 cuốn sách
-16 GB disk   = 40,394 cuốn sách
+L3:Chuong_1 → L4[
+    Doan_1,
+    Doan_2,
+    ...
+]
 
-1 đời đọc sách (~200 cuốn) = 79 MB = 31% of 256 MB heap
-1 thư viện nhỏ (~5,000 cuốn) = 1.98 GB = disk only
-```
+L4:Doan_1 → L5[
+    Cau_1,
+    Cau_2,
+    ...
+]
 
----
+L5:Cau_1 → L6[
+    Tu_1, Tu_2, Tu_3, ...    ← words
+]
 
-## VIII. ENCODER ∫ₛ — Bootstrap
-
-```
-Bootstrap = ∫ₛ (spatial integration, chạy 1 lần):
-
-  char  = f'(x)           → nguyên tử (9,584 UDC)
-  sub   = ∫ₛ chars dx     → compose(chars) → sub P_weight
-  block = ∫ₛ subs dx      → compose(subs) → block P_weight
-  group = ∫ₛ blocks dx    → compose(blocks) → group P_weight
-
-Từ DƯỚI LÊN. Kết quả SEALED. Không bao giờ thay đổi.
-
-Input: tài liệu UDC_DOC (13 files) + UnicodeData.txt
-Output: KnowTree L0-L3 = 20 KB SEALED
-```
-
----
-
-## IX. ENCODER ∫ₜ — Runtime (Learning)
-
-```
-Runtime = ∫ₜ (temporal integration, chạy liên tục):
-
-  input → tokenize → alias lookup → u16 indices
-  → compose(indices) → new P_weight
-  → KnowTree[new_index] = P_weight
-  → Hebbian co_activate neighbors
-
-encode("tôi buồn vì mất việc"):
-  tokens = ["tôi", "buồn", "vì", "mất", "việc"]
-  indices = [alias("tôi"), alias("buồn"), ...]
-  P_weights = [KnowTree[idx] for idx in indices]
-  composed = compose(P_weights)  ← amplify, NOT average
-  ΔV = -0.75 (amplified from individual V values)
-
-  → Store: KnowTree[new_idx] = composed
-  → Silk: co_activate("buồn", "mất_việc", emotion_tag)
-  → STM: push turn
-  → Dream: if chín → promote QR
+L6:Tu_1 → Ln-1[
+    char_1, char_2, char_3, ...    ← LÁ (Unicode codepoints)
+]
 ```
 
 ---
 
-## X. DECODER ∂ — Output
+## IV. Ln-1 = LÁ — CÁ THỂ CUỐI CÙNG
 
 ```
-∂P/∂space      = ∇f(p)   → normal → rendering (SDF)
-∂V/∂time       = V'(t)   → tone (ConversationCurve)
-∂P/∂experience = ΔP      → novelty (Curiosity instinct)
+Ln-1 = node KHÔNG THỂ PHÂN TIẾP NỮA.
 
-Search = walk tree:
-  query → tokenize → alias → indices
-  → find word nodes in KnowTree
-  → follow chain links → fact nodes
-  → decode fact → output text
+Mỗi lá = 1 P_weight (2 bytes).
+Lá KHÔNG có con. Lá IS giá trị.
 
-O(query_words) NOT O(knowledge_count)
-```
+Ví dụ lá:
+  ← (U+2190) = P_weight [S:1, R:5, V:4, A:4, T:2]     ← UDC char, immutable
+  "tình yêu"  = P_weight [S:0, R:0, V:7, A:5, T:2]     ← learned word
+  fn fib      = P_weight [S:0, R:0, V:4, A:4, T:3]     ← fn node
+  "Ha Noi..." = P_weight [S:0, R:2, V:5, A:3, T:0]     ← fact node
 
----
+Khi 1 node có thể phân tiếp → nó KHÔNG phải lá → nó là nhánh.
+Khi 1 node KHÔNG thể phân → nó LÀ lá = Ln-1.
 
-## XI. IMPLEMENTATION TRONG OLANG
+Depth khác nhau cho từng nhánh:
+  UDC char: L0 → L1 → L2 → L3 → Ln-1=L4 (depth 4)
+  Sách câu: L0 → L1 → L2 → L3 → L4 → L5 → L6 → Ln-1=L7 (depth 7)
+  Fn node:  L0 → L1 → Ln-1=L2 (depth 2)
 
-### Data structures
-
-```olang
-// KnowTree = nested arrays of u16
-let __kt_root = [];          // L0: [sdf_idx, math_idx, emo_idx, mus_idx, learned_idx]
-let __kt_blocks = [];        // L1: arrays per group
-let __kt_subs = [];          // L2: arrays per block
-let __kt_chars = [];         // L3: P_weight per char (u16 as f64)
-let __kt_learned = [];       // L4+: learned P_weights
-
-// Chains = arrays of u16 indices
-let __kt_chains = [];        // array of chain arrays
-// Each chain = [u16, u16, ...] — order = structural Silk
-
-// Hebbian Silk = separate edge list
-let __kt_silk = [];          // [{from: u16, to: u16, weight: u16, emo: u16}]
-
-// Alias = hash → index mapping
-let __kt_alias_hash = [];    // [hash, hash, ...]
-let __kt_alias_idx = [];     // [idx, idx, ...] — parallel arrays
-```
-
-### Lookup O(1)
-
-```olang
-fn kt_lookup(codepoint) {
-    // Direct index: KnowTree[codepoint] = P_weight
-    if codepoint < len(__kt_chars) {
-        return __kt_chars[codepoint];
-    };
-    return 0;  // not found
-}
-```
-
-### Learn (chain + nodes)
-
-```olang
-fn kt_learn_v2(text) {
-    // 1. Tokenize → words
-    // 2. Each word → alias lookup → u16 index
-    //    If not found → create new learned node
-    // 3. Chain = [word_idx, word_idx, ...]
-    // 4. Fact_mol = compose(word_mols) — amplify, NOT average
-    // 5. Store chain in __kt_chains
-    // 6. Hebbian: co_activate adjacent words (cross-sentence only)
-}
-```
-
-### Search (tree walk)
-
-```olang
-fn kt_search_v2(query) {
-    // 1. Tokenize query → word indices
-    // 2. For each word index → find chains containing this word
-    //    (reverse index: word → chains)
-    // 3. Score chains by number of matching query words
-    // 4. Return best chain → decode → text
-}
+CÂY KHÔNG CÓ DEPTH CỐ ĐỊNH.
+Mỗi nhánh phân đến khi hết phân.
+Ln-1 ở bất kỳ depth nào.
 ```
 
 ---
 
-## XII. MIGRATION PATH
+## V. SILK TRONG CÂY
 
 ```
-Hiện tại (knowtree.ol):
-  __kt_chars  = [{cp, mol}]           ← dict, ~50 bytes/entry
-  __kt_words  = [{text, mol, facts}]  ← dict, ~80 bytes/entry
-  __kt_facts  = [{text, words, mol}]  ← dict, ~100 bytes/entry
-  Search = scan word array O(n)
+Structural Silk = thứ tự trong array = 0 bytes
+  chain[A, B, C] → A→B→C implicit
 
-Target (this design):
-  __kt_chars  = [u16, u16, ...]       ← flat array, 2 bytes/entry
-  chains      = [[u16], [u16], ...]   ← arrays of u16
-  silk        = [{from, to, w, emo}]  ← 8 bytes/edge
-  Search = O(query_words) via reverse index
+Hebbian Silk = NỐI NHÁNH KHÁC NHAU
+  "Scarlett" ở L3:Chuong_1 ↔ "Scarlett" ở L3:Chuong_30
+  "buồn" ở L1:Memory:STM ↔ "mất việc" ở L1:Learning:facts
 
-Migration:
-  Step 1: Keep current knowtree.ol working (backward compat)
-  Step 2: Build knowtree_v2.ol alongside (new design)
-  Step 3: Wire v2 into learn/respond
-  Step 4: Remove v1 when v2 proven stable
+  Hebbian TẠO NODE MỚI ở Ln-1:
+    co_activate("buồn", "mất_việc")
+    → nếu w ≥ φ⁻¹ → Dream promote
+    → node mới "mất_mát" ở L1:Learning
+    → LÁ MỚI ở Ln-1 đúng vị trí trong cây
+
+  8 bytes/edge: from(2B) + to(2B) + weight(2B) + emotion(2B)
 ```
 
 ---
 
-## XIII. TỔNG KẾT
+## VI. DUNG LƯỢNG
 
 ```
-o{} = array[65,536] × 2B = 128 KB max (20 KB actual L0-L3)
+L0 root:           18 bytes (9 nhánh × 2B)
+L1 branches:      ~100 nhánh × 2B = 200 bytes
+L2 groups:        ~500 nhóm × 2B = 1 KB
+L3 sub-groups:    ~2,000 nhánh × 2B = 4 KB
+L4+ leaves:       ~10,000 lá × 2B = 20 KB
+───────────────────────────────────────
+TOTAL TREE:       ~25 KB (fits L1 cache)
 
-o{ROOT}
-  → o{SDF}[14 blocks] → o{Arrows}[10 subs] → o{LEFTWARDS}[11 chars]
-  → o{MATH}[21 blocks] → ...
-  → o{EMO}[17 blocks] → ...
-  → o{MUS}[7 blocks] → ...
-  → o{LEARNED}[N dynamic] → words, facts, skills, agents
+Alias table:      ~1 MB (riêng biệt)
+Chain data:       2 bytes/link (biến thiên theo nội dung)
+Hebbian Silk:     ~40 KB (5,000 edges × 8B)
 
-Chain = [u16, u16, ...] — thứ tự = Structural Silk = 0 bytes
-Hebbian = cross-branch edges — 8 bytes/edge, ~40 KB total
-Alias = text → u16 index — 6 bytes/entry, ~1 MB total
-
-1 cuốn sách = 406 KB (7.9× compression vs raw text)
-256 MB = 645 cuốn sách
-1 đời = 79 MB
-
-KnowTree fits in L1 cache.
-Every lookup = O(1).
-Every search = O(query_words).
-Every chain = 2 bytes/link.
-Structural Silk = 0 bytes.
-
-Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức.
-o{}, chain(), splice(), φ⁻¹.
-Hết.
+1 cuốn sách thêm: ~400 KB chain data
+1 đời: ~80 MB
+256 MB heap: đủ cho 3 đời
 ```
+
+---
+
+## VII. NGUYÊN TẮC
+
+```
+1. L0 = MỌI THỨ. Không có gì ngoài L0.
+2. Mỗi nhánh phân đến khi hết phân → Ln-1 = lá.
+3. Depth không cố định. Mỗi nhánh có depth riêng.
+4. Lá = 2 bytes (P_weight). Không phân tiếp.
+5. Thứ tự trong array = Structural Silk = 0 bytes.
+6. Hebbian = CHỈ cross-branch. Tạo lá mới khi chín.
+7. UDC lá = SEALED. Learning lá = Hebbian → Dream → QR → SEALED.
+8. Traverse: L0 → L1 → ... → Ln-1 = O(depth). depth < 10 thực tế.
+```
+
+---
+
+*o{}, chain(), splice(), φ⁻¹. Hết.*
