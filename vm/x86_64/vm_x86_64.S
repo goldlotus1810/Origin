@@ -5637,8 +5637,10 @@ msg_prompt:
     .ascii "\xe2\xa6\xbf "               # "⦿ " (⦿ U+29BF = 3 bytes UTF-8 + space)
 
 msg_help:
-    .ascii "Commands: let, fn, emit, if, while, match, exit\n"
-    .ascii "Type Olang code or natural text.\n"
+    .ascii "Code: let fn emit if while for match lambda\n"
+    .ascii "HOF:  map filter reduce pipe any all\n"
+    .ascii "AI:   learn <fact>  respond <text>  memory\n"
+    .ascii "Sys:  test  build  compile <path>  exit\n"
 .equ msg_help_len, . - msg_help
 
 # ── Keyword hash table for __str_is_keyword ────────────────────────────

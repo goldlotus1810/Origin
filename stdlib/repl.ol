@@ -95,7 +95,7 @@ pub fn repl_eval(input) {
   // Check for REPL commands
   if src == "exit" || src == "quit" { return "__exit__"; }
   if src == "help" {
-    return "Commands: let, fn, emit, if, while, match, encode <text>, respond <text>, exit\nType Olang code or natural text.";
+    return "Code: let fn emit if while for match lambda | HOF: map filter reduce pipe any all | AI: learn respond memory | test build exit";
   }
 
   // Respond command: full agent pipeline with memory → response
@@ -209,10 +209,10 @@ pub fn repl_eval(input) {
     let _rm_d = stm_digest();
     let _rm_out = "STM: " + __to_string(stm_count()) + " turns | Silk: " + __to_string(silk_count()) + " edges | Knowledge: " + __to_string(knowledge_count()) + " facts";
     _rm_out = _rm_out + " | Nodes: " + __to_string(node_count());
-    _rm_out = _rm_out + " | Emo: V=" + __to_string(_rm_emo.v) + " A=" + __to_string(_rm_emo.a) + " streak=" + __to_string(_rm_emo.streak);
-    _rm_out = _rm_out + " " + emoji_for_emotion(_rm_emo.v, _rm_emo.a);
-    if len(_rm_d) > 0 { _rm_out = _rm_out + " | Digest: " + _rm_d; };
-    _rm_out = _rm_out + " | Themes: " + _rm_s;
+    _rm_out = _rm_out + " | Fn: " + __to_string(fn_node_count());
+    _rm_out = _rm_out + "\nEmo: V=" + __to_string(_rm_emo.v) + " A=" + __to_string(_rm_emo.a) + " streak=" + __to_string(_rm_emo.streak) + " " + emoji_for_emotion(_rm_emo.v, _rm_emo.a);
+    if len(_rm_d) > 0 { _rm_out = _rm_out + "\nDigest: " + _rm_d; };
+    if len(_rm_s) > 0 { _rm_out = _rm_out + "\nThemes: " + _rm_s; };
     return _rm_out;
   }
 
