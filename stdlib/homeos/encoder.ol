@@ -1568,21 +1568,23 @@ fn knowledge_search(_ks_query) {
             };
         };
 
-        // Strategy 2: Keyword matching (backward compat, exact)
+        // Strategy 2: Keyword matching — substring search in full text (case-sensitive but catches more)
+        // Also search query words in entry text directly using _a_has (works in boot)
         let _ks_kwscore = 0;
         let _ks_qi = 0;
         let _ks_qw = "";
         while _ks_qi < len(_ks_query) {
             let _ks_ch = char_at(_ks_query, _ks_qi);
             if __char_code(_ks_ch) == 32 {
-                if len(_ks_qw) >= 3 {
+                if len(_ks_qw) >= 2 {
+                    // Check in word list (exact match)
                     let _ks_wi = 0;
                     while _ks_wi < len(_ks_entry.words) {
-                        if _ks_entry.words[_ks_wi] == _ks_qw {
-                            _ks_kwscore = _ks_kwscore + 3;
-                        };
+                        if _ks_entry.words[_ks_wi] == _ks_qw { _ks_kwscore = _ks_kwscore + 3; };
                         let _ks_wi = _ks_wi + 1;
                     };
+                    // Also check as substring in full text (catches case differences)
+                    if _a_has(_ks_entry.text, _ks_qw) == 1 { _ks_kwscore = _ks_kwscore + 2; };
                 };
                 _ks_qw = "";
             } else {
@@ -1590,14 +1592,13 @@ fn knowledge_search(_ks_query) {
             };
             let _ks_qi = _ks_qi + 1;
         };
-        if len(_ks_qw) >= 3 {
+        if len(_ks_qw) >= 2 {
             let _ks_wi = 0;
             while _ks_wi < len(_ks_entry.words) {
-                if _ks_entry.words[_ks_wi] == _ks_qw {
-                    _ks_kwscore = _ks_kwscore + 3;
-                };
+                if _ks_entry.words[_ks_wi] == _ks_qw { _ks_kwscore = _ks_kwscore + 3; };
                 let _ks_wi = _ks_wi + 1;
             };
+            if _a_has(_ks_entry.text, _ks_qw) == 1 { _ks_kwscore = _ks_kwscore + 2; };
         };
 
         // Take best of both strategies
