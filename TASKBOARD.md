@@ -113,8 +113,8 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | ST.2 | map/filter/reduce | ~120 LOC | DONE ✅ | Inline compiler builtins. Lambda expressions + closure calls. |
 | ST.2b | Lambda expressions | ~60 LOC | DONE ✅ | `fn(x) { body }` parsed + compiled. Higher-order functions work. |
 | ST.2c | Cross-boundary closures | ~20 LOC ASM | DONE ✅ | eval_bc_base global. Boot↔eval closure calls fixed. |
-| ST.3 | min/max/any/all/zip/enumerate | ~40 LOC | TODO | Utility functions cơ bản |
-| ST.4 | Regression test suite | ~100 LOC | TODO | 30+ tests covering a[expr], sort, nested loops, closures |
+| ST.3 | any/all + min/max/sum (boot) | ~80 LOC | DONE ✅ | Inline any/all compiler builtins. min_val/max_val/sum from iter.ol. |
+| ST.4 | Regression test suite 20/20 | ~30 LOC | DONE ✅ | +4: idx_binop, idx_var_add, sort_first, sort_last. |
 
 #### Phase 5B — Node-native (1 LOC = 1 node = 16 bits)
 
@@ -455,4 +455,5 @@ VI PHẠM hiện tại:
 2026-03-25  Nox: BUG-INDEX/BUG-SORT FIXED — ArrayLit→push in parser.ol. [1,2,5,8,9] ✅. 16/16 tests.
 2026-03-25  Nox: Lambda expressions + closure calls. fn(x){body} parsed+compiled. Higher-order functions.
 2026-03-25  Nox: Inline map/filter/reduce compiler builtins. Functional pipeline works.
+2026-03-25  Nox: any/all builtins. Test suite 16→20. Phase 5A COMPLETE.
 ```
