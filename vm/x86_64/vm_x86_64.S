@@ -1112,6 +1112,26 @@ op_call:
     cmp     %rdx, %rax
     je      .call_write_raw
 
+    # ── Molecule extract builtins (T5 ND.2) ──
+    movabs  $0x9AB0ED8E471CE883, %rdx   # __mol_s
+    cmp     %rdx, %rax
+    je      .call_mol_s
+    movabs  $0x9AB0EC8E471CE6D0, %rdx   # __mol_r
+    cmp     %rdx, %rax
+    je      .call_mol_r
+    movabs  $0x9AB0F08E471CED9C, %rdx   # __mol_v
+    cmp     %rdx, %rax
+    je      .call_mol_v
+    movabs  $0x9AB0DF8E471CD0B9, %rdx   # __mol_a
+    cmp     %rdx, %rax
+    je      .call_mol_a
+    movabs  $0x9AB0F28E471CF102, %rdx   # __mol_t
+    cmp     %rdx, %rax
+    je      .call_mol_t
+    movabs  $0xABFC7C5900FA2DAB, %rdx   # __mol_pack
+    cmp     %rdx, %rax
+    je      .call_mol_pack
+
     # ── Eval bytecode (nested execution) ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
     cmp     %rdx, %rax
@@ -3727,6 +3747,105 @@ op_ret:
     movsd   (%r14), %xmm0
     roundsd $2, %xmm0, %xmm0          # round toward +inf
     movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+# ── Molecule extract builtins (T5 ND.2) ────────────────────────────────
+# P_weight = [S:4][R:4][V:3][A:3][T:2] = 16 bits packed as f64
+# __mol_s(mol) → (mol / 4096) % 16     (bits 12-15)
+# __mol_r(mol) → (mol / 256) % 16      (bits 8-11)
+# __mol_v(mol) → (mol / 32) % 8        (bits 5-7)
+# __mol_a(mol) → (mol / 4) % 8         (bits 2-4)
+# __mol_t(mol) → mol % 4               (bits 0-1)
+# __mol_pack(s,r,v,a,t) → s*4096 + r*256 + v*32 + a*4 + t
+
+.call_mol_s:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $12, %eax
+    and     $0x0F, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_r:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $8, %eax
+    and     $0x0F, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_v:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $5, %eax
+    and     $0x07, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_a:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $2, %eax
+    and     $0x07, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_t:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    and     $0x03, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_pack:
+    # Stack: [s, r, v, a, t] → s*4096 + r*256 + v*32 + a*4 + t
+    add     %rcx, %r13
+    # Pop t
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax              # t
+    add     $16, %r14
+    # Pop a
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # a
+    shl     $2, %edx                    # a*4
+    add     %edx, %eax
+    add     $16, %r14
+    # Pop v
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # v
+    shl     $5, %edx                    # v*32
+    add     %edx, %eax
+    add     $16, %r14
+    # Pop r
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # r
+    shl     $8, %edx                    # r*256
+    add     %edx, %eax
+    add     $16, %r14
+    # Pop s
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # s
+    shl     $12, %edx                   # s*4096
+    add     %edx, %eax
+    # Push result as f64
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ── __sleep(ms) — nanosleep syscall ──────────────────────────────────────

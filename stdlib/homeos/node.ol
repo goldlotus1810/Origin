@@ -208,3 +208,75 @@ pub fn node_stats() {
     };
     return { total: _ns_total, linked: _ns_linked, total_fires: _ns_fires };
 }
+
+// ════════════════════════════════════════════════════════════════
+// Fn-Node Registry — function metadata for Lego composition (T5 ND.4)
+// ════════════════════════════════════════════════════════════════
+// Every fn has a node: { name, mol (semantic meaning), fires (call count), params }
+// fn.mol → fn has emotion (heal() V=6, delete() V=2)
+// fn.fires → hot function detection (Dream can cluster → skill)
+// fn.links → related fns (add↔subtract, encode↔decode)
+
+let __fn_nodes = [];
+
+pub fn fn_node_register(_fnr_name, _fnr_param_count) {
+    let _fnr_i = 0;
+    while _fnr_i < len(__fn_nodes) {
+        if __fn_nodes[_fnr_i].name == _fnr_name { return; };
+        let _fnr_i = _fnr_i + 1;
+    };
+    let _fnr_mol = 0;
+    if len(_fnr_name) >= 1 {
+        _fnr_mol = encode_codepoint(__char_code(char_at(_fnr_name, 0)));
+        let _fnr_ci = 1;
+        while _fnr_ci < len(_fnr_name) {
+            _fnr_mol = mol_compose(_fnr_mol, encode_codepoint(__char_code(char_at(_fnr_name, _fnr_ci))));
+            let _fnr_ci = _fnr_ci + 1;
+        };
+    };
+    push(__fn_nodes, {
+        name: _fnr_name,
+        mol: _fnr_mol,
+        fires: 0,
+        params: _fnr_param_count,
+        links: []
+    });
+}
+
+pub fn fn_node_fire(_fnf_name) {
+    let _fnf_i = 0;
+    while _fnf_i < len(__fn_nodes) {
+        if __fn_nodes[_fnf_i].name == _fnf_name {
+            __fn_nodes[_fnf_i].fires = __fn_nodes[_fnf_i].fires + 1;
+            return;
+        };
+        let _fnf_i = _fnf_i + 1;
+    };
+}
+
+pub fn fn_node_link(_fnl_a, _fnl_b) {
+    let _fnl_i = 0;
+    while _fnl_i < len(__fn_nodes) {
+        if __fn_nodes[_fnl_i].name == _fnl_a {
+            push(__fn_nodes[_fnl_i].links, _fnl_b);
+        };
+        if __fn_nodes[_fnl_i].name == _fnl_b {
+            push(__fn_nodes[_fnl_i].links, _fnl_a);
+        };
+        let _fnl_i = _fnl_i + 1;
+    };
+}
+
+pub fn fn_node_count() { return len(__fn_nodes); }
+
+pub fn fn_node_hot(_fnh_min_fires) {
+    let _fnh_result = [];
+    let _fnh_i = 0;
+    while _fnh_i < len(__fn_nodes) {
+        if __fn_nodes[_fnh_i].fires >= _fnh_min_fires {
+            push(_fnh_result, __fn_nodes[_fnh_i].name);
+        };
+        let _fnh_i = _fnh_i + 1;
+    };
+    return _fnh_result;
+}
