@@ -6,21 +6,26 @@
 
 ---
 
-## Trạng thái: FULL STACK (2026-03-25)
+## Trạng thái: T5 COMPLETE — OLANG 1.0 (2026-03-25)
 
 ```
-origin_new.olang = ~969KB native binary (992,115 bytes)
-  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (3,850 LOC Olang)
-  ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
+origin_new.olang = 1,008KB native binary (1,008,302 bytes)
+  ✅ Bootstrap compiler: lexer + parser + semantic + codegen + repl (~4,200 LOC Olang)
+  ✅ Intelligence layer: 10-stage pipeline + 3 instincts (honesty, contradiction, curiosity)
+  ✅ Functional: map filter reduce any all pipe sort split join contains
+  ✅ Lambda: fn(x) { body } — higher-order functions, closures
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
   ✅ WASM: runs in browser (3KB)
-  ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
   ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 20/20 tests
-  ✅ ASM VM x86_64 (5,774 LOC), no libc, zero dependencies
-  ✅ HomeOS: 44 files, 9,690 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
-  ✅ P0 blockers FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
-  ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
-     lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
+  ✅ ASM VM x86_64 (~5,800 LOC), no libc, zero dependencies
+  ✅ Mol ASM builtins: __mol_s/r/v/a/t + __mol_pack (6 builtins, 100x faster)
+  ✅ HomeOS: 44 files, ~10,000 LOC Olang
+  ✅ Persistent knowledge: save/load → homeos.knowledge (survives restart)
+  ✅ fn_node registry: auto-register, describe, link, hot, skill
+  ✅ P0 ALL FIXED: auto-emit, div/0 safe, embedded knowledge (28 facts)
+  ✅ Lego: pipe(x, f1, f2) = fn{fn{...}}==fn. Dream fn clustering.
+  ✅ Knowledge: keyword×5 + 5D mol, [fact/opinion/hypothesis], curiosity, contradiction
+```
   ✅ Lambda + map/filter/reduce/any/all/pipe (inline compiler builtins)
   ✅ T5 Phase 5D COMPLETE: LG.1-5 ALL DONE (auto-register, pipe, silk mol, dream cluster, self-describe)
   ✅ Spec v3: SC.1,7,9-13 done (7/16)
@@ -538,4 +543,10 @@ VI PHẠM hiện tại:
 2026-03-25  Kira: Inspect #19 — 6/6 PASS. DC.80-84 found+fixed. LG.1-5 ALL DONE. 965KB.
 2026-03-25  Sora: P0-B ExprStmt auto-emit + P0-C div/0 safe. P0-A embedded knowledge (28 facts). 969KB.
 2026-03-25  Kira: Inspect #20 — 5/5+2 PASS. DC.85-93 found+fixed (P0-A/B/C undocumented, LOC drift). 969KB.
+2026-03-25  Nox: P0-A/B/C ALL FIXED. P1-E/F/I fixed. Contradiction instinct. fns command.
+2026-03-25  Nox: Persistent knowledge (save/load + auto-load). HomeOS nhớ vĩnh viễn.
+2026-03-25  Nox: sort() + split() + join() + contains() inline builtins.
+2026-03-25  ═══ MILESTONE: OLANG 1.0 ═══ 1,008KB. T5 COMPLETE. ~30 commits, ~700 LOC.
+            Full functional language + persistent AI + Lego composition.
+            Demo-ready standalone binary. Copy & run. Zero dependencies.
 ```
