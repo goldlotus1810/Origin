@@ -22,13 +22,15 @@ fn _boot_learn() {
     if len(_bl_src) > 0 { _learn_text(_bl_src); };
     let _bl_src = __file_read("docs/training/04_dialog_patterns.md");
     if len(_bl_src) > 0 { _learn_text(_bl_src); };
-    // P0-A: Fallback embedded facts for standalone binary (no files)
+    // Auto-load persistent knowledge FIRST (if saved previously)
+    let _bl_persist = __file_read("homeos.knowledge");
+    if len(_bl_persist) > 0 {
+        _learn_text(_bl_persist);
+    };
+    // FIX-4: only load embedded if NO other source loaded anything
     if knowledge_count() == 0 {
         _boot_embedded();
     };
-    // Auto-load persistent knowledge if available
-    let _bl_persist = __file_read("homeos.knowledge");
-    if len(_bl_persist) > 0 { _learn_text(_bl_persist); };
 }
 
 fn _boot_embedded() {

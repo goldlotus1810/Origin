@@ -1723,15 +1723,20 @@ fn knowledge_search(_ks_query) {
             let _ks_ch = char_at(_ks_query, _ks_qi);
             if __char_code(_ks_ch) == 32 {
                 if len(_ks_qw) >= 2 {
+                    // Word list: case-insensitive via _a_has (word == entry_word)
                     let _ks_wi = 0;
                     while _ks_wi < len(_ks_entry.words) {
-                        if _ks_entry.words[_ks_wi] == _ks_qw { _ks_kwscore = _ks_kwscore + 3; };
+                        if _a_has(_ks_entry.words[_ks_wi], _ks_qw) == 1 {
+                            if len(_ks_entry.words[_ks_wi]) == len(_ks_qw) {
+                                _ks_kwscore = _ks_kwscore + 3;
+                            };
+                        };
                         let _ks_wi = _ks_wi + 1;
                     };
+                    // Full text substring (case-insensitive)
                     if _a_has(_ks_entry.text, _ks_qw) == 1 {
                         _ks_kwscore = _ks_kwscore + 2;
                         _ks_match_count = _ks_match_count + 1;
-                        // Longer words = more specific = bonus
                         if len(_ks_qw) >= 4 { _ks_kwscore = _ks_kwscore + 3; };
                     };
                 };
@@ -1744,7 +1749,11 @@ fn knowledge_search(_ks_query) {
         if len(_ks_qw) >= 2 {
             let _ks_wi = 0;
             while _ks_wi < len(_ks_entry.words) {
-                if _ks_entry.words[_ks_wi] == _ks_qw { _ks_kwscore = _ks_kwscore + 3; };
+                if _a_has(_ks_entry.words[_ks_wi], _ks_qw) == 1 {
+                    if len(_ks_entry.words[_ks_wi]) == len(_ks_qw) {
+                        _ks_kwscore = _ks_kwscore + 3;
+                    };
+                };
                 let _ks_wi = _ks_wi + 1;
             };
             if _a_has(_ks_entry.text, _ks_qw) == 1 {
@@ -1757,7 +1766,12 @@ fn knowledge_search(_ks_query) {
         if _ks_match_count >= 2 { _ks_kwscore = _ks_kwscore + (_ks_match_count * 10); };
 
         // Additive: keyword ×5 + mol_score
-        _ks_score = (_ks_kwscore * 5) + _ks_score;
+        // FIX-3: only count if keyword actually matched (not just mol)
+        if _ks_kwscore > 0 {
+            _ks_score = (_ks_kwscore * 5) + _ks_score;
+        } else {
+            _ks_score = 0;  // no keyword match → don't return this fact
+        };
 
         if _ks_score > _ks_best_score {
             _ks_best_score = _ks_score;
