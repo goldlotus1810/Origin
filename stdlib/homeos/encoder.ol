@@ -1372,23 +1372,23 @@ pub fn agent_respond(text) {
         };
     };
 
-    // ── 7. INSTINCT: Honesty + Curiosity (inline, T5) ──
+    // ── 7. INSTINCT → ACTION (GD.3 SK.1-7) ──
+    // Instincts return ACTION that controls response behavior
+    let _ar_action = "respond";  // default: respond normally
     let _ar_conf = 0;
     let _ar_novelty = 0;
-    if len(__knowledge) > 0 {
-        let _ar_sim_count = 0;
-        let _ar_best_sim = 0;
-        let _ar_ii = 0;
-        while _ar_ii < len(__knowledge) {
-            let _ar_iscore = _mol_similarity(mol, __knowledge[_ar_ii].mol);
-            if _ar_iscore > 5 { _ar_sim_count = _ar_sim_count + 1; };
-            if _ar_iscore > _ar_best_sim { _ar_best_sim = _ar_iscore; };
-            let _ar_ii = _ar_ii + 1;
+
+    // SK.2 Honesty: confidence from KnowTree score
+    if __g_ks_score >= 20 { _ar_conf = 90; };
+    if __g_ks_score >= 10 { if _ar_conf == 0 { _ar_conf = 70; }; };
+    if __g_ks_score > 0 { if _ar_conf == 0 { _ar_conf = 50; }; };
+    if __g_ks_score == 0 { _ar_novelty = 8; };
+
+    // SK.2 Honesty action: silence when confidence too low + no knowledge
+    if _ar_conf == 0 {
+        if len(_ar_knowledge) == 0 {
+            if intent == "chat" { _ar_action = "ask"; };  // unknown → ask back
         };
-        if _ar_sim_count >= 5 { _ar_conf = 90; };
-        if _ar_sim_count >= 3 { if _ar_conf == 0 { _ar_conf = 70; }; };
-        if _ar_sim_count >= 1 { if _ar_conf == 0 { _ar_conf = 50; }; };
-        _ar_novelty = 10 - _ar_best_sim;
     };
 
     // ── 7b. INSTINCT #2: Contradiction ──
@@ -1520,8 +1520,11 @@ pub fn agent_respond(text) {
         if _ar_c2_score > _ar_c3_score { _ar_out = _ar_c2; };
     };
 
-    // ── SC.16 CHECKPOINT 5: Response ──
-    if len(_ar_out) == 0 { _ar_out = ask_back(); };
+    // ── SC.16 CHECKPOINT 5: Response — action-driven ──
+    if _ar_action == "ask" {
+        _ar_out = _ar_out_emoji + " Minh chua hieu ro. Ban muon hoi ve dieu gi?";
+    };
+    if len(_ar_out) == 0 { _ar_out = _ar_out_emoji + " Minh nghe roi."; };
 
     return _ar_out;
 }
