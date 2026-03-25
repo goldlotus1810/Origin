@@ -160,31 +160,35 @@ Saved 30 facts to homeos.knowledge
 
 ### Instincts
 - **Honesty**: `[fact]` / `[opinion]` / `[hypothesis]` — confidence labels
-- **Contradiction**: `[!]` flag khi input mau thuan voi knowledge
+- **Contradiction**: `[!]` flag + polite correction (DNA Repair)
+- **Causality**: detect "tai sao/why" → causal reasoning
+- **Abstraction**: `[khai niem quen thuoc]` for well-known concepts
+- **Analogy**: detect "giong/similar" → comparison mode
 - **Curiosity**: "Chu de moi" khi gap topic chua biet
+- **Reflection**: periodic conversation quality check
 
 ---
 
 ## Cau Truc
 
 ```
-origin_new.olang              1,008KB native binary (ELF64 x86_64, no libc)
+origin_new.olang              1,021KB native binary (ELF64 x86_64, no libc)
 |
-+-- vm/x86_64/vm_x86_64.S    ASM VM — ~5,800 LOC x86_64 assembly
++-- vm/x86_64/vm_x86_64.S    ASM VM — 5,987 LOC x86_64 assembly
 |   +-- Bytecode interpreter  36 opcodes
 |   +-- Bump allocator        256MB heap (r15)
 |   +-- Syscall bridge        read/write/exit/nanosleep (no libc)
 |   +-- 70+ builtins          math, string, array, dict, mol, crypto, file I/O
 |   +-- REPL loop             read -> compile -> eval -> print
 |
-+-- stdlib/bootstrap/         Bootstrap compiler — ~4,200 LOC Olang
++-- stdlib/bootstrap/         Bootstrap compiler — 3,748 LOC Olang
 |   +-- lexer.ol              Tokenizer (298 LOC)
 |   +-- parser.ol             Recursive descent (1,132 LOC)
-|   +-- semantic.ol           AST -> bytecode + inline HOF (~1,900 LOC)
+|   +-- semantic.ol           AST -> bytecode + inline HOF (1,889 LOC)
 |   +-- codegen.ol            Helpers (429 LOC)
-|   +-- repl.ol               REPL + commands (~380 LOC)
+|   +-- repl.ol               REPL + commands (451 LOC)
 |
-+-- stdlib/homeos/            HomeOS — 45 files, ~10,000 LOC Olang
++-- stdlib/homeos/            HomeOS — 45 files, 10,042 LOC Olang
 |   +-- encoder.ol            10-stage pipeline, knowledge, Silk, emotion
 |   +-- node.ol               DN/QR nodes, fn_node registry, Dream cluster
 |   +-- instinct.ol           7 instincts (honesty, contradiction, curiosity...)
@@ -207,7 +211,7 @@ origin_new.olang              1,008KB native binary (ELF64 x86_64, no libc)
     +-- kira/                 Kira inspection reports
 ```
 
-**Total: ~5,800 LOC ASM + ~14,200 LOC Olang + ~98K LOC Rust (legacy)**
+**Total: 5,987 LOC ASM + 15,981 LOC Olang (bootstrap 3,748 + repl 451 + homeos 10,042 + stdlib 1,740) + ~98K LOC Rust (legacy)**
 
 ---
 
@@ -281,9 +285,10 @@ Sys:   test  build  save  load  fns  help  exit — System
 | [docs/olang_handbook.md](docs/olang_handbook.md) | Olang handbook |
 | [docs/UDC_DOC/](docs/UDC_DOC/) | 42 UDC encode formulas |
 | [docs/sora/](docs/sora/) | Sora analysis + reports |
-| [PLAN_REWRITE.md](PLAN_REWRITE.md) | Lo trinh Rust -> Olang |
+| [plans/MASTER_PLAN_HOMEOS_V1.md](plans/MASTER_PLAN_HOMEOS_V1.md) | HomeOS v1.0 master plan (6 sprints) |
+| [PLAN_REWRITE.md](PLAN_REWRITE.md) | Lo trinh Rust -> Olang (COMPLETED) |
 
 ---
 
-*Origin · Olang 1.0 · 1,008KB · self-hosting · zero deps · 2026*
+*Origin · Olang 1.0 · 1,021KB · self-hosting · zero deps · 2026*
 *"Moi ky tu la 1 SDF. Chuoi sinh chuoi. Luu TRONG SO. Doc bang DAO HAM."*

@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~985KB native binary (1,008,302 bytes, ELF64, no libc, no deps)
+origin_new.olang = ~1,021KB native binary (1,021,393 bytes, ELF64, no libc, no deps)
 
 User input
   ↓
@@ -468,7 +468,7 @@ P0 Blockers:      ALL FIXED (2026-03-25):
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~985KB)
+make build                    # → origin_new.olang (~1,021KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -488,13 +488,13 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,776 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,987 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,132 LOC) |
 | `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,889 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (429 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,696 LOC) |
+| `stdlib/repl.ol` | REPL entry point (451 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (45 files, 10,042 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |

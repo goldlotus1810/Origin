@@ -1,8 +1,9 @@
 # Olang Handbook — So tay Ngon ngu Olang
 
-> **Phien ban:** 0.07 | **Cap nhat:** 2026-03-23
+> **Phien ban:** 1.0 | **Cap nhat:** 2026-03-25
 >
-> Olang = ngon ngu lap trinh + suy luan + sang tao cua HomeOS.
+> Olang 1.0 = ngon ngu tu hosting, 1,021KB, zero dependencies.
+> Lambda, HOF (map/filter/reduce/pipe), persistent knowledge.
 > Moi thu la MolecularChain. Moi phep toan la bien doi chain.
 
 ---
@@ -1904,4 +1905,4 @@ poem([
 
 ---
 
-*Olang Handbook v0.05 — HomeOS 2026-03-18*
+*Olang Handbook v1.0 — HomeOS 2026-03-25*

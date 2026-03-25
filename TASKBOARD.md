@@ -9,16 +9,17 @@
 ## Trạng thái: OLANG 1.0 (2026-03-25)
 
 ```
-origin_new.olang = 1,008KB native binary (ELF64 x86_64, no libc)
+origin_new.olang = 1,021KB native binary (1,021,393 bytes, ELF64 x86_64, no libc)
   20/20 tests | fib(20)=6765 | SHA-256 FIPS 180-4
-  ~5,800 LOC ASM | ~4,200 LOC Bootstrap | ~10,000 LOC HomeOS
+  5,987 LOC ASM | 3,748 LOC Bootstrap | 451 LOC REPL | 10,042 LOC HomeOS (45 files)
   Lambda + HOF: map filter reduce any all pipe sort split join contains
-  Mol ASM: __mol_s/r/v/a/t + __mol_pack (6 builtins)
-  Persistent: save/load → homeos.knowledge
-  Instincts: honesty [fact/opinion/hypothesis] + contradiction [!] + curiosity
+  Mol ASM: __mol_s/r/v/a/t + __mol_pack + __utf8_cp/len (8 builtins)
+  Persistent: save/load → homeos.knowledge (auto-load on boot)
+  Instincts: 7/7 active | Checkpoints: 5/5 | SC.4 Immune | SC.5 Homeostasis | SC.6 DNA Repair
   fn_node: auto-register, describe, link, hot, Dream cluster
-  Lego: pipe(x, f1, f2) = fn{fn{...}}==fn
-  P0 ALL FIXED: auto-emit, div/0 safe, 28 embedded facts
+  Lego: pipe(x, f1, f2) = fn{fn{...}}==fn | Dict pretty-print
+  UTF-8 decode: __utf8_cp → full Unicode codepoint
+  P0+P1 ALL FIXED | Greeting/goodbye router | Gate heal skip | Math ?/= strip
 ```
 
 ---

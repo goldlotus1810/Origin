@@ -1,5 +1,9 @@
 # Plan: origin.olang = Self-Contained Executable
 
+> **STATUS: COMPLETED ✅ (2026-03-25)**
+> Tất cả giai đoạn 1-7 ĐÃ HOÀN THÀNH. origin.olang = 1,021KB self-hosting binary.
+> Kế hoạch tiếp: `plans/MASTER_PLAN_HOMEOS_V1.md`
+
 **Ngày:** 2026-03-18
 **Mục tiêu:** origin.olang tự chứa VM, tự chạy, 0 dependency ngoài.
 
