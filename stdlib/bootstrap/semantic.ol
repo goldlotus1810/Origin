@@ -713,6 +713,103 @@ fn compile_expr(state, expr) {
                 patch_jump(state, _lp_done, current_pos(state));
                 return;
             };
+            if _ce_fname == "join" && len(args) == 2 {
+                // join(arr, sep) → concatenate array elements with separator
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__jn_a"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__jn_sep"));
+                emit_op(state, make_op_name("Push", ""));
+                emit_op(state, make_op_name("Store", "__jn_r"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__jn_i"));
+                let _jn_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__jn_i"));
+                emit_op(state, make_op_name("Load", "__jn_a"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _jn_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // if i > 0: r = r + sep
+                emit_op(state, make_op_name("Load", "__jn_i"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Call", "__cmp_gt"));
+                let _jn_nosep = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_name("Load", "__jn_r"));
+                emit_op(state, make_op_name("Load", "__jn_sep"));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__jn_r"));
+                patch_jump(state, _jn_nosep, current_pos(state));
+                // r = r + __to_string(arr[i])
+                emit_op(state, make_op_name("Load", "__jn_r"));
+                emit_op(state, make_op_name("Load", "__jn_a"));
+                emit_op(state, make_op_name("Load", "__jn_i"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__jn_r"));
+                // i++
+                emit_op(state, make_op_name("Load", "__jn_i"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__jn_i"));
+                emit_jmp(state, _jn_loop);
+                patch_jump(state, _jn_jz, current_pos(state));
+                emit_op(state, make_op_name("Load", "__jn_r"));
+                return;
+            };
+            if _ce_fname == "contains" && len(args) == 2 {
+                // contains(str, substr) → 1 if found, 0 if not
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__cn_s"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__cn_sub"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__cn_i"));
+                // slen - sublen + 1 = max start
+                emit_op(state, make_op_name("Load", "__cn_s"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Load", "__cn_sub"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__hyp_sub"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__cn_max"));
+                let _cn_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__cn_i"));
+                emit_op(state, make_op_name("Load", "__cn_max"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _cn_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // check substr match at position i
+                emit_op(state, make_op_name("Load", "__cn_s"));
+                emit_op(state, make_op_name("Load", "__cn_i"));
+                emit_op(state, make_op_name("Load", "__cn_i"));
+                emit_op(state, make_op_name("Load", "__cn_sub"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Call", "__str_substr"));
+                emit_op(state, make_op_name("Load", "__cn_sub"));
+                emit_op(state, make_op_name("Call", "__eq"));
+                let _cn_nomatch = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                // found!
+                emit_op(state, make_op_num("PushNum", 1));
+                let _cn_done = current_pos(state);
+                emit_op(state, make_op_num("Jmp", 0));
+                patch_jump(state, _cn_nomatch, current_pos(state));
+                // i++
+                emit_op(state, make_op_name("Load", "__cn_i"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__cn_i"));
+                emit_jmp(state, _cn_loop);
+                // not found
+                patch_jump(state, _cn_jz, current_pos(state));
+                emit_op(state, make_op_num("PushNum", 0));
+                patch_jump(state, _cn_done, current_pos(state));
+                return;
+            };
             if _ce_fname == "sort" && len(args) == 1 {
                 // sort(arr) → new sorted array (insertion sort, in-place on copy)
                 // Copy arr → __sa, then insertion sort __sa
