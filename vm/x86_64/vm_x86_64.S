@@ -573,12 +573,24 @@ cg_call_closure:
     push    %r12                        # save current r12
     push    %r13                        # save return PC
 
-    # Switch r12 to boot bytecode (closure bodies live there)
+    # Check bit 63: eval closure (absolute address) vs boot closure (relative PC)
+    bt      $63, %rdi
+    jc      .cc_eval_closure
+
+    # Boot closure: switch r12 to boot bytecode base, PC = relative body_pc
     lea     boot_bc_base(%rip), %rax
     mov     (%rax), %r12
+    mov     %edi, %r13d                 # PC = body_pc (relative)
+    jmp     vm_loop
 
-    # Jump to body
-    mov     %edi, %r13d                 # PC = body_pc
+.cc_eval_closure:
+    # Eval closure: body_pc is absolute address with bit 63 set
+    btr     $63, %rdi                   # clear bit 63 → absolute address
+    # Use saved eval_bc_base as r12, compute body offset for r13
+    lea     eval_bc_base(%rip), %rax
+    mov     (%rax), %r12               # r12 = eval buffer base
+    sub     %r12, %rdi                 # offset = absolute - base
+    mov     %edi, %r13d               # PC = body offset within eval buffer
     jmp     vm_loop
 
 .cc_not_closure:
@@ -1172,16 +1184,13 @@ op_call:
 
 .closure_is_eval:
     # Eval closure: body_pc is absolute address with bit 63 flag
-    btr     $63, %rdi                  # clear flag
-    # rdi = absolute address of body in eval buffer
-    # r12 needs to be set to eval buffer base, r13 = offset
-    # For simplicity: set r12 = 0, r13 = absolute address (hack but works since vm_loop does r12+r13)
-    # Actually: just load from the original r12 saved on stack
-    mov     (%rsp), %r13               # saved return PC (relative to old r12)
-    mov     8(%rsp), %r12              # saved r12 (eval buffer base)
-    # Now compute: body offset = absolute - r12
-    sub     %r12, %rdi
-    mov     %edi, %r13d                # PC = body_pc relative to eval base
+    btr     $63, %rdi                  # clear flag → rdi = absolute address of body
+    # Use saved eval_bc_base as r12, compute body offset for r13
+    # Jump targets in body are relative to eval buffer base, not body start
+    lea     eval_bc_base(%rip), %rax
+    mov     (%rax), %r12               # r12 = eval buffer base
+    sub     %r12, %rdi                 # offset = absolute_addr - base
+    mov     %edi, %r13d                # PC = body offset within eval buffer
     jmp     vm_loop
 
 .call_skip:
@@ -3137,6 +3146,9 @@ op_call:
     xor     %r13d, %r13d               # PC = 0
     mov     $0x100000, %rbx             # 1MB bounds — op_ret accepts boot PCs
     add     %rcx, %r15                  # bump heap past bytecode buffer
+    # Save eval buffer base for cross-boundary closure calls
+    lea     eval_bc_base(%rip), %rax
+    mov     %r8, (%rax)
 
     jmp     vm_loop                     # execute!
     # When this hits op_halt, it will check the nested flag and return here
@@ -5584,6 +5596,8 @@ boot_bc_base:
     .space 8                            # boot bytecode base address (for nested calls)
 boot_bc_size:
     .space 8                            # boot bytecode size
+eval_bc_base:
+    .space 8                            # eval bytecode base (for cross-boundary closure calls)
 eval_mode:
     .space 1                            # 0 = REPL mode, 1 = --eval mode (stdin)
     .align 8

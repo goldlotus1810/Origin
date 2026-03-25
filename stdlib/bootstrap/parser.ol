@@ -27,6 +27,7 @@ union Expr {
     MatchExpr { subject: Expr, arms: Vec[MatchArm] },
     DictLit { fields: Vec[FieldInit] },
     ArrayComp { var: Str, depth: Num },
+    Lambda { params: Vec[Str], body: Vec[Stmt] },
 }
 
 union Stmt {
@@ -273,30 +274,20 @@ fn parse_primary(p) {
                 advance(p);
                 return Expr::Ident { name: "match" };
             };
-            // Lambda: fn(params) { body } — skip and return 0 (no closure support yet)
+            // Lambda: fn(params) { body } → Expr::Lambda
             if name == "fn" {
-                advance(p);
-                // Skip params
-                if is_symbol_tok(peek(p), "(") {
-                    advance(p);
-                    let _lam_depth = 1;
-                    while _lam_depth > 0 && !is_eof(peek(p)) {
-                        if is_symbol_tok(peek(p), "(") { _lam_depth = _lam_depth + 1; };
-                        if is_symbol_tok(peek(p), ")") { _lam_depth = _lam_depth - 1; };
-                        advance(p);
-                    };
+                advance(p); // skip fn keyword (already peeked as ident)
+                expect_symbol(p, "(");
+                let _lam_params = [];
+                while !is_symbol_tok(peek(p), ")") && !is_eof(peek(p)) {
+                    push(_lam_params, expect_ident(p));
+                    if is_symbol_tok(peek(p), ",") { advance(p); };
                 };
-                // Skip body
-                if is_symbol_tok(peek(p), "{") {
-                    advance(p);
-                    let _lam_depth = 1;
-                    while _lam_depth > 0 && !is_eof(peek(p)) {
-                        if is_symbol_tok(peek(p), "{") { _lam_depth = _lam_depth + 1; };
-                        if is_symbol_tok(peek(p), "}") { _lam_depth = _lam_depth - 1; };
-                        advance(p);
-                    };
-                };
-                return Expr::NumLit { value: 0 };
+                expect_symbol(p, ")");
+                push(_pb_stack, _lam_params);
+                let _lam_body = parse_block(p);
+                let _lam_params = pop(_pb_stack);
+                return Expr::Lambda { params: _lam_params, body: _lam_body };
             };
             // Other keywords → treat as identifier (from, type, etc. used as var names)
             advance(p);

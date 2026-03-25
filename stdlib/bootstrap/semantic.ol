@@ -910,6 +910,40 @@ fn compile_expr(state, expr) {
             if __g_mej2 >= 0 { patch_jump(state, __g_mej2, _m_end); };
             if __g_mej3 >= 0 { patch_jump(state, __g_mej3, _m_end); };
         },
+        Expr::Lambda { params, body } => {
+            // Lambda expression: fn(params) { body } → emit Closure like FnDef but no Store
+            let _lm_params = params;
+            let _lm_body = body;
+            let _lm_pcnt = len(_lm_params);
+            let _lm_closure_pos = current_pos(state);
+            emit_op(state, make_op_num("Closure", _lm_pcnt));
+            // Store params (reversed for stack order)
+            let _lm_saved = save_locals(state);
+            let _lm_pi = _lm_pcnt - 1;
+            while _lm_pi >= 0 {
+                emit_op(state, make_op_name("Store", _lm_params[_lm_pi]));
+                push_local(state, _lm_params[_lm_pi]);
+                let _lm_pi = _lm_pi - 1;
+            };
+            // Compile body
+            let _lm_bi = 0;
+            while _lm_bi < len(_lm_body) {
+                compile_stmt(state, _lm_body[_lm_bi]);
+                let _lm_bi = _lm_bi + 1;
+            };
+            // Default return
+            emit_op(state, make_op_name("Push", ""));
+            emit_op(state, make_op_simple("Ret"));
+            restore_locals(state, _lm_saved);
+            // Patch body_len
+            let _lm_body_len = current_pos(state) - _lm_closure_pos - 6;
+            let _lm_bpos = _lm_closure_pos + 2;
+            set_at(_g_output, _lm_bpos, _lm_body_len % 256);
+            set_at(_g_output, _lm_bpos + 1, (_lm_body_len / 256) % 256);
+            set_at(_g_output, _lm_bpos + 2, (_lm_body_len / 65536) % 256);
+            set_at(_g_output, _lm_bpos + 3, (_lm_body_len / 16777216) % 256);
+            // Closure value is now on stack (pushed by cg_closure opcode)
+        },
         _ => {
             add_error(state, "Unknown expression type");
         },
