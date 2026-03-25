@@ -1347,11 +1347,19 @@ pub fn agent_respond(text) {
         };
     };
 
-    // Knowledge retrieval — GATE: skip for emotional/heal intent (no random facts for "toi buon")
+    // Knowledge retrieval — GATE: skip for heal, gate by score
     let _ar_knowledge = "";
+    let __g_ks_score = 0;
     if len(__knowledge) > 0 {
         if intent != "heal" {
             _ar_knowledge = knowledge_search(_ar_norm);
+        };
+    };
+    // GT.1: Gate threshold — LOW score → don't attach fact, ask instead
+    if __g_ks_score > 0 {
+        if __g_ks_score < 10 {
+            // Low confidence match — don't present as fact
+            _ar_knowledge = "";
         };
     };
 
@@ -1780,9 +1788,12 @@ fn knowledge_search(_ks_query) {
         let _ks_ki = _ks_ki + 1;
     };
 
+    // Return scored result for gate_decide
     if _ks_best_score > 0 {
+        let __g_ks_score = _ks_best_score;
         return __tpl_know + _ks_best + ")";
     };
+    let __g_ks_score = 0;
     return "";
 }
 
