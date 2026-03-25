@@ -860,7 +860,10 @@ fn _emo_bias_tone(tone) {
 }
 
 pub fn stm_push(_sp_text, _sp_intent, _sp_tone) {
-    push(__stm, { input: _sp_text, intent: _sp_intent, tone: _sp_tone, turn: len(__stm) });
+    // GD.2 NR.1: STM entries link to KnowTree word nodes
+    let _sp_mol = 0;
+    let _sp_kt_result = kt_search(_sp_text);
+    push(__stm, { input: _sp_text, intent: _sp_intent, tone: _sp_tone, turn: len(__stm), kt_score: _sp_kt_result.score });
     if len(__stm) > __stm_max {
         let _sp_new = [];
         let _sp_i = 1;
@@ -1144,19 +1147,18 @@ fn dream_cycle() {
     if _dc_learn >= 3 { _dc_dominant = "learn"; };
     if _dc_tech >= 3 { _dc_dominant = "technical"; };
 
-    // Strengthen: boost weight of edges matching dominant emotion
+    // GD.2 NR.3: Dream consolidation — boost high-fire edges (not emotion field)
     if _dc_dominant != "chat" {
         let _dc_j = 0;
         while _dc_j < len(__silk) {
             let _dc_e = __silk[_dc_j];
-            if _dc_e.emotion == _dc_dominant {
-                // Dream boost: +0.05 to matching edges (consolidation)
+            // Boost edges with fires >= 2 (well-connected survive)
+            if _dc_e.fires >= 2 {
                 let _dc_new_w = _dc_e.weight + 0.05;
                 if _dc_new_w > 1 { _dc_new_w = 1; };
                 set_at(__silk, _dc_j, {
                     from: _dc_e.from, to: _dc_e.to,
-                    weight: _dc_new_w,
-                    emotion: _dc_e.emotion, fires: _dc_e.fires
+                    weight: _dc_new_w, fires: _dc_e.fires
                 });
             };
             let _dc_j = _dc_j + 1;
