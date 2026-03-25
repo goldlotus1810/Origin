@@ -203,6 +203,17 @@ pub fn repl_eval(input) {
     };
   }
 
+  if src == "fns" {
+    let _rf_out = "Fn nodes: " + __to_string(fn_node_count());
+    let _rf_i = 0;
+    while _rf_i < fn_node_count() {
+        let _rf_n = __fn_nodes[_rf_i];
+        _rf_out = _rf_out + "\n  " + _rf_n.name + "(" + __to_string(_rf_n.params) + ") fires=" + __to_string(_rf_n.fires);
+        let _rf_i = _rf_i + 1;
+    };
+    return _rf_out;
+  }
+
   if src == "memory" {
     let _rm_s = stm_summary();
     let _rm_emo = emo_state();
