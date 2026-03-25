@@ -31,8 +31,17 @@ fn _boot_learn() {
     if knowledge_count() == 0 {
         _boot_embedded();
     };
-    // N.5: KnowTree grows from user 'learn' commands (not boot seeded)
-    // Boot seeding 166 facts crashes (heap/scope). Tree grows organically.
+    // N.5: Seed KnowTree from embedded facts only (28 facts, safe)
+    // Full 166 training facts deferred — heap pressure too high
+    if len(__kt_facts) == 0 {
+        let _bl_ki = 0;
+        let _bl_max = knowledge_count();
+        if _bl_max > 30 { _bl_max = 30; };  // cap at 30 to avoid heap crash
+        while _bl_ki < _bl_max {
+            kt_learn(__knowledge[_bl_ki].text);
+            let _bl_ki = _bl_ki + 1;
+        };
+    };
 }
 
 fn _boot_embedded() {
