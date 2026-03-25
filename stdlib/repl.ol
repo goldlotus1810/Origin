@@ -352,8 +352,15 @@ pub fn repl_eval(input) {
     if _re_2 == "__" { _re_is_code = 1; };
   };
 
-  // Not code → natural text conversation
+  // Not code → classify: greeting / question / chat
   if _re_is_code == 0 {
+    // Short greetings → smart response (no knowledge lookup)
+    if len(src) <= 15 {
+        if src == "hi" || src == "Hi" || src == "hello" || src == "Hello" { return smart_greet(stm_count()); };
+        if src == "hey" || src == "Hey" || src == "yo" || src == "Yo" { return smart_greet(stm_count()); };
+        if src == "chao" || src == "Chao" || src == "xin chao" || src == "Xin chao" { return smart_greet(stm_count()); };
+        if src == "bye" || src == "Bye" || src == "tam biet" { return smart_goodbye(stm_count()); };
+    };
     return agent_respond(src);
   }
 
