@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~961KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~963KB native binary (ELF64, no libc, no deps)
 
 User input
   ↓
@@ -126,6 +126,9 @@ emit reduce([1,2,3,4,5], fn(a,b) { return a+b; }); // 15
 emit any([1,2,3], fn(x) { return x > 2; });         // 1 (true)
 emit all([1,2,3], fn(x) { return x > 0; });         // 1 (true)
 // NOTE: nested chaining clobbers vars. Use: let a = filter(...); map(a, ...)
+
+// Pipe (Lego composition — fn{fn{...}}==fn)
+emit pipe(5, fn(x) { return x + 1; }, fn(x) { return x * 2; }); // 12
 
 // Try/catch
 try { __throw("error"); } catch { emit "caught"; };
@@ -238,6 +241,7 @@ filter(arr, f) → [x for x in arr if f(x)]
 reduce(arr, f) → fold left (acc=arr[0])
 any(arr, f) → 1 if f(x) for some x
 all(arr, f) → 1 if f(x) for all x
+pipe(x, f1, f2, ...) → fn(...f2(f1(x)))  // Lego composition
 ```
 
 ---
@@ -428,6 +432,9 @@ T5 Layer 1:       BUG-KNOWLEDGE fixed: 5D mol distance, all-chars chain, additiv
                    Instincts: [fact/opinion/hypothesis] labels. Curiosity for unknowns.
 T5 ND.2:          __mol_s/r/v/a/t + __mol_pack (6 ASM builtins, 100x faster).
 T5 ND.4:          fn_node registry: register/fire/link/hot. fn has mol + fire_count.
+T5 LG.1:          Compiler auto-emits fn_node_register() after every FnDef.
+T5 LG.2:          pipe(x, f1, f2, ...) — Lego operator. fn{fn{...}}==fn.
+T5 LG.5:          fn_node_describe(name) → lazy mol + 5D metadata (V/A/R/T).
 ```
 
 ---
@@ -436,7 +443,7 @@ T5 ND.4:          fn_node registry: register/fire/link/hot. fn has mol + fire_co
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~961KB)
+make build                    # → origin_new.olang (~963KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -459,10 +466,10 @@ make check-all
 | `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,767 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,132 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,569 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,594 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
 | `stdlib/repl.ol` | REPL entry point (355 LOC) |
-| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,559 LOC) |
+| `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,591 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
 | `TASKBOARD.md` | Task tracker |

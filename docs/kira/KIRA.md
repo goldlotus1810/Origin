@@ -142,3 +142,4 @@ BUG-INDEX/BUG-SORT: ✅ FIXED (Nox 2026-03-25)
 | 15 | 2026-03-24 | 4/5 ❌ | DC.51-61 | BUG-SORT discovered |
 | 16 | 2026-03-24 | 4/5 ❌ | ZERO | ROOT CAUSE: a[BinOp]→a[0] |
 | 17 | 2026-03-25 | 10/10 ✅ | DC.62-74 | Lambda+HOF+mol undoc, LOC drift. ALL FIXED. |
+| 18 | 2026-03-25 | 7/7 ✅ | DC.75-79 | pipe()+LG.1/5 undoc, LOC drift. ALL FIXED. |
