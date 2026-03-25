@@ -1354,26 +1354,22 @@ pub fn agent_respond(text) {
     let reply = compose_reply(intent, tone, _ar_norm);
 
     // ── 11. COMPOSE FINAL OUTPUT ──
-    let _ar_out = _ar_out_emoji + " " + reply;
-
-    // Confidence label (honesty instinct)
-    if _ar_conf >= 90 { _ar_out = _ar_out + " [fact]"; };
-    if _ar_conf >= 70 { if _ar_conf < 90 { _ar_out = _ar_out + " [opinion]"; }; };
-    if _ar_conf >= 50 { if _ar_conf < 70 { _ar_out = _ar_out + " [hypothesis]"; }; };
-
-    // Curiosity for unknown topics
-    if _ar_novelty > 7 {
-        if len(_ar_knowledge) == 0 {
+    // P1-E: When knowledge found, lead with fact directly (not template)
+    let _ar_out = "";
+    if len(_ar_knowledge) > 0 {
+        _ar_out = _ar_out_emoji + " " + _ar_knowledge;
+        // Append confidence
+        if _ar_conf >= 90 { _ar_out = _ar_out + " [fact]"; };
+        if _ar_conf >= 70 { if _ar_conf < 90 { _ar_out = _ar_out + " [opinion]"; }; };
+        if len(memory_context) > 0 { _ar_out = _ar_out + memory_context; };
+    } else {
+        _ar_out = _ar_out_emoji + " " + reply;
+        if _ar_conf >= 50 { if _ar_conf < 70 { _ar_out = _ar_out + " [hypothesis]"; }; };
+        // Curiosity for unknown topics
+        if _ar_novelty > 7 {
             _ar_out = _ar_out + " (Chu de moi — minh muon tim hieu them.)";
         };
-    };
-
-    if len(_ar_knowledge) > 0 {
-        _ar_out = _ar_out + memory_context + " " + _ar_knowledge;
-    } else {
-        if len(memory_context) > 0 {
-            _ar_out = _ar_out + memory_context;
-        };
+        if len(memory_context) > 0 { _ar_out = _ar_out + memory_context; };
     };
     return _ar_out;
 }

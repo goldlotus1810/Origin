@@ -585,6 +585,38 @@ fn compile_expr(state, expr) {
                 emit_op(state, make_op_name("Load", "__rc"));
                 return;
             };
+            if _ce_fname == "reduce" && len(args) == 3 {
+                // reduce(arr, f, init) → acc=init, for i=0..len { acc=f(acc,arr[i]) }
+                compile_expr(state, args[0]);
+                emit_op(state, make_op_name("Store", "__ra"));
+                compile_expr(state, args[1]);
+                emit_op(state, make_op_name("Store", "__rf"));
+                compile_expr(state, args[2]);
+                emit_op(state, make_op_name("Store", "__rc"));
+                emit_op(state, make_op_num("PushNum", 0));
+                emit_op(state, make_op_name("Store", "__ri"));
+                let _rp3_loop = current_pos(state);
+                emit_op(state, make_op_name("Load", "__ri"));
+                emit_op(state, make_op_name("Load", "__ra"));
+                emit_op(state, make_op_name("Call", "__array_len"));
+                emit_op(state, make_op_name("Call", "__cmp_lt"));
+                let _rp3_jz = current_pos(state);
+                emit_op(state, make_op_num("Jz", 0));
+                emit_op(state, make_op_name("Load", "__rc"));
+                emit_op(state, make_op_name("Load", "__ra"));
+                emit_op(state, make_op_name("Load", "__ri"));
+                emit_op(state, make_op_name("Call", "__array_get"));
+                emit_op(state, make_op_name("Call", "__rf"));
+                emit_op(state, make_op_name("Store", "__rc"));
+                emit_op(state, make_op_name("Load", "__ri"));
+                emit_op(state, make_op_num("PushNum", 1));
+                emit_op(state, make_op_name("Call", "__hyp_add"));
+                emit_op(state, make_op_name("Store", "__ri"));
+                emit_jmp(state, _rp3_loop);
+                patch_jump(state, _rp3_jz, current_pos(state));
+                emit_op(state, make_op_name("Load", "__rc"));
+                return;
+            };
             if _ce_fname == "pipe" && len(args) >= 2 {
                 // pipe(x, f1, f2, ..., fn) → fn(...f2(f1(x)))
                 // The Lego operator: chain functions together
