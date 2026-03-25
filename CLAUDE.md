@@ -34,7 +34,7 @@
 ## Kiến trúc hiện tại (Self-hosting)
 
 ```
-origin_new.olang = ~965KB native binary (ELF64, no libc, no deps)
+origin_new.olang = ~969KB native binary (992,115 bytes, ELF64, no libc, no deps)
 
 User input
   ↓
@@ -376,6 +376,7 @@ build                    Self-build: compile + pack → origin_built.olang
 test                     Run 20 inline tests
 memory                   Show STM turns + Silk edges + Knowledge facts
 help                     Show available commands
+personality <mode>       Set personality: "formal", "casual", "english"
 exit / quit              Exit REPL
 <natural text>           Auto-detect: non-code → agent_respond (Vietnamese OK)
 ```
@@ -437,6 +438,11 @@ T5 LG.2:          pipe(x, f1, f2, ...) — Lego operator. fn{fn{...}}==fn.
 T5 LG.3:          Silk edges mol-keyed (number compare, ~24B/edge, max 256).
 T5 LG.4:          fn_dream_cluster(min_fires) + skill_promote(). Phase 5D COMPLETE.
 T5 LG.5:          fn_node_describe(name) → lazy mol + 5D metadata (V/A/R/T).
+P0 Blockers:      ALL FIXED (2026-03-25):
+  P0-A: _boot_embedded() — 28 core facts fallback for standalone binary (no training files)
+  P0-B: ExprStmt auto-emit — bare expressions print result (Pop → Emit)
+         Side-effect: set_at() and other void-like calls also auto-emit in loops
+  P0-C: Div/0 safe — 1/0 returns 0, REPL survives (was: halt with vm_error_div_zero)
 ```
 
 ---
@@ -445,7 +451,7 @@ T5 LG.5:          fn_node_describe(name) → lazy mol + 5D metadata (V/A/R/T).
 
 ```bash
 # Build native binary
-make build                    # → origin_new.olang (~965KB)
+make build                    # → origin_new.olang (~969KB)
 
 # Test
 echo 'emit 42' | ./origin_new.olang
@@ -465,12 +471,12 @@ make check-all
 
 | File | Vai trò |
 |------|---------|
-| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,767 LOC) |
+| `vm/x86_64/vm_x86_64.S` | ASM VM — trái tim (5,774 LOC) |
 | `stdlib/bootstrap/lexer.ol` | Tokenizer (298 LOC) |
 | `stdlib/bootstrap/parser.ol` | Parser recursive descent (1,132 LOC) |
-| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,594 LOC) |
+| `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,596 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
-| `stdlib/repl.ol` | REPL entry point (355 LOC) |
+| `stdlib/repl.ol` | REPL entry point (395 LOC) |
 | `stdlib/homeos/*.ol` | HomeOS stdlib (44 files, 9,690 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
