@@ -42,7 +42,7 @@ origin_new.olang = 1,021KB native binary (1,021,393 bytes, ELF64 x86_64, no libc
 
 > Tier 1 (Intelligence Layer), Tier 2 (Language Features), Tier 3 (Platform),
 > Tier 4 (Self-hosting), Tier 5 (UDC-native) — ALL DONE.
-> 112 DCs found and fixed (DC.1-DC.112). 23 inspections by Kira.
+> 117 DCs found and fixed (DC.1-DC.117). 24 inspections by Kira.
 > Details: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
 
 ---
@@ -93,4 +93,8 @@ origin_new.olang = 1,021KB native binary (1,021,393 bytes, ELF64 x86_64, no libc
   mol ASM builtins, fn_node registry, Silk mol-keyed, Dream fn cluster,
   sort/split/join/contains, persistent knowledge, P0 ALL FIXED.
   965KB → 1,008KB. 20/20 tests. Demo-ready standalone.
+2026-03-25  HomeOS v1.0 Sprints 1-5 DONE. classify.ol, router, gate, math ?/=.
+  SC.3-6 instincts/checkpoints, dict pretty-print, UTF-8→Unicode.
+  1,008KB → 1,021KB. 28 commits post-milestone.
+2026-03-25  Kira: Inspect #24 — 8/8 PASS. DC.113-117 found+fixed (__utf8, classify, dict, SC.3-6). 1,021KB.
 ```

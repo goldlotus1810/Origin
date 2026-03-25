@@ -235,6 +235,10 @@ __sleep(ms) → sleep for ms milliseconds (nanosleep)
 __time() → current time in milliseconds (CLOCK_MONOTONIC)
 __write_raw(str) → write string to stdout (ANSI escape support)
 
+// UTF-8 (Unicode codepoint decode)
+__utf8_cp(str, pos) → full Unicode codepoint at byte pos (1-4 byte decode)
+__utf8_len(str, pos) → byte count of UTF-8 sequence at pos
+
 // Molecule (T5 ND.2 — bit extract, no __floor needed)
 __mol_s(m) → (m >> 12) & 0x0F   (shape, 4 bits)
 __mol_r(m) → (m >> 8) & 0x0F    (relation, 4 bits)
@@ -455,6 +459,14 @@ T5 LG.2:          pipe(x, f1, f2, ...) — Lego operator. fn{fn{...}}==fn.
 T5 LG.3:          Silk edges mol-keyed (number compare, ~24B/edge, max 256).
 T5 LG.4:          fn_dream_cluster(min_fires) + skill_promote(). Phase 5D COMPLETE.
 T5 LG.5:          fn_node_describe(name) → lazy mol + 5D metadata (V/A/R/T).
+SC.3:             7/7 instincts: Honesty+Contradiction+Causality+Abstraction+Analogy+Curiosity+Reflection
+SC.4:             Immune Selection N=3 (knowledge, STM, Silk), score + select
+SC.5:             Homeostasis (Free Energy) — FE = intent_change + emotion_delta, EMA smooth
+SC.6:             DNA Repair (self_correct) — Contradiction + high conf → polite correction
+SC.16:            5/5 Checkpoints: Gate+Encode+Infer+Promote+Response
+Dict:             Pretty-print: emit {x:1} → {x: 1} (was: {dict 2})
+UTF-8:            __utf8_cp → full Unicode codepoint, Vietnamese diacritics differentiate words
+HomeOS v1.0:      classify.ol → greeting/goodbye router → knowledge gate → math ?/= strip
 P0 Blockers:      ALL FIXED (2026-03-25):
   P0-A: _boot_embedded() — 28 core facts fallback for standalone binary (no training files)
   P0-B: ExprStmt auto-emit — bare expressions print result (Pop → Emit)
@@ -494,6 +506,7 @@ make check-all
 | `stdlib/bootstrap/semantic.ol` | Semantic → direct bytecode emission (1,889 LOC) |
 | `stdlib/bootstrap/codegen.ol` | Codegen helpers (429 LOC) |
 | `stdlib/repl.ol` | REPL entry point (451 LOC) |
+| `stdlib/homeos/classify.ol` | Intent classifier + handlers (189 LOC) |
 | `stdlib/homeos/*.ol` | HomeOS stdlib (45 files, 10,042 LOC) |
 | `docs/olang_handbook.md` | Olang handbook |
 | `docs/HomeOS_SPEC_v3.md` | HomeOS spec v3.1 |
