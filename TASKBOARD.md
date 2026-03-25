@@ -154,10 +154,11 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
-| LG.1 | fn → inspectable node chain | ~100 LOC | TODO | fn body = chain of instruction nodes, không phải opaque bytecode |
+| LG.1 | fn auto-register as node | ~15 LOC | DONE ✅ | Compiler emits fn_node_register after FnDef. Auto-tracked. |
 | LG.2 | Compose fn từ UDC blocks | ~80 LOC | TODO | `fn = compose(node1, node2, node3)` — Lego assembly |
-| LG.3 | Silk = implicit từ chain order | ~40 LOC | TODO | Thay explicit bigrams → sequence trong chain = 0 bytes overhead |
-| LG.4 | Dream = cluster fn → skill | ~60 LOC | TODO | Repeated fn patterns → promote to named skill node |
+| LG.3 | Silk = implicit từ chain order | ~40 LOC | TODO | Hybrid: implicit intra-chain + explicit inter-chain |
+| LG.4 | Dream = cluster fn → skill | ~60 LOC | TODO | fn_node_hot(min) → cluster → promote to skill |
+| LG.5 | fn self-describe | ~30 LOC | DONE ✅ | fn_node_describe: lazy mol + 5D metadata (V/A/R/T). |
 | LG.5 | Self-describe: fn biết mình là gì | ~40 LOC | TODO | fn.mol → cảm xúc, fn.fire → hot function, fn.links → related fns |
 
 ---
@@ -474,4 +475,5 @@ VI PHẠM hiện tại:
             Instinct: [fact/opinion/hypothesis] labels. Curiosity. r_dispatch + temporal_tag.
 2026-03-25  Nox: T5 ND.2 mol ASM builtins (__mol_s/r/v/a/t + __mol_pack). 100x faster extract.
             ND.4 fn_node metadata registry (register/fire/link/hot). Phase 5B core DONE.
+2026-03-25  Nox: T5 LG.1 fn auto-register + LG.5 fn self-describe (lazy mol + 5D metadata).
 ```
