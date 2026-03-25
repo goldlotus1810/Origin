@@ -4292,16 +4292,108 @@ op_emit:
     jmp     vm_loop
 
 .emit_dict:
-    # Print "{dict N}"
+    # Pretty-print: {key1: val1, key2: val2}
     test    %rsi, %rsi
     jz      .emit_dict_empty
-    mov     (%rsi), %rax
-    lea     str_dict_open(%rip), %rsi
-    mov     $6, %edx                    # "{dict "
+    push    %rbp
+    mov     %rsi, %rbp                  # rbp = dict base
+    # Print "{"
+    lea     str_lbrace(%rip), %rsi
+    mov     $1, %edx
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
-    cvtsi2sd %rax, %xmm0
+    mov     (%rbp), %rcx               # count
+    test    %rcx, %rcx
+    jz      .emit_dict_close
+    lea     8(%rbp), %rbp              # first entry
+    xor     %eax, %eax                  # index = 0
+    push    %rcx                        # save count
+.emit_dict_entry:
+    push    %rax                        # save index
+    push    %rbp                        # save entry ptr
+    # Comma separator (if not first)
+    test    %eax, %eax
+    jz      .emit_dict_nocomma
+    lea     str_comma_sp(%rip), %rsi
+    mov     $2, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+.emit_dict_nocomma:
+    pop     %rbp                        # restore entry ptr
+    pop     %rax                        # restore index
+    push    %rax
+    push    %rbp
+    # Print key (string at entry+0, len at entry+8)
+    mov     (%rbp), %rsi               # key ptr
+    mov     8(%rbp), %rdx              # key len
+    test    %rdx, %rdx
+    jz      .emit_dict_key_done
+    # Decode u16 molecules to ASCII
+    push    %rdx
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+.emit_dk_loop:
+    test    %rcx, %rcx
+    jz      .emit_dk_done
+    movzwl  (%rsi), %eax
+    movb    %al, (%rdi)
+    add     $2, %rsi
+    inc     %rdi
+    dec     %rcx
+    jmp     .emit_dk_loop
+.emit_dk_done:
+    pop     %rdx
+    mov     %r15, %rsi
+    mov     $1, %edi
+    push    %rdx
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rdx
+.emit_dict_key_done:
+    # Print ": "
+    lea     str_colon_sp(%rip), %rsi
+    mov     $2, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Print value (entry+16=val_ptr, entry+24=val_len)
+    pop     %rbp
+    pop     %rax
+    push    %rax
+    push    %rbp
+    mov     24(%rbp), %rdx             # val len/marker
+    cmp     $F64_MARKER, %rdx
+    je      .emit_dict_val_f64
+    # String value: decode u16
+    mov     16(%rbp), %rsi             # val ptr
+    test    %rdx, %rdx
+    jz      .emit_dict_val_done
+    push    %rdx
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+.emit_dv_loop:
+    test    %rcx, %rcx
+    jz      .emit_dv_done
+    movzwl  (%rsi), %eax
+    movb    %al, (%rdi)
+    add     $2, %rsi
+    inc     %rdi
+    dec     %rcx
+    jmp     .emit_dv_loop
+.emit_dv_done:
+    pop     %rdx
+    mov     %r15, %rsi
+    mov     $1, %edi
+    push    %rdx
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rdx
+    jmp     .emit_dict_val_done
+.emit_dict_val_f64:
+    mov     16(%rbp), %rax
+    movq    %rax, %xmm0
     call    f64_to_ascii
     mov     %r15, %rsi
     mov     %eax, %edx
@@ -4310,7 +4402,17 @@ op_emit:
     mov     $SYS_WRITE, %eax
     syscall
     pop     %rax
-    add     %rax, %r15
+.emit_dict_val_done:
+    pop     %rbp                        # restore entry ptr
+    pop     %rax                        # restore index
+    add     $32, %rbp                   # next entry (32 bytes each)
+    inc     %eax
+    mov     (%rsp), %rcx              # peek count
+    cmp     %ecx, %eax
+    jb      .emit_dict_entry
+    add     $8, %rsp                    # pop count
+.emit_dict_close:
+    pop     %rbp
     lea     str_brace_nl(%rip), %rsi
     mov     $2, %edx
     mov     $1, %edi
@@ -5709,6 +5811,9 @@ str_comma_space: .ascii ", "
 str_dict_open:   .ascii "{dict "
 str_brace_nl:    .ascii "}\n"
 str_empty_dict:  .ascii "{}\n\0"
+str_lbrace:      .ascii "{"
+str_colon_sp:    .ascii ": "
+str_comma_sp:    .ascii ", "
 
 # ── REPL function name ──────────────────────────────────────────────────
 bname_repl_eval: .ascii "repl_eval"
