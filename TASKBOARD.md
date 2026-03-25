@@ -155,7 +155,7 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | ID | Task | Effort | Status | Notes |
 |----|------|--------|--------|-------|
 | LG.1 | fn auto-register as node | ~15 LOC | DONE ✅ | Compiler emits fn_node_register after FnDef. Auto-tracked. |
-| LG.2 | Compose fn từ UDC blocks | ~80 LOC | TODO | `fn = compose(node1, node2, node3)` — Lego assembly |
+| LG.2 | pipe() — Lego operator | ~15 LOC | DONE ✅ | `pipe(x, f1, f2, fn)` → fn(...f2(f1(x))). fn{fn{...}}==fn. |
 | LG.3 | Silk = implicit từ chain order | ~40 LOC | TODO | Hybrid: implicit intra-chain + explicit inter-chain |
 | LG.4 | Dream = cluster fn → skill | ~60 LOC | TODO | fn_node_hot(min) → cluster → promote to skill |
 | LG.5 | fn self-describe | ~30 LOC | DONE ✅ | fn_node_describe: lazy mol + 5D metadata (V/A/R/T). |
@@ -476,4 +476,5 @@ VI PHẠM hiện tại:
 2026-03-25  Nox: T5 ND.2 mol ASM builtins (__mol_s/r/v/a/t + __mol_pack). 100x faster extract.
             ND.4 fn_node metadata registry (register/fire/link/hot). Phase 5B core DONE.
 2026-03-25  Nox: T5 LG.1 fn auto-register + LG.5 fn self-describe (lazy mol + 5D metadata).
+2026-03-25  Nox: T5 LG.2 pipe() Lego operator. fn{fn{...}}==fn. Data flows through node chain.
 ```
