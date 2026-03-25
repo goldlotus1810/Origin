@@ -9,7 +9,7 @@
 ## Trạng thái: FULL STACK (2026-03-25)
 
 ```
-origin_new.olang = ~963KB native binary (985,435 bytes)
+origin_new.olang = ~965KB native binary (988,381 bytes)
   ✅ Bootstrap compiler: lexer + parser + semantic + codegen (3,453 LOC Olang)
   ✅ Intelligence layer: 10-stage pipeline (alias→emoji→UDC→node→DN/QR→decode→output)
   ✅ Crypto: SHA-256 FIPS 180-4 in ASM
@@ -17,11 +17,11 @@ origin_new.olang = ~963KB native binary (985,435 bytes)
   ✅ OL.8: REPL calls stdlib functions (boot/eval closure bridge)
   ✅ fib(20) = 6,765 | __sha256("abc") = ba7816bf... | 20/20 tests
   ✅ ASM VM x86_64 (5,767 LOC), no libc, zero dependencies
-  ✅ HomeOS: 44 files, 9,591 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
+  ✅ HomeOS: 44 files, 9,690 LOC Olang (alias, node, UDC decode, UTF-8, emoji)
   ✅ Streaming compiler: ALL 4 bootstrap files compile (0 segfaults)
      lexer 1.9s, codegen 2s, parser 2.7s, semantic 3s
   ✅ Lambda + map/filter/reduce/any/all/pipe (inline compiler builtins)
-  ✅ T5: Layer 1 + ND.2/4 + LG.1/2/5 (auto-register, pipe, self-describe)
+  ✅ T5 Phase 5D COMPLETE: LG.1-5 ALL DONE (auto-register, pipe, silk mol, dream cluster, self-describe)
   ✅ Spec v3: SC.1,7,9-13 done (7/16)
 ```
 
@@ -340,6 +340,16 @@ Parser upgrade, E2E tests, Logic check — TẤT CẢ DONE.
 | DC.78 | DONE ✅ | CLAUDE.md | pipe() builtin documented |
 | DC.79 | DONE ✅ | CLAUDE.md | LG.1/LG.2/LG.5 in Phase 5 section |
 
+### Docs Conflicts — DC.80-DC.84 (phát hiện 2026-03-25 inspect #19)
+
+| # | Mức độ | File | Xung đột | Status |
+|---|--------|------|----------|--------|
+| DC.80 | DONE ✅ | CLAUDE.md | HomeOS 9,591 → 9,690 LOC (+99) |
+| DC.81 | DONE ✅ | CLAUDE.md | Binary ~963KB → ~965KB |
+| DC.82 | DONE ✅ | CLAUDE.md | LG.3 Silk mol-keyed (max 256) documented |
+| DC.83 | DONE ✅ | CLAUDE.md | LG.4 fn_dream_cluster + skill_promote documented |
+| DC.84 | DONE ✅ | TASKBOARD | Phase 5D COMPLETE updated |
+
 ### BUG-INDEX / BUG-SORT — FIXED ✅ (2026-03-25 Nox)
 
 ```
@@ -509,4 +519,6 @@ VI PHẠM hiện tại:
 2026-03-25  Nox: T5 LG.1 fn auto-register + LG.5 fn self-describe (lazy mol + 5D metadata).
 2026-03-25  Nox: T5 LG.2 pipe() Lego operator. fn{fn{...}}==fn. Data flows through node chain.
 2026-03-25  Kira: Inspect #18 — 7/7 PASS (incl. pipe). DC.75-79 found+fixed. 963KB.
+2026-03-25  Nox: T5 LG.3 Silk mol-keyed (256 edges) + LG.4 Dream fn clustering. Phase 5D COMPLETE.
+2026-03-25  Kira: Inspect #19 — 6/6 PASS. DC.80-84 found+fixed. LG.1-5 ALL DONE. 965KB.
 ```
