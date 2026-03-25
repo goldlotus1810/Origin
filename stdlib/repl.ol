@@ -15,13 +15,53 @@ let __boot_learned = 0;
 fn _boot_learn() {
     if __boot_learned == 1 { return; };
     let __boot_learned = 1;
-    // Auto-load training data if available
+    // Try loading training data from files (in-repo)
     let _bl_src = __file_read("docs/training/05_about_origin.md");
     if len(_bl_src) > 0 { _learn_text(_bl_src); };
     let _bl_src = __file_read("docs/training/03_world_knowledge.md");
     if len(_bl_src) > 0 { _learn_text(_bl_src); };
     let _bl_src = __file_read("docs/training/04_dialog_patterns.md");
     if len(_bl_src) > 0 { _learn_text(_bl_src); };
+    // P0-A: Fallback embedded facts for standalone binary (no files)
+    if knowledge_count() == 0 {
+        _boot_embedded();
+    };
+}
+
+fn _boot_embedded() {
+    // Core identity
+    knowledge_learn("Origin la du an tao ngon ngu lap trinh tu hosting ten Olang");
+    knowledge_learn("Olang tu compile chinh minh trong 966 kilobyte khong dependency");
+    knowledge_learn("VM cua Olang viet bang x86 64 assembly khoang 5700 dong code");
+    knowledge_learn("Compiler cua Olang gom lexer parser semantic va codegen");
+    knowledge_learn("HomeOS la he dieu hanh tri thuc chay tren Olang");
+    knowledge_learn("HomeOS biet doc sach nho va tra loi tu tri thuc da hoc");
+    knowledge_learn("goldlotus1810 la nguoi tao du an Origin va dan duong cac AI session");
+    knowledge_learn("Origin bat dau ngay 11 thang 3 nam 2026");
+    knowledge_learn("Tu hosting dat duoc ngay 23 thang 3 nam 2026 sau 13 ngay");
+    // Vietnam geography
+    knowledge_learn("Viet Nam la quoc gia o Dong Nam A voi thu do Ha Noi");
+    knowledge_learn("Ho Chi Minh City la thanh pho lon nhat cua Viet Nam");
+    knowledge_learn("Da Nang la thanh pho bien dep nam giua Viet Nam");
+    knowledge_learn("Vinh Ha Long la di san the gioi UNESCO o Quang Ninh");
+    knowledge_learn("Phu Quoc la dao lon nhat cua Viet Nam o Kien Giang");
+    // World knowledge
+    knowledge_learn("Trai Dat quay quanh Mat Troi mat 365 ngay mot vong");
+    knowledge_learn("Nuoc soi o 100 do C va dong bang o 0 do C");
+    knowledge_learn("Einstein phat minh thuyet tuong doi nam 1905");
+    knowledge_learn("Newton phat minh luc hap dan khi thay tao roi");
+    knowledge_learn("DNA la phan tu mang thong tin di truyen cua moi sinh vat");
+    knowledge_learn("Internet bat dau tu ARPANET nam 1969");
+    // Dialog patterns
+    knowledge_learn("khi nguoi ta chao nen chao lai than thien va hoi ho the nao");
+    knowledge_learn("khi nguoi ta buon nen lang nghe va dong cam truoc khi khuyen");
+    knowledge_learn("khi nguoi ta hoi ve ban than nen tra loi trung thuc va khiem ton");
+    knowledge_learn("khi nguoi ta cam on nen nhan va chuc ho tot dep");
+    knowledge_learn("khi nguoi ta gian nen binh tinh lang nghe va khong phan ung gay gat");
+    // Tech
+    knowledge_learn("SHA-256 la thuat toan bam mat ma tao chuoi 64 ky tu hex");
+    knowledge_learn("Olang co map filter reduce any all va pipe cho functional programming");
+    knowledge_learn("Moi function trong Olang tu dong dang ky thanh node voi mol va fire count");
 }
 
 fn _learn_text(_lt_content) {
