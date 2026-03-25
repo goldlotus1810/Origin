@@ -54,7 +54,22 @@ pub fn kt_word(_kw_text) {
 
 let __kt_facts = [];        // [{text, words, mol}]
 
+// L2 branches: each branch = list of fact_ids
+let __kt_br_facts = [];         // general knowledge
+let __kt_br_books = [];         // books read
+let __kt_br_convs = [];         // conversations
+let __kt_br_skills = [];        // learned skills
+let __kt_br_personal = [];      // personal info
+
 pub fn kt_learn(_kl_text) {
+    return _kt_learn_branch(_kl_text, "facts");
+}
+
+pub fn kt_learn_to(_klt_text, _klt_branch) {
+    return _kt_learn_branch(_klt_text, _klt_branch);
+}
+
+fn _kt_learn_branch(_kl_text, _kl_branch) {
     // Dedup
     let _kl_i = 0;
     while _kl_i < len(__kt_facts) {
@@ -96,6 +111,12 @@ pub fn kt_learn(_kl_text) {
         push(__kt_words[_kl_wids[_kl_li]].facts, _kl_fid);
         let _kl_li = _kl_li + 1;
     };
+    // L2 branch assignment
+    if _kl_branch == "facts" { push(__kt_br_facts, _kl_fid); };
+    if _kl_branch == "books" { push(__kt_br_books, _kl_fid); };
+    if _kl_branch == "conversations" { push(__kt_br_convs, _kl_fid); };
+    if _kl_branch == "skills" { push(__kt_br_skills, _kl_fid); };
+    if _kl_branch == "personal" { push(__kt_br_personal, _kl_fid); };
     return len(__kt_facts);
 }
 
@@ -188,9 +209,11 @@ fn _kt_score_word(_ksw_word) {
 // ════════════════════════════════════════════════════════════════
 
 pub fn kt_stats() {
-    return "KnowTree: " + __to_string(len(__kt_chars)) + " chars, " +
-           __to_string(len(__kt_words)) + " words, " +
-           __to_string(len(__kt_facts)) + " facts";
+    return "KnowTree: " + __to_string(len(__kt_words)) + " words, " +
+           __to_string(len(__kt_facts)) + " facts (" +
+           "F:" + __to_string(len(__kt_br_facts)) +
+           " B:" + __to_string(len(__kt_br_books)) +
+           " C:" + __to_string(len(__kt_br_convs)) + ")";
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -223,7 +246,7 @@ pub fn kt_read_book(_rb_path) {
                 // Skip comment lines
                 if __char_code(char_at(_rb_sent, 0)) != 35 {  // not #
                     let _rb_fid = len(__kt_facts);
-                    kt_learn(_rb_sent);
+                    kt_learn_to(_rb_sent, "books");
                     // Silk: connect consecutive sentences (implicit paragraph structure)
                     if _rb_prev_fact >= 0 {
                         if _rb_fid < len(__kt_facts) {
