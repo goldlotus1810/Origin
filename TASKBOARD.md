@@ -32,7 +32,7 @@ origin_new.olang = 1,008KB native binary (ELF64 x86_64, no libc)
 | 1 | Classifier + handlers (classify.ol) | ~160 | DONE ✅ |
 | 2 | Greeting/goodbye router in repl_eval | ~10 | DONE ✅ |
 | 3 | Gate: heal intent skips knowledge | ~5 | DONE ✅ |
-| 4 | Integrate (case-insensitive search, math eval) | ~50 | TODO |
+| 4 | Knowledge search: substring + min 2 chars | ~10 | DONE ✅ |
 | 5 | Polish (error messages, tests) | ~40 | TODO |
 
 ---
