@@ -1250,10 +1250,19 @@ pub fn agent_respond(text) {
     let intent = __g_analysis_intent;
     let tone = __g_analysis_tone;
 
+    // ── SC.16 CHECKPOINT 2: Encode ──
+    // Verify encoding produced valid molecule
+    if mol == 0 { mol = 146; };  // fallback neutral if encode failed
+
     // ── EMOTION CARRY-OVER ──
     let _ar_emo = text_emotion_v2(_ar_norm);
     _emo_update(_ar_emo.v, _ar_emo.a);
     tone = _emo_bias_tone(tone);
+
+    // ── SC.16 CHECKPOINT 3: Infer ──
+    // Verify intent is valid
+    if len(intent) == 0 { intent = "chat"; };
+    if len(tone) == 0 { tone = "neutral"; };
 
     // ── 4. CREATE NODE (DN = SHA-256 address) ──
     let _ar_node = node_create(_ar_norm, mol, _ar_emo, intent);
@@ -1346,14 +1355,47 @@ pub fn agent_respond(text) {
         _ar_novelty = 10 - _ar_best_sim;
     };
 
-    // ── 7b. INSTINCT: Contradiction detection ──
+    // ── 7b. INSTINCT #2: Contradiction ──
     let _ar_contradiction = "";
     if len(_ar_knowledge) > 0 {
-        // Check if input contains negation near a known keyword
         if _a_has(_ar_norm, "khong") == 1 || _a_has(_ar_norm, "sai") == 1 || _a_has(_ar_norm, "phang") == 1 || _a_has(_ar_norm, "not") == 1 || _a_has(_ar_norm, "wrong") == 1 || _a_has(_ar_norm, "false") == 1 {
             _ar_contradiction = "Minh thay co dieu khac voi nhung gi minh biet.";
         };
     };
+
+    // ── 7c. INSTINCT #3: Causality ──
+    let _ar_causal = "";
+    if _a_has(_ar_norm, "tai sao") == 1 || _a_has(_ar_norm, "vi sao") == 1 || _a_has(_ar_norm, "nguyen nhan") == 1 || _a_has(_ar_norm, "why") == 1 || _a_has(_ar_norm, "because") == 1 || _a_has(_ar_norm, "cause") == 1 {
+        _ar_causal = " (Cau hoi ve nguyen nhan — minh tim moi lien he.)";
+    };
+
+    // ── 7d. INSTINCT #4: Abstraction ──
+    // If query is very general (short, no specific keywords) → abstract
+    let _ar_abstract = "";
+    if _ar_conf >= 50 {
+        if _ar_sim_count >= 5 { _ar_abstract = " [khai niem quen thuoc]"; };
+    };
+
+    // ── 7e. INSTINCT #5: Analogy ──
+    // Detect "giong nhu", "tuong tu", "like", "similar" → analogy mode
+    let _ar_analogy = "";
+    if _a_has(_ar_norm, "giong") == 1 || _a_has(_ar_norm, "tuong tu") == 1 || _a_has(_ar_norm, "similar") == 1 || _a_has(_ar_norm, "like") == 1 {
+        _ar_analogy = " (So sanh — minh tim diem tuong dong.)";
+    };
+
+    // ── 7f. INSTINCT #7: Reflection ──
+    // After 5+ turns, reflect on conversation quality
+    let _ar_reflect = "";
+    if stm_count() >= 5 {
+        if stm_count() % 5 == 0 {
+            _ar_reflect = " (Minh dang suy nghi ve cuoc tro chuyen cua chung ta.)";
+        };
+    };
+
+    // ── SC.16 CHECKPOINT 4: Promote ──
+    // Decide if knowledge should be promoted (high confidence + high fire)
+    // This is where Dream would cluster hot patterns
+    if _ar_conf >= 90 { if _ar_novelty < 3 { /* well-known, stable */ }; };
 
     // ── 8. UDC DECODE (molecule → mood label) ──
     let _ar_mood = udc_describe(mol);
@@ -1373,16 +1415,27 @@ pub fn agent_respond(text) {
         if _ar_conf >= 90 { _ar_out = _ar_out + " [fact]"; };
         if _ar_conf >= 70 { if _ar_conf < 90 { _ar_out = _ar_out + " [opinion]"; }; };
         if len(_ar_contradiction) > 0 { _ar_out = _ar_out + " [!] " + _ar_contradiction; };
+        if len(_ar_causal) > 0 { _ar_out = _ar_out + _ar_causal; };
+        if len(_ar_analogy) > 0 { _ar_out = _ar_out + _ar_analogy; };
+        if len(_ar_abstract) > 0 { _ar_out = _ar_out + _ar_abstract; };
         if len(memory_context) > 0 { _ar_out = _ar_out + memory_context; };
+        if len(_ar_reflect) > 0 { _ar_out = _ar_out + _ar_reflect; };
     } else {
         _ar_out = _ar_out_emoji + " " + reply;
         if _ar_conf >= 50 { if _ar_conf < 70 { _ar_out = _ar_out + " [hypothesis]"; }; };
-        // Curiosity for unknown topics
         if _ar_novelty > 7 {
             _ar_out = _ar_out + " (Chu de moi — minh muon tim hieu them.)";
         };
+        if len(_ar_causal) > 0 { _ar_out = _ar_out + _ar_causal; };
+        if len(_ar_analogy) > 0 { _ar_out = _ar_out + _ar_analogy; };
+        if len(_ar_reflect) > 0 { _ar_out = _ar_out + _ar_reflect; };
         if len(memory_context) > 0 { _ar_out = _ar_out + memory_context; };
     };
+
+    // ── SC.16 CHECKPOINT 5: Response ──
+    // Final validation: don't return empty response
+    if len(_ar_out) == 0 { _ar_out = ask_back(); };
+
     return _ar_out;
 }
 
