@@ -106,6 +106,36 @@ fn _mol_v(mol) { return __floor(mol / 32) % 8; }
 fn _mol_a(mol) { return __floor(mol / 4) % 8; }
 fn _mol_t(mol) { return mol % 4; }
 
+// R dispatch: relation index → behavior tag (T5 foundation)
+pub fn r_dispatch(_rd_r) {
+    if _rd_r == 0 { return "algebraic"; };
+    if _rd_r == 1 { return "order"; };
+    if _rd_r == 2 { return "represent"; };
+    if _rd_r == 3 { return "numeral"; };
+    if _rd_r == 4 { return "punct"; };
+    if _rd_r == 5 { return "currency"; };
+    if _rd_r == 6 { return "additive"; };
+    if _rd_r == 7 { return "control"; };
+    if _rd_r == 8 { return "member"; };
+    if _rd_r == 9 { return "subset"; };
+    if _rd_r == 10 { return "equiv"; };
+    if _rd_r == 11 { return "orthogonal"; };
+    if _rd_r == 12 { return "compose"; };
+    if _rd_r == 13 { return "causes"; };
+    if _rd_r == 14 { return "similar"; };
+    if _rd_r == 15 { return "derived"; };
+    return "unknown";
+}
+
+// Temporal tag: T index → time description (T5 foundation)
+pub fn temporal_tag(_tt_t) {
+    if _tt_t == 0 { return "static"; };
+    if _tt_t == 1 { return "slow"; };
+    if _tt_t == 2 { return "medium"; };
+    if _tt_t == 3 { return "fast"; };
+    return "static";
+}
+
 // Spec §1.6: amplify(Va, Vb, w) — khuếch đại về phía dominant, KHÔNG trung bình
 // base  = (Va + Vb) / 2
 // boost = |Va − base| × w × 0.5
@@ -1276,17 +1306,49 @@ pub fn agent_respond(text) {
         _ar_knowledge = knowledge_search(_ar_norm);
     };
 
-    // ── 7. UDC DECODE (molecule → mood label) ──
+    // ── 7. INSTINCT: Honesty + Curiosity (inline, T5) ──
+    let _ar_conf = 0;
+    let _ar_novelty = 0;
+    if len(__knowledge) > 0 {
+        let _ar_sim_count = 0;
+        let _ar_best_sim = 0;
+        let _ar_ii = 0;
+        while _ar_ii < len(__knowledge) {
+            let _ar_iscore = _mol_similarity(mol, __knowledge[_ar_ii].mol);
+            if _ar_iscore > 5 { _ar_sim_count = _ar_sim_count + 1; };
+            if _ar_iscore > _ar_best_sim { _ar_best_sim = _ar_iscore; };
+            let _ar_ii = _ar_ii + 1;
+        };
+        if _ar_sim_count >= 5 { _ar_conf = 90; };
+        if _ar_sim_count >= 3 { if _ar_conf == 0 { _ar_conf = 70; }; };
+        if _ar_sim_count >= 1 { if _ar_conf == 0 { _ar_conf = 50; }; };
+        _ar_novelty = 10 - _ar_best_sim;
+    };
+
+    // ── 8. UDC DECODE (molecule → mood label) ──
     let _ar_mood = udc_describe(mol);
 
-    // ── 8. OUTPUT EMOJI (emotion → emoji) ──
+    // ── 9. OUTPUT EMOJI (emotion → emoji) ──
     let _ar_out_emoji = emoji_for_emotion(_ar_emo.v, _ar_emo.a);
 
-    // ── 9. ALIAS OUTPUT ──
+    // ── 10. ALIAS OUTPUT ──
     let reply = compose_reply(intent, tone, _ar_norm);
 
-    // ── 10. COMPOSE FINAL OUTPUT ──
+    // ── 11. COMPOSE FINAL OUTPUT ──
     let _ar_out = _ar_out_emoji + " " + reply;
+
+    // Confidence label (honesty instinct)
+    if _ar_conf >= 90 { _ar_out = _ar_out + " [fact]"; };
+    if _ar_conf >= 70 { if _ar_conf < 90 { _ar_out = _ar_out + " [opinion]"; }; };
+    if _ar_conf >= 50 { if _ar_conf < 70 { _ar_out = _ar_out + " [hypothesis]"; }; };
+
+    // Curiosity for unknown topics
+    if _ar_novelty > 7 {
+        if len(_ar_knowledge) == 0 {
+            _ar_out = _ar_out + " (Chu de moi — minh muon tim hieu them.)";
+        };
+    };
+
     if len(_ar_knowledge) > 0 {
         _ar_out = _ar_out + memory_context + " " + _ar_knowledge;
     } else {
@@ -1325,13 +1387,15 @@ fn _text_to_chain(_ttc_text) {
     while _ttc_i < len(_ttc_text) {
         let _ttc_code = __char_code(char_at(_ttc_text, _ttc_i));
         if _ttc_code == 32 {
-            if _ttc_w_len >= 2 {
-                // Encode word: combine first 2 char codepoints into molecule
-                let _ttc_c0 = __char_code(char_at(_ttc_text, _ttc_w_start));
-                let _ttc_c1 = __char_code(char_at(_ttc_text, _ttc_w_start + 1));
-                let _ttc_m0 = encode_codepoint(_ttc_c0);
-                let _ttc_m1 = encode_codepoint(_ttc_c1);
-                push(_ttc_chain, mol_compose(_ttc_m0, _ttc_m1));
+            if _ttc_w_len >= 1 {
+                // Encode ALL chars in word, compose sequentially
+                let _ttc_wm = encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start)));
+                let _ttc_ci = 1;
+                while _ttc_ci < _ttc_w_len {
+                    _ttc_wm = mol_compose(_ttc_wm, encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start + _ttc_ci))));
+                    let _ttc_ci = _ttc_ci + 1;
+                };
+                push(_ttc_chain, _ttc_wm);
             };
             _ttc_w_start = -1;
             _ttc_w_len = 0;
@@ -1341,30 +1405,36 @@ fn _text_to_chain(_ttc_text) {
         };
         let _ttc_i = _ttc_i + 1;
     };
-    if _ttc_w_len >= 2 {
-        let _ttc_c0 = __char_code(char_at(_ttc_text, _ttc_w_start));
-        let _ttc_c1 = __char_code(char_at(_ttc_text, _ttc_w_start + 1));
-        let _ttc_m0 = encode_codepoint(_ttc_c0);
-        let _ttc_m1 = encode_codepoint(_ttc_c1);
-        push(_ttc_chain, mol_compose(_ttc_m0, _ttc_m1));
+    if _ttc_w_len >= 1 {
+        let _ttc_wm = encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start)));
+        let _ttc_ci = 1;
+        while _ttc_ci < _ttc_w_len {
+            _ttc_wm = mol_compose(_ttc_wm, encode_codepoint(__char_code(char_at(_ttc_text, _ttc_w_start + _ttc_ci))));
+            let _ttc_ci = _ttc_ci + 1;
+        };
+        push(_ttc_chain, _ttc_wm);
     };
     return _ttc_chain;
 }
 
 // Molecule distance: |Va-Vb| + |Aa-Ab| (Manhattan on V,A — the emotional axes)
 fn _mol_distance(_md_a, _md_b) {
-    let _md_va = _mol_v(_md_a);
-    let _md_vb = _mol_v(_md_b);
-    let _md_aa = _mol_a(_md_a);
-    let _md_ab = _mol_a(_md_b);
-    return _enc_abs(_md_va - _md_vb) + _enc_abs(_md_aa - _md_ab);
+    // 5D Manhattan distance: S(0-15) + R(0-15) + V(0-7) + A(0-7) + T(0-3) = max 47
+    let _md_sa = _mol_s(_md_a); let _md_sb = _mol_s(_md_b);
+    let _md_ra = _mol_r(_md_a); let _md_rb = _mol_r(_md_b);
+    let _md_va = _mol_v(_md_a); let _md_vb = _mol_v(_md_b);
+    let _md_aa = _mol_a(_md_a); let _md_ab = _mol_a(_md_b);
+    let _md_ta = _mol_t(_md_a); let _md_tb = _mol_t(_md_b);
+    return _enc_abs(_md_sa - _md_sb) + _enc_abs(_md_ra - _md_rb)
+         + _enc_abs(_md_va - _md_vb) + _enc_abs(_md_aa - _md_ab)
+         + _enc_abs(_md_ta - _md_tb);
 }
 
-// Similarity: 1.0 - normalized_distance (0..1 scale as integer 0..10)
+// Similarity: normalized 5D distance → 0..10 scale
 fn _mol_similarity(_ms_a, _ms_b) {
     let _ms_dist = _mol_distance(_ms_a, _ms_b);
-    // Max possible distance = 7+7 = 14. Normalize: sim = 10 - (dist * 10 / 14)
-    let _ms_sim = 10 - __floor((_ms_dist * 10) / 14);
+    // Max distance = 15+15+7+7+3 = 47
+    let _ms_sim = 10 - __floor((_ms_dist * 10) / 47);
     if _ms_sim < 0 { return 0; };
     return _ms_sim;
 }
@@ -1504,7 +1574,8 @@ fn knowledge_search(_ks_query) {
         };
 
         // Take best of both strategies
-        if _ks_kwscore > _ks_score { _ks_score = _ks_kwscore; };
+        // Additive: keyword ×5 + mol_score — keyword match ALWAYS boosts score
+        _ks_score = (_ks_kwscore * 5) + _ks_score;
 
         if _ks_score > _ks_best_score {
             _ks_best_score = _ks_score;
