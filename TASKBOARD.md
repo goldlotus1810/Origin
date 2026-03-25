@@ -1,96 +1,114 @@
 # TASKBOARD — Origin / Olang
 
-> **Mọi AI session đọc file này TRƯỚC KHI bắt đầu làm việc.**
-> **Viết OLANG. Rust legacy chỉ bug fix.**
-> **Lịch sử DCs + completed tasks:** [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
+> **Doc TRUOC KHI lam viec. Viet OLANG.**
+> **Master Plan:** [`plans/MASTER_PLAN_HOMEOS_V1.md`](plans/MASTER_PLAN_HOMEOS_V1.md)
+> **Lich su:** [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
 
 ---
 
-## Trạng thái: OLANG 1.0 (2026-03-25)
+## Trang thai: OLANG 1.0 + HomeOS 1.0 (2026-03-25)
 
 ```
-origin_new.olang = 1,021KB native binary (1,021,393 bytes, ELF64 x86_64, no libc)
-  20/20 tests | fib(20)=6765 | SHA-256 FIPS 180-4
-  5,987 LOC ASM | 3,748 LOC Bootstrap | 451 LOC REPL | 10,042 LOC HomeOS (45 files)
-  Lambda + HOF: map filter reduce any all pipe sort split join contains
-  Mol ASM: __mol_s/r/v/a/t + __mol_pack + __utf8_cp/len (8 builtins)
-  Persistent: save/load → homeos.knowledge (auto-load on boot)
-  Instincts: 7/7 active | Checkpoints: 5/5 | SC.4 Immune | SC.5 Homeostasis | SC.6 DNA Repair
-  fn_node: auto-register, describe, link, hot, Dream cluster
-  Lego: pipe(x, f1, f2) = fn{fn{...}}==fn | Dict pretty-print
-  UTF-8 decode: __utf8_cp → full Unicode codepoint
-  P0+P1 ALL FIXED | Greeting/goodbye router | Gate heal skip | Math ?/= strip
+origin_new.olang = 1,021KB (1,021,393 bytes, ELF64 x86_64, no libc)
+  20/20 tests | fib(20)=6765 | 3 doi self-build verified
+  5,987 LOC ASM | 3,748 LOC Bootstrap | 451 LOC REPL | 10,042 LOC HomeOS
+  Total: 21,559 LOC (VM + Olang)
 ```
 
 ---
 
-## NEXT: HomeOS v1.0 (xem plans/PLAN_HOMEOS_V1.md)
+## RELEASE ROADMAP
 
-> **Nguyên tắc:** Gate trước, trả lời sau. Handcode == Zero.
+### v1.0 "It speaks" — DONE ✅ (2026-03-25)
 
-| Sprint | Mục tiêu | LOC | Status |
-|--------|----------|-----|--------|
-| 1 | Classifier + handlers (classify.ol) | ~160 | DONE ✅ |
-| 2 | Greeting/goodbye router in repl_eval | ~10 | DONE ✅ |
-| 3 | Gate: heal intent skips knowledge | ~5 | DONE ✅ |
-| 4 | Knowledge search: substring + min 2 chars | ~10 | DONE ✅ |
-| 5 | Polish: math ?/= strip, P1-D fixed | ~10 | DONE ✅ |
+Binary chay doc lap. REPL. Knowledge. Emotion. 7 instincts. Persistent.
+
+### v1.1 "It understands" — IN PROGRESS
+
+> Knowledge search DUNG. Gate QUYET DINH: tra loi / hoi lai / im.
+
+| # | Task | Effort | Status |
+|---|------|--------|--------|
+| FIX-1 | Case-insensitive word[] match | ~10 LOC | TODO |
+| FIX-2 | Short word disambiguation | ~5 LOC | TODO |
+| FIX-3 | Gate zero-score → ask_back | ~5 LOC | TODO |
+| FIX-4 | No persistence dupes on restart | ~3 LOC | TODO |
+| KS.1 | knowledge_search_scored → {text, score} | ~20 LOC | TODO |
+| GT.1 | gate_decide threshold (HIGH/LOW/ZERO) | ~15 LOC | TODO |
+| IN.1 | Instinct → action refactor | ~50 LOC | TODO |
+| CP.1 | Compose v2: f(knowledge, emotion, context) | ~40 LOC | TODO |
+| TS.1 | 50+ integration test scenarios | ~50 LOC | TODO |
+
+### v1.2 "It reasons" — PLANNED
+
+> Formula dispatch. Mol = behavior, khong chi number.
+
+| # | Task | Effort | Status |
+|---|------|--------|--------|
+| FE.1 | r_eval(R, a, b) → compose by relation | ~60 LOC | TODO |
+| FE.2 | v_behavior(V) → approach/avoid/neutral | ~20 LOC | TODO |
+| FE.3 | a_urgency(A) → calm/alert/urgent | ~20 LOC | TODO |
+| FE.4 | Causal chain in Silk | ~30 LOC | TODO |
+| FE.5 | Analogy engine 5D delta | ~40 LOC | TODO |
+
+### v1.3 "It grows" — PLANNED
+
+> Self-improvement. Dream → skill. Auto-optimize.
+
+| # | Task | Effort | Status |
+|---|------|--------|--------|
+| DR.1 | fn_node_fire wiring | ~15 LOC | TODO |
+| DR.2 | Dream cluster → skill promote | ~30 LOC | TODO |
+| DR.3 | Knowledge compression | ~30 LOC | TODO |
+| DR.4 | Auto-save on exit | ~10 LOC | TODO |
+
+### v2.0 "It connects" — FUTURE
+
+> Multi-device. Browser. Mobile.
+
+| # | Task | Status |
+|---|------|--------|
+| ARM64 VM complete | WIP (1,229 LOC skeleton) |
+| WASM update | DONE (3KB, basic) |
+| ISL protocol | TODO |
+| Server mode | TODO |
 
 ---
 
-## Completed (Tier 1-5) — ARCHIVED
+## Spec v3 Compliance
 
-> Tier 1 (Intelligence Layer), Tier 2 (Language Features), Tier 3 (Platform),
-> Tier 4 (Self-hosting), Tier 5 (UDC-native) — ALL DONE.
-> 112 DCs found and fixed (DC.1-DC.112). 23 inspections by Kira.
-> Details: [`docs/TASKBOARD_ARCHIVE.md`](docs/TASKBOARD_ARCHIVE.md)
-
----
-
-## Open Items
-
-### Spec v3 Gaps (INFO — defer until needed)
-
-| # | Spec Section | Status | Notes |
-|---|-------------|--------|-------|
-| SC.2 | Fusion (multi-modality) | ❌ | text-only for now |
-| SC.3 | 7 Instincts | ✅ 7/7 | All active: Honesty+Contradiction+Causality+Abstraction+Analogy+Curiosity+Reflection |
-| SC.4 | Immune Selection N=3 | ✅ | 3 candidates (knowledge, STM, Silk), score + select |
-| SC.5 | Homeostasis (Free Energy) | ✅ | FE = intent_change + emotion_delta, EMA smooth |
-| SC.6 | DNA Repair (self_correct) | ✅ | Contradiction + high conf → polite correction |
-| SC.16 | 5 Checkpoints | ✅ 5/5 | Gate+Encode+Infer+Promote+Response |
-
-### Known Limitations
-
-```
-- Boot↔eval closure boundary: boot stdlib (sort/reduce from iter.ol) can't call eval closures
-  Workaround: inline compiler builtins (map/filter/reduce/sort/etc.) bypass boundary
-- Nested inline builtins: map(filter(...)) clobbers global vars → use 2-step
-- fn_node_fire: boot↔eval arg passing issue → fire tracking deferred
-- Dict pretty-print: ✅ FIXED — emit {x:1} → {x: 1}
-- Global var scope: no block scope, must use unique prefixes
-```
-
-### Platform (defer)
-
-| ID | Task | Status | Notes |
-|----|------|--------|-------|
-| OL.11 | ARM64 ASM VM | WIP | 1,229 LOC. Boots bare. Needs builtins. |
-| OL.15 | Mobile (Android/iOS) | BLOCKED | Needs ARM64 complete. |
-| FE.4 | S×T SDF rendering | DEFER | Only for 3D/WebGL. |
-| FE.5 | 42 UDC encode formulas | DEFER | Character-level precision. |
+| # | Section | Status |
+|---|---------|--------|
+| SC.1 | SecurityGate 3-layer | ✅ 12 patterns |
+| SC.3 | 7 Instincts | ✅ 7/7 active |
+| SC.4 | Immune Selection N=3 | ✅ 3 candidates |
+| SC.5 | Homeostasis (Free Energy) | ✅ FE tracking |
+| SC.6 | DNA Repair | ✅ Self-correction |
+| SC.16 | 5 Checkpoints | ✅ 5/5 |
+| SC.2 | Fusion (multi-modal) | ❌ text-only |
 
 ---
 
-## Log (recent)
+## Known Limitations
 
 ```
-2026-03-23  SELF-HOSTING. fib(20)=6765. 806KB. 27/27 tests.
-2026-03-24  100% SELF-COMPILE (48/48). 30+ bugs. Intelligence pipeline. 964KB.
-2026-03-25  OLANG 1.0 — T5 COMPLETE. ~30 commits:
-  BUG-SORT fix, lambda, map/filter/reduce/any/all/pipe,
-  knowledge fix (5D mol, keyword×5), instincts (honesty/contradiction/curiosity),
-  mol ASM builtins, fn_node registry, Silk mol-keyed, Dream fn cluster,
-  sort/split/join/contains, persistent knowledge, P0 ALL FIXED.
-  965KB → 1,008KB. 20/20 tests. Demo-ready standalone.
+- Boot↔eval boundary: boot functions can't call eval closures → inline builtins
+- Nested inline builtins: map(filter(...)) clobbers vars → 2-step
+- set_at/push auto-emit noise → use sort() builtin
+- Global var scope: no block scope → unique prefixes
+- fn_node_fire: not wired (boot↔eval arg issue)
+```
+
+---
+
+## Log
+
+```
+2026-03-23  SELF-HOSTING. 806KB.
+2026-03-24  100% SELF-COMPILE. Intelligence pipeline. 964KB.
+2026-03-25  OLANG 1.0 + HomeOS 1.0. ~50 commits. 1,021KB.
+            T5 complete. All P0+P1 fixed. 7/7 instincts. 5/5 checkpoints.
+            UTF-8 pipeline. Dict pretty-print. Persistent knowledge.
+            Classifier → Router → Gate architecture.
+            MASTER PLAN written. Release roadmap: v1.0→v1.1→v1.2→v1.3→v2.0.
 ```
