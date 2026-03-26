@@ -1262,6 +1262,10 @@ op_call:
     movabs  $0x05F32B674266E367, %rdx   # __simd_compose4(a,b,c,d)
     cmp     %rdx, %rax
     je      .call_simd_compose4
+    # ── JIT cache register ──
+    movabs  $0xF7ED721D453C820E, %rdx   # __jit_register(fn_name, native_ptr)
+    cmp     %rdx, %rax
+    je      .call_jit_register
     # ── Profile ──
     movabs  $0x45D4F29E55E01818, %rdx   # __profile_top(n) → array of [hash, count] top-n
     cmp     %rdx, %rax
@@ -1286,6 +1290,43 @@ op_call:
 
     # ── Not a builtin: try var_table lookup ──
     # rax still has the hash from hash_name
+    # Check JIT cache first: if native code exists for this hash → call directly
+    push    %rax                        # save hash
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi                 # 32 slots
+    shl     $4, %esi                    # × 16 bytes per entry [hash:8][ptr:8]
+    cmp     %rax, (%rdx, %rsi)
+    jne     .no_jit_cache
+    # JIT cache hit! Call native directly
+    mov     8(%rdx, %rsi), %rax        # native function pointer
+    pop     %rdx                        # discard saved hash
+    add     %rcx, %r13                  # skip name bytes
+    # arg = top of VM stack (f64 → integer in rdi)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi
+    add     $16, %r14
+    # Save VM regs, call native, restore
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    call    *%rax
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    # Push result
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.no_jit_cache:
+    pop     %rax                        # restore hash
+
     push    %rcx                        # save name_len
     call    var_load_hash               # rax=ptr, rdx=len
     pop     %rcx
@@ -3322,6 +3363,48 @@ op_call:
 # ═══════════════════════════════════════════════════════════════════════════
 # NEW BUILTINS — Rebuilt from REBUILD_NOTES.md
 # ═══════════════════════════════════════════════════════════════════════════
+
+# __jit_register(fn_name_str, native_ptr) → register native code for function
+.call_jit_register:
+    add     %rcx, %r13
+    # Pop native_ptr
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8              # native ptr
+    add     $16, %r14
+    # Pop fn_name (u16 chain) → decode to ASCII → hash
+    mov     (%r14), %rsi               # chain ptr (u16 mols)
+    mov     8(%r14), %rdx              # mol count
+    add     $16, %r14
+    # Decode u16 → ASCII bytes in sha_input, then hash
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.jr_decode:
+    cmp     %rdx, %rcx
+    jge     .jr_hash
+    movzbl  (%rsi, %rcx, 2), %eax     # low byte of u16 mol
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .jr_decode
+.jr_hash:
+    # Hash the decoded ASCII bytes
+    lea     sha_input(%rip), %rdi
+    mov     %ecx, %edx
+    push    %r8
+    call    hash_name
+    pop     %r8
+    # Store in jit_cache: cache[hash & 0x1F] = {hash, ptr}
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    mov     %rax, (%rdx, %rsi)        # hash
+    mov     %r8, 8(%rdx, %rsi)        # native ptr
+    # Push 0 (success)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
 
 # __profile_top(n) → array [hash0, count0, hash1, count1, ...]
 .call_profile_top:
@@ -7783,6 +7866,8 @@ eval_total:
     .space 8                            # total bytes read from stdin
 eval_offset:
     .space 8                            # current processing offset in buffer
+jit_cache:
+    .space 512                          # 32 slots × [hash:8][ptr:8] = 16 bytes each
 profile_counters:
     .space 1024                         # 256 × 4-byte counters
 profile_hashes:
