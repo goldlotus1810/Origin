@@ -1,0 +1,8 @@
+[package]
+name = "homemath"
+version.workspace = true
+edition.workspace = true
+description = "HomeOS native math — zero external dependencies"
+
+[features]
+default = []

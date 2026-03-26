@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ucd",
+    "crates/olang",
+    "crates/silk",
+    "crates/vsdf",
+    "crates/isl",
+    "crates/hal",
+    "crates/wasm",
+    "crates/context",
+    "crates/agents",
+    "crates/memory",
+    "crates/runtime",
+    "crates/homemath",
+    "tools/seeder",
+    "tools/inspector",
+    "tools/server",
+    "tools/bench",
+    "tools/migrate",
+    "tools/builder",
+    "tools/intg",
+    "tools/udc_gen",
+    "tools/check_logic",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+ucd     = { path = "crates/ucd" }
+olang   = { path = "crates/olang" }
+silk    = { path = "crates/silk" }
+vsdf    = { path = "crates/vsdf" }
+context = { path = "crates/context" }
+agents  = { path = "crates/agents" }
+memory  = { path = "crates/memory" }
+runtime = { path = "crates/runtime" }
+hal      = { path = "crates/hal" }
+homemath = { path = "crates/homemath" }

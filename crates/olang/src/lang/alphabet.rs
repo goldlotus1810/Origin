@@ -1,0 +1,1695 @@
+//! # alphabet — Bảng chữ cái của Olang
+//!
+//! Định nghĩa tập ký tự hợp lệ, phân loại ký tự, Token, và Lexer.
+//!
+//! ## Bảng chữ cái Olang
+//!
+//! ```text
+//! Lớp           Ký tự                                    Ý nghĩa
+//! ─────────────────────────────────────────────────────────────────
+//! Relation      ∈ ⊂ ≡ ⊥ ∘ → ≈ ← ∪ ∩ ∂ ∖ ↔ ⟳ ⚡ ∥     16 toán tử quan hệ
+//! Symbol        ≔ ⇒ ↻ ○                                  Gán, suy ra, lặp, xuất
+//! Arithmetic    + - × ÷                                   Giả thuyết (QT3: chưa chứng minh)
+//! Physical      ⧺ ⊖                                      Vật lý (QT3: đã chứng minh)
+//! Delimiter     { } ( ) ; , = ? " |                       Cấu trúc
+//! Digit         0-9                                       Số nguyên
+//! Ident         Unicode letters, emoji, _                 Tên node / biến
+//! Whitespace    space, tab, newline, CR                   Phân cách token
+//!
+//! ## QT3: Ba tầng nhận thức
+//!
+//! ```text
+//! +/-   = giả thuyết (chưa chứng minh)
+//! ⧺/⊖   = vật lý (đã chứng minh — thêm/bớt thật)
+//! ==    = sự thật chắc chắn
+//! ```
+//!
+//! ## Hai dạng cú pháp (tương đương)
+//!
+//! ```text
+//! Keyword style          Symbol style         Ý nghĩa
+//! ────────────────────────────────────────────────────
+//! let x = expr;          x ≔ expr;            Gán
+//! emit expr;             ○ expr;              Xuất
+//! if cond { }            cond ⇒ { }           Điều kiện
+//! if c { } else { }      c ⇒ { } ⊥ { }       Điều kiện + ngược lại
+//! loop N { }             ↻ N { }              Lặp
+//! fn f(a,b) { }         f ≔ (a,b) { }        Hàm
+//! ```
+
+extern crate alloc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CharClass — phân loại ký tự
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lớp ký tự trong bảng chữ cái Olang.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CharClass {
+    /// Toán tử quan hệ: ∈ ⊂ ≡ ⊥ ∘ → ≈ ← ∪ ∩ ∂ ∖ ↔ ⟳ ⚡ ∥
+    Relation,
+    /// Ký hiệu cấu trúc: ≔ ⇒ ↻ ○
+    Symbol,
+    /// Số học giả thuyết (QT3): + - × ÷
+    Arithmetic,
+    /// Vật lý đã chứng minh (QT3): ⧺ ⊖
+    Physical,
+    /// Dấu phân cách: { } ( ) ; , = ? " |
+    Delimiter,
+    /// Khoảng trắng
+    Whitespace,
+    /// Chữ số: 0-9
+    Digit,
+    /// Ký tự định danh: Unicode letter, emoji, _
+    Ident,
+}
+
+/// Phân loại một ký tự Unicode theo bảng chữ cái Olang.
+pub fn classify(c: char) -> CharClass {
+    match c {
+        // 18 relation operators (v2 spec: structural + space + time + context)
+        '∈' | '⊂' | '≡' | '⊥' | '∘' | '→' | '≈' | '←' | '∪' | '∩' | '∖' | '↔'
+        | '⟶' | '⟳' | '↑' | '⚡' | '∥' | '∂' => CharClass::Relation,
+        // Symbol operators (control flow)
+        '≔' | '⇒' | '↻' | '○' => CharClass::Symbol,
+        // Arithmetic (QT3: hypothesis — chưa chứng minh)
+        '+' | '-' | '×' | '÷' | '%' | '*' | '/' => CharClass::Arithmetic,
+        // Physical (QT3: proven — đã chứng minh)
+        '⧺' | '⊖' => CharClass::Physical,
+        // Delimiters
+        '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',' | '=' | '?' | '"' | '|' | '.' | ':' | '<' | '>' | '!' | '&' | '~' | '^' => CharClass::Delimiter,
+        // Whitespace
+        ' ' | '\t' | '\n' | '\r' => CharClass::Whitespace,
+        // Digits
+        '0'..='9' => CharClass::Digit,
+        // Everything else = identifier character
+        _ => CharClass::Ident,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RelOp — 18 toán tử quan hệ (v2 spec)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Toán tử quan hệ trong Olang (v2 design spec).
+///
+/// 3 nhóm: Structural (0x01-0x08) + Space (0x09-0x0C) + Time (0x0D-0x11)
+/// + Context (∂) — semantic level only, no byte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelOp {
+    // ── Structural Edges (bất biến — L0) ──
+    /// ∈ (U+2208) — ELEMENT OF / 0x01 / A thuộc B
+    Member,
+    /// ⊂ (U+2282) — SUBSET OF / 0x02 / A tập con B
+    Subset,
+    /// ≡ (U+2261) — IDENTICAL TO / 0x03 / A tương đương B
+    Equiv,
+    /// ⊥ (U+22A5) — UP TACK / 0x04 / A độc lập B
+    Ortho,
+    /// ∘ (U+2218) — RING OPERATOR / 0x05 / A∘B → mới
+    Compose,
+    /// → (U+2192) — RIGHTWARDS ARROW / 0x06 / A gây ra B
+    Causes,
+    /// ≈ (U+2248) — ALMOST EQUAL TO / 0x07 / A gần giống B
+    Similar,
+    /// ← (U+2190) — LEFTWARDS ARROW / 0x08 / A xuất phát từ B
+    Derived,
+
+    // ── Space Edges (từ SDF — bất biến) ──
+    /// ∪ (U+222A) — UNION / 0x09 / A chứa B
+    Contains,
+    /// ∩ (U+2229) — INTERSECTION / 0x0A / A giao B
+    Intersects,
+    /// ∖ (U+2216) — SET MINUS / 0x0B / A trừ B
+    SetMinus,
+    /// ↔ (U+2194) — LEFT RIGHT ARROW / 0x0C / A đối xứng B
+    Bidir,
+
+    // ── Time Edges (từ Music — học được) ──
+    /// ⟶ (U+27F6) — LONG RIGHTWARDS ARROW / 0x0D / A chảy → B
+    Flows,
+    /// ⟳ (U+27F3) — CW GAPPED CIRCLE ARROW / 0x0E / A lặp chu kỳ B
+    Repeats,
+    /// ↑ (U+2191) — UPWARDS ARROW / 0x0F / A giải quyết ở B
+    Resolves,
+    /// ⚡ (U+26A1) — HIGH VOLTAGE / 0x10 / A kích hoạt B
+    Trigger,
+    /// ∥ (U+2225) — PARALLEL TO / 0x11 / A đồng bộ B
+    Parallel,
+
+    // ── Semantic level only (no byte) ──
+    /// ∂ (U+2202) — Context / ngữ cảnh
+    Context,
+}
+
+impl RelOp {
+    /// Parse ký tự Unicode → RelOp.
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            // Structural (0x01-0x08)
+            '∈' => Some(Self::Member),
+            '⊂' => Some(Self::Subset),
+            '≡' => Some(Self::Equiv),
+            '⊥' => Some(Self::Ortho),
+            '∘' => Some(Self::Compose),
+            '→' => Some(Self::Causes),
+            '≈' => Some(Self::Similar),
+            '←' => Some(Self::Derived),
+            // Space (0x09-0x0C)
+            '∪' => Some(Self::Contains),
+            '∩' => Some(Self::Intersects),
+            '∖' => Some(Self::SetMinus),
+            '↔' => Some(Self::Bidir),
+            // Time (0x0D-0x11)
+            '⟶' => Some(Self::Flows),
+            '⟳' => Some(Self::Repeats),
+            '↑' => Some(Self::Resolves),
+            '⚡' => Some(Self::Trigger),
+            '∥' => Some(Self::Parallel),
+            // Semantic only
+            '∂' => Some(Self::Context),
+            _ => None,
+        }
+    }
+
+    /// Ký tự Unicode đại diện.
+    pub fn as_char(self) -> char {
+        match self {
+            Self::Member => '∈',
+            Self::Subset => '⊂',
+            Self::Equiv => '≡',
+            Self::Ortho => '⊥',
+            Self::Compose => '∘',
+            Self::Causes => '→',
+            Self::Similar => '≈',
+            Self::Derived => '←',
+            Self::Contains => '∪',
+            Self::Intersects => '∩',
+            Self::SetMinus => '∖',
+            Self::Bidir => '↔',
+            Self::Flows => '⟶',
+            Self::Repeats => '⟳',
+            Self::Resolves => '↑',
+            Self::Trigger => '⚡',
+            Self::Parallel => '∥',
+            Self::Context => '∂',
+        }
+    }
+
+    /// Map sang relation byte cho IR (v2 spec).
+    ///
+    /// Structural: 0x01-0x08, Space: 0x09-0x0C, Time: 0x0D-0x11.
+    /// Context(∂) = semantic level only → None.
+    pub fn to_rel_byte(self) -> Option<u8> {
+        match self {
+            // Structural
+            Self::Member => Some(0x01),
+            Self::Subset => Some(0x02),
+            Self::Equiv => Some(0x03),
+            Self::Ortho => Some(0x04),
+            Self::Compose => Some(0x05),
+            Self::Causes => Some(0x06),
+            Self::Similar => Some(0x07),
+            Self::Derived => Some(0x08),
+            // Space
+            Self::Contains => Some(0x09),
+            Self::Intersects => Some(0x0A),
+            Self::SetMinus => Some(0x0B),
+            Self::Bidir => Some(0x0C),
+            // Time
+            Self::Flows => Some(0x0D),
+            Self::Repeats => Some(0x0E),
+            Self::Resolves => Some(0x0F),
+            Self::Trigger => Some(0x10),
+            Self::Parallel => Some(0x11),
+            // Semantic only
+            Self::Context => None,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ArithOp — Số học (chỉ cho numbers, KHÔNG cho nodes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Toán tử số học GIẢ THUYẾT (QT3: +/- = chưa chứng minh).
+/// Nodes dùng ∘ (compose) hoặc ZWJ, KHÔNG dùng +.
+/// Quá trình: quan sát → +/- → chứng minh → ==
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithOp {
+    /// `+` — cộng (giả thuyết)
+    Add,
+    /// `-` — trừ (giả thuyết)
+    Sub,
+    /// `×` (U+00D7) — nhân (giả thuyết)
+    Mul,
+    /// `÷` (U+00F7) — chia (giả thuyết)
+    Div,
+    /// `%` — modulo (giả thuyết)
+    Mod,
+}
+
+impl ArithOp {
+    /// Parse ký tự → ArithOp.
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            '+' => Some(Self::Add),
+            '-' => Some(Self::Sub),
+            '×' | '*' => Some(Self::Mul),
+            '÷' | '/' => Some(Self::Div),
+            '%' => Some(Self::Mod),
+            _ => None,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PhysOp — Vật lý đã chứng minh (QT3: ⧺/⊖ = thêm/bớt thật)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Toán tử vật lý ĐÃ CHỨNG MINH (QT3: ⧺/⊖ = sự thật).
+///
+/// Khác với +/- (giả thuyết): ⧺/⊖ chỉ dùng khi có bằng chứng.
+/// ⧺ = thêm vật lý (đã xác nhận)
+/// ⊖ = bớt vật lý (đã xác nhận)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysOp {
+    /// ⧺ (U+29FA) — thêm vật lý (đã chứng minh)
+    PhysAdd,
+    /// ⊖ (U+2296) — bớt vật lý (đã chứng minh)
+    PhysSub,
+}
+
+impl PhysOp {
+    /// Parse ký tự → PhysOp.
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            '⧺' => Some(Self::PhysAdd),
+            '⊖' => Some(Self::PhysSub),
+            _ => None,
+        }
+    }
+
+    /// Ký tự Unicode đại diện.
+    pub fn as_char(self) -> char {
+        match self {
+            Self::PhysAdd => '⧺',
+            Self::PhysSub => '⊖',
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Keyword — từ khóa (alias tiếng Anh cho symbols)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Từ khóa dành riêng — alias cho ký hiệu toán học.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keyword {
+    /// `let` = ≔
+    Let,
+    /// `fn` = ≔ (...) { }
+    Fn,
+    /// `if` = ⇒
+    If,
+    /// `else` = ⊥
+    Else,
+    /// `loop` = ↻
+    Loop,
+    /// `emit` = ○
+    Emit,
+    /// `match` — pattern matching
+    Match,
+    /// `try` — error handling
+    Try,
+    /// `catch` — error handler block
+    Catch,
+    /// `for` — for-in loop
+    For,
+    /// `in` — range iteration
+    In,
+    /// `while` — conditional loop
+    While,
+    /// `break` — exit loop
+    Break,
+    /// `continue` — skip to next iteration
+    Continue,
+    /// `return` — return value from function
+    Return,
+    /// `use` — import module
+    Use,
+    /// `struct` — struct definition
+    Struct,
+    /// `enum` — enum definition
+    Enum,
+    /// `impl` — impl block
+    Impl,
+    /// `trait` — trait definition
+    Trait,
+    /// `self` — self reference in methods
+    SelfKw,
+    /// `pub` — public visibility
+    Pub,
+    /// `spawn` — concurrent task
+    Spawn,
+    /// `channel` — create communication channel
+    Channel,
+    /// `mod` — module declaration
+    Mod,
+    /// `select` — multi-channel wait
+    Select,
+    /// `timeout` — timeout arm in select
+    Timeout,
+    /// `from` — channel receive in select arm
+    From,
+    /// `mut` — mutable variable binding
+    Mut,
+}
+
+/// Check xem string có phải keyword không.
+pub fn keyword_from_str(s: &str) -> Option<Keyword> {
+    match s {
+        "let" => Some(Keyword::Let),
+        "fn" => Some(Keyword::Fn),
+        "if" => Some(Keyword::If),
+        "else" => Some(Keyword::Else),
+        "loop" => Some(Keyword::Loop),
+        "emit" => Some(Keyword::Emit),
+        "match" => Some(Keyword::Match),
+        "try" => Some(Keyword::Try),
+        "catch" => Some(Keyword::Catch),
+        "for" => Some(Keyword::For),
+        "in" => Some(Keyword::In),
+        "while" => Some(Keyword::While),
+        "break" => Some(Keyword::Break),
+        "continue" => Some(Keyword::Continue),
+        "return" => Some(Keyword::Return),
+        "use" => Some(Keyword::Use),
+        "struct" => Some(Keyword::Struct),
+        "type" => Some(Keyword::Struct),    // Olang bootstrap dùng "type" thay "struct"
+        "enum" => Some(Keyword::Enum),
+        "union" => Some(Keyword::Enum),     // Olang bootstrap dùng "union" thay "enum"
+        "impl" => Some(Keyword::Impl),
+        "trait" => Some(Keyword::Trait),
+        "self" => Some(Keyword::SelfKw),
+        "pub" => Some(Keyword::Pub),
+        "spawn" => Some(Keyword::Spawn),
+        "channel" => Some(Keyword::Channel),
+        "module" => Some(Keyword::Mod),
+        "select" => Some(Keyword::Select),
+        "timeout" => Some(Keyword::Timeout),
+        "from" => Some(Keyword::From),
+        "mut" => Some(Keyword::Mut),
+        _ => None,
+    }
+}
+
+/// Check xem string có phải system command không.
+pub fn is_command(s: &str) -> bool {
+    matches!(
+        s,
+        "dream"
+            | "stats"
+            | "health"
+            | "seed"
+            | "shutdown"
+            | "reboot"
+            | "status"
+            | "help"
+            | "learn"
+            | "fuse"
+            // Reasoning & debug primitives
+            | "trace"
+            | "inspect"
+            | "assert"
+            | "typeof"
+            | "why"
+            | "explain"
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Token — đơn vị từ vựng
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Token — đơn vị nhỏ nhất trong chương trình Olang.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    // ── Identifiers & Literals ──
+    /// Tên: node alias, biến, emoji
+    Ident(String),
+    /// Số nguyên
+    Int(u32),
+    /// Số thực (float)
+    Float(f64),
+    /// Chuỗi ký tự trong ngoặc kép: "text"
+    Str(String),
+
+    // ── Keywords (alias tiếng Anh cho symbols) ──
+    /// `let` (= ≔)
+    Let,
+    /// `fn` (= ≔ () {})
+    Fn,
+    /// `if` (= ⇒)
+    If,
+    /// `else` (= ⊥ {})
+    Else,
+    /// `loop` (= ↻)
+    Loop,
+    /// `emit` (= ○)
+    Emit,
+
+    // ── Commands ──
+    /// System command: dream, stats, learn, ...
+    Command(String),
+
+    // ── Operators ──
+    /// Relation operator (16 loại)
+    Rel(RelOp),
+    /// Arithmetic operator — giả thuyết (QT3: +/-)
+    Arith(ArithOp),
+    /// Physical operator — đã chứng minh (QT3: ⧺/⊖)
+    Phys(PhysOp),
+    /// == sự thật chắc chắn (QT3)
+    Truth,
+
+    // ── Symbol operators (Unicode math) ──
+    /// ≔ (U+2254) — define / gán
+    Define,
+    /// ⇒ (U+21D2) — implies / nếu...thì
+    Implies,
+    /// ↻ (U+21BB) — cycle / lặp
+    Cycle,
+    /// ○ (U+25CB) — origin / xuất
+    Circle,
+
+    // ── Delimiters ──
+    /// `{`
+    LBrace,
+    /// `}`
+    RBrace,
+    /// `(`
+    LParen,
+    /// `)`
+    RParen,
+    /// `;`
+    Semi,
+    /// `,`
+    Comma,
+    /// `=`
+    Eq,
+    /// `?`
+    Wild,
+    /// `|`
+    Pipe,
+    /// `match`
+    Match,
+    /// `try`
+    Try,
+    /// `catch`
+    Catch,
+    /// `=>`
+    FatArrow,
+    /// `for`
+    For,
+    /// `in`
+    In,
+    /// `..` — range operator
+    DotDot,
+    /// `while`
+    While,
+    /// `<` — less than
+    Lt,
+    /// `>` — greater than
+    Gt,
+    /// `<=` — less than or equal
+    Le,
+    /// `>=` — greater than or equal
+    Ge,
+    /// `!=` — not equal
+    Ne,
+    /// `!` — logical not
+    Not,
+    /// `&&` — logical and
+    And,
+    /// `||` — logical or
+    Or,
+    /// `break`
+    Break,
+    /// `continue`
+    Continue,
+    /// `return`
+    Return,
+    /// `use`
+    Use,
+    /// `struct`
+    Struct,
+    /// `enum`
+    Enum,
+    /// `impl`
+    Impl,
+    /// `trait`
+    Trait,
+    /// `self`
+    SelfKw,
+    /// `pub`
+    Pub,
+    /// `spawn`
+    Spawn,
+    /// `channel`
+    Channel,
+    /// `mod` — module declaration
+    ModKw,
+    /// `select` — multi-channel wait
+    Select,
+    /// `timeout` — timeout arm in select
+    Timeout,
+    /// `from` — channel receive in select arm
+    From,
+    /// `::` — path separator (enum variants, module paths)
+    ColonColon,
+    /// `[`
+    LBracket,
+    /// `]`
+    RBracket,
+    /// `.`
+    Dot,
+    /// `:`
+    Colon,
+    /// `|>` — pipe operator (Julia-style: output feeds into next)
+    PipeArrow,
+
+    /// `??` — unwrap with default value (Option/Result)
+    DoubleQuestion,
+
+    /// f-string: `f"hello {name}"` — interpolated string with embedded expressions
+    /// Parts alternate: literal, expr_source, literal, expr_source, ...
+    /// Odd-indexed parts are expression source text to be parsed and evaluated.
+    FStr(Vec<String>),
+
+    /// `<<` — bit shift left
+    Shl,
+    /// `>>` — bit shift right
+    Shr,
+    /// `&` — bitwise AND (single ampersand)
+    BitAnd,
+    /// `^` — bitwise XOR
+    BitXor,
+    /// `~` — bitwise NOT (unary)
+    BitNot,
+
+    /// `mut` — mutable variable binding
+    Mut,
+
+    // ── End ──
+    /// End of input
+    Eof,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lexer — scanner sinh token từ source text
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lexer: chuyển source text → dãy Token.
+pub struct Lexer<'a> {
+    src: &'a str,
+    chars: core::iter::Peekable<core::str::CharIndices<'a>>,
+}
+
+impl<'a> Lexer<'a> {
+    /// Tạo lexer mới từ source.
+    pub fn new(src: &'a str) -> Self {
+        Self {
+            src,
+            chars: src.char_indices().peekable(),
+        }
+    }
+
+    /// Đọc token tiếp theo.
+    pub fn next_token(&mut self) -> Token {
+        self.skip_whitespace();
+
+        let (pos, c) = match self.chars.peek().copied() {
+            Some(pair) => pair,
+            None => return Token::Eof,
+        };
+
+        // Relation operators (16)
+        if let Some(op) = RelOp::from_char(c) {
+            self.chars.next();
+            return Token::Rel(op);
+        }
+
+        // Symbol operators
+        match c {
+            '≔' => {
+                self.chars.next();
+                return Token::Define;
+            }
+            '⇒' => {
+                self.chars.next();
+                return Token::Implies;
+            }
+            '↻' => {
+                self.chars.next();
+                return Token::Cycle;
+            }
+            '○' => {
+                self.chars.next();
+                return Token::Circle;
+            }
+            _ => {}
+        }
+
+        // Physical operators (QT3: ⧺/⊖ — proven)
+        if let Some(op) = PhysOp::from_char(c) {
+            self.chars.next();
+            return Token::Phys(op);
+        }
+
+        // Arithmetic operators (QT3: +/- — hypothesis)
+        if let Some(op) = ArithOp::from_char(c) {
+            self.chars.next();
+            return Token::Arith(op);
+        }
+
+        // Delimiters
+        match c {
+            '{' => {
+                self.chars.next();
+                return Token::LBrace;
+            }
+            '}' => {
+                self.chars.next();
+                return Token::RBrace;
+            }
+            '(' => {
+                self.chars.next();
+                return Token::LParen;
+            }
+            ')' => {
+                self.chars.next();
+                return Token::RParen;
+            }
+            '[' => {
+                self.chars.next();
+                return Token::LBracket;
+            }
+            ']' => {
+                self.chars.next();
+                return Token::RBracket;
+            }
+            ';' => {
+                self.chars.next();
+                return Token::Semi;
+            }
+            ',' => {
+                self.chars.next();
+                return Token::Comma;
+            }
+            '=' => {
+                self.chars.next();
+                // == → Truth (QT3: sự thật chắc chắn)
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Truth;
+                }
+                // => → FatArrow (match arm)
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::FatArrow;
+                }
+                return Token::Eq;
+            }
+            '!' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Ne;
+                }
+                return Token::Not;
+            }
+            '?' => {
+                self.chars.next();
+                if let Some(&(_, '?')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::DoubleQuestion;
+                }
+                return Token::Wild;
+            }
+            '|' => {
+                self.chars.next();
+                if let Some(&(_, '|')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Or;
+                }
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::PipeArrow;
+                }
+                return Token::Pipe;
+            }
+            '&' => {
+                self.chars.next();
+                if let Some(&(_, '&')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::And;
+                }
+                return Token::BitAnd;
+            }
+            '"' => {
+                return self.lex_string();
+            }
+            '~' => {
+                self.chars.next();
+                return Token::BitNot;
+            }
+            '^' => {
+                self.chars.next();
+                return Token::BitXor;
+            }
+            '.' => {
+                self.chars.next();
+                if let Some(&(_, '.')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::DotDot;
+                }
+                return Token::Dot;
+            }
+            ':' => {
+                self.chars.next();
+                // Check for :: (path separator)
+                if let Some(&(_, ':')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::ColonColon;
+                }
+                return Token::Colon;
+            }
+            '<' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Le;
+                }
+                if let Some(&(_, '<')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Shl;
+                }
+                return Token::Lt;
+            }
+            '>' => {
+                self.chars.next();
+                if let Some(&(_, '=')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Ge;
+                }
+                if let Some(&(_, '>')) = self.chars.peek() {
+                    self.chars.next();
+                    return Token::Shr;
+                }
+                return Token::Gt;
+            }
+            _ => {}
+        }
+
+        // Numbers
+        if c.is_ascii_digit() {
+            return self.lex_number();
+        }
+
+        // Identifiers, keywords, commands
+        self.lex_ident(pos)
+    }
+
+    /// Tokenize toàn bộ source → Vec<Token> (không bao gồm Eof).
+    pub fn tokenize_all(src: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(src);
+        let mut tokens = Vec::new();
+        loop {
+            let tok = lexer.next_token();
+            if tok == Token::Eof {
+                break;
+            }
+            tokens.push(tok);
+        }
+        tokens
+    }
+
+    fn skip_whitespace(&mut self) {
+        loop {
+            match self.chars.peek() {
+                Some(&(_, c)) if c.is_whitespace() => {
+                    self.chars.next();
+                }
+                // // line comment
+                Some(&(pos, '/')) => {
+                    let next_pos = pos + 1;
+                    // Peek two chars ahead manually
+                    let src_bytes = self.src.as_bytes();
+                    if next_pos < src_bytes.len() && src_bytes[next_pos] == b'/' {
+                        // Line comment: skip until newline
+                        self.chars.next(); // consume first /
+                        self.chars.next(); // consume second /
+                        while let Some(&(_, c)) = self.chars.peek() {
+                            if c == '\n' { break; }
+                            self.chars.next();
+                        }
+                    } else if next_pos < src_bytes.len() && src_bytes[next_pos] == b'*' {
+                        // Block comment: skip until */
+                        self.chars.next(); // consume /
+                        self.chars.next(); // consume *
+                        let mut prev = ' ';
+                        while let Some(&(_, c)) = self.chars.peek() {
+                            self.chars.next();
+                            if prev == '*' && c == '/' { break; }
+                            prev = c;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+    }
+
+    fn lex_number(&mut self) -> Token {
+        let mut n: u32 = 0;
+        // First digit
+        if let Some(&(_, c)) = self.chars.peek() {
+            if let Some(d) = c.to_digit(10) {
+                n = d;
+                self.chars.next();
+            }
+        }
+        // Check for hex prefix: 0x or 0X
+        if n == 0 {
+            if let Some(&(_, c)) = self.chars.peek() {
+                if c == 'x' || c == 'X' {
+                    self.chars.next(); // consume 'x'
+                    let mut hex_n: u32 = 0;
+                    let mut has_digits = false;
+                    while let Some(&(_, c)) = self.chars.peek() {
+                        if let Some(d) = c.to_digit(16) {
+                            hex_n = hex_n.saturating_mul(16).saturating_add(d);
+                            has_digits = true;
+                            self.chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if has_digits {
+                        return Token::Int(hex_n);
+                    }
+                    // 0x with no digits — return 0
+                    return Token::Int(0);
+                }
+            }
+        }
+        // Continue reading decimal digits
+        while let Some(&(_, c)) = self.chars.peek() {
+            if let Some(d) = c.to_digit(10) {
+                n = n.saturating_mul(10).saturating_add(d);
+                self.chars.next();
+            } else {
+                break;
+            }
+        }
+        // Check for float: integer part followed by '.' and digit
+        if let Some(&(_, '.')) = self.chars.peek() {
+            // Peek ahead to see if next after '.' is a digit (not a field access)
+            let mut clone = self.chars.clone();
+            clone.next(); // skip '.'
+            if let Some(&(_, c)) = clone.peek() {
+                if c.is_ascii_digit() {
+                    self.chars.next(); // consume '.'
+                    let mut frac = 0.0_f64;
+                    let mut divisor = 10.0_f64;
+                    while let Some(&(_, c)) = self.chars.peek() {
+                        if let Some(d) = c.to_digit(10) {
+                            frac += d as f64 / divisor;
+                            divisor *= 10.0;
+                            self.chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    return Token::Float(n as f64 + frac);
+                }
+            }
+        }
+        Token::Int(n)
+    }
+
+    fn lex_string(&mut self) -> Token {
+        self.chars.next(); // consume opening "
+        let mut s = String::new();
+        while let Some(&(_, c)) = self.chars.peek() {
+            self.chars.next();
+            if c == '"' {
+                break;
+            }
+            if c == '\\' {
+                // Escape sequences
+                if let Some(&(_, esc)) = self.chars.peek() {
+                    self.chars.next();
+                    match esc {
+                        'n' => s.push('\n'),
+                        't' => s.push('\t'),
+                        'r' => s.push('\r'),
+                        '\\' => s.push('\\'),
+                        '"' => s.push('"'),
+                        '0' => s.push('\0'),
+                        _ => {
+                            s.push('\\');
+                            s.push(esc);
+                        }
+                    }
+                } else {
+                    s.push('\\');
+                }
+            } else {
+                s.push(c);
+            }
+        }
+        Token::Str(s)
+    }
+
+    /// Lex f-string: `f"hello {name}, you have {count} items"`
+    /// Returns FStr with alternating literal/expression parts.
+    /// parts[0] = literal, parts[1] = expr source, parts[2] = literal, ...
+    fn lex_fstring(&mut self) -> Token {
+        self.chars.next(); // consume opening "
+        let mut parts = Vec::new();
+        let mut current = String::new();
+
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c == '"' {
+                self.chars.next();
+                break;
+            }
+            if c == '\\' {
+                self.chars.next();
+                if let Some(&(_, esc)) = self.chars.peek() {
+                    self.chars.next();
+                    match esc {
+                        'n' => current.push('\n'),
+                        't' => current.push('\t'),
+                        'r' => current.push('\r'),
+                        '\\' => current.push('\\'),
+                        '"' => current.push('"'),
+                        '{' => current.push('{'),
+                        '}' => current.push('}'),
+                        _ => { current.push('\\'); current.push(esc); }
+                    }
+                }
+                continue;
+            }
+            if c == '{' {
+                self.chars.next(); // consume {
+                // Push the literal part so far
+                parts.push(core::mem::take(&mut current));
+                // Read expression until matching }
+                let mut depth = 1u32;
+                let mut expr_src = String::new();
+                while let Some(&(_, ec)) = self.chars.peek() {
+                    self.chars.next();
+                    if ec == '{' { depth += 1; }
+                    if ec == '}' {
+                        depth -= 1;
+                        if depth == 0 { break; }
+                    }
+                    expr_src.push(ec);
+                }
+                parts.push(expr_src);
+                continue;
+            }
+            self.chars.next();
+            current.push(c);
+        }
+        // Push trailing literal
+        parts.push(current);
+        Token::FStr(parts)
+    }
+
+    fn lex_ident(&mut self, start: usize) -> Token {
+        let mut end = start;
+
+        while let Some(&(i, c)) = self.chars.peek() {
+            match classify(c) {
+                CharClass::Ident | CharClass::Digit => {
+                    end = i + c.len_utf8();
+                    self.chars.next();
+                }
+                _ => break,
+            }
+        }
+
+        let word = &self.src[start..end];
+
+        // f-string: f"..." — check before keywords
+        if word == "f" {
+            if let Some(&(_, '"')) = self.chars.peek() {
+                return self.lex_fstring();
+            }
+        }
+
+        // Keyword?
+        if let Some(kw) = keyword_from_str(word) {
+            return match kw {
+                Keyword::Let => Token::Let,
+                Keyword::Fn => Token::Fn,
+                Keyword::If => Token::If,
+                Keyword::Else => Token::Else,
+                Keyword::Loop => Token::Loop,
+                Keyword::Emit => Token::Emit,
+                Keyword::Match => Token::Match,
+                Keyword::Try => Token::Try,
+                Keyword::Catch => Token::Catch,
+                Keyword::For => Token::For,
+                Keyword::In => Token::In,
+                Keyword::While => Token::While,
+                Keyword::Break => Token::Break,
+                Keyword::Continue => Token::Continue,
+                Keyword::Return => Token::Return,
+                Keyword::Use => Token::Use,
+                Keyword::Struct => Token::Struct,
+                Keyword::Enum => Token::Enum,
+                Keyword::Impl => Token::Impl,
+                Keyword::Trait => Token::Trait,
+                Keyword::SelfKw => Token::SelfKw,
+                Keyword::Pub => Token::Pub,
+                Keyword::Spawn => Token::Spawn,
+                Keyword::Channel => Token::Channel,
+                Keyword::Mod => Token::ModKw,
+                Keyword::Select => Token::Select,
+                Keyword::Timeout => Token::Timeout,
+                Keyword::From => Token::From,
+                Keyword::Mut => Token::Mut,
+            };
+        }
+
+        // Command?
+        if is_command(word) {
+            return Token::Command(word.to_string());
+        }
+
+        // Identifier
+        Token::Ident(word.to_string())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    // ── CharClass ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn classify_relations() {
+        let rels = [
+            '∈', '⊂', '≡', '⊥', '∘', '→', '≈', '←', '∪', '∩', '∖', '↔',
+            '⟶', '⟳', '↑', '⚡', '∥', '∂',
+        ];
+        for c in rels {
+            assert_eq!(classify(c), CharClass::Relation, "'{c}' phải là Relation");
+        }
+    }
+
+    #[test]
+    fn classify_symbols() {
+        for c in ['≔', '⇒', '↻', '○'] {
+            assert_eq!(classify(c), CharClass::Symbol, "'{c}' phải là Symbol");
+        }
+    }
+
+    #[test]
+    fn classify_arithmetic() {
+        for c in ['+', '-', '×', '÷'] {
+            assert_eq!(
+                classify(c),
+                CharClass::Arithmetic,
+                "'{c}' phải là Arithmetic (hypothesis)"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_physical() {
+        for c in ['⧺', '⊖'] {
+            assert_eq!(
+                classify(c),
+                CharClass::Physical,
+                "'{c}' phải là Physical (proven)"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_delimiters() {
+        for c in ['{', '}', '(', ')', ';', ',', '=', '?', '"', '|'] {
+            assert_eq!(
+                classify(c),
+                CharClass::Delimiter,
+                "'{c}' phải là Delimiter"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_whitespace() {
+        for c in [' ', '\t', '\n', '\r'] {
+            assert_eq!(
+                classify(c),
+                CharClass::Whitespace,
+                "'{c:?}' phải là Whitespace"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_digits() {
+        for c in '0'..='9' {
+            assert_eq!(classify(c), CharClass::Digit, "'{c}' phải là Digit");
+        }
+    }
+
+    #[test]
+    fn classify_ident_chars() {
+        for c in ['a', 'ử', '火', '🔥', '_'] {
+            assert_eq!(classify(c), CharClass::Ident, "'{c}' phải là Ident");
+        }
+    }
+
+    // ── RelOp (16 operators) ────────────────────────────────────────────────
+
+    #[test]
+    fn relop_roundtrip_all_18() {
+        let ops = [
+            // Structural
+            ('∈', RelOp::Member),
+            ('⊂', RelOp::Subset),
+            ('≡', RelOp::Equiv),
+            ('⊥', RelOp::Ortho),
+            ('∘', RelOp::Compose),
+            ('→', RelOp::Causes),
+            ('≈', RelOp::Similar),
+            ('←', RelOp::Derived),
+            // Space
+            ('∪', RelOp::Contains),
+            ('∩', RelOp::Intersects),
+            ('∖', RelOp::SetMinus),
+            ('↔', RelOp::Bidir),
+            // Time
+            ('⟶', RelOp::Flows),
+            ('⟳', RelOp::Repeats),
+            ('↑', RelOp::Resolves),
+            ('⚡', RelOp::Trigger),
+            ('∥', RelOp::Parallel),
+            // Semantic
+            ('∂', RelOp::Context),
+        ];
+        for (c, expected) in ops {
+            let op = RelOp::from_char(c).unwrap();
+            assert_eq!(op, expected);
+            assert_eq!(op.as_char(), c, "roundtrip failed for {c}");
+        }
+    }
+
+    #[test]
+    fn relop_byte_mapping_v2() {
+        // Structural: 0x01-0x08
+        assert_eq!(RelOp::Member.to_rel_byte(), Some(0x01));
+        assert_eq!(RelOp::Derived.to_rel_byte(), Some(0x08));
+        // Space: 0x09-0x0C
+        assert_eq!(RelOp::Contains.to_rel_byte(), Some(0x09));
+        assert_eq!(RelOp::Intersects.to_rel_byte(), Some(0x0A));
+        assert_eq!(RelOp::SetMinus.to_rel_byte(), Some(0x0B));
+        assert_eq!(RelOp::Bidir.to_rel_byte(), Some(0x0C));
+        // Time: 0x0D-0x11
+        assert_eq!(RelOp::Flows.to_rel_byte(), Some(0x0D));
+        assert_eq!(RelOp::Repeats.to_rel_byte(), Some(0x0E));
+        assert_eq!(RelOp::Resolves.to_rel_byte(), Some(0x0F));
+        assert_eq!(RelOp::Trigger.to_rel_byte(), Some(0x10));
+        assert_eq!(RelOp::Parallel.to_rel_byte(), Some(0x11));
+        // Context: semantic only → None
+        assert_eq!(RelOp::Context.to_rel_byte(), None);
+    }
+
+    // ── ArithOp ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn arith_from_char() {
+        assert_eq!(ArithOp::from_char('+'), Some(ArithOp::Add));
+        assert_eq!(ArithOp::from_char('-'), Some(ArithOp::Sub));
+        assert_eq!(ArithOp::from_char('×'), Some(ArithOp::Mul));
+        assert_eq!(ArithOp::from_char('÷'), Some(ArithOp::Div));
+        assert_eq!(ArithOp::from_char('∘'), None); // not arithmetic
+    }
+
+    // ── Keywords & Commands ─────────────────────────────────────────────────
+
+    #[test]
+    fn keyword_detection() {
+        assert_eq!(keyword_from_str("let"), Some(Keyword::Let));
+        assert_eq!(keyword_from_str("fn"), Some(Keyword::Fn));
+        assert_eq!(keyword_from_str("if"), Some(Keyword::If));
+        assert_eq!(keyword_from_str("else"), Some(Keyword::Else));
+        assert_eq!(keyword_from_str("loop"), Some(Keyword::Loop));
+        assert_eq!(keyword_from_str("emit"), Some(Keyword::Emit));
+        assert_eq!(keyword_from_str("fire"), None);
+    }
+
+    #[test]
+    fn command_detection() {
+        assert!(is_command("dream"));
+        assert!(is_command("stats"));
+        assert!(is_command("learn"));
+        assert!(!is_command("fire"));
+        assert!(!is_command("let"));
+    }
+
+    // ── Lexer: existing patterns ────────────────────────────────────────────
+
+    #[test]
+    fn lex_simple_ident() {
+        let tokens = Lexer::tokenize_all("fire");
+        assert_eq!(tokens, vec![Token::Ident("fire".into())]);
+    }
+
+    #[test]
+    fn lex_emoji() {
+        let tokens = Lexer::tokenize_all("🔥");
+        assert_eq!(tokens, vec![Token::Ident("🔥".into())]);
+    }
+
+    #[test]
+    fn lex_compose() {
+        let tokens = Lexer::tokenize_all("fire ∘ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Rel(RelOp::Compose),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_relation_query() {
+        let tokens = Lexer::tokenize_all("🔥 ∈ ?");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("🔥".into()),
+                Token::Rel(RelOp::Member),
+                Token::Wild,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_let_binding() {
+        let tokens = Lexer::tokenize_all("let steam = fire ∘ water;");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Let,
+                Token::Ident("steam".into()),
+                Token::Eq,
+                Token::Ident("fire".into()),
+                Token::Rel(RelOp::Compose),
+                Token::Ident("water".into()),
+                Token::Semi,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_fn_def() {
+        let tokens = Lexer::tokenize_all("fn blend(a, b) { a ∘ b }");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Fn,
+                Token::Ident("blend".into()),
+                Token::LParen,
+                Token::Ident("a".into()),
+                Token::Comma,
+                Token::Ident("b".into()),
+                Token::RParen,
+                Token::LBrace,
+                Token::Ident("a".into()),
+                Token::Rel(RelOp::Compose),
+                Token::Ident("b".into()),
+                Token::RBrace,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_if_else() {
+        let tokens = Lexer::tokenize_all("if fire { emit fire; } else { emit water; }");
+        assert_eq!(tokens[0], Token::If);
+        assert!(tokens.contains(&Token::Else));
+    }
+
+    #[test]
+    fn lex_loop() {
+        let tokens = Lexer::tokenize_all("loop 3 { emit fire; }");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Loop,
+                Token::Int(3),
+                Token::LBrace,
+                Token::Emit,
+                Token::Ident("fire".into()),
+                Token::Semi,
+                Token::RBrace,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_command() {
+        let tokens = Lexer::tokenize_all("dream");
+        assert_eq!(tokens, vec![Token::Command("dream".into())]);
+    }
+
+    #[test]
+    fn lex_vietnamese() {
+        let tokens = Lexer::tokenize_all("lửa ∘ nước");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("lửa".into()),
+                Token::Rel(RelOp::Compose),
+                Token::Ident("nước".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_empty() {
+        assert!(Lexer::tokenize_all("").is_empty());
+    }
+
+    #[test]
+    fn lex_context_query() {
+        let tokens = Lexer::tokenize_all("bank ∂ finance");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("bank".into()),
+                Token::Rel(RelOp::Context),
+                Token::Ident("finance".into()),
+            ]
+        );
+    }
+
+    // ── Lexer: NEW symbol forms ─────────────────────────────────────────────
+
+    #[test]
+    fn lex_define_symbol() {
+        let tokens = Lexer::tokenize_all("steam ≔ fire ∘ water;");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("steam".into()),
+                Token::Define,
+                Token::Ident("fire".into()),
+                Token::Rel(RelOp::Compose),
+                Token::Ident("water".into()),
+                Token::Semi,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_implies_symbol() {
+        let tokens = Lexer::tokenize_all("fire ⇒ { }");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Implies,
+                Token::LBrace,
+                Token::RBrace,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_cycle_symbol() {
+        let tokens = Lexer::tokenize_all("↻ 3 { }");
+        assert_eq!(
+            tokens,
+            vec![Token::Cycle, Token::Int(3), Token::LBrace, Token::RBrace,]
+        );
+    }
+
+    #[test]
+    fn lex_circle_emit() {
+        let tokens = Lexer::tokenize_all("○ fire;");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Circle,
+                Token::Ident("fire".into()),
+                Token::Semi,
+            ]
+        );
+    }
+
+    // ── Lexer: NEW operators ────────────────────────────────────────────────
+
+    #[test]
+    fn lex_new_relops() {
+        let tokens = Lexer::tokenize_all("fire ∖ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Rel(RelOp::SetMinus),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_bidir() {
+        let tokens = Lexer::tokenize_all("fire ↔ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Rel(RelOp::Bidir),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_trigger() {
+        let tokens = Lexer::tokenize_all("🔥 ⚡ 💧");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("🔥".into()),
+                Token::Rel(RelOp::Trigger),
+                Token::Ident("💧".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_parallel() {
+        let tokens = Lexer::tokenize_all("fire ∥ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Rel(RelOp::Parallel),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_arithmetic() {
+        let tokens = Lexer::tokenize_all("1 + 2 × 3");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Int(1),
+                Token::Arith(ArithOp::Add),
+                Token::Int(2),
+                Token::Arith(ArithOp::Mul),
+                Token::Int(3),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_literal() {
+        let tokens = Lexer::tokenize_all("learn \"tôi buồn\"");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Command("learn".into()),
+                Token::Str("tôi buồn".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_chain_query() {
+        // ○{🌞 → ? → 🌵}
+        let tokens = Lexer::tokenize_all("🌞 → ? → 🌵");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("🌞".into()),
+                Token::Rel(RelOp::Causes),
+                Token::Wild,
+                Token::Rel(RelOp::Causes),
+                Token::Ident("🌵".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_learn_command() {
+        assert!(is_command("learn"));
+        let tokens = Lexer::tokenize_all("learn");
+        assert_eq!(tokens, vec![Token::Command("learn".into())]);
+    }
+
+    // ── QT3: hypothesis vs physical vs truth ────────────────────────────────
+
+    #[test]
+    fn lex_physical_add() {
+        let tokens = Lexer::tokenize_all("fire ⧺ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Phys(PhysOp::PhysAdd),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_physical_sub() {
+        let tokens = Lexer::tokenize_all("fire ⊖ water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Phys(PhysOp::PhysSub),
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_truth_double_eq() {
+        let tokens = Lexer::tokenize_all("fire == water");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("fire".into()),
+                Token::Truth,
+                Token::Ident("water".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_single_eq_still_works() {
+        let tokens = Lexer::tokenize_all("let x = fire;");
+        assert!(tokens.contains(&Token::Eq));
+        assert!(!tokens.contains(&Token::Truth));
+    }
+
+    #[test]
+    fn physop_roundtrip() {
+        assert_eq!(PhysOp::from_char('⧺'), Some(PhysOp::PhysAdd));
+        assert_eq!(PhysOp::from_char('⊖'), Some(PhysOp::PhysSub));
+        assert_eq!(PhysOp::PhysAdd.as_char(), '⧺');
+        assert_eq!(PhysOp::PhysSub.as_char(), '⊖');
+        assert_eq!(PhysOp::from_char('x'), None);
+    }
+
+    // ── Hex literal tests ─────────────────────────────────────────────────
+
+    fn tokenize(src: &str) -> Vec<Token> {
+        Lexer::tokenize_all(src)
+    }
+
+    #[test]
+    fn lex_hex_literal_0xff() {
+        let tokens = tokenize("0xFF");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(255))),
+            "0xFF should produce Int(255), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_literal_0x00() {
+        let tokens = tokenize("0x00");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(0))),
+            "0x00 should produce Int(0), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_literal_0x4f4c() {
+        let tokens = tokenize("0x4F4C");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(20300))),
+            "0x4F4C should produce Int(20300), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_uppercase_prefix() {
+        let tokens = tokenize("0XFF");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(255))),
+            "0XFF should produce Int(255), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_in_let_statement() {
+        let tokens = tokenize("let x = 0xFF;");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(255))),
+            "let x = 0xFF should contain Int(255), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_plain_zero_still_works() {
+        let tokens = tokenize("0");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(0))),
+            "plain 0 should produce Int(0), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_decimal_unchanged() {
+        let tokens = tokenize("42");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(42))),
+            "42 should produce Int(42), got {:?}", tokens);
+    }
+
+    #[test]
+    fn lex_hex_0x01() {
+        let tokens = tokenize("0x01");
+        assert!(tokens.iter().any(|t| matches!(t, Token::Int(1))),
+            "0x01 should produce Int(1), got {:?}", tokens);
+    }
+}

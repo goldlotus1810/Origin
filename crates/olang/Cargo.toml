@@ -1,0 +1,17 @@
+[package]
+name    = "olang"
+version.workspace = true
+edition.workspace = true
+description = "Olang core — Molecule, MolecularChain, Registry, VM, Compiler"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+std     = []
+
+[dependencies]
+ucd = { workspace = true }
+
+homemath      = { workspace = true }

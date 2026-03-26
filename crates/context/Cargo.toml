@@ -1,0 +1,18 @@
+[package]
+name    = "context"
+version.workspace = true
+edition.workspace = true
+description = "Emotion pipeline — EmotionTag V/A/D/I, ConversationCurve, Intent"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+std     = []
+
+[dependencies]
+ucd   = { workspace = true }
+olang = { workspace = true }
+silk  = { workspace = true }
+homemath = { workspace = true }

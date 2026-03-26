@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HomeOS ○ — KnowledgeTree Universe</title>
+<style>
+  :root {
+    --bg:       #06080f;
+    --surface:  #0d1117;
+    --border:   #1e2736;
+    --text:     #c9d4e8;
+    --dim:      #4a5568;
+    --accent:   #4fc3f7;
+    --gold:     #ffd54f;
+    --danger:   #ef5350;
+    --joy:      #66bb6a;
+    --neutral:  #78909c;
+    --glow:     rgba(79,195,247,0.15);
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); }
+
+  body {
+    font-family: var(--font-mono);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+    flex-shrink: 0;
+  }
+  .logo {
+    font-size: 22px;
+    color: var(--accent);
+    letter-spacing: -1px;
+  }
+  .title {
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .stats-bar {
+    margin-left: auto;
+    display: flex;
+    gap: 20px;
+    font-size: 10px;
+    color: var(--dim);
+  }
+  .stats-bar span { color: var(--accent); }
+
+  /* ── Layout ── */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Canvas ── */
+  #canvas {
+    flex: 1;
+    display: block;
+    cursor: crosshair;
+  }
+
+  /* ── Side panel ── */
+  .panel {
+    width: 240px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-section {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 8px;
+  }
+  .node-info {
+    font-size: 11px;
+    line-height: 1.8;
+  }
+  .node-info .name { font-size: 16px; color: var(--accent); margin-bottom: 4px; }
+  .node-info .layer { color: var(--gold); }
+  .node-info .emotion { display: flex; gap: 6px; margin-top: 6px; }
+  .bar { height: 3px; border-radius: 2px; margin-top: 2px; }
+  .bar-v  { background: linear-gradient(90deg, var(--danger), var(--joy)); }
+  .bar-a  { background: var(--accent); opacity: .7; }
+
+  .controls { padding: 12px 14px; font-size: 10px; color: var(--dim); line-height: 2; }
+  .key { display: inline-block; background: var(--border); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+
+  /* ── Emotion legend ── */
+  .legend {
+    padding: 12px 14px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 10px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 11px;
+    opacity: 0;
+    transition: opacity .3s;
+    pointer-events: none;
+    z-index: 100;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">○</div>
+  <div>
+    <div style="font-size:13px;font-weight:600">KnowledgeTree Universe</div>
+    <div class="title">HomeOS · ISDF Renderer · vSDF + Silk</div>
+  </div>
+  <div class="stats-bar">
+    <div>Nodes: <span id="s-nodes">0</span></div>
+    <div>Edges: <span id="s-edges">0</span></div>
+    <div>FPS: <span id="s-fps">0</span></div>
+    <div>t: <span id="s-time">0.00</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <canvas id="canvas"></canvas>
+
+  <div class="panel">
+    <div class="panel-section">
+      <div class="panel-label">Selected Node</div>
+      <div class="node-info" id="node-info">
+        <div class="name" id="ni-name">—</div>
+        <div>Layer: <span class="layer" id="ni-layer">—</span></div>
+        <div>ISL: <span id="ni-isl" style="color:var(--dim)">—</span></div>
+        <div class="emotion">
+          <div style="flex:1">
+            <div style="color:var(--dim);font-size:9px">VALENCE</div>
+            <div class="bar bar-v" id="bar-v" style="width:50%"></div>
+          </div>
+          <div style="flex:1">
+            <div style="color:var(--dim);font-size:9px">AROUSAL</div>
+            <div class="bar bar-a" id="bar-a" style="width:50%"></div>
+          </div>
+        </div>
+        <div style="margin-top:6px;color:var(--dim);font-size:10px" id="ni-desc">hover a node</div>
+      </div>
+    </div>
+
+    <div class="panel-section controls">
+      <div class="panel-label">Controls</div>
+      <span class="key">drag</span> orbit &nbsp;
+      <span class="key">scroll</span> zoom<br>
+      <span class="key">space</span> pause &nbsp;
+      <span class="key">r</span> reset<br>
+      <span class="key">l</span> layers &nbsp;
+      <span class="key">s</span> silk edges
+    </div>
+
+    <div class="legend">
+      <div class="panel-label">Emotion Map</div>
+      <div class="legend-item"><div class="dot" style="background:#ef5350"></div>Negative (V &lt; -0.4)</div>
+      <div class="legend-item"><div class="dot" style="background:#78909c"></div>Neutral</div>
+      <div class="legend-item"><div class="dot" style="background:#66bb6a"></div>Positive (V &gt; 0.4)</div>
+      <div class="legend-item"><div class="dot" style="background:#ffd54f"></div>L0 Instinct</div>
+      <div class="legend-item"><div class="dot" style="background:#4fc3f7"></div>L1–L2 Core</div>
+      <div class="legend-item"><div class="dot" style="background:#ce93d8"></div>L3 Knowledge</div>
+      <div class="legend-item"><div class="dot" style="background:#80cbc4"></div>L4+ Learned</div>
+      <div style="margin-top:12px;font-size:9px;color:var(--dim)">
+        Silk edge width = weight<br>
+        Particle speed = arousal<br>
+        Pulse rate = activity
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// HomeOS World Renderer — Isometric SDF Universe
+// Spec từ MASTER.md §17 ISDF RENDERER
+// ═══════════════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+
+// ── Camera state ────────────────────────────────────────────────────────
+const cam = {
+  theta:  0.5,   // Y-axis rotation
+  phi:    0.4,   // X-axis tilt
+  dist:   640,
+  panX:   0,
+  panY:   0,
+  zoom:   1.0,
+};
+
+// ── World time ──────────────────────────────────────────────────────────
+let worldTime  = 8.0;  // hours (0-24)
+let paused     = false;
+let showSilk   = true;
+let showLayers = true;
+let frameCount = 0;
+let lastFPS    = 0;
+let lastFPSTime = performance.now();
+
+// ── Isometric constants (from spec) ────────────────────────────────────
+const TW = 38, TH = 19, HS = 30;
+
+function project(wx, wy, wz) {
+  const ct = Math.cos(cam.theta), st = Math.sin(cam.theta);
+  const cp = Math.cos(cam.phi),   sp = Math.sin(cam.phi);
+  const rx  =  wx*ct + wz*st;
+  const rz  = -wx*st + wz*ct;
+  const ry  =  wy*cp - rz*sp;
+  const rz2 =  wy*sp + rz*cp;
+  const scale = cam.dist / (cam.dist + rz2*55) * (cam.dist/640) * cam.zoom;
+  const W = canvas.width, H = canvas.height;
+  const sx = W/2 + cam.panX + (rx - rz2)*TW*0.5*scale;
+  const sy = H/2 + cam.panY + (rx + rz2)*TH*0.5*scale - ry*HS*scale;
+  return { sx, sy, rz2, scale };
+}
+
+// ── Sunlight (from spec) ────────────────────────────────────────────────
+function sunLight(t) {
+  const angle = t/12*Math.PI - Math.PI/2;
+  return {
+    x: Math.cos(angle),
+    y: Math.max(0, Math.sin((t-6)/12*Math.PI)),
+    z: Math.sin(angle),
+    a: 0.25,
+  };
+}
+
+// ── Node color by emotion + layer ──────────────────────────────────────
+function nodeColor(node, sun) {
+  const v = node.valence, a = node.arousal;
+  const layer = node.layer;
+
+  // Base color from layer
+  let r, g, b;
+  if (layer === 0) { r=255; g=213; b=79; }       // L0: gold
+  else if (layer <= 2) { r=79; g=195; b=247; }   // L1-2: blue
+  else if (layer === 3) { r=206; g=147; b=216; } // L3: purple
+  else { r=128; g=203; b=196; }                  // L4+: teal
+
+  // Modulate by valence: negative → red shift, positive → green shift
+  if (v < -0.3) { r += (1+v)*60; g -= (1+v)*40; }
+  else if (v > 0.3) { g += v*60; r -= v*30; }
+
+  // Diffuse shading from sunlight
+  const diffuse = Math.max(0, sun.y * 0.7);
+  const shade   = sun.a + diffuse;
+
+  return `rgb(${Math.min(255,r*shade)|0},${Math.min(255,g*shade)|0},${Math.min(255,b*shade)|0})`;
+}
+
+// ── SDF sphere render ───────────────────────────────────────────────────
+function drawNode(node, proj, sun, hover) {
+  const { sx, sy, scale } = proj;
+  const r = Math.max(4, node.r * scale * 0.8);
+
+  // Specular direction
+  const hx = sun.x * 0.4;
+  const hy = -sun.y * 0.4;
+
+  const col = nodeColor(node, sun);
+
+  // Outer glow for high-arousal nodes
+  if (node.arousal > 0.6) {
+    const grd = ctx.createRadialGradient(sx,sy,r*0.5,sx,sy,r*2.5);
+    grd.addColorStop(0, col.replace('rgb','rgba').replace(')',',0.15)'));
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(sx,sy,r*2.5,0,Math.PI*2);
+    ctx.fillStyle = grd; ctx.fill();
+  }
+
+  // Main sphere — radial gradient (Phong shading from spec)
+  const hlx = sx + hx*r, hly = sy + hy*r;
+  const grd = ctx.createRadialGradient(hlx,hly,0,sx,sy,r);
+  const bright = col;
+  const dark   = col.replace(/\d+/g,n=>Math.max(0,n*0.3)|0).replace('rgb','rgb');
+  grd.addColorStop(0, bright);
+  grd.addColorStop(1, dark);
+
+  ctx.beginPath();
+  ctx.arc(sx, sy, r, 0, Math.PI*2);
+  ctx.fillStyle = grd;
+  ctx.fill();
+
+  // Hover ring
+  if (hover) {
+    ctx.beginPath();
+    ctx.arc(sx, sy, r+3, 0, Math.PI*2);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // Label
+  if (r > 8) {
+    ctx.fillStyle = hover ? '#fff' : 'rgba(201,212,232,0.8)';
+    ctx.font = `${Math.max(9, r*0.7)|0}px ${getComputedStyle(document.body).getPropertyValue('--font-mono')}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(node.emoji || node.name.slice(0,2), sx, sy);
+  }
+
+  // Activity pulse (Silk weight indicator)
+  if (node.activity > 0) {
+    const pulseR = r * (1 + node.activity * 0.5 * Math.sin(Date.now()*0.003*node.arousal));
+    ctx.beginPath(); ctx.arc(sx,sy,pulseR,0,Math.PI*2);
+    ctx.strokeStyle = col.replace('rgb','rgba').replace(')',',0.3)');
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+// ── Silk edge (quadratic Bezier + particles) ────────────────────────────
+function drawEdge(a, b, edge, projA, projB) {
+  const { sx:ax, sy:ay } = projA;
+  const { sx:bx, sy:by } = projB;
+
+  // Midpoint + 9% perpendicular offset (from spec)
+  const mx  = (ax+bx)/2, my = (ay+by)/2;
+  const dx  = bx-ax, dy = by-ay;
+  const len = Math.hypot(dx,dy);
+  const cpx = mx + (-dy/len)*len*0.09;
+  const cpy = my + ( dx/len)*len*0.09;
+
+  // Edge style by type
+  const styles = {
+    0x07: { color:'rgba(79,195,247,0.4)',  dash:[] },         // ≈ Similar
+    0x03: { color:'rgba(255,213,79,0.5)',  dash:[4,4] },      // ≡ Equiv
+    0x01: { color:'rgba(102,187,106,0.4)', dash:[2,6] },      // ∈ Member
+    0x05: { color:'rgba(206,147,216,0.4)', dash:[1,3] },      // ∘ Compose
+    0xFF: { color:`rgba(${edge.v<0?'239,83,80':'102,187,106'},0.3)`, dash:[] }, // Assoc
+  };
+  const s = styles[edge.kind] || styles[0x07];
+
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.quadraticCurveTo(cpx, cpy, bx, by);
+  ctx.strokeStyle = s.color;
+  ctx.setLineDash(s.dash);
+  ctx.lineWidth = Math.max(0.5, edge.weight * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Signal particle (Bezier eval from spec)
+  const t = ((Date.now() * 0.0005 * (0.5 + edge.v_arousal)) % 1);
+  const u = 1-t;
+  const px = u*u*ax + 2*u*t*cpx + t*t*bx;
+  const py = u*u*ay + 2*u*t*cpy + t*t*by;
+
+  ctx.beginPath();
+  ctx.arc(px, py, 2, 0, Math.PI*2);
+  ctx.fillStyle = s.color.replace('0.3','0.9').replace('0.4','0.9').replace('0.5','0.9');
+  ctx.fill();
+
+  // Trail (5 ghost points)
+  for (let i=1;i<=3;i++) {
+    const tt = ((t - i*0.04 + 1) % 1);
+    const uu = 1-tt;
+    const gx = uu*uu*ax + 2*uu*tt*cpx + tt*tt*bx;
+    const gy = uu*uu*ay + 2*uu*tt*cpy + tt*tt*by;
+    ctx.beginPath();
+    ctx.arc(gx, gy, 1, 0, Math.PI*2);
+    ctx.fillStyle = s.color.replace(/[\d.]+\)$/, `${0.3/i})`);
+    ctx.fill();
+  }
+}
+
+// ── Knowledge Tree data ─────────────────────────────────────────────────
+// Nodes: origin.olang L0 seed nodes + some L2-L5 examples
+const NODES = [
+  // L0 bản năng
+  {id:'origin', name:'○',  emoji:'○', layer:0, x:0,   y:0,   z:0,   r:18, valence:0.0,  arousal:0.5, activity:1.0},
+  {id:'fire',   name:'fire',  emoji:'🔥', layer:0, x:-3,  y:1,   z:2,   r:14, valence:0.3,  arousal:0.8, activity:0.7},
+  {id:'water',  name:'water', emoji:'💧', layer:0, x:3,   y:1,   z:2,   r:14, valence:0.2,  arousal:0.4, activity:0.5},
+  {id:'earth',  name:'earth', emoji:'🌍', layer:0, x:0,   y:1,   z:-3,  r:14, valence:0.4,  arousal:0.3, activity:0.4},
+  {id:'light',  name:'light', emoji:'💡', layer:0, x:2,   y:2,   z:0,   r:12, valence:0.5,  arousal:0.6, activity:0.6},
+  {id:'mind',   name:'mind',  emoji:'🧠', layer:0, x:-2,  y:2,   z:0,   r:13, valence:0.3,  arousal:0.7, activity:0.8},
+  {id:'heart',  name:'heart', emoji:'❤', layer:0, x:0,   y:2,   z:3,   r:12, valence:0.7,  arousal:0.6, activity:0.7},
+  {id:'danger', name:'danger',emoji:'⚠', layer:0, x:-3,  y:0,   z:-2,  r:11, valence:-0.6, arousal:0.8, activity:0.5},
+  // L2 concepts
+  {id:'emotion',name:'Emotion',emoji:'😌',layer:2, x:4,  y:3,   z:1,   r:10, valence:0.2,  arousal:0.5, activity:0.4},
+  {id:'joy',    name:'Joy',    emoji:'😊',layer:2, x:5,  y:3.5, z:2,   r:9,  valence:0.8,  arousal:0.7, activity:0.6},
+  {id:'sadness',name:'Sadness',emoji:'😢',layer:2, x:5,  y:2.5, z:-1,  r:9,  valence:-0.7, arousal:0.3, activity:0.3},
+  {id:'planet', name:'Planet', emoji:'🪐',layer:2, x:-5, y:3,   z:0,   r:11, valence:0.3,  arousal:0.2, activity:0.2},
+  // L3 branches
+  {id:'earth5', name:'Earth',  emoji:'🌏',layer:3, x:-6, y:3.5, z:1,   r:8,  valence:0.5,  arousal:0.3, activity:0.3},
+  {id:'mars',   name:'Mars',   emoji:'🔴',layer:3, x:-7, y:3,   z:-1,  r:7,  valence:-0.1, arousal:0.2, activity:0.1},
+  {id:'animal', name:'Animal', emoji:'🐾',layer:3, x:1,  y:4,   z:4,   r:9,  valence:0.4,  arousal:0.6, activity:0.5},
+  {id:'dog',    name:'Dog',    emoji:'🐕',layer:4, x:2,  y:4.5, z:5,   r:7,  valence:0.6,  arousal:0.7, activity:0.6},
+  {id:'storm',  name:'Storm',  emoji:'⛈',layer:2, x:-4, y:1,   z:-4,  r:10, valence:-0.4, arousal:0.9, activity:0.8},
+];
+
+const EDGES = [
+  {a:'origin',b:'fire',   kind:0x01, weight:0.9, v_arousal:0.8},
+  {a:'origin',b:'water',  kind:0x01, weight:0.9, v_arousal:0.4},
+  {a:'origin',b:'earth',  kind:0x01, weight:0.9, v_arousal:0.3},
+  {a:'origin',b:'mind',   kind:0x01, weight:0.9, v_arousal:0.7},
+  {a:'origin',b:'heart',  kind:0x01, weight:0.8, v_arousal:0.6},
+  {a:'fire',  b:'light',  kind:0x07, weight:0.7, v_arousal:0.7, v:-0.1},
+  {a:'water', b:'earth',  kind:0x07, weight:0.6, v_arousal:0.3, v:0.3},
+  {a:'mind',  b:'emotion',kind:0x05, weight:0.7, v_arousal:0.5, v:0.2},
+  {a:'emotion',b:'joy',   kind:0x03, weight:0.8, v_arousal:0.7, v:0.8},
+  {a:'emotion',b:'sadness',kind:0x03,weight:0.7, v_arousal:0.3, v:-0.7},
+  {a:'earth', b:'planet', kind:0x01, weight:0.5, v_arousal:0.2, v:0.3},
+  {a:'planet',b:'earth5', kind:0x01, weight:0.8, v_arousal:0.3, v:0.5},
+  {a:'planet',b:'mars',   kind:0x01, weight:0.7, v_arousal:0.2, v:-0.1},
+  {a:'mind',  b:'animal', kind:0x07, weight:0.4, v_arousal:0.6, v:0.4},
+  {a:'animal',b:'dog',    kind:0x01, weight:0.9, v_arousal:0.7, v:0.6},
+  {a:'danger',b:'storm',  kind:0xFF, weight:0.6, v_arousal:0.9, v:-0.5},
+  {a:'fire',  b:'storm',  kind:0xFF, weight:0.5, v_arousal:0.8, v:-0.3},
+  {a:'heart', b:'joy',    kind:0xFF, weight:0.7, v_arousal:0.7, v:0.8},
+];
+
+// ── Hover detection (vSDF from spec: evaluate at point) ────────────────
+let hoveredNode = null;
+let selectedNode = null;
+
+function findHovered(mx, my) {
+  const sun = sunLight(worldTime);
+  const sorted = [...NODES].sort((a,b) => {
+    const pa = project(a.x,a.y,a.z), pb = project(b.x,b.y,b.z);
+    return pa.rz2 - pb.rz2;
+  });
+  for (let i = sorted.length-1; i >= 0; i--) {
+    const n = sorted[i];
+    const p = project(n.x, n.y, n.z);
+    const r = Math.max(4, n.r * p.scale * 0.8);
+    const dx = mx - p.sx, dy = my - p.sy;
+    if (dx*dx + dy*dy < r*r) return n;
+  }
+  return null;
+}
+
+// ── Main render loop ────────────────────────────────────────────────────
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width  = rect.width;
+  canvas.height = rect.height;
+}
+
+function render() {
+  resize();
+  const W = canvas.width, H = canvas.height;
+  const sun = sunLight(worldTime);
+
+  // Background — deep space gradient
+  const bgGrd = ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.7);
+  bgGrd.addColorStop(0, '#0d1520');
+  bgGrd.addColorStop(1, '#06080f');
+  ctx.fillStyle = bgGrd;
+  ctx.fillRect(0,0,W,H);
+
+  // Grid floor (faint)
+  ctx.save();
+  ctx.globalAlpha = 0.08;
+  ctx.strokeStyle = '#4a5568';
+  ctx.lineWidth = 0.5;
+  for (let x=-8;x<=8;x++) {
+    const pa = project(x,-2,-8), pb = project(x,-2,8);
+    ctx.beginPath(); ctx.moveTo(pa.sx,pa.sy); ctx.lineTo(pb.sx,pb.sy); ctx.stroke();
+  }
+  for (let z=-8;z<=8;z++) {
+    const pa = project(-8,-2,z), pb = project(8,-2,z);
+    ctx.beginPath(); ctx.moveTo(pa.sx,pa.sy); ctx.lineTo(pb.sx,pb.sy); ctx.stroke();
+  }
+  ctx.restore();
+
+  // Depth sort (painter's algorithm from spec)
+  const sorted = NODES.map(n => ({ n, proj: project(n.x,n.y,n.z) }))
+                       .sort((a,b) => a.proj.rz2 - b.proj.rz2);
+
+  // Draw Silk edges (behind nodes)
+  if (showSilk) {
+    const nodeMap = {};
+    NODES.forEach(n => { nodeMap[n.id] = project(n.x,n.y,n.z); });
+    for (const e of EDGES) {
+      const pa = nodeMap[e.a], pb = nodeMap[e.b];
+      if (pa && pb) drawEdge(NODES.find(n=>n.id===e.a), NODES.find(n=>n.id===e.b), e, pa, pb);
+    }
+  }
+
+  // Draw nodes (front to back already sorted)
+  for (const {n,proj} of sorted) {
+    drawNode(n, proj, sun, n === hoveredNode);
+  }
+
+  // Layer labels
+  if (showLayers) {
+    const layers = [{y:0,label:'L0 · Instinct'},{y:2,label:'L1-2 · Concept'},{y:4,label:'L3-4 · Knowledge'}];
+    for (const l of layers) {
+      const p = project(-9, l.y, 0);
+      ctx.fillStyle = 'rgba(74,85,104,0.6)';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(l.label, p.sx, p.sy);
+    }
+  }
+
+  // HUD: sunlight indicator
+  const sunX = W - 60, sunY = 50;
+  ctx.save();
+  ctx.globalAlpha = 0.7;
+  const sunGrd = ctx.createRadialGradient(sunX,sunY,0,sunX,sunY,20);
+  sunGrd.addColorStop(0, `rgba(255,213,79,${sun.y})`);
+  sunGrd.addColorStop(1, 'rgba(255,213,79,0)');
+  ctx.fillStyle = sunGrd;
+  ctx.beginPath(); ctx.arc(sunX,sunY,20,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // Stats
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFPSTime > 1000) {
+    lastFPS = frameCount;
+    frameCount = 0;
+    lastFPSTime = now;
+  }
+  document.getElementById('s-nodes').textContent = NODES.length;
+  document.getElementById('s-edges').textContent = EDGES.length;
+  document.getElementById('s-fps').textContent   = lastFPS;
+  document.getElementById('s-time').textContent  = worldTime.toFixed(2);
+}
+
+// ── Animation loop ──────────────────────────────────────────────────────
+let animId;
+function loop() {
+  if (!paused) {
+    worldTime = (worldTime + 0.002) % 24;
+  }
+  render();
+  animId = requestAnimationFrame(loop);
+}
+
+// ── Input ───────────────────────────────────────────────────────────────
+let drag = false, lastX = 0, lastY = 0;
+
+canvas.addEventListener('mousedown', e => {
+  drag = true; lastX = e.clientX; lastY = e.clientY;
+});
+canvas.addEventListener('mousemove', e => {
+  if (drag) {
+    cam.theta += (e.clientX - lastX) * 0.005;
+    cam.phi   += (e.clientY - lastY) * 0.005;
+    cam.phi    = Math.max(-1.2, Math.min(1.2, cam.phi));
+    lastX = e.clientX; lastY = e.clientY;
+  }
+  const rect = canvas.getBoundingClientRect();
+  hoveredNode = findHovered(e.clientX - rect.left, e.clientY - rect.top);
+  updateNodeInfo(hoveredNode || selectedNode);
+});
+canvas.addEventListener('mouseup', () => {
+  drag = false;
+  if (hoveredNode) {
+    selectedNode = hoveredNode;
+    updateNodeInfo(selectedNode);
+  }
+});
+canvas.addEventListener('wheel', e => {
+  cam.zoom *= e.deltaY > 0 ? 0.95 : 1.05;
+  cam.zoom = Math.max(0.2, Math.min(5, cam.zoom));
+  e.preventDefault();
+}, { passive: false });
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { paused = !paused; toast(paused ? '⏸ Paused' : '▶ Running'); e.preventDefault(); }
+  if (e.key === 'r') { cam.theta=0.5; cam.phi=0.4; cam.dist=640; cam.panX=0; cam.panY=0; cam.zoom=1; }
+  if (e.key === 'l') { showLayers = !showLayers; }
+  if (e.key === 's') { showSilk   = !showSilk;   toast(showSilk ? '○ Silk ON' : '○ Silk OFF'); }
+});
+
+// Touch support
+canvas.addEventListener('touchstart', e => {
+  lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+});
+canvas.addEventListener('touchmove', e => {
+  cam.theta += (e.touches[0].clientX - lastX) * 0.005;
+  cam.phi   += (e.touches[0].clientY - lastY) * 0.003;
+  lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+  e.preventDefault();
+}, { passive: false });
+
+// ── UI helpers ──────────────────────────────────────────────────────────
+function updateNodeInfo(node) {
+  if (!node) return;
+  document.getElementById('ni-name').textContent  = `${node.emoji || ''} ${node.name}`;
+  document.getElementById('ni-layer').textContent = `L${node.layer}`;
+  document.getElementById('ni-isl').textContent   = `ISL[0${node.layer}:--:--:--]`;
+  const vPct = ((node.valence + 1) / 2 * 100).toFixed(0);
+  const aPct = (node.arousal * 100).toFixed(0);
+  document.getElementById('bar-v').style.width = vPct + '%';
+  document.getElementById('bar-a').style.width = aPct + '%';
+  const desc = node.valence > 0.3 ? 'Positive · Active' :
+               node.valence < -0.3 ? 'Negative · Heavy' : 'Neutral · Stable';
+  document.getElementById('ni-desc').textContent = desc;
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2000);
+}
+
+// ── Boot ────────────────────────────────────────────────────────────────
+resize();
+window.addEventListener('resize', resize);
+updateNodeInfo(NODES[0]);
+loop();
+toast('○ KnowledgeTree Universe loaded');
+</script>
+</body>
+</html>

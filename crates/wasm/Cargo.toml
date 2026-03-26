@@ -1,0 +1,24 @@
+[package]
+name        = "homeos-wasm"
+version.workspace = true
+edition.workspace = true
+description = "HomeOS WebAssembly bindings for browser"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+default = []
+console_error_panic_hook = []
+
+[dependencies]
+ucd     = { workspace = true }
+olang   = { workspace = true }
+silk    = { workspace = true }
+context = { workspace = true }
+agents  = { workspace = true }
+memory  = { workspace = true }
+runtime = { workspace = true }
+isl     = { path = "../isl" }
+wasm-bindgen = { version = "0.2" }

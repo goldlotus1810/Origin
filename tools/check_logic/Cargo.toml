@@ -1,0 +1,15 @@
+[package]
+name = "check_logic"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "check-logic"
+path = "src/main.rs"
+
+[dependencies]
+ucd      = { path = "../../crates/ucd" }
+olang    = { path = "../../crates/olang" }
+silk     = { path = "../../crates/silk" }
+context  = { path = "../../crates/context" }
+homemath = { path = "../../crates/homemath" }

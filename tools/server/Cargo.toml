@@ -1,0 +1,18 @@
+[package]
+name    = "server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+ucd     = { workspace = true }
+olang   = { workspace = true, features = ["std"] }
+silk    = { workspace = true, features = ["std"] }
+context = { workspace = true, features = ["std"] }
+agents  = { workspace = true, features = ["std"] }
+memory  = { workspace = true, features = ["std"] }
+runtime = { workspace = true, features = ["std"] }
+hal     = { workspace = true, features = ["std"] }

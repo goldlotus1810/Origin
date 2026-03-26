@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Origin / HomeOS — WASM</title>
+<style>
+  body { background:#1a1a2e; color:#e0e0e0; font-family:monospace; padding:20px; }
+  h1 { color:#00ff88; }
+  #output { background:#0d0d1a; border:1px solid #333; padding:10px; min-height:200px;
+            white-space:pre-wrap; margin:10px 0; border-radius:4px; }
+  #input { background:#0d0d1a; color:#00ff88; border:1px solid #555; padding:8px;
+           width:80%; font-family:monospace; font-size:14px; border-radius:4px; }
+  button { background:#00ff88; color:#000; border:none; padding:8px 16px; cursor:pointer;
+           font-family:monospace; font-weight:bold; border-radius:4px; margin-left:8px; }
+  .prompt { color:#00ff88; }
+  .result { color:#e0e0e0; }
+  .info { color:#888; font-size:12px; }
+</style>
+</head>
+<body>
+<h1>Origin / HomeOS</h1>
+<p class="info">881KB native → 3KB WASM. Zero dependencies. Runs in your browser.</p>
+<div id="output"><span class="prompt">⦿ HomeOS v0.05 (WASM)</span>
+<span class="prompt">○ Type: emit &lt;number&gt; or emit &lt;a&gt; + &lt;b&gt;</span>
+</div>
+<input id="input" placeholder="emit 42" autofocus>
+<button onclick="runCode()">Run</button>
+<script>
+let instance;
+let outputEl = document.getElementById('output');
+let inputEl = document.getElementById('input');
+function buildBytecode(code) {
+    const m = code.match(/^emit\s+(-?\d+\.?\d*)$/);
+    if (m) {
+        const buf = new Uint8Array(11);
+        buf[0] = 0x15;
+        new Float64Array(buf.buffer, 1, 1)[0] = parseFloat(m[1]);
+        buf[9] = 0x06; buf[10] = 0x0F;
+        return buf;
+    }
+    const m2 = code.match(/^emit\s+(-?\d+\.?\d*)\s*([+\-*/])\s*(-?\d+\.?\d*)$/);
+    if (m2) {
+        const ops = {'+':'__hyp_add','-':'__hyp_sub','*':'__hyp_mul','/':'__hyp_div'};
+        const name = ops[m2[2]]; if(!name) return null;
+        const buf = new Uint8Array(64); let off=0;
+        buf[off++]=0x15; new Float64Array(buf.buffer,off,1)[0]=parseFloat(m2[1]); off+=8;
+        buf[off++]=0x15; new Float64Array(buf.buffer,off,1)[0]=parseFloat(m2[3]); off+=8;
+        buf[off++]=0x07; buf[off++]=name.length;
+        for(let i=0;i<name.length;i++) buf[off++]=name.charCodeAt(i);
+        buf[off++]=0x06; buf[off++]=0x0F;
+        return buf.slice(0,off);
+    }
+    return null;
+}
+async function init() {
+    const resp = await fetch('vm_wasm.wasm');
+    const bytes = await resp.arrayBuffer();
+    const {instance:inst} = await WebAssembly.instantiate(bytes, {
+        env: {
+            host_write(ptr,len) {
+                const mem = new Uint8Array(inst.exports.memory.buffer);
+                const text = new TextDecoder().decode(mem.slice(ptr,ptr+len));
+                outputEl.innerHTML += '<span class="result">⦿ '+text+'</span>\n';
+                return len;
+            },
+            host_read(p,l){return 0;},host_load_bytecode(p,l){return 0;},
+            host_log(p,l){},host_emit_event(t,p,l){}
+        }
+    });
+    instance = inst;
+    outputEl.innerHTML += '<span class="info">WASM VM loaded ✅</span>\n';
+}
+function runCode() {
+    const code = inputEl.value.trim(); if(!code) return;
+    outputEl.innerHTML += '<span class="prompt">○ '+code+'</span>\n';
+    const bc = buildBytecode(code);
+    if(!bc) { outputEl.innerHTML += '<span class="result">⦿ (syntax not yet supported)</span>\n'; inputEl.value=''; return; }
+    const ptr = instance.exports.alloc(bc.length);
+    new Uint8Array(instance.exports.memory.buffer).set(bc, ptr);
+    instance.exports.init_embedded(ptr, bc.length);
+    instance.exports.init(); instance.exports.run();
+    inputEl.value=''; outputEl.scrollTop=outputEl.scrollHeight;
+}
+inputEl.addEventListener('keypress', e => { if(e.key==='Enter') runCode(); });
+init();
+</script>
+</body>
+</html>

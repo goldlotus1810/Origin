@@ -1,0 +1,21 @@
+[package]
+name    = "agents"
+version.workspace = true
+edition.workspace = true
+description = "Agent hierarchy — LearningLoop, BookReader, LeoAI, Chief, Worker"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+std     = []
+
+[dependencies]
+isl     = { path = "../isl" }
+ucd     = { workspace = true }
+olang   = { workspace = true }
+silk    = { workspace = true }
+context = { workspace = true }
+hal     = { workspace = true }
+homemath = { workspace = true }

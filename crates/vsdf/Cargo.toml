@@ -1,0 +1,17 @@
+[package]
+name    = "vsdf"
+version.workspace = true
+edition.workspace = true
+description = "VSDF — 18 SDF generators, FFR Fibonacci rendering, NodeBody"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+std     = []
+
+[dependencies]
+ucd   = { workspace = true }
+olang = { workspace = true }
+homemath = { workspace = true }

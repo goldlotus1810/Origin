@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HomeOS ○</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0a0a0a; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; height: 100vh; display: flex; flex-direction: column; }
+header { padding: 12px 20px; border-bottom: 1px solid #1e1e1e; display: flex; align-items: center; gap: 12px; }
+header .logo { font-size: 20px; color: #888; }
+header h1 { font-size: 14px; font-weight: 400; color: #666; }
+header .status { margin-left: auto; font-size: 12px; color: #444; }
+#chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 80%; padding: 10px 14px; border-radius: 4px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.msg.user { align-self: flex-end; background: #1a1a2e; color: #9ab; border: 1px solid #1e2a3e; }
+.msg.system { align-self: flex-start; background: #0f1a0f; color: #8a8; border: 1px solid #1a2e1a; }
+.msg.crisis { background: #1a0a0a; color: #e88; border: 1px solid #3e1e1e; }
+.msg.olang { background: #0a0f1a; color: #88b; border: 1px solid #1e2a3e; font-size: 12px; }
+.msg .meta { font-size: 10px; color: #444; margin-top: 4px; }
+.tone-bar { height: 2px; margin: 0 20px; background: #111; }
+.tone-fill { height: 100%; transition: all 0.5s; background: #2a4a2a; }
+footer { padding: 12px 20px; border-top: 1px solid #1e1e1e; display: flex; gap: 8px; }
+#input { flex: 1; background: #111; border: 1px solid #222; color: #ddd; padding: 8px 12px; border-radius: 4px; font-size: 13px; font-family: inherit; outline: none; }
+#input:focus { border-color: #2a4a2a; }
+#send { background: #1a2e1a; border: 1px solid #2a4a2a; color: #8a8; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+#send:hover { background: #2a4a2a; }
+.fx-display { font-size: 11px; color: #444; padding: 4px 20px; }
+.stats-bar { font-size: 10px; color: #555; padding: 2px 20px; display: flex; gap: 16px; }
+.stats-bar span { color: #666; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">○</span>
+  <h1>HomeOS · Unicode 18.0</h1>
+  <span class="status" id="status">loading...</span>
+</header>
+<div class="tone-bar"><div class="tone-fill" id="tone-fill" style="width:50%"></div></div>
+<div id="chat"></div>
+<div class="fx-display">f(x) = <span id="fx">0.000</span> · tone: <span id="tone">engaged</span></div>
+<div class="stats-bar">STM: <span id="stm">0</span> · Silk: <span id="silk-edges">0</span> edges · Nodes: <span id="silk-nodes">0</span> · Registry: <span id="reg">0</span></div>
+<footer>
+  <input id="input" placeholder="chat thường hoặc ○{lửa ∘ nước} ..." autofocus>
+  <button id="send">→</button>
+</footer>
+
+<script type="module">
+// Import WASM — sẽ được generate bởi wasm-pack
+// import init, { HomeOSWasm, version } from './homeos_wasm.js';
+
+// Polyfill: dùng native JS simulation khi WASM chưa sẵn
+class HomeOSSimulator {
+  constructor() {
+    this._turn = 0;
+    this._fx = 0;
+    this._history = [];
+  }
+  process(input) {
+    this._turn++;
+    const ts = Date.now();
+
+    // Simple simulation
+    let text, kind, tone;
+
+    if (input.includes('muốn chết') || input.includes('want to die')) {
+      text = "Tôi thấy bạn đang trải qua điều rất khó. Bạn không cô đơn.\nĐường dây hỗ trợ: 1800 599 920 (miễn phí, 24/7).";
+      kind = 'crisis'; tone = 'supportive';
+      this._fx = Math.max(-1, this._fx - 0.5);
+    } else if (input.startsWith('○{')) {
+      const inner = input.slice(2, -1).trim();
+      if (inner === 'stats') {
+        text = `HomeOS ○\nTurns   : ${this._turn}\nf(x)    : ${this._fx.toFixed(3)}\n[WASM not loaded — simulation mode]`;
+        kind = 'system'; tone = 'engaged';
+      } else if (inner === 'dream') {
+        text = `Dream cycle ○\nScanned: ${this._history.length}\n[simulation]`;
+        kind = 'system'; tone = 'engaged';
+      } else if (inner === 'help') {
+        text = `HomeOS ○{} Commands:\n○{lửa ∘ nước} — compose (LCA)\n○{🔥 ∈ ?}   — relation query\n○{stats}      — system stats\n○{dream}      — dream cycle`;
+        kind = 'system'; tone = 'engaged';
+      } else {
+        text = `○ VM: ${inner} [simulation — load WASM for real execution]`;
+        kind = 'olang'; tone = 'engaged';
+      }
+    } else {
+      const sad = ['buồn','mệt','khó','đau','sad','tired'];
+      const happy = ['vui','tuyệt','great','happy','tốt'];
+      const hasSad = sad.some(w => input.toLowerCase().includes(w));
+      const hasHappy = happy.some(w => input.toLowerCase().includes(w));
+
+      if (hasSad) {
+        this._fx = Math.max(-1, this._fx - 0.2);
+        text = this._fx < -0.3 ? "Tôi nghe bạn. Bạn muốn kể thêm không?" : "Tôi hiểu.";
+        kind = 'system'; tone = this._fx < -0.4 ? 'supportive' : 'gentle';
+      } else if (hasHappy) {
+        this._fx = Math.min(1, this._fx + 0.2);
+        text = "Tốt lắm!"; kind = 'system'; tone = 'reinforcing';
+      } else {
+        text = "Tôi hiểu rồi."; kind = 'system'; tone = 'engaged';
+      }
+    }
+
+    this._history.push(input);
+    return JSON.stringify({ text, tone, fx: this._fx, kind, turn: this._turn });
+  }
+  get fx() { return this._fx; }
+  get turns() { return this._turn; }
+  get stm_len() { return this._history.length; }
+  get silk_edge_count() { return 0; }
+  get silk_node_count() { return 0; }
+  get registry_len() { return 0; }
+  tone() { return 'engaged'; }
+  read_book(text) { this._history.push('[book]'); return 1; }
+  dream() { return JSON.stringify({text:'Dream [sim]',tone:'engaged',fx:0,kind:'system',turn:this._turn}); }
+  stats() { return JSON.stringify({text:'Stats [sim]',tone:'engaged',fx:0,kind:'system',turn:this._turn}); }
+}
+
+// ─── App ───────────────────────────────────────────────────────────────
+const chat   = document.getElementById('chat');
+const input  = document.getElementById('input');
+const fxEl   = document.getElementById('fx');
+const toneEl = document.getElementById('tone');
+const toneFill = document.getElementById('tone-fill');
+const status = document.getElementById('status');
+const stmEl  = document.getElementById('stm');
+const silkEl = document.getElementById('silk-edges');
+const nodesEl = document.getElementById('silk-nodes');
+const regEl  = document.getElementById('reg');
+
+let os = null;
+
+async function initOS() {
+  try {
+    // Try load real WASM
+    const { default: init, HomeOSWasm, version } = await import('./homeos_wasm.js');
+    await init();
+    os = new HomeOSWasm();
+    status.textContent = version();
+    addMsg('system', `○(∅) == ○\n${version()}\nWASM loaded ✓`);
+  } catch(e) {
+    // Fallback to simulation
+    os = new HomeOSSimulator();
+    status.textContent = 'HomeOS · simulation mode';
+    addMsg('system', '○(∅) == ○\nHomeOS running in simulation mode.\nBuild WASM: wasm-pack build crates/wasm --target web');
+  }
+}
+
+function addMsg(kind, text, meta='') {
+  const div = document.createElement('div');
+  div.className = `msg ${kind}`;
+  div.textContent = text;
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    div.appendChild(m);
+  }
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function updateFx(fx, tone) {
+  fxEl.textContent = fx.toFixed(3);
+  toneEl.textContent = tone;
+  // Tone bar: fx ∈ [-1,1] → width 0..100%
+  const pct = ((fx + 1) / 2 * 100).toFixed(1);
+  toneFill.style.width = pct + '%';
+  const colors = {
+    crisis: '#4a1a1a', supportive: '#1a2a4a', gentle: '#2a2a3a',
+    reinforcing: '#1a3a1a', celebratory: '#2a3a1a', engaged: '#1a2a1a',
+    pause: '#3a2a1a'
+  };
+  toneFill.style.background = colors[tone] || '#2a4a2a';
+}
+
+async function send() {
+  const text = input.value.trim();
+  if (!text || !os) return;
+  input.value = '';
+
+  addMsg('user', text);
+
+  try {
+    const raw  = os.process(text);
+    const resp = JSON.parse(raw);
+    addMsg(resp.kind === 'crisis' ? 'crisis' : resp.kind, resp.text,
+      `turn=${resp.turn} · tone=${resp.tone}`);
+    updateFx(resp.fx, resp.tone);
+    updateStats();
+  } catch(e) {
+    addMsg('system', `Error: ${e.message}`);
+  }
+}
+
+function updateStats() {
+  if (!os) return;
+  stmEl.textContent = os.stm_len;
+  silkEl.textContent = os.silk_edge_count;
+  nodesEl.textContent = os.silk_node_count;
+  regEl.textContent = os.registry_len;
+}
+
+document.getElementById('send').onclick = send;
+input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+
+initOS();
+</script>
+</body>
+</html>

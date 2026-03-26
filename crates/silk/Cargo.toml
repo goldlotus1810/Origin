@@ -1,0 +1,17 @@
+[package]
+name    = "silk"
+version.workspace = true
+edition.workspace = true
+description = "Silk — Hebbian knowledge graph with implicit 5D connections"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+std     = []
+
+[dependencies]
+ucd   = { workspace = true }
+olang = { workspace = true }
+homemath = { workspace = true }

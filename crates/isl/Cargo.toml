@@ -1,0 +1,16 @@
+[package]
+name    = "isl"
+version = "0.1.0"
+edition = "2021"
+description = "ISL — Inter-System Link messaging, 4-byte addressing"
+
+[features]
+default = []
+encrypt = []
+
+[dependencies]
+olang   = { path = "../olang" }
+
+[lib]
+name = "isl"
+path = "src/lib.rs"

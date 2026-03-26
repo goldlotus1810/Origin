@@ -1,0 +1,28 @@
+[package]
+name    = "seeder"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "seeder"
+path = "src/main.rs"
+
+[dependencies]
+ucd   = { workspace = true }
+olang = { workspace = true, features = ["std"] }
+
+[[bin]]
+name = "multilang"
+path = "src/multilang.rs"
+
+[[bin]]
+name = "l2_data"
+path = "src/l2_data.rs"
+
+[[bin]]
+name = "l3_topics"
+path = "src/l3_topics.rs"
+
+[[bin]]
+name = "seed_domains"
+path = "src/seed_domains.rs"

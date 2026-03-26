@@ -1,0 +1,20 @@
+[package]
+name    = "memory"
+version.workspace = true
+edition.workspace = true
+description = "Memory — STM, DreamCycle, Proposals, AAM, RegistryGate"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+std     = []
+
+[dependencies]
+ucd     = { workspace = true }
+olang   = { workspace = true }
+silk    = { workspace = true }
+context = { workspace = true }
+agents  = { workspace = true }
+homemath = { workspace = true }

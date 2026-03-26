@@ -1,0 +1,29 @@
+[package]
+name    = "bench"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "bench"
+path = "src/main.rs"
+
+[[bin]]
+name = "chat-bench"
+path = "src/chat_bench.rs"
+
+[[bin]]
+name = "system-bench"
+path = "src/system_bench.rs"
+
+[[bin]]
+name = "silk-bench"
+path = "src/silk_bench.rs"
+
+[dependencies]
+ucd     = { workspace = true }
+olang   = { workspace = true, features = ["std"] }
+agents  = { workspace = true, features = ["std"] }
+runtime = { workspace = true, features = ["std"] }
+silk    = { workspace = true }
+context = { workspace = true }
+vsdf    = { workspace = true }
