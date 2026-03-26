@@ -1266,6 +1266,10 @@ op_call:
     movabs  $0xF7ED721D453C820E, %rdx   # __jit_register(fn_name, native_ptr)
     cmp     %rdx, %rax
     je      .call_jit_register
+    # ── JIT invalidate ──
+    movabs  $0x9C2E99FAD130770E, %rdx   # __jit_invalidate(fn_name) → clear cache
+    cmp     %rdx, %rax
+    je      .call_jit_invalidate
     # ── Profile ──
     movabs  $0x45D4F29E55E01818, %rdx   # __profile_top(n) → array of [hash, count] top-n
     cmp     %rdx, %rax
@@ -3400,6 +3404,37 @@ op_call:
     mov     %rax, (%rdx, %rsi)        # hash
     mov     %r8, 8(%rdx, %rsi)        # native ptr
     # Push 0 (success)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __jit_invalidate(fn_name) → clear JIT cache for function
+.call_jit_invalidate:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.ji_dec:
+    cmp     %rdx, %rcx
+    jge     .ji_hash
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .ji_dec
+.ji_hash:
+    lea     sha_input(%rip), %rdi
+    mov     %ecx, %edx
+    call    hash_name
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    movq    $0, (%rdx, %rsi)           # clear hash → cache miss next time
+    movq    $0, 8(%rdx, %rsi)
     sub     $16, %r14
     xorpd   %xmm0, %xmm0
     movsd   %xmm0, (%r14)
