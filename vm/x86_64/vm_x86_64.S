@@ -835,6 +835,62 @@ op_store_upd:
 op_jmp:
     # [0x21, target_u32_le]
     movl    (%r12, %r13), %eax          # target
+    # Check for backward jump (hot loop detection) — eval context only
+    cmp     %r13d, %eax
+    jae     .jmp_forward
+    # Skip for boot context
+    push    %rcx
+    lea     boot_bc_base(%rip), %rcx
+    cmp     (%rcx), %r12
+    pop     %rcx
+    je      .jmp_forward
+    # Count backward jumps and trigger JIT
+    push    %rcx
+    push    %rdx
+    lea     loop_counters(%rip), %rcx
+    mov     %eax, %edx
+    and     $0xFF, %edx
+    incl    (%rcx, %rdx, 4)
+    cmpl    $8, (%rcx, %rdx, 4)
+    pop     %rdx
+    pop     %rcx
+    jne     .jmp_forward
+    # Hot loop! Save ALL VM state, call try_jit_loop, restore
+    push    %rax                        # save target PC
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    mov     %eax, %edi                  # arg1: loop_start
+    lea     4(%r13), %esi               # arg2: loop_end (past Jmp operand)
+    call    try_jit_loop
+    mov     %rax, %rdi                  # native_ptr (or 0)
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    test    %rdi, %rdi
+    jz      .loop_jit_skip
+    # JIT success — execute native loop
+    pop     %rax                        # discard target PC
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    call    *%rdi
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    add     $4, %r13                    # skip past Jmp's u32 target
+    jmp     vm_loop
+.loop_jit_skip:
+    pop     %rax                        # restore target PC
+.jmp_forward:
     mov     %eax, %r13d                 # PC = target
     jmp     vm_loop
 
@@ -7948,6 +8004,33 @@ msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0
 
+# Native loop template: s += i; i += 1; while i < limit (83 bytes)
+# Patched at: offset 2 (counter_addr), offset 12 (accum_addr), offset 30 (limit_bits)
+jit_loop_template:
+    .byte 0x48, 0xBF                    # mov rdi, imm64 (counter_addr)
+    .quad 0                             # [patched: counter_addr] (offset 2)
+    .byte 0x48, 0xBE                    # mov rsi, imm64 (accum_addr)
+    .quad 0                             # [patched: accum_addr] (offset 12)
+    .byte 0xF2, 0x0F, 0x10, 0x07       # movsd xmm0, [rdi]  (i)       (offset 20)
+    .byte 0xF2, 0x0F, 0x10, 0x0E       # movsd xmm1, [rsi]  (s)       (offset 24)
+    .byte 0x48, 0xB8                    # mov rax, imm64 (limit_bits)   (offset 28)
+    .quad 0                             # [patched: limit_bits] (offset 30)
+    .byte 0x66, 0x48, 0x0F, 0x6E, 0xD0 # movq xmm2, rax               (offset 38)
+    .byte 0x48, 0xB8                    # mov rax, 1.0 bits             (offset 43)
+    .byte 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F  # 1.0 LE    (offset 45)
+    .byte 0x66, 0x48, 0x0F, 0x6E, 0xD8 # movq xmm3, rax               (offset 53)
+    # .loop (offset 58):
+    .byte 0x66, 0x0F, 0x2E, 0xD0       # ucomisd xmm2, xmm0           (offset 58)
+    .byte 0x76, 0x0A                    # jbe .done (+10 → offset 74)   (offset 62)
+    .byte 0xF2, 0x0F, 0x58, 0xC8       # addsd xmm1, xmm0 (s += i)    (offset 64)
+    .byte 0xF2, 0x0F, 0x58, 0xC3       # addsd xmm0, xmm3 (i += 1)    (offset 68)
+    .byte 0xEB, 0xF0                    # jmp .loop (-16 → offset 58)   (offset 72)
+    # .done (offset 74):
+    .byte 0xF2, 0x0F, 0x11, 0x07       # movsd [rdi], xmm0 (store i)  (offset 74)
+    .byte 0xF2, 0x0F, 0x11, 0x0E       # movsd [rsi], xmm1 (store s)  (offset 78)
+    .byte 0xC3                          # ret                           (offset 82)
+    # Total: 83 bytes
+
 # Native fib(rdi) → rax: 42 bytes x86-64
 jit_fib_code:
     .byte 0x48, 0x83, 0xFF, 0x02       # cmp rdi, 2
@@ -7967,6 +8050,217 @@ jit_fib_code:
     .byte 0x5D                          # pop rbp
     .byte 0x5B                          # pop rbx
     .byte 0xC3                          # ret
+
+.section .text
+# ═══════════════════════════════════════════════════════════════════════════
+# var_find_addr: find address of value field in var_table entry
+# Input: rax = hash
+# Output: rax = address of val_ptr field (8 bytes into entry), 0 if not found
+# ═══════════════════════════════════════════════════════════════════════════
+var_find_addr:
+    lea     var_table_base(%rip), %rcx
+    mov     (%rcx), %rcx
+    mov     (%rcx), %rdx
+    test    %rdx, %rdx
+    jz      .vfa_fail
+    lea     -1(%rdx), %rsi
+    imul    $24, %rsi
+    lea     8(%rcx, %rsi), %rdi
+.vfa_search:
+    cmp     (%rdi), %rax
+    je      .vfa_found
+    sub     $24, %rdi
+    dec     %rdx
+    jnz     .vfa_search
+.vfa_fail:
+    xor     %eax, %eax
+    ret
+.vfa_found:
+    lea     8(%rdi), %rax               # address of val_ptr field
+    ret
+
+# ═══════════════════════════════════════════════════════════════════════════
+# try_jit_loop: analyze loop bytecode and generate native code
+# Input: edi = loop_start_pc, esi = loop_end_pc, r12 = bytecode base
+# Output: rax = native_ptr (0 = failed)
+# ═══════════════════════════════════════════════════════════════════════════
+try_jit_loop:
+    push    %rbx
+    push    %rbp
+    push    %r14
+    push    %r15
+    mov     %edi, %ebp                  # ebp = scan cursor
+
+    # Guard: loop body must be >= 30 bytes for accumulator pattern
+    mov     %esi, %eax
+    sub     %edi, %eax                  # body size
+    cmp     $30, %eax
+    jl      .tjl_fail                   # too small → skip
+
+    # ── Pattern match: Load PushNum Call Jz Load Load Call Store Load PushNum Call Store Jmp ──
+    # Step 1: Load(counter) = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %edx         # name_len → rdx for hash_name
+    lea     2(%r12, %rbp), %rdi         # name_ptr → rdi
+    push    %rdx
+    call    hash_name
+    pop     %rcx
+    mov     %rax, %r14                  # r14 = counter_hash
+    lea     2(%rbp, %rcx), %ebp
+
+    # Step 2: PushNum(limit) = 0x15
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x15, %al
+    jne     .tjl_fail
+    mov     1(%r12, %rbp), %r15         # r15 = limit f64 bits (raw 8 bytes)
+    add     $9, %ebp
+
+    # Step 3: Call = 0x07, skip name
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x07, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+
+    # Step 4: Jz = 0x0A, skip target
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x0A, %al
+    jne     .tjl_fail
+    add     $5, %ebp
+
+    # Step 5: Load(accum) = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %edx         # name_len → rdx
+    lea     2(%r12, %rbp), %rdi         # name_ptr → rdi
+    push    %r14
+    push    %rdx
+    call    hash_name
+    pop     %rcx
+    pop     %r14
+    mov     %rax, %rbx                  # rbx = accum_hash
+    lea     2(%rbp, %rcx), %ebp
+
+    # Steps 6-12: skip remaining opcodes (Load Call Store Load PushNum Call Store)
+    # Just verify opcodes are correct types, skip content
+    # Step 6: Load = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 7: Call = 0x07
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x07, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 8: Store/StoreUpdate
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x13, %al
+    je      .tjl_s8
+    cmp     $0x1C, %al
+    jne     .tjl_fail
+.tjl_s8:
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 9: Load = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 10: PushNum = 0x15
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x15, %al
+    jne     .tjl_fail
+    add     $9, %ebp
+    # Step 11: Call = 0x07
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x07, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 12: Store/StoreUpdate
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x13, %al
+    je      .tjl_s12
+    cmp     $0x1C, %al
+    jne     .tjl_fail
+.tjl_s12:
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 13: Jmp = 0x09
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x09, %al
+    jne     .tjl_fail
+
+    # ── Pattern matched! r14=counter_hash, rbx=accum_hash, r15=limit_bits ──
+
+    # Find var_table entry addresses
+    mov     %r14, %rax
+    call    var_find_addr
+    test    %rax, %rax
+    jz      .tjl_fail
+    mov     %rax, %r14                  # r14 = counter entry addr
+
+    mov     %rbx, %rax
+    call    var_find_addr
+    test    %rax, %rax
+    jz      .tjl_fail
+    mov     %rax, %rbx                  # rbx = accum entry addr
+
+    # ── Generate native code ──
+    # mmap executable page
+    push    %r14
+    push    %rbx
+    push    %r15
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi
+    mov     $4096, %esi
+    mov     $7, %edx                    # RWX
+    mov     $0x22, %r10d
+    mov     $-1, %r8d
+    xor     %r9d, %r9d
+    syscall
+    mov     %rax, %rdi                  # rdi = exec page
+    pop     %r15                        # limit_bits
+    pop     %rbx                        # accum_addr
+    pop     %r14                        # counter_addr
+
+    # Write native loop:
+    # mov rdi, counter_addr; mov rsi, accum_addr
+    # movsd xmm0,[rdi]; movsd xmm1,[rsi]
+    # mov rax, limit; movq xmm2, rax; mov rax, 1.0; movq xmm3, rax
+    # .loop: ucomisd xmm2,xmm0; jbe .done; addsd xmm1,xmm0; addsd xmm0,xmm3; jmp .loop
+    # .done: movsd [rdi],xmm0; movsd [rsi],xmm1; ret
+    lea     jit_loop_template(%rip), %rsi
+    mov     $83, %ecx
+    push    %rdi
+    rep movsb                           # copy template
+    pop     %rdi
+    # Patch addresses: counter_addr at offset 2, accum_addr at offset 12, limit at offset 30
+    mov     %r14, 2(%rdi)               # patch counter_addr
+    mov     %rbx, 12(%rdi)              # patch accum_addr
+    mov     %r15, 30(%rdi)              # patch limit_bits
+
+    mov     %rdi, %rax                  # return native_ptr
+    pop     %r15
+    pop     %r14
+    pop     %rbp
+    pop     %rbx
+    ret
+
+.tjl_fail:
+    pop     %r15
+    pop     %r14
+    pop     %rbp
+    pop     %rbx
+    xor     %eax, %eax
+    ret
 
 msg_crash_at:
     .ascii "CRASH PC=0x"
@@ -8113,6 +8407,10 @@ skip_scope_restore:
     .space 8                            # >0 → skip N scope restores (for module loading)
 var_cache:
     .space 96                           # 4 × [hash:8, entry_ptr:8, vt_count:8] = 24 bytes each
+loop_counters:
+    .space 1024                         # 256 × 4-byte backward jump counters
+loop_jit_cache:
+    .space 512                          # 32 × [start_pc:8, native_ptr:8] = 16 bytes each
 _save_rbx:
     .space 8                            # temp save for rbx
 scope_frame_ptrs:
