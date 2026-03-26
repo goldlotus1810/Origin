@@ -246,10 +246,10 @@ DONE khi: 2 Olang instances tự optimize nhau, performance improves each gen
 ## TIMELINE SUMMARY
 
 ```
-Sprint 1 (Wk 1-2):   Fix VM bugs          → 86/86 tests, no workarounds
-Sprint 2 (Wk 3-4):   Auto-JIT             → hot functions = C speed automatically
-Sprint 3 (Wk 5-6):   Modules              → use "file.ol" works
-Sprint 4 (Wk 7-8):   Error handling       → stack traces, Result types
+Sprint 1 (Wk 1-2):   Fix VM bugs          → 85/86 tests ✅ (3/4 bugs fixed)
+Sprint 2 (Wk 3-4):   Auto-JIT             → fib/fact/sum JIT = C speed ✅
+Sprint 3 (Wk 5-6):   Modules              → use "file.ol" works ✅ (text expansion)
+Sprint 4 (Wk 7-8):   Error handling       → Result types ✅, crash PC trace ✅
 Sprint 5 (Wk 9-10):  Developer UX         → multiline REPL, tab completion
 Sprint 6 (Wk 11-12): HTTPS + crypto       → real TLS, Ed25519
 Sprint 7 (Wk 13-14): Regex + Unicode      → pattern matching, NFC

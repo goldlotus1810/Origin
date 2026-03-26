@@ -1368,6 +1368,13 @@ op_call:
     mov     %rdx, (%rax, %rcx, 8)     # depth_stack[depth] = count
     lea     closure_depth(%rip), %rax
     incq    (%rax)                      # depth++
+    # Invalidate var cache (new scope = new locals may shadow)
+    lea     var_cache(%rip), %rax
+    xor     %ecx, %ecx
+    mov     %rcx, (%rax)
+    mov     %rcx, 16(%rax)
+    mov     %rcx, 32(%rax)
+    mov     %rcx, 48(%rax)
     pop     %rdi                        # restore body_pc
 
 .closure_skip_scope:
@@ -5116,6 +5123,13 @@ op_ret:
     lea     var_table_base(%rip), %rdi
     mov     (%rdi), %rdi
     mov     %rdx, (%rdi)               # truncate: var_table.count = saved_count
+    # Invalidate var cache (entries may point to removed vars)
+    lea     var_cache(%rip), %rax
+    xor     %ecx, %ecx
+    mov     %rcx, (%rax)
+    mov     %rcx, 16(%rax)
+    mov     %rcx, 32(%rax)
+    mov     %rcx, 48(%rax)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7205,8 +7219,23 @@ var_store_hash:
     ret
 
 # var_load_hash: rax=hash → rax=val_ptr, rdx=val_len
-# REVERSE search: start from LAST entry (locals found first, O(1) for recent vars)
+# REVERSE search with 4-entry direct-mapped cache
 var_load_hash:
+    # Check cache: 4 entries × [hash:8, entry_ptr:8] = 16 bytes each
+    lea     var_cache(%rip), %rcx
+    mov     %rax, %rdx
+    and     $3, %edx
+    shl     $4, %edx                    # × 16 bytes per entry
+    cmp     %rax, (%rcx, %rdx)          # hash match?
+    jne     .vlh_cache_miss
+    mov     8(%rcx, %rdx), %rcx         # entry_ptr (direct pointer into var_table)
+    cmp     (%rcx), %rax                # verify hash at entry still matches
+    jne     .vlh_cache_miss
+    mov     8(%rcx), %rax               # val_ptr
+    mov     16(%rcx), %rdx              # val_len
+    ret
+.vlh_cache_miss:
+
     push    %rbx
     lea     var_table_base(%rip), %rbx
     mov     (%rbx), %rbx
@@ -7222,6 +7251,15 @@ var_load_hash:
 .vlh_search:
     cmp     (%rdi), %rax
     jne     .vlh_next
+    # Found — update cache
+    push    %rax
+    lea     var_cache(%rip), %rcx
+    mov     %rax, %rdx
+    and     $3, %edx
+    shl     $4, %edx
+    mov     %rax, (%rcx, %rdx)          # store hash
+    mov     %rdi, 8(%rcx, %rdx)         # store entry pointer
+    pop     %rax
     mov     8(%rdi), %rax
     mov     16(%rdi), %rdx
     pop     %rbx
@@ -7941,6 +7979,8 @@ closure_depth:
     .space 8                            # nesting depth (0 = not in closure)
 skip_scope_restore:
     .space 8                            # >0 → skip N scope restores (for module loading)
+var_cache:
+    .space 64                           # 4 × [hash:8, entry_ptr:8] = 16 bytes each
 _save_rbx:
     .space 8                            # temp save for rbx
 scope_frame_ptrs:
