@@ -6750,11 +6750,25 @@ var_table_init:
 # Simple, no string comparison needed.
 
 # hash_name: rdi=name ptr, edx=name len → rax=hash
+# DIRECT-MAPPED CACHE: 256 entries indexed by (ptr & 0xFF)
+# Each entry: [ptr:8][hash:8] = 16 bytes. Total: 4KB.
+# Hit = 1 cmp + 1 mov. Miss = FNV + 1 store.
 hash_name:
-    # FNV-1a
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi                 # index = ptr & 255
+    shl     $4, %esi                    # × 16 bytes per entry
+    cmp     %rdi, (%rax, %rsi)        # same ptr?
+    jne     .hn_compute
+    mov     8(%rax, %rsi), %rax       # cache hit!
+    ret
+.hn_compute:
+    push    %rdi
+    push    %rdx
+    push    %rsi                        # save cache index
     movabs  $0xcbf29ce484222325, %rax
     movabs  $0x100000001b3, %rcx
-    add     %rdi, %rdx                  # end ptr
+    add     %rdi, %rdx
 .hn_loop:
     cmp     %rdx, %rdi
     jae     .hn_done
@@ -6764,6 +6778,13 @@ hash_name:
     inc     %rdi
     jmp     .hn_loop
 .hn_done:
+    pop     %rsi                        # restore cache index
+    pop     %rdx
+    pop     %rdi
+    # Store in cache
+    lea     hn_cache(%rip), %rcx
+    mov     %rdi, (%rcx, %rsi)        # ptr
+    mov     %rax, 8(%rcx, %rsi)       # hash
     ret
 
 # var_store_hash: rax=hash, r8=val_ptr, r9=val_len
@@ -7554,6 +7575,8 @@ eval_total:
     .space 8                            # total bytes read from stdin
 eval_offset:
     .space 8                            # current processing offset in buffer
+hn_cache:
+    .space 4096                         # 256 entries × [ptr:8][hash:8] = 16 bytes each
 net_sockaddr:
     .space 16
 net_recv_buf:
