@@ -46,7 +46,9 @@ pub fn chain_lca(a, b) {
   let n = min(chain_len(a), chain_len(b));
   let i = 0;
   while i < n {
-    let lca_mol = mol_lca(chain_get(a, i), chain_get(b, i));
+    let ma = chain_get(a, i);
+    let mb = chain_get(b, i);
+    let lca_mol = mol_pack(min(shape(ma), shape(mb)), min(relation(ma), relation(mb)), min(valence(ma), valence(mb)), min(arousal(ma), arousal(mb)), min(time(ma), time(mb)));
     chain_append(result, lca_mol);
     i = i + 1;
   }

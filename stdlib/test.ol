@@ -1,42 +1,45 @@
 // stdlib/test.ol — Olang Test Framework (CUT.3)
 
-let __test_pass = 0;
-let __test_fail = 0;
-let __test_total = 0;
+let __test_pass = [0];
+let __test_fail = [0];
+let __test_total = [0];
 
 pub fn assert_eq(_te_a, _te_e, _te_n) {
-    let __test_total = __test_total + 1;
+    set_at(__test_total, 0, __array_get(__test_total, 0) + 1);
     if _te_a == _te_e {
-        let __test_pass = __test_pass + 1;
+        set_at(__test_pass, 0, __array_get(__test_pass, 0) + 1);
     } else {
-        let __test_fail = __test_fail + 1;
+        set_at(__test_fail, 0, __array_get(__test_fail, 0) + 1);
         emit "  FAIL: " + _te_n;
     };
 }
 
 pub fn assert_true(_tt_v, _tt_n) {
-    let __test_total = __test_total + 1;
+    set_at(__test_total, 0, __array_get(__test_total, 0) + 1);
     if _tt_v {
-        let __test_pass = __test_pass + 1;
+        set_at(__test_pass, 0, __array_get(__test_pass, 0) + 1);
     } else {
-        let __test_fail = __test_fail + 1;
+        set_at(__test_fail, 0, __array_get(__test_fail, 0) + 1);
         emit "  FAIL: " + _tt_n;
     };
 }
 
 pub fn test_summary() {
-    if __test_fail == 0 {
-        emit "ALL PASS: " + __to_string(__test_pass) + "/" + __to_string(__test_total);
+    let _ts_fail = __array_get(__test_fail, 0);
+    let _ts_pass = __array_get(__test_pass, 0);
+    let _ts_total = __array_get(__test_total, 0);
+    if _ts_fail == 0 {
+        emit "ALL PASS: " + __to_string(_ts_pass) + "/" + __to_string(_ts_total);
     } else {
-        emit "FAILED: " + __to_string(__test_fail) + "/" + __to_string(__test_total);
+        emit "FAILED: " + __to_string(_ts_fail) + "/" + __to_string(_ts_total);
     };
-    return __test_fail;
+    return _ts_fail;
 }
 
 pub fn run_all_tests() {
-    let __test_pass = 0;
-    let __test_fail = 0;
-    let __test_total = 0;
+    set_at(__test_pass, 0, 0);
+    set_at(__test_fail, 0, 0);
+    set_at(__test_total, 0, 0);
     test_core();
     test_features();
     return test_summary();

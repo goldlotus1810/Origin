@@ -1303,6 +1303,12 @@ op_call:
     movabs  $0xDD3AF5492696D871, %rdx   # __tcp_close(fd)
     cmp     %rdx, %rax
     je      .call_tcp_close
+    movabs  $0x6F0C4CBAC89C91C4, %rdx   # __tcp_listen(port)
+    cmp     %rdx, %rax
+    je      .call_tcp_listen
+    movabs  $0x493ABC5CE7C7C7CF, %rdx   # __tcp_accept(server_fd)
+    cmp     %rdx, %rax
+    je      .call_tcp_accept
     # ── Filesystem ──
     movabs  $0x33AB401298E66956, %rdx   # __readdir(path)
     cmp     %rdx, %rax
@@ -4083,6 +4089,81 @@ op_call:
     syscall
     sub     $16, %r14
     xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_listen(port) → server_fd (socket + bind + listen)
+.call_tcp_listen:
+    add     %rcx, %r13
+    push    %rbx                        # save bytecode size
+    # Pop port number
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %ebx              # ebx = port
+    add     $16, %r14
+    # socket(AF_INET=2, SOCK_STREAM=1, 0)
+    mov     $41, %eax                   # SYS_SOCKET
+    mov     $2, %edi
+    mov     $1, %esi
+    xor     %edx, %edx
+    syscall
+    mov     %eax, %r8d                  # r8d = server_fd
+    # setsockopt(fd, SOL_SOCKET=1, SO_REUSEADDR=2, &1, 4)
+    sub     $4, %rsp
+    movl    $1, (%rsp)
+    mov     %r8d, %edi
+    mov     $1, %esi
+    mov     $2, %edx
+    lea     (%rsp), %r10
+    push    %r8
+    mov     $4, %r8d                    # optlen (clobbers r8, saved above)
+    mov     $54, %eax
+    syscall
+    pop     %r8
+    add     $4, %rsp
+    # Build sockaddr_in on stack
+    sub     $16, %rsp
+    movw    $2, (%rsp)                  # AF_INET
+    mov     %ebx, %eax
+    xchg    %al, %ah                   # bswap16 for network byte order
+    movw    %ax, 2(%rsp)
+    movl    $0, 4(%rsp)                # INADDR_ANY
+    movq    $0, 8(%rsp)
+    # bind
+    mov     %r8d, %edi
+    lea     (%rsp), %rsi
+    mov     $16, %edx
+    mov     $49, %eax
+    syscall
+    # listen
+    mov     %r8d, %edi
+    mov     $128, %esi
+    mov     $50, %eax
+    syscall
+    add     $16, %rsp
+    # Return server_fd
+    sub     $16, %r14
+    cvtsi2sd %r8d, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    pop     %rbx
+    jmp     vm_loop
+
+# __tcp_accept(server_fd) → client_fd
+.call_tcp_accept:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi              # server_fd
+    add     $16, %r14
+    # accept4(fd, NULL, NULL, 0)
+    xor     %esi, %esi                  # addr = NULL
+    xor     %edx, %edx                  # addrlen = NULL
+    xor     %r10d, %r10d               # flags = 0
+    mov     $43, %eax                   # SYS_ACCEPT
+    syscall
+    # Push client_fd
+    sub     $16, %r14
+    cvtsi2sd %eax, %xmm0
     movsd   %xmm0, (%r14)
     movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
@@ -7605,6 +7686,57 @@ op_halt:
     cmp     $4095, %rcx                 # max length
     jl      .repl_read_byte
 .repl_read_newline:
+    # Multiline: check bracket balance before accepting line
+    # Scan buffer for {, [, ( and }, ], ) — if unbalanced, read more
+    push    %rcx
+    push    %rsi
+    xor     %edx, %edx                  # balance counter
+    xor     %r8d, %r8d                  # scan index
+.repl_bracket_scan:
+    cmp     %ecx, %r8d
+    jge     .repl_bracket_done
+    movzbl  (%rsi, %r8), %eax
+    cmp     $'{', %al
+    je      .repl_bracket_open
+    cmp     $'[', %al
+    je      .repl_bracket_open
+    cmp     $'(', %al
+    je      .repl_bracket_open
+    cmp     $'}', %al
+    je      .repl_bracket_close
+    cmp     $']', %al
+    je      .repl_bracket_close
+    cmp     $')', %al
+    je      .repl_bracket_close
+    jmp     .repl_bracket_next
+.repl_bracket_open:
+    inc     %edx
+    jmp     .repl_bracket_next
+.repl_bracket_close:
+    dec     %edx
+.repl_bracket_next:
+    inc     %r8d
+    jmp     .repl_bracket_scan
+.repl_bracket_done:
+    pop     %rsi
+    pop     %rcx
+    test    %edx, %edx
+    jz      .repl_line_complete         # balanced → done
+    # Unbalanced: print continuation prompt "... " and read more
+    push    %rcx
+    push    %rsi
+    lea     msg_cont_prompt(%rip), %rsi
+    mov     $4, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rsi
+    pop     %rcx
+    # Replace newline with space and continue reading
+    movb    $' ', (%rsi, %rcx)
+    inc     %rcx
+    jmp     .repl_read_byte
+.repl_line_complete:
     inc     %rcx                        # include newline in count
 .repl_read_done:
     mov     %rcx, %rax                  # rax = bytes read (compatible with old code)
@@ -8268,6 +8400,9 @@ try_jit_loop:
     pop     %rbx
     xor     %eax, %eax
     ret
+
+msg_cont_prompt:
+    .ascii "... "
 
 msg_crash_at:
     .ascii "CRASH PC=0x"

@@ -76,8 +76,5 @@ pub fn to_string(val) {
 }
 
 fn char_from_code(code) {
-  // ASCII code → character string
-  let chars = "0123456789";
-  if code >= 48 && code <= 57 { return char_at(chars, code - 48); }
-  return "?";
+  return __chr(code);
 }

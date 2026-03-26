@@ -1,0 +1,1 @@
+let _tp = 0; let _tf = 0; if type_name(42) == "Num" { _tp = _tp + 1; } else { _tf = _tf + 1; }; if type_name("x") == "Str" { _tp = _tp + 1; } else { _tf = _tf + 1; }; if is_num(3) == 1 { _tp = _tp + 1; } else { _tf = _tf + 1; }; if is_str("y") == 1 { _tp = _tp + 1; } else { _tf = _tf + 1; }; if _tf == 0 { emit "PASS"; } else { emit "FAIL"; };
