@@ -1368,13 +1368,7 @@ op_call:
     mov     %rdx, (%rax, %rcx, 8)     # depth_stack[depth] = count
     lea     closure_depth(%rip), %rax
     incq    (%rax)                      # depth++
-    # Invalidate var cache (new scope = new locals may shadow)
-    lea     var_cache(%rip), %rax
-    xor     %ecx, %ecx
-    mov     %rcx, (%rax)
-    mov     %rcx, 16(%rax)
-    mov     %rcx, 32(%rax)
-    mov     %rcx, 48(%rax)
+    # No cache invalidation needed — count-based validation handles scope changes
     pop     %rdi                        # restore body_pc
 
 .closure_skip_scope:
@@ -5123,13 +5117,7 @@ op_ret:
     lea     var_table_base(%rip), %rdi
     mov     (%rdi), %rdi
     mov     %rdx, (%rdi)               # truncate: var_table.count = saved_count
-    # Invalidate var cache (entries may point to removed vars)
-    lea     var_cache(%rip), %rax
-    xor     %ecx, %ecx
-    mov     %rcx, (%rax)
-    mov     %rcx, 16(%rax)
-    mov     %rcx, 32(%rax)
-    mov     %rcx, 48(%rax)
+    # No cache invalidation needed — count-based validation handles scope changes
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7219,18 +7207,22 @@ var_store_hash:
     ret
 
 # var_load_hash: rax=hash → rax=val_ptr, rdx=val_len
-# REVERSE search with 4-entry direct-mapped cache
+# REVERSE search with 4-entry direct-mapped cache (count-validated)
 var_load_hash:
-    # Check cache: 4 entries × [hash:8, entry_ptr:8] = 16 bytes each
+    # Check cache: 4 entries × [hash:8, entry_ptr:8, vt_count:8] = 24 bytes each
     lea     var_cache(%rip), %rcx
     mov     %rax, %rdx
     and     $3, %edx
-    shl     $4, %edx                    # × 16 bytes per entry
+    imul    $24, %edx                   # × 24 bytes per entry
     cmp     %rax, (%rcx, %rdx)          # hash match?
     jne     .vlh_cache_miss
-    mov     8(%rcx, %rdx), %rcx         # entry_ptr (direct pointer into var_table)
-    cmp     (%rcx), %rax                # verify hash at entry still matches
+    # Check var_table count hasn't changed (scope change detection)
+    lea     var_table_base(%rip), %rsi
+    mov     (%rsi), %rsi
+    mov     (%rsi), %rsi                # current count
+    cmp     %rsi, 16(%rcx, %rdx)        # count match?
     jne     .vlh_cache_miss
+    mov     8(%rcx, %rdx), %rcx         # entry_ptr
     mov     8(%rcx), %rax               # val_ptr
     mov     16(%rcx), %rdx              # val_len
     ret
@@ -7256,9 +7248,14 @@ var_load_hash:
     lea     var_cache(%rip), %rcx
     mov     %rax, %rdx
     and     $3, %edx
-    shl     $4, %edx
+    imul    $24, %edx
     mov     %rax, (%rcx, %rdx)          # store hash
     mov     %rdi, 8(%rcx, %rdx)         # store entry pointer
+    # Store current var_table count for validation
+    lea     var_table_base(%rip), %rax
+    mov     (%rax), %rax
+    mov     (%rax), %rax
+    mov     %rax, 16(%rcx, %rdx)        # store count
     pop     %rax
     mov     8(%rdi), %rax
     mov     16(%rdi), %rdx
@@ -7980,7 +7977,7 @@ closure_depth:
 skip_scope_restore:
     .space 8                            # >0 → skip N scope restores (for module loading)
 var_cache:
-    .space 64                           # 4 × [hash:8, entry_ptr:8] = 16 bytes each
+    .space 96                           # 4 × [hash:8, entry_ptr:8, vt_count:8] = 24 bytes each
 _save_rbx:
     .space 8                            # temp save for rbx
 scope_frame_ptrs:
