@@ -770,15 +770,25 @@ op_load_local:
     # [0x31/0x34, name_len_u8, name_bytes...]
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    # Hash the name for lookup
     lea     (%r12, %r13), %rdi         # name ptr
-    mov     %ecx, %edx                  # name len
-    sub     $8, %rsp                    # align stack to 16 bytes
-    push    %rcx                        # save name_len (stack now 16-aligned for call)
-    call    hash_name                   # → rax = hash
+    mov     %ecx, %edx
+    # Inline hash cache check
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi
+    shl     $4, %esi
+    cmp     %rdi, (%rax, %rsi)
+    jne     .op_load_hash_miss
+    mov     8(%rax, %rsi), %rax
+    jmp     .op_load_have_hash
+.op_load_hash_miss:
+    sub     $8, %rsp
+    push    %rcx
+    call    hash_name
     pop     %rcx
-    add     $8, %rsp                    # restore alignment
-    add     %rcx, %r13                  # PC += name_len
+    add     $8, %rsp
+.op_load_have_hash:
+    add     %rcx, %r13
     # Search var table by hash
     call    var_load_hash               # rax=hash → rax=ptr, rdx=len
     sub     $16, %r14
@@ -792,19 +802,29 @@ op_store_upd:
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
     lea     (%r12, %r13), %rdi         # name ptr
-    mov     %ecx, %edx                  # name len
-    # Save value before hash call
-    mov     (%r14), %r8                # value ptr
-    mov     8(%r14), %r9               # value len
-    add     $16, %r14                  # pop value
+    mov     %ecx, %edx
+    mov     (%r14), %r8
+    mov     8(%r14), %r9
+    add     $16, %r14
+    # Inline hash cache check
     push    %rcx
     push    %r8
     push    %r9
-    call    hash_name                   # → rax = hash
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi
+    shl     $4, %esi
+    cmp     %rdi, (%rax, %rsi)
+    jne     .op_store_hash_miss
+    mov     8(%rax, %rsi), %rax
+    jmp     .op_store_have_hash
+.op_store_hash_miss:
+    call    hash_name
+.op_store_have_hash:
     pop     %r9
     pop     %r8
     pop     %rcx
-    add     %rcx, %r13                 # PC += name_len
+    add     %rcx, %r13
     call    var_store_hash              # rax=hash, r8=ptr, r9=len
     jmp     vm_loop
 
@@ -856,10 +876,21 @@ op_call:
     inc     %r13
     lea     (%r12, %r13), %rdi         # name ptr
 
-    # Hash-based builtin dispatch (FNV-1a)
-    mov     %ecx, %edx                  # name len for hash_name
-    push    %rcx                        # save name_len
-    call    hash_name                   # → rax = hash
+    # Hash dispatch: use cache (inline, no call overhead)
+    mov     %ecx, %edx
+    push    %rcx
+    # Inline cache check (avoid call hash_name overhead for hot paths)
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi
+    shl     $4, %esi
+    cmp     %rdi, (%rax, %rsi)
+    jne     .op_call_hash_miss
+    mov     8(%rax, %rsi), %rax        # cache hit!
+    jmp     .op_call_have_hash
+.op_call_hash_miss:
+    call    hash_name
+.op_call_have_hash:
     pop     %rcx
 
     # ── Math builtins ──
