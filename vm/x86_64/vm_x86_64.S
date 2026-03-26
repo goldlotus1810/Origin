@@ -47,7 +47,15 @@
 .equ SYS_MUNMAP,    11
 .equ SYS_NANOSLEEP, 35
 .equ SYS_CLOCK_GETTIME, 228
+.equ SYS_SOCKET,    41
+.equ SYS_CONNECT,   42
+.equ SYS_SENDTO,    44
+.equ SYS_RECVFROM,  45
+.equ SYS_GETDENTS64, 217
 .equ SYS_EXIT,      60
+.equ AF_INET,       2
+.equ SOCK_STREAM,   1
+.equ SOCK_DGRAM,    2
 .equ CLOCK_MONOTONIC, 1
 
 # ── File open flags ─────────────────────────────────────────────────────
@@ -1141,6 +1149,75 @@ op_call:
     je      .call_utf8_len
 
     # ── Eval bytecode (nested execution) ──
+    # ── Text/search builtins (native) ──
+    movabs  $0x10278AEC167ABEF0, %rdx   # __text_to_pw(str, tbl)
+    cmp     %rdx, %rax
+    je      .call_text_to_pw
+    movabs  $0x58485CB4691F98BE, %rdx   # __text_to_chain(str, tbl)
+    cmp     %rdx, %rax
+    je      .call_text_to_chain
+    movabs  $0x8072B20F985EC0A2, %rdx   # __line_offsets(str)
+    cmp     %rdx, %rax
+    je      .call_line_offsets
+    movabs  $0x3A1642345E94EA24, %rdx   # __str_find(haystack, needle)
+    cmp     %rdx, %rax
+    je      .call_str_find
+    # ── Network builtins ──
+    movabs  $0xC9091F4EA5E0EFF5, %rdx   # __dns_resolve(hostname)
+    cmp     %rdx, %rax
+    je      .call_dns_resolve
+    movabs  $0x79C07AA57E23765F, %rdx   # __tcp_connect(ip, port)
+    cmp     %rdx, %rax
+    je      .call_tcp_connect
+    movabs  $0x495BE76EAB8378AD, %rdx   # __tcp_send(fd, data)
+    cmp     %rdx, %rax
+    je      .call_tcp_send
+    movabs  $0xAD9A9975BDE0C517, %rdx   # __tcp_recv(fd, max)
+    cmp     %rdx, %rax
+    je      .call_tcp_recv
+    movabs  $0xDD3AF5492696D871, %rdx   # __tcp_close(fd)
+    cmp     %rdx, %rax
+    je      .call_tcp_close
+    # ── Filesystem ──
+    movabs  $0x33AB401298E66956, %rdx   # __readdir(path)
+    cmp     %rdx, %rax
+    je      .call_readdir
+    # ── Char/string ──
+    movabs  $0xA3E9AFF6513138BE, %rdx   # __chr(code)
+    cmp     %rdx, %rax
+    je      .call_chr
+    movabs  $0x93CF8290EAF97526, %rdx   # char_from_code(code)
+    cmp     %rdx, %rax
+    je      .call_chr
+    # ── Crypto ──
+    movabs  $0x89275829827A6638, %rdx   # __aes_encrypt(key, data)
+    cmp     %rdx, %rax
+    je      .call_aes_encrypt
+    movabs  $0xE653F1B42A305014, %rdx   # __aes_decrypt(key, data)
+    cmp     %rdx, %rax
+    je      .call_aes_decrypt
+    movabs  $0x90B5A88623267519, %rdx   # __sha512(data)
+    cmp     %rdx, %rax
+    je      .call_sha512
+    # ── Storage ──
+    movabs  $0x1C44C0F08C07EC77, %rdx   # __mmap_file(path, size)
+    cmp     %rdx, %rax
+    je      .call_mmap_file
+    movabs  $0xB85069B47868C218, %rdx   # __munmap_file(ptr, size)
+    cmp     %rdx, %rax
+    je      .call_munmap_file
+    # ── Math ──
+    movabs  $0x1148126D13F2B0FC, %rdx   # __isqrt(x)
+    cmp     %rdx, %rax
+    je      .call_isqrt
+    movabs  $0x463B7CECBD9DCAEF, %rdx   # _isqrt(x)
+    cmp     %rdx, %rax
+    je      .call_isqrt
+    # ── SIMD ──
+    movabs  $0x05F32B674266E367, %rdx   # __simd_compose4(a,b,c,d)
+    cmp     %rdx, %rax
+    je      .call_simd_compose4
+    # ── Eval bytecode ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
     cmp     %rdx, %rax
     je      .call_eval_bytecode
@@ -3179,6 +3256,1487 @@ op_call:
     mov     %rax, (%r14)
     mov     %rax, 8(%r14)
     jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NEW BUILTINS — Rebuilt from REBUILD_NOTES.md
+# ═══════════════════════════════════════════════════════════════════════════
+
+# __isqrt(x) → sqrt(x) via hardware sqrtsd
+.call_isqrt:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    sqrtsd  %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+# __chr(code) → 1-char string
+.call_chr:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    add     $16, %r14
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $1, 8(%r14)
+    add     $2, %r15
+    jmp     vm_loop
+
+# __line_offsets(str) → array [start, end, ...]
+.call_line_offsets:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     %r15, %rdi
+    add     $8, %r15
+    xor     %eax, %eax
+    xor     %ecx, %ecx
+    xor     %r8d, %r8d
+.lo_loop:
+    cmp     %rdx, %rax
+    jge     .lo_last
+    movzwl  (%rsi, %rax, 2), %r9d
+    and     $0xFF, %r9d
+    cmp     $0x0A, %r9d
+    jne     .lo_next
+    mov     %rax, %r10
+    sub     %rcx, %r10
+    cmp     $3, %r10
+    jb      .lo_skip
+    push    %rax
+    cvtsi2sd %ecx, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    add     $2, %r8d
+.lo_skip:
+    lea     1(%rax), %ecx
+.lo_next:
+    inc     %eax
+    jmp     .lo_loop
+.lo_last:
+    movq    %r8, (%rdi)
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __str_find(haystack, needle) → array of match positions
+.call_str_find:
+    add     %rcx, %r13
+    mov     (%r14), %rdi
+    mov     8(%r14), %rcx
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    push    %rsi
+    push    %rdx
+    push    %rdi
+    push    %rcx
+    mov     %r15, %rbp
+    add     $8, %r15
+    xor     %r8d, %r8d
+    xor     %eax, %eax
+    mov     16(%rsp), %rdx
+    mov     (%rsp), %rcx
+    sub     %rcx, %rdx
+.sf_outer:
+    cmp     %rdx, %rax
+    jg      .sf_done
+    mov     24(%rsp), %rsi
+    mov     8(%rsp), %rdi
+    mov     (%rsp), %rcx
+    xor     %r9d, %r9d
+.sf_inner:
+    cmp     %rcx, %r9
+    jge     .sf_match
+    lea     (%rax, %r9), %r10
+    movzbl  (%rsi, %r10, 2), %r11d
+    movzbl  (%rdi, %r9, 2), %ecx
+    cmp     %ecx, %r11d
+    jne     .sf_nomatch
+    inc     %r9
+    mov     (%rsp), %rcx
+    jmp     .sf_inner
+.sf_match:
+    push    %rax
+    push    %rdx
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    inc     %r8d
+    pop     %rdx
+    pop     %rax
+    cmp     $10000, %r8d
+    jge     .sf_done
+.sf_nomatch:
+    inc     %eax
+    mov     (%rsp), %rcx
+    mov     16(%rsp), %rdx
+    sub     %rcx, %rdx
+    jmp     .sf_outer
+.sf_done:
+    add     $32, %rsp
+    mov     %r8, (%rbp)
+    sub     $16, %r14
+    mov     %rbp, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_connect(ip, port) → fd
+.call_tcp_connect:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    add     $16, %r14
+    push    %rax
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.tc_decode:
+    cmp     %rdx, %rcx
+    jge     .tc_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .tc_decode
+.tc_open:
+    movb    $0, (%rdi, %rcx)
+    lea     net_sockaddr(%rip), %rdi
+    movq    $0, (%rdi)
+    movq    $0, 8(%rdi)
+    movw    $AF_INET, (%rdi)
+    pop     %rax
+    xchg    %al, %ah
+    movw    %ax, 2(%rdi)
+    lea     sha_input(%rip), %rsi
+    lea     4(%rdi), %r8
+    xor     %ecx, %ecx
+.tc_parse:
+    movzbl  (%rsi), %eax
+    inc     %rsi
+    test    %eax, %eax
+    jz      .tc_last
+    cmp     $'.', %eax
+    je      .tc_dot
+    sub     $'0', %eax
+    imul    $10, %ecx
+    add     %eax, %ecx
+    jmp     .tc_parse
+.tc_dot:
+    movb    %cl, (%r8)
+    inc     %r8
+    xor     %ecx, %ecx
+    jmp     .tc_parse
+.tc_last:
+    movb    %cl, (%r8)
+    mov     $SYS_SOCKET, %eax
+    mov     $AF_INET, %edi
+    mov     $SOCK_STREAM, %esi
+    xor     %edx, %edx
+    syscall
+    test    %rax, %rax
+    js      .tc_error
+    mov     %eax, %r8d
+    mov     $SYS_CONNECT, %eax
+    mov     %r8d, %edi
+    lea     net_sockaddr(%rip), %rsi
+    mov     $16, %edx
+    syscall
+    test    %rax, %rax
+    js      .tc_fail
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %r8d, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.tc_fail:
+    mov     $SYS_CLOSE, %eax
+    mov     %r8d, %edi
+    syscall
+.tc_error:
+    pop     %rbx
+    sub     $16, %r14
+    mov     $0xBFF0000000000000, %rax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_send(fd, data) → bytes_sent
+.call_tcp_send:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi
+    add     $16, %r14
+    push    %rdi
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.ts_dec:
+    cmp     %rdx, %rcx
+    jge     .ts_send
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .ts_dec
+.ts_send:
+    mov     %ecx, %edx
+    pop     %rdi
+    lea     sha_input(%rip), %rsi
+    xor     %r10d, %r10d
+    xor     %r8d, %r8d
+    xor     %r9d, %r9d
+    mov     $SYS_SENDTO, %eax
+    syscall
+    sub     $16, %r14
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_recv(fd, max) → string
+.call_tcp_recv:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi
+    add     $16, %r14
+    cmp     $65536, %edx
+    jbe     .tr_ok
+    mov     $65536, %edx
+.tr_ok:
+    lea     net_recv_buf(%rip), %rsi
+    xor     %r10d, %r10d
+    xor     %r8d, %r8d
+    xor     %r9d, %r9d
+    mov     $SYS_RECVFROM, %eax
+    syscall
+    test    %rax, %rax
+    jle     .tr_empty
+    mov     %rax, %rcx
+    mov     %r15, %rdi
+    lea     net_recv_buf(%rip), %rsi
+    xor     %edx, %edx
+.tr_enc:
+    cmp     %rcx, %rdx
+    jge     .tr_push
+    movzbl  (%rsi, %rdx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%rdi, %rdx, 2)
+    inc     %rdx
+    jmp     .tr_enc
+.tr_push:
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    mov     %rcx, 8(%r14)
+    lea     (%r15, %rcx, 2), %r15
+    jmp     vm_loop
+.tr_empty:
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $0, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_close(fd) → 0
+.call_tcp_close:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi
+    add     $16, %r14
+    mov     $SYS_CLOSE, %eax
+    syscall
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __dns_resolve(hostname) → IP string
+.call_dns_resolve:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.dns_dec:
+    cmp     %rdx, %rcx
+    jge     .dns_dec_done
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .dns_dec
+.dns_dec_done:
+    movb    $0, (%rdi, %rcx)
+    mov     %ecx, %r8d
+    lea     net_recv_buf(%rip), %rdi
+    movw    $0x3412, (%rdi)
+    movw    $0x0001, 2(%rdi)
+    movw    $0x0100, 4(%rdi)
+    movw    $0, 6(%rdi)
+    movw    $0, 8(%rdi)
+    movw    $0, 10(%rdi)
+    lea     12(%rdi), %r9
+    lea     sha_input(%rip), %rsi
+    mov     %r9, %r10
+    lea     1(%r9), %r11
+    xor     %ecx, %ecx
+.dns_enc:
+    movzbl  (%rsi), %eax
+    inc     %rsi
+    test    %eax, %eax
+    jz      .dns_enc_done
+    cmp     $'.', %eax
+    je      .dns_dot
+    mov     %al, (%r11)
+    inc     %r11
+    inc     %ecx
+    jmp     .dns_enc
+.dns_dot:
+    movb    %cl, (%r10)
+    mov     %r11, %r10
+    lea     1(%r11), %r11
+    xor     %ecx, %ecx
+    jmp     .dns_enc
+.dns_enc_done:
+    movb    %cl, (%r10)
+    movb    $0, (%r11)
+    inc     %r11
+    movw    $0x0100, (%r11)
+    movw    $0x0100, 2(%r11)
+    lea     4(%r11), %r11
+    lea     net_recv_buf(%rip), %rax
+    sub     %rax, %r11
+    mov     %r11, %r8
+    mov     $SYS_SOCKET, %eax
+    mov     $AF_INET, %edi
+    mov     $SOCK_DGRAM, %esi
+    xor     %edx, %edx
+    syscall
+    test    %rax, %rax
+    js      .dns_fail
+    mov     %eax, %ebx
+    lea     net_sockaddr(%rip), %rdi
+    movw    $AF_INET, (%rdi)
+    movw    $0x3500, 2(%rdi)
+    movl    $0x08080808, 4(%rdi)
+    movq    $0, 8(%rdi)
+    mov     $SYS_SENDTO, %eax
+    mov     %ebx, %edi
+    lea     net_recv_buf(%rip), %rsi
+    mov     %r8, %rdx
+    xor     %r10d, %r10d
+    lea     net_sockaddr(%rip), %r8
+    mov     $16, %r9d
+    syscall
+    mov     $SYS_RECVFROM, %eax
+    mov     %ebx, %edi
+    lea     net_recv_buf(%rip), %rsi
+    mov     $512, %edx
+    xor     %r10d, %r10d
+    xor     %r8d, %r8d
+    xor     %r9d, %r9d
+    syscall
+    push    %rax
+    mov     $SYS_CLOSE, %eax
+    mov     %ebx, %edi
+    syscall
+    pop     %rax
+    lea     net_recv_buf(%rip), %rsi
+    lea     12(%rsi), %rdi
+.dns_skip:
+    movzbl  (%rdi), %eax
+    test    %eax, %eax
+    jz      .dns_skip_done
+    lea     1(%rdi, %rax), %rdi
+    jmp     .dns_skip
+.dns_skip_done:
+    add     $5, %rdi
+    movzbl  (%rdi), %eax
+    cmp     $0xC0, %eax
+    jb      .dns_fail
+    add     $12, %rdi
+    movzbl  (%rdi), %eax
+    movzbl  1(%rdi), %ecx
+    movzbl  2(%rdi), %edx
+    movzbl  3(%rdi), %r8d
+    mov     %r15, %r9
+    call    .dns_b2s
+    movw    $0x212E, (%r15)
+    add     $2, %r15
+    mov     %ecx, %eax
+    call    .dns_b2s
+    movw    $0x212E, (%r15)
+    add     $2, %r15
+    mov     %edx, %eax
+    call    .dns_b2s
+    movw    $0x212E, (%r15)
+    add     $2, %r15
+    mov     %r8d, %eax
+    call    .dns_b2s
+    mov     %r15, %rax
+    sub     %r9, %rax
+    shr     $1, %rax
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r9, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.dns_b2s:
+    push    %rcx
+    push    %rdx
+    push    %rbx
+    xor     %ebx, %ebx
+    xor     %edx, %edx
+    mov     $100, %ecx
+    div     %ecx
+    test    %eax, %eax
+    jz      .dns_no_h
+    add     $0x2130, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    mov     $1, %ebx
+.dns_no_h:
+    mov     %edx, %eax
+    xor     %edx, %edx
+    mov     $10, %ecx
+    div     %ecx
+    test    %eax, %eax
+    jnz     .dns_wr_t
+    test    %ebx, %ebx
+    jz      .dns_sk_t
+.dns_wr_t:
+    add     $0x2130, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+.dns_sk_t:
+    mov     %edx, %eax
+    add     $0x2130, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    pop     %rbx
+    pop     %rdx
+    pop     %rcx
+    ret
+.dns_fail:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $0, 8(%r14)
+    jmp     vm_loop
+
+# __readdir(path) → array of filenames
+.call_readdir:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.rd_dec:
+    cmp     %rdx, %rcx
+    jge     .rd_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .rd_dec
+.rd_open:
+    movb    $0, (%rdi, %rcx)
+    push    %rbx
+    lea     sha_input(%rip), %rdi
+    mov     $0x90000, %esi
+    xor     %edx, %edx
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .rd_empty
+    push    %rax
+    mov     %r15, %rbp
+    movq    $0, (%r15)
+    add     $8, %r15
+.rd_gd:
+    mov     $SYS_GETDENTS64, %eax
+    mov     (%rsp), %edi
+    lea     net_dents_buf(%rip), %rsi
+    mov     $8192, %edx
+    syscall
+    test    %rax, %rax
+    jle     .rd_close
+    xor     %ecx, %ecx
+.rd_parse:
+    cmp     %rax, %rcx
+    jge     .rd_gd
+    lea     net_dents_buf(%rip), %rsi
+    add     %rcx, %rsi
+    movzwl  16(%rsi), %edx
+    lea     19(%rsi), %rdi
+    cmpb    $'.', (%rdi)
+    jne     .rd_emit
+    cmpb    $0, 1(%rdi)
+    je      .rd_sk
+    cmpb    $'.', 1(%rdi)
+    jne     .rd_emit
+    cmpb    $0, 2(%rdi)
+    je      .rd_sk
+.rd_emit:
+    push    %rax
+    push    %rcx
+    push    %rdx
+    mov     %r15, %r9
+    xor     %r10d, %r10d
+.rd_cpn:
+    movzbl  (%rdi, %r10), %r11d
+    test    %r11d, %r11d
+    jz      .rd_cpd
+    or      $0x2100, %r11d
+    movw    %r11w, (%r15)
+    add     $2, %r15
+    inc     %r10d
+    cmp     $255, %r10d
+    jb      .rd_cpn
+.rd_cpd:
+    mov     (%rbp), %rdi
+    mov     %rdi, %r11
+    shl     $4, %r11
+    lea     8(%rbp, %r11), %r11
+    mov     %r9, (%r11)
+    mov     %r10, 8(%r11)
+    incq    (%rbp)
+    pop     %rdx
+    pop     %rcx
+    pop     %rax
+.rd_sk:
+    add     %edx, %ecx
+    jmp     .rd_parse
+.rd_close:
+    pop     %rdi
+    mov     $SYS_CLOSE, %eax
+    mov     %edi, %edi
+    syscall
+    mov     (%rbp), %rax
+    mov     %rax, %rcx
+    shl     $4, %rcx
+    lea     8(%rbp, %rcx), %rcx
+    cmp     %rcx, %r15
+    jae     .rd_push
+    mov     %rcx, %r15
+.rd_push:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %rbp, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+.rd_empty:
+    mov     %r15, %rdi
+    movq    $0, (%r15)
+    add     $8, %r15
+    pop     %rbx
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __aes_encrypt(key, data) → ciphertext
+.call_aes_encrypt:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     (%r14), %rdi
+    mov     8(%r14), %rcx
+    add     $16, %r14
+    lea     net_recv_buf(%rip), %r8
+    xor     %eax, %eax
+.ae_dk:
+    cmp     $32, %eax
+    jge     .ae_kd
+    cmp     %ecx, %eax
+    jge     .ae_kp
+    movzbl  (%rdi, %rax, 2), %r9d
+    mov     %r9b, (%r8, %rax)
+    inc     %eax
+    jmp     .ae_dk
+.ae_kp:
+    movb    $0, (%r8, %rax)
+    inc     %eax
+    jmp     .ae_dk
+.ae_kd:
+    movdqu  (%r8), %xmm1
+    movdqu  16(%r8), %xmm2
+    lea     64(%r8), %r10
+    xor     %eax, %eax
+.ae_dd:
+    cmp     %edx, %eax
+    jge     .ae_pad
+    movzbl  (%rsi, %rax, 2), %r9d
+    mov     %r9b, (%r10, %rax)
+    inc     %eax
+    jmp     .ae_dd
+.ae_pad:
+    mov     %eax, %r11d
+    or      $0xF, %eax
+    inc     %eax
+    mov     %eax, %ebx
+    mov     %ebx, %ecx
+    sub     %r11d, %ecx
+.ae_pl:
+    cmp     %ebx, %r11d
+    jge     .ae_enc
+    mov     %cl, (%r10, %r11)
+    inc     %r11d
+    jmp     .ae_pl
+.ae_enc:
+    lea     64(%r8), %rsi
+    lea     1024(%r8), %rdi
+    xor     %ecx, %ecx
+.ae_eb:
+    cmp     %ebx, %ecx
+    jge     .ae_ed
+    movdqu  (%rsi, %rcx), %xmm0
+    pxor    %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenclast %xmm1, %xmm0
+    movdqu  %xmm0, (%rdi, %rcx)
+    add     $16, %ecx
+    jmp     .ae_eb
+.ae_ed:
+    lea     1024(%r8), %rsi
+    mov     %r15, %r9
+    xor     %ecx, %ecx
+.ae_ts:
+    cmp     %ebx, %ecx
+    jge     .ae_push
+    movzbl  (%rsi, %rcx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %ecx
+    jmp     .ae_ts
+.ae_push:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r9, (%r14)
+    movq    %rcx, 8(%r14)
+    jmp     vm_loop
+
+# __aes_decrypt(key, data) → plaintext
+.call_aes_decrypt:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     (%r14), %rdi
+    mov     8(%r14), %rcx
+    add     $16, %r14
+    lea     net_recv_buf(%rip), %r8
+    xor     %eax, %eax
+.ad_dk:
+    cmp     $32, %eax
+    jge     .ad_kd
+    cmp     %ecx, %eax
+    jge     .ad_kp
+    movzbl  (%rdi, %rax, 2), %r9d
+    mov     %r9b, (%r8, %rax)
+    inc     %eax
+    jmp     .ad_dk
+.ad_kp:
+    movb    $0, (%r8, %rax)
+    inc     %eax
+    jmp     .ad_dk
+.ad_kd:
+    movdqu  (%r8), %xmm1
+    movdqu  16(%r8), %xmm2
+    movdqa  %xmm2, %xmm3
+    aesimc  %xmm3, %xmm3
+    movdqa  %xmm1, %xmm4
+    aesimc  %xmm4, %xmm4
+    lea     64(%r8), %r10
+    xor     %eax, %eax
+.ad_dd:
+    cmp     %edx, %eax
+    jge     .ad_dec
+    movzbl  (%rsi, %rax, 2), %r9d
+    mov     %r9b, (%r10, %rax)
+    inc     %eax
+    jmp     .ad_dd
+.ad_dec:
+    mov     %eax, %ebx
+    lea     64(%r8), %rsi
+    lea     1024(%r8), %rdi
+    xor     %ecx, %ecx
+.ad_db:
+    cmp     %ebx, %ecx
+    jge     .ad_dd2
+    movdqu  (%rsi, %rcx), %xmm0
+    pxor    %xmm1, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdeclast %xmm1, %xmm0
+    movdqu  %xmm0, (%rdi, %rcx)
+    add     $16, %ecx
+    jmp     .ad_db
+.ad_dd2:
+    lea     1024(%r8), %rsi
+    movzbl  -1(%rsi, %rbx), %eax
+    sub     %eax, %ebx
+    mov     %r15, %r9
+    xor     %ecx, %ecx
+.ad_ts:
+    cmp     %ebx, %ecx
+    jge     .ad_push
+    movzbl  (%rsi, %rcx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %ecx
+    jmp     .ad_ts
+.ad_push:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r9, (%r14)
+    movq    %rcx, 8(%r14)
+    jmp     vm_loop
+
+# __mmap_file(path, size) → ptr
+.call_mmap_file:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.mm_dec:
+    cmp     %rdx, %rcx
+    jge     .mm_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .mm_dec
+.mm_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    mov     $0x42, %esi
+    mov     $0644, %edx
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .mm_fail
+    mov     %eax, %ebx
+    mov     $77, %eax
+    mov     %ebx, %edi
+    mov     %r8, %rsi
+    syscall
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi
+    mov     %r8, %rsi
+    mov     $3, %edx
+    mov     $1, %r10d
+    mov     %ebx, %r8d
+    xor     %r9d, %r9d
+    syscall
+    push    %rax
+    mov     $SYS_CLOSE, %eax
+    mov     %ebx, %edi
+    syscall
+    pop     %rax
+    test    %rax, %rax
+    js      .mm_fail
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.mm_fail:
+    pop     %rbx
+    sub     $16, %r14
+    mov     $0xBFF0000000000000, %rax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __munmap_file(ptr, size) → 0
+.call_munmap_file:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rsi
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi
+    add     $16, %r14
+    mov     $SYS_MUNMAP, %eax
+    syscall
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __simd_compose4(a,b,c,d) → composed mol
+.call_simd_compose4:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm3
+    cvttsd2si %xmm3, %r11d
+    add     $16, %r14
+    movsd   (%r14), %xmm2
+    cvttsd2si %xmm2, %r10d
+    add     $16, %r14
+    movsd   (%r14), %xmm1
+    cvttsd2si %xmm1, %r9d
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8d
+    add     $16, %r14
+    # compose a+b→r8, then +c, then +d (3 iterations)
+    mov     $3, %ecx
+    lea     ed25519_tmp(%rip), %rdi
+    mov     %r9d, (%rdi)
+    mov     %r10d, 4(%rdi)
+    mov     %r11d, 8(%rdi)
+.sc4_loop:
+    test    %ecx, %ecx
+    jz      .sc4_done
+    mov     (%rdi), %r9d
+    # compose r8d + r9d → r8d (per dimension: floor((2*a+b)/3))
+    # S
+    mov     %r8d, %eax
+    shr     $12, %eax
+    and     $0xF, %eax
+    mov     %r9d, %edx
+    shr     $12, %edx
+    and     $0xF, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0xF, %eax
+    shl     $12, %eax
+    mov     %eax, %ebx
+    # R
+    mov     %r8d, %eax
+    shr     $8, %eax
+    and     $0xF, %eax
+    mov     %r9d, %edx
+    shr     $8, %edx
+    and     $0xF, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0xF, %eax
+    shl     $8, %eax
+    or      %eax, %ebx
+    # V
+    mov     %r8d, %eax
+    shr     $5, %eax
+    and     $0x7, %eax
+    mov     %r9d, %edx
+    shr     $5, %edx
+    and     $0x7, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0x7, %eax
+    shl     $5, %eax
+    or      %eax, %ebx
+    # A
+    mov     %r8d, %eax
+    shr     $2, %eax
+    and     $0x7, %eax
+    mov     %r9d, %edx
+    shr     $2, %edx
+    and     $0x7, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0x7, %eax
+    shl     $2, %eax
+    or      %eax, %ebx
+    # T
+    mov     %r8d, %eax
+    and     $0x3, %eax
+    mov     %r9d, %edx
+    and     $0x3, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0x3, %eax
+    or      %eax, %ebx
+    mov     %ebx, %r8d
+    add     $4, %rdi
+    dec     %ecx
+    jmp     .sc4_loop
+.sc4_done:
+    mov     %ebx, %eax
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __text_to_pw(str, tbl) → array [pw, freq, ...]
+.call_text_to_pw:
+    add     %rcx, %r13
+    push    %r12
+    mov     (%r14), %r9
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    push    %rsi
+    push    %rdx
+    mov     (%r9), %r8
+    lea     8(%r9), %r9
+    push    %r8
+    push    %r9
+    mov     %r15, %rbx
+    lea     65536(%r15), %rbp
+    lea     196608(%r15), %r12
+    lea     458752(%r15), %r15
+    push    %rdi
+    mov     %rbx, %rdi
+    mov     $458752, %ecx
+    xor     %eax, %eax
+    rep     stosb
+    pop     %rdi
+    mov     16(%rsp), %rcx
+    mov     24(%rsp), %rsi
+    mov     (%rsp), %r9
+    mov     8(%rsp), %r8
+    xor     %eax, %eax
+.ttp_loop:
+    cmp     %rcx, %rax
+    jge     .ttp_done
+    movzwl  (%rsi, %rax, 2), %edi
+    and     $0xFF, %edi
+    cmp     $0x80, %edi
+    jb      .ttp_1b
+    cmp     $0xE0, %edi
+    jb      .ttp_2b
+    cmp     $0xF0, %edi
+    jb      .ttp_3b
+    and     $0x07, %edi
+    shl     $18, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    shl     $12, %edx
+    or      %edx, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    shl     $6, %edx
+    or      %edx, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    or      %edx, %edi
+    inc     %eax
+    jmp     .ttp_cp
+.ttp_3b:
+    and     $0x0F, %edi
+    shl     $12, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    shl     $6, %edx
+    or      %edx, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    or      %edx, %edi
+    inc     %eax
+    jmp     .ttp_cp
+.ttp_2b:
+    and     $0x1F, %edi
+    shl     $6, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    or      %edx, %edi
+    inc     %eax
+    jmp     .ttp_cp
+.ttp_1b:
+    inc     %eax
+.ttp_cp:
+    push    %rax
+    push    %rcx
+    push    %rsi
+    mov     %edi, %eax
+    imul    $40503, %eax
+    and     $0xFFFF, %eax
+    addl    $1, (%r12, %rax, 4)
+    cmpb    $0, (%rbx, %rax)
+    jne     .ttp_seen
+    movb    $1, (%rbx, %rax)
+    mov     %edi, %ecx
+    shl     $1, %ecx
+    lea     1(%rcx), %edx
+    cmp     %r8d, %edx
+    jge     .ttp_seen
+    movzbl  (%r9, %rcx), %edx
+    movzbl  1(%r9, %rcx), %ecx
+    shl     $8, %ecx
+    or      %ecx, %edx
+    movw    %dx, (%rbp, %rax, 2)
+.ttp_seen:
+    pop     %rsi
+    pop     %rcx
+    pop     %rax
+    jmp     .ttp_loop
+.ttp_done:
+    add     $32, %rsp
+    xor     %ecx, %ecx
+    xor     %eax, %eax
+.ttp_cnt:
+    cmp     $65536, %eax
+    jge     .ttp_build
+    cmpb    $0, (%rbx, %rax)
+    je      .ttp_cn
+    inc     %ecx
+.ttp_cn:
+    inc     %eax
+    jmp     .ttp_cnt
+.ttp_build:
+    mov     %r15, %rdi
+    lea     (%rcx, %rcx), %rax
+    mov     %rax, (%r15)
+    add     $8, %r15
+    xor     %eax, %eax
+.ttp_emit:
+    cmp     $65536, %eax
+    jge     .ttp_fin
+    cmpb    $0, (%rbx, %rax)
+    je      .ttp_en
+    push    %rax
+    movzwl  (%rbp, %rax, 2), %edx
+    cvtsi2sd %edx, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    push    %rax
+    mov     (%r12, %rax, 4), %edx
+    cvtsi2sd %edx, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+.ttp_en:
+    inc     %eax
+    jmp     .ttp_emit
+.ttp_fin:
+    pop     %r12
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __text_to_chain(str, tbl) → array [pw0, pw1, ...]
+.call_text_to_chain:
+    add     %rcx, %r13
+    mov     (%r14), %r9
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     (%r9), %r8
+    lea     8(%r9), %r9
+    mov     %r15, %rdi
+    add     $8, %r15
+    xor     %eax, %eax
+    xor     %ecx, %ecx
+.ttc_loop:
+    cmp     %rdx, %rax
+    jge     .ttc_done
+    movzwl  (%rsi, %rax, 2), %r10d
+    and     $0xFF, %r10d
+    cmp     $0x80, %r10d
+    jb      .ttc_1b
+    cmp     $0xE0, %r10d
+    jb      .ttc_2b
+    cmp     $0xF0, %r10d
+    jb      .ttc_3b
+    and     $0x07, %r10d
+    shl     $18, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    shl     $12, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    shl     $6, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    jmp     .ttc_cp
+.ttc_3b:
+    and     $0x0F, %r10d
+    shl     $12, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    shl     $6, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    jmp     .ttc_cp
+.ttc_2b:
+    and     $0x1F, %r10d
+    shl     $6, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    jmp     .ttc_cp
+.ttc_1b:
+    inc     %eax
+.ttc_cp:
+    push    %rax
+    push    %rdx
+    mov     %r10d, %eax
+    shl     $1, %eax
+    lea     1(%rax), %r11d
+    cmp     %r8d, %r11d
+    jge     .ttc_skip
+    movzbl  (%r9, %rax), %r11d
+    movzbl  1(%r9, %rax), %eax
+    shl     $8, %eax
+    or      %eax, %r11d
+    cvtsi2sd %r11d, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    inc     %ecx
+.ttc_skip:
+    pop     %rdx
+    pop     %rax
+    jmp     .ttc_loop
+.ttc_done:
+    movq    %rcx, (%rdi)
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __sha512(data) → 128-char hex (FIPS 180-4)
+.call_sha512:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha512_input(%rip), %rdi
+    xor     %ecx, %ecx
+.s5d:
+    cmp     %rdx, %rcx
+    jge     .s5dd
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .s5d
+.s5dd:
+    mov     %ecx, %r8d
+    lea     sha512_state(%rip), %rdi
+    movabs  $0x6a09e667f3bcc908, %rax; mov %rax, (%rdi)
+    movabs  $0xbb67ae8584caa73b, %rax; mov %rax, 8(%rdi)
+    movabs  $0x3c6ef372fe94f82b, %rax; mov %rax, 16(%rdi)
+    movabs  $0xa54ff53a5f1d36f1, %rax; mov %rax, 24(%rdi)
+    movabs  $0x510e527fade682d1, %rax; mov %rax, 32(%rdi)
+    movabs  $0x9b05688c2b3e6c1f, %rax; mov %rax, 40(%rdi)
+    movabs  $0x1f83d9abfb41bd6b, %rax; mov %rax, 48(%rdi)
+    movabs  $0x5be0cd19137e2179, %rax; mov %rax, 56(%rdi)
+    lea     sha512_input(%rip), %rdi
+    mov     %r8d, %ecx
+    movb    $0x80, (%rdi, %rcx)
+    inc     %ecx
+.s5p:
+    mov     %ecx, %eax
+    and     $127, %eax
+    cmp     $112, %eax
+    je      .s5pd
+    movb    $0, (%rdi, %rcx)
+    inc     %ecx
+    jmp     .s5p
+.s5pd:
+    movq    $0, (%rdi, %rcx)
+    add     $8, %ecx
+    mov     %r8d, %eax
+    shl     $3, %eax
+    bswap   %rax
+    mov     %rax, (%rdi, %rcx)
+    add     $8, %ecx
+    # W init
+    lea     sha512_input(%rip), %rsi
+    lea     sha512_w(%rip), %rdi
+    xor     %eax, %eax
+.s5wi:
+    cmp     $16, %eax
+    jge     .s5we
+    mov     (%rsi, %rax, 8), %rdx
+    bswap   %rdx
+    mov     %rdx, (%rdi, %rax, 8)
+    inc     %eax
+    jmp     .s5wi
+.s5we:
+    cmp     $80, %eax
+    jge     .s5comp
+    lea     sha512_w(%rip), %rdi
+    lea     -2(%rax), %ecx
+    mov     (%rdi, %rcx, 8), %rdx
+    mov     %rdx, %r10
+    ror     $19, %r10
+    mov     %rdx, %r11
+    ror     $61, %r11
+    xor     %r11, %r10
+    mov     %rdx, %r11
+    shr     $6, %r11
+    xor     %r11, %r10
+    lea     -15(%rax), %ecx
+    mov     (%rdi, %rcx, 8), %rdx
+    mov     %rdx, %r11
+    ror     $1, %r11
+    mov     %rdx, %rcx
+    ror     $8, %rcx
+    xor     %rcx, %r11
+    shr     $7, %rdx
+    xor     %rdx, %r11
+    add     %r11, %r10
+    lea     -7(%rax), %ecx
+    add     (%rdi, %rcx, 8), %r10
+    lea     -16(%rax), %ecx
+    add     (%rdi, %rcx, 8), %r10
+    mov     %r10, (%rdi, %rax, 8)
+    inc     %eax
+    jmp     .s5we
+.s5comp:
+    push    %r12
+    push    %r14
+    push    %r15
+    push    %r13
+    push    %rbp
+    lea     sha512_state(%rip), %rsi
+    lea     ed25519_tmp(%rip), %rdi
+    xor     %eax, %eax
+.s5cs:
+    mov     (%rsi, %rax, 8), %rdx
+    mov     %rdx, (%rdi, %rax, 8)
+    inc     %eax
+    cmp     $8, %eax
+    jb      .s5cs
+    lea     sha512_w(%rip), %r13
+    lea     sha512_k(%rip), %rbp
+    xor     %r14d, %r14d
+.s5r:
+    cmp     $80, %r14d
+    jge     .s5rd
+    lea     ed25519_tmp(%rip), %rdi
+    mov     0(%rdi), %r8
+    mov     32(%rdi), %r9
+    mov     56(%rdi), %rax
+    mov     %r9, %r10
+    ror     $14, %r10
+    mov     %r9, %r11
+    ror     $18, %r11
+    xor     %r11, %r10
+    mov     %r9, %r11
+    ror     $41, %r11
+    xor     %r11, %r10
+    mov     40(%rdi), %r11
+    mov     48(%rdi), %r12
+    mov     %r9, %rcx
+    and     %r11, %rcx
+    mov     %r9, %r15
+    not     %r15
+    and     %r12, %r15
+    xor     %r15, %rcx
+    add     %r10, %rax
+    add     %rcx, %rax
+    add     (%rbp, %r14, 8), %rax
+    add     (%r13, %r14, 8), %rax
+    mov     %r8, %r10
+    ror     $28, %r10
+    mov     %r8, %r11
+    ror     $34, %r11
+    xor     %r11, %r10
+    mov     %r8, %r11
+    ror     $39, %r11
+    xor     %r11, %r10
+    mov     8(%rdi), %r11
+    mov     16(%rdi), %r12
+    mov     %r8, %rcx
+    and     %r11, %rcx
+    mov     %r8, %r15
+    and     %r12, %r15
+    xor     %r15, %rcx
+    mov     %r11, %r15
+    and     %r12, %r15
+    xor     %r15, %rcx
+    add     %rcx, %r10
+    mov     48(%rdi), %rcx
+    mov     %rcx, 56(%rdi)
+    mov     40(%rdi), %rcx
+    mov     %rcx, 48(%rdi)
+    mov     32(%rdi), %rcx
+    mov     %rcx, 40(%rdi)
+    mov     24(%rdi), %rcx
+    add     %rax, %rcx
+    mov     %rcx, 32(%rdi)
+    mov     16(%rdi), %rcx
+    mov     %rcx, 24(%rdi)
+    mov     8(%rdi), %rcx
+    mov     %rcx, 16(%rdi)
+    mov     0(%rdi), %rcx
+    mov     %rcx, 8(%rdi)
+    add     %r10, %rax
+    mov     %rax, 0(%rdi)
+    inc     %r14d
+    jmp     .s5r
+.s5rd:
+    lea     sha512_state(%rip), %rsi
+    lea     ed25519_tmp(%rip), %rdi
+    xor     %eax, %eax
+.s5as:
+    mov     (%rdi, %rax, 8), %rdx
+    add     %rdx, (%rsi, %rax, 8)
+    inc     %eax
+    cmp     $8, %eax
+    jb      .s5as
+    pop     %rbp
+    pop     %r13
+    pop     %r15
+    pop     %r14
+    pop     %r12
+    lea     sha512_state(%rip), %rsi
+    mov     %r15, %rdi
+    xor     %edx, %edx
+.s5hl:
+    mov     (%rsi, %rdx, 8), %rax
+    mov     $16, %r8d
+.s5bl:
+    rol     $4, %rax
+    mov     %eax, %r10d
+    and     $0xF, %r10d
+    add     $0x2130, %r10d
+    cmp     $0x213A, %r10d
+    jb      .s5hd
+    add     $0x27, %r10d
+.s5hd:
+    movw    %r10w, (%rdi)
+    add     $2, %rdi
+    dec     %r8d
+    jnz     .s5bl
+    inc     %edx
+    cmp     $8, %edx
+    jb      .s5hl
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $128, 8(%r14)
+    mov     %rdi, %r15
+    jmp     vm_loop
+
+# SHA-512 K constants
+.section .rodata
+.align 8
+sha512_k:
+    .quad 0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc
+    .quad 0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118
+    .quad 0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2
+    .quad 0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694
+    .quad 0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65
+    .quad 0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5
+    .quad 0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4
+    .quad 0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70
+    .quad 0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df
+    .quad 0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b
+    .quad 0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30
+    .quad 0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8
+    .quad 0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8
+    .quad 0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3
+    .quad 0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec
+    .quad 0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b
+    .quad 0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178
+    .quad 0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b
+    .quad 0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c
+    .quad 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817
+.section .text
 
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -5996,3 +7554,17 @@ eval_total:
     .space 8                            # total bytes read from stdin
 eval_offset:
     .space 8                            # current processing offset in buffer
+net_sockaddr:
+    .space 16
+net_recv_buf:
+    .space 65536
+net_dents_buf:
+    .space 8192
+sha512_state:
+    .space 64
+sha512_w:
+    .space 640
+sha512_input:
+    .space 2048
+ed25519_tmp:
+    .space 512
