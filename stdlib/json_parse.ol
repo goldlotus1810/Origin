@@ -96,23 +96,23 @@ fn _jp_parse_array(_ja_t, _ja_pos) {
 fn _jp_parse_object(_jo_t, _jo_pos) {
     let _ = __set_at(_jo_pos, 0, __array_get(_jo_pos, 0) + 1);
     _jp_skip_ws(_jo_t, _jo_pos);
-    let _jo_result = { _json: 1 };
+    let _jo_result = [];
     if __char_code(char_at(_jo_t, __array_get(_jo_pos, 0))) == 125 { let _ = __set_at(_jo_pos, 0, __array_get(_jo_pos, 0) + 1); return _jo_result; };
-    // First key-value
     let _jo_key = _jp_parse_string(_jo_t, _jo_pos);
     _jp_skip_ws(_jo_t, _jo_pos);
     let _ = __set_at(_jo_pos, 0, __array_get(_jo_pos, 0) + 1);
     let _jo_val = _jp_parse_value(_jo_t, _jo_pos);
-    let _jo_result = __dict_set(_jo_result, _jo_key, _jo_val);
+    let _ = __push(_jo_result, _jo_key);
+    let _ = __push(_jo_result, _jo_val);
     _jp_skip_ws(_jo_t, _jo_pos);
-    // Additional key-values
     while __char_code(char_at(_jo_t, __array_get(_jo_pos, 0))) == 44 {
         let _ = __set_at(_jo_pos, 0, __array_get(_jo_pos, 0) + 1);
         let _jo_key = _jp_parse_string(_jo_t, _jo_pos);
         _jp_skip_ws(_jo_t, _jo_pos);
         let _ = __set_at(_jo_pos, 0, __array_get(_jo_pos, 0) + 1);
         let _jo_val = _jp_parse_value(_jo_t, _jo_pos);
-        let _jo_result = __dict_set(_jo_result, _jo_key, _jo_val);
+        let _ = __push(_jo_result, _jo_key);
+        let _ = __push(_jo_result, _jo_val);
         _jp_skip_ws(_jo_t, _jo_pos);
     };
     let _ = __set_at(_jo_pos, 0, __array_get(_jo_pos, 0) + 1);

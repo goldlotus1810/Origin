@@ -174,7 +174,7 @@ if command -v python3 &>/dev/null; then
 
             if [ -f "$bytecode_file" ]; then
                 # Run and check it doesn't crash (no expected output for legacy tests)
-                if timeout 5 "$BINARY" "$bytecode_file" >/dev/null 2>&1; then
+                if echo "" | timeout 5 "$BINARY" "$bytecode_file" >/dev/null 2>&1; then
                     PASS=$((PASS + 1))
                     echo -e "  $GREEN  OK$NC vm/$testname (no crash)"
                 else
