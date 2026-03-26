@@ -893,6 +893,20 @@ op_call:
 .op_call_have_hash:
     pop     %rcx
 
+    # Profile: increment call counter for this hash
+    # Direct-mapped: profile_counters[hash & 0xFF] += 1
+    # profile_hashes[hash & 0xFF] = hash (last writer wins)
+    push    %rax
+    push    %rdx
+    lea     profile_counters(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0xFF, %esi
+    incl    (%rdx, %rsi, 4)            # counter[hash & 255]++
+    lea     profile_hashes(%rip), %rdx
+    mov     %rax, (%rdx, %rsi, 8)     # record hash
+    pop     %rdx
+    pop     %rax
+
     # ── Math builtins ──
     movabs  $0x57252090B96BC074, %rdx   # __hyp_add
     cmp     %rdx, %rax
@@ -1248,6 +1262,13 @@ op_call:
     movabs  $0x05F32B674266E367, %rdx   # __simd_compose4(a,b,c,d)
     cmp     %rdx, %rax
     je      .call_simd_compose4
+    # ── Profile ──
+    movabs  $0x45D4F29E55E01818, %rdx   # __profile_top(n) → array of [hash, count] top-n
+    cmp     %rdx, %rax
+    je      .call_profile_top
+    movabs  $0xFC07F3E9B18D01A4, %rdx   # __profile_reset() → clear counters
+    cmp     %rdx, %rax
+    je      .call_profile_reset
     # ── JIT ──
     movabs  $0x641F898B1A9D68F6, %rdx   # __memcpy_to(dest_ptr, bytes_buf, len)
     cmp     %rdx, %rax
@@ -3301,6 +3322,72 @@ op_call:
 # ═══════════════════════════════════════════════════════════════════════════
 # NEW BUILTINS — Rebuilt from REBUILD_NOTES.md
 # ═══════════════════════════════════════════════════════════════════════════
+
+# __profile_top(n) → array [hash0, count0, hash1, count1, ...]
+.call_profile_top:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8d             # n = how many top entries
+    add     $16, %r14
+    # Build result array: scan 256 counters, find top-N
+    mov     %r15, %rdi                 # array base
+    lea     (%r8, %r8), %rax          # count = n*2
+    mov     %rax, (%r15)
+    add     $8, %r15
+    # Simple: emit all non-zero entries (up to n)
+    lea     profile_counters(%rip), %rsi
+    lea     profile_hashes(%rip), %rdx
+    xor     %ecx, %ecx                 # emitted count
+    xor     %eax, %eax                 # index
+.pt_loop:
+    cmp     $256, %eax
+    jge     .pt_done
+    cmp     %r8d, %ecx
+    jge     .pt_done
+    cmpl    $0, (%rsi, %rax, 4)
+    je      .pt_next
+    # Emit hash + count
+    push    %rax
+    mov     (%rdx, %rax, 8), %rax     # hash
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    push    %rax
+    movl    (%rsi, %rax, 4), %eax     # count
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    inc     %ecx
+.pt_next:
+    inc     %eax
+    jmp     .pt_loop
+.pt_done:
+    # Fix array count
+    lea     (%rcx, %rcx), %rax
+    mov     %rax, (%rdi)
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __profile_reset() → clear all counters
+.call_profile_reset:
+    add     %rcx, %r13
+    push    %rdi
+    lea     profile_counters(%rip), %rdi
+    mov     $1024, %ecx
+    xor     %eax, %eax
+    rep     stosb
+    pop     %rdi
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
 
 # __memcpy_to(dest_ptr, bytes_buf, len) → copy bytes buffer to raw address
 .call_memcpy_to:
@@ -7696,6 +7783,10 @@ eval_total:
     .space 8                            # total bytes read from stdin
 eval_offset:
     .space 8                            # current processing offset in buffer
+profile_counters:
+    .space 1024                         # 256 × 4-byte counters
+profile_hashes:
+    .space 2048                         # 256 × 8-byte hashes
 hn_cache:
     .space 4096                         # 256 entries × [ptr:8][hash:8] = 16 bytes each
 net_sockaddr:
