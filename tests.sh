@@ -371,7 +371,7 @@ run_olang_test "type/array" \
 
 run_olang_test "type/function" \
     'let f = fn(x) { return x; }; emit __type_of(f);' \
-    "function"
+    "closure"
 
 # 2.12 Bitwise
 run_olang_test "bitwise/or" \

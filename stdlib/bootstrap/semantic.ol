@@ -80,7 +80,7 @@ fn _prefill_output() {
     if _g_output_ready == 0 {
         // Use __array_range to allocate exact size in ONE shot (no relocation!)
         // Values [0..16383] will be overwritten by set_at during codegen
-        let _g_output = __array_range(16384);
+        let _g_output = __array_range(65536);
         let _g_output_ready = 1;
     };
     // NOTE: _g_pos NOT reset here — streaming compiler accumulates.

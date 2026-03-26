@@ -10,38 +10,29 @@
 
 // ── Type checking ──
 
-// Note: __type_of returns raw ASCII strings, not u16 molecules.
-// Direct == comparison fails. Use first char code to distinguish:
-//   number=110(n), string=115(s), array=97(a), dict=100(d), closure=99(c)
+// __type_of now returns u16 molecules: "number", "string", "array", "dict", "closure", "nil"
 
 pub fn type_name(_tn_val) {
-    let _tn_c = __char_code(char_at(__type_of(_tn_val), 0));
-    if _tn_c == 110 { return "Num"; };
-    if _tn_c == 115 { return "Str"; };
-    if _tn_c == 97 { return "Array"; };
-    if _tn_c == 100 { return "Dict"; };
-    if _tn_c == 99 { return "Fn"; };
+    let _tn_t = __type_of(_tn_val);
+    if _tn_t == "number" { return "Num"; };
+    if _tn_t == "string" { return "Str"; };
+    if _tn_t == "array" { return "Array"; };
+    if _tn_t == "dict" { return "Dict"; };
+    if _tn_t == "closure" { return "Fn"; };
     return "Unknown";
 }
 
-pub fn is_num(_in_v) { return __char_code(char_at(__type_of(_in_v), 0)) == 110; }
-pub fn is_str(_is_v) { return __char_code(char_at(__type_of(_is_v), 0)) == 115; }
-pub fn is_array(_ia_v) { return __char_code(char_at(__type_of(_ia_v), 0)) == 97; }
-pub fn is_dict(_id_v) { return __char_code(char_at(__type_of(_id_v), 0)) == 100; }
-pub fn is_fn(_if_v) { return __char_code(char_at(__type_of(_if_v), 0)) == 99; }
+pub fn is_num(_in_v) { return __type_of(_in_v) == "number"; }
+pub fn is_str(_is_v) { return __type_of(_is_v) == "string"; }
+pub fn is_array(_ia_v) { return __type_of(_ia_v) == "array"; }
+pub fn is_dict(_id_v) { return __type_of(_id_v) == "dict"; }
+pub fn is_fn(_if_v) { return __type_of(_if_v) == "closure"; }
 
 // ── Type assertion ──
 
 pub fn assert_type(_at_val, _at_expected) {
     let _at_actual = type_name(_at_val);
-    // Use length + first char for reliable comparison (avoids encoding mismatch)
-    let _at_match = 0;
-    if len(_at_actual) == len(_at_expected) {
-        if __char_code(char_at(_at_actual, 0)) == __char_code(char_at(_at_expected, 0)) {
-            _at_match = 1;
-        };
-    };
-    if _at_match == 0 {
+    if _at_actual != _at_expected {
         __throw("Type error: expected " + _at_expected + ", got " + _at_actual);
     };
     return _at_val;

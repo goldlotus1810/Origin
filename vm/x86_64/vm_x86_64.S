@@ -2105,33 +2105,33 @@ op_call:
     je      .typeof_fn
     test    %rax, %rax
     jz      .typeof_nil
-    # Default: string
-    lea     str_string(%rip), %rax
+    # Default: string (u16 molecules)
+    lea     u16_string(%rip), %rax
     mov     %rax, (%r14)
     movq    $6, 8(%r14)
     jmp     vm_loop
 .typeof_number:
-    lea     str_number(%rip), %rax
+    lea     u16_number(%rip), %rax
     mov     %rax, (%r14)
     movq    $6, 8(%r14)
     jmp     vm_loop
 .typeof_array:
-    lea     str_array(%rip), %rax
+    lea     u16_array(%rip), %rax
     mov     %rax, (%r14)
     movq    $5, 8(%r14)
     jmp     vm_loop
 .typeof_dict:
-    lea     str_dict(%rip), %rax
+    lea     u16_dict(%rip), %rax
     mov     %rax, (%r14)
     movq    $4, 8(%r14)
     jmp     vm_loop
 .typeof_fn:
-    lea     str_fn(%rip), %rax
+    lea     u16_closure(%rip), %rax
     mov     %rax, (%r14)
-    movq    $8, 8(%r14)
+    movq    $7, 8(%r14)
     jmp     vm_loop
 .typeof_nil:
-    lea     str_nil(%rip), %rax
+    lea     u16_nil(%rip), %rax
     mov     %rax, (%r14)
     movq    $3, 8(%r14)
     jmp     vm_loop
@@ -8493,6 +8493,14 @@ str_array:      .ascii "array"
 str_dict:       .ascii "dict"
 str_fn:         .ascii "function"
 str_nil:        .ascii "nil"
+
+# u16 molecule-encoded type strings (0x21XX per char)
+u16_number:     .short 0x216E, 0x2175, 0x216D, 0x2162, 0x2165, 0x2172  # "number"
+u16_string:     .short 0x2173, 0x2174, 0x2172, 0x2169, 0x216E, 0x2167  # "string"
+u16_array:      .short 0x2161, 0x2172, 0x2172, 0x2161, 0x2179           # "array"
+u16_dict:       .short 0x2164, 0x2169, 0x2163, 0x2174                   # "dict"
+u16_closure:    .short 0x2163, 0x216C, 0x216F, 0x2173, 0x2175, 0x2172, 0x2165  # "closure"
+u16_nil:        .short 0x216E, 0x2169, 0x216C                           # "nil"
 
 # ── Float constants ─────────────────────────────────────────────────────
 .align 8
