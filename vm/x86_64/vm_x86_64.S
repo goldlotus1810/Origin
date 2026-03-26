@@ -7740,9 +7740,46 @@ op_halt:
     syscall
 
 op_halt_err:
-    mov     $SYS_EXIT, %eax
-    mov     $1, %edi                    # exit(1)
+    # Print crash info: PC and stack trace
+    lea     msg_crash_at(%rip), %rsi
+    mov     $10, %edx
+    mov     $2, %edi
+    mov     $SYS_WRITE, %eax
     syscall
+    # Print PC as hex
+    mov     %r13, %rdi
+    call    print_hex_u64
+    # Print newline
+    lea     msg_newline(%rip), %rsi
+    mov     $1, %edx
+    mov     $2, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Exit
+    mov     $SYS_EXIT, %eax
+    mov     $1, %edi
+    syscall
+
+# Print 64-bit value as hex to stderr
+print_hex_u64:
+    lea     hex_chars(%rip), %rsi
+    lea     -16(%rsp), %rcx        # temp buffer on stack
+    mov     $16, %r8d
+.ph_loop:
+    dec     %r8d
+    mov     %rdi, %rax
+    and     $0xF, %eax
+    movzbl  (%rsi, %rax), %edx
+    movb    %dl, (%rcx, %r8)
+    shr     $4, %rdi
+    test    %r8d, %r8d
+    jnz     .ph_loop
+    mov     %rcx, %rsi
+    mov     $16, %edx
+    mov     $2, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    ret
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Read-only data
@@ -7760,6 +7797,12 @@ msg_pc:
 msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0
+
+msg_crash_at:
+    .ascii "CRASH PC=0x"
+msg_newline:
+    .ascii "\n"
+    .byte 0
 
 msg_open:
     .ascii "Cannot open binary!\n"
