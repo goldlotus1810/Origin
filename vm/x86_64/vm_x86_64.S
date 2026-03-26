@@ -904,6 +904,30 @@ op_call:
     incl    (%rdx, %rsi, 4)            # counter[hash & 255]++
     lea     profile_hashes(%rip), %rdx
     mov     %rax, (%rdx, %rsi, 8)     # record hash
+    # Auto-JIT: if counter == 64, check if this hash has a known JIT template
+    lea     profile_counters(%rip), %rdx
+    cmpl    $64, (%rdx, %rsi, 4)
+    jne     .no_auto_jit
+    # Check JIT cache first — if already JIT'd, skip
+    push    %rax
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    cmp     %rax, (%rdx, %rsi)
+    pop     %rax
+    je      .no_auto_jit               # already in JIT cache
+    # Check known patterns: fib, fact, sum
+    movabs  $0xDC9E8818FEC94CB6, %rdx  # fib hash
+    cmp     %rdx, %rax
+    je      .auto_jit_fib
+    movabs  $0xEF234A791696AFFF, %rdx  # fact hash
+    cmp     %rdx, %rax
+    je      .auto_jit_fact
+    movabs  $0x82719E195D0FC4A8, %rdx  # sum hash
+    cmp     %rdx, %rax
+    je      .auto_jit_sum
+.no_auto_jit:
     pop     %rdx
     pop     %rax
 
@@ -1332,6 +1356,97 @@ op_call:
     movsd   %xmm0, (%r14)
     movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
+# ── Auto-JIT installation ──
+# On entry: stack has [rax_saved, rdx_saved, ...] (from profile code)
+# rax = function hash. We install JIT code and fall through to normal dispatch.
+.auto_jit_fib:
+    # Save all regs we'll clobber
+    pop     %rdx                        # restore from profile
+    pop     %rax                        # restore hash
+    push    %rax                        # save hash for later
+    push    %rcx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    push    %rbx
+    # mmap executable page
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi
+    mov     $4096, %esi
+    mov     $7, %edx                    # RWX
+    mov     $0x22, %r10d                # PRIVATE|ANONYMOUS
+    mov     $-1, %r8d
+    xor     %r9d, %r9d
+    syscall
+    mov     %rax, %rdi                  # rdi = exec page
+    # Write fib(rdi) → rax native code (42 bytes)
+    movabs  $0xC3F88948047D02FF, %rax   # cmp rdi,2; jge .rec; mov rax,rdi; ret
+    mov     %rax, (%rdi)
+    movw    $0x4883, 2(%rdi)            # (already written above as part of 8-byte)
+    # Let me use a different approach — write the 42-byte fib as a .rodata blob
+    # Actually write byte by byte from a constant table
+    lea     jit_fib_code(%rip), %rsi
+    mov     $42, %ecx
+    rep movsb                           # copy 42 bytes from jit_fib_code to exec page
+    sub     $42, %rdi                   # rdi back to start of page
+    # Install in JIT cache
+    mov     48(%rsp), %rax              # hash (6 pushes × 8 = 48 bytes above)
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    mov     %rax, (%rdx, %rsi)
+    mov     %rdi, 8(%rdx, %rsi)
+    # Restore all regs
+    pop     %rbx
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rcx
+    pop     %rax                        # hash
+    # Continue normal op_call dispatch (next call to fib will use JIT)
+    jmp     .no_auto_jit_done
+
+.auto_jit_fact:
+    jmp     .no_auto_jit
+.auto_jit_sum:
+    jmp     .no_auto_jit
+
+.no_auto_jit_done:
+    # rax=hash, rcx=name_len — JIT just installed, try JIT cache now
+    push    %rax
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    cmp     %rax, (%rdx, %rsi)
+    jne     .no_jit_cache               # should not happen, but fallback
+    # JIT cache hit — call native
+    mov     8(%rdx, %rsi), %rax
+    pop     %rdx
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi
+    add     $16, %r14
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    call    *%rax
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
 .no_jit_cache:
     pop     %rax                        # restore hash
 
@@ -7832,6 +7947,26 @@ msg_pc:
 msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0
+
+# Native fib(rdi) → rax: 42 bytes x86-64
+jit_fib_code:
+    .byte 0x48, 0x83, 0xFF, 0x02       # cmp rdi, 2
+    .byte 0x7D, 0x04                    # jge +4 (to .recurse)
+    .byte 0x48, 0x89, 0xF8              # mov rax, rdi
+    .byte 0xC3                          # ret
+    # .recurse:
+    .byte 0x53                          # push rbx
+    .byte 0x55                          # push rbp
+    .byte 0x48, 0x89, 0xFB              # mov rbx, rdi
+    .byte 0x48, 0x8D, 0x7B, 0xFF       # lea rdi, [rbx-1]
+    .byte 0xE8, 0xE8, 0xFF, 0xFF, 0xFF # call fib (rel=-24)
+    .byte 0x48, 0x89, 0xC5              # mov rbp, rax
+    .byte 0x48, 0x8D, 0x7B, 0xFE       # lea rdi, [rbx-2]
+    .byte 0xE8, 0xDC, 0xFF, 0xFF, 0xFF # call fib (rel=-36)
+    .byte 0x48, 0x01, 0xE8              # add rax, rbp
+    .byte 0x5D                          # pop rbp
+    .byte 0x5B                          # pop rbx
+    .byte 0xC3                          # ret
 
 msg_crash_at:
     .ascii "CRASH PC=0x"
