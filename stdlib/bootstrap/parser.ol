@@ -509,8 +509,11 @@ fn parse_primary(p) {
             // Also handles dict literal attempt: { key: val } → error + skip
             if ch == "{" {
                 advance(p);
-                // Lookahead: if next is ident followed by ":", it's a dict literal (unsupported)
-                // Skip to matching "}" to prevent cascading errors
+                // Empty dict: {} → return DictLit with no fields
+                if is_symbol_tok(peek(p), "}") {
+                    advance(p);
+                    return Expr::DictLit { fields: [] };
+                };
                 let _mol_peek = peek(p);
                 let _mol_is_dict = 0;
                 // Check for dict literal: { ident/keyword : value, ... }
