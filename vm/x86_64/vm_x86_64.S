@@ -1168,34 +1168,18 @@ op_call:
     cmp     (%rsi), %r12
     je      .closure_skip_scope
 
-    # Push scope frame to HEAP scope stack
-    lea     var_shadow_top(%rip), %rsi
-    mov     (%rsi), %rdx               # scope top = frame_start
-    # Save frame_start in frame_ptrs[depth]
+    # FAST scope save: just save var_table count (NO memcpy!)
+    # depth_stack[depth] = current count → 1 store, 8 bytes
     lea     closure_depth(%rip), %rax
     mov     (%rax), %rcx               # current depth
+    push    %rdi                        # save body_pc
+    lea     var_table_base(%rip), %rsi
+    mov     (%rsi), %rsi
+    mov     (%rsi), %rdx               # current var_table count
     lea     scope_frame_ptrs(%rip), %rax
-    mov     %rdx, (%rax, %rcx, 8)     # frame_ptrs[depth] = frame_start
+    mov     %rdx, (%rax, %rcx, 8)     # depth_stack[depth] = count
     lea     closure_depth(%rip), %rax
     incq    (%rax)                      # depth++
-    # Copy var_table to frame (save edi=body_pc first!)
-    push    %rdi                        # save body_pc (edi clobbered by rep movsb)
-    lea     var_table_base(%rip), %rsi
-    mov     (%rsi), %rsi               # var_table base
-    mov     (%rsi), %rcx               # count
-    mov     %rcx, (%rdx)               # write count to frame
-    push    %rdx                        # save frame_start
-    lea     8(%rdx), %rdi              # dest
-    lea     8(%rsi), %rsi              # src
-    mov     %rcx, %rax
-    imul    $24, %rax                  # byte count
-    mov     %eax, %ecx
-    rep     movsb
-    pop     %rdx                        # restore frame_start
-    # Update scope top
-    lea     8(%rdx, %rax), %rsi
-    lea     var_shadow_top(%rip), %rdi
-    mov     %rsi, (%rdi)
     pop     %rdi                        # restore body_pc
 
 .closure_skip_scope:
@@ -3208,31 +3192,18 @@ op_ret:
     lea     boot_bc_base(%rip), %rdi
     cmp     (%rdi), %r12
     je      vm_loop                     # returning to boot → no scope restore needed
-    # Returning to eval context: restore if depth > 0
+    # FAST scope restore: just truncate var_table count (NO memcpy!)
     lea     closure_depth(%rip), %rsi
     cmpq    $0, (%rsi)
     je      vm_loop
     decq    (%rsi)                      # depth--
     mov     (%rsi), %rcx               # new depth
-    # Get frame_start from frame_ptrs[depth]
+    # Restore count from depth_stack[depth]
     lea     scope_frame_ptrs(%rip), %rax
-    mov     (%rax, %rcx, 8), %rdx      # frame_start
-    # Restore var_table entries from snapshot
-    push    %r13                        # save PC (will be clobbered by rep movsb)
+    mov     (%rax, %rcx, 8), %rdx      # saved_count
     lea     var_table_base(%rip), %rdi
-    mov     (%rdi), %rdi               # var_table base
-    mov     (%rdx), %rcx               # saved count
-    mov     %rcx, (%rdi)               # restore count
-    lea     8(%rdi), %rdi              # dest = entries
-    lea     8(%rdx), %rsi              # src = snapshot
-    mov     %rcx, %rax
-    imul    $24, %rax
-    mov     %eax, %ecx
-    rep     movsb
-    pop     %r13                        # restore PC
-    # Rewind scope top
-    lea     var_shadow_top(%rip), %rsi
-    mov     %rdx, (%rsi)
+    mov     (%rdi), %rdi
+    mov     %rdx, (%rdi)               # truncate: var_table.count = saved_count
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5238,47 +5209,70 @@ hash_name:
     ret
 
 # var_store_hash: rax=hash, r8=val_ptr, r9=val_len
+# FRAME-AWARE: only search within current frame (depth_stack[depth-1]..count)
+# This ensures inner function "n" SHADOWS outer "n" instead of overwriting
 var_store_hash:
     push    %rbx
     lea     var_table_base(%rip), %rbx
     mov     (%rbx), %rbx               # table base
-    mov     (%rbx), %rcx               # count
-    test    %rcx, %rcx
-    jz      .vsh_new
+    mov     (%rbx), %rcx               # total count
 
-    # Search for existing hash
-    lea     8(%rbx), %rdi              # first entry
+    # Get frame_start: if depth > 0, start from depth_stack[depth-1]
+    push    %rax                        # save hash
+    lea     closure_depth(%rip), %rdi
+    mov     (%rdi), %rdi               # depth
+    xor     %r10d, %r10d               # frame_start = 0 (default: search all)
+    test    %rdi, %rdi
+    jz      .vsh_have_start
+    dec     %rdi
+    lea     scope_frame_ptrs(%rip), %r10
+    mov     (%r10, %rdi, 8), %r10d    # frame_start = depth_stack[depth-1]
+.vsh_have_start:
+    pop     %rax                        # restore hash
+
+    # entries_in_frame = count - frame_start
+    mov     %rcx, %rdi                 # total count
+    sub     %r10, %rdi                  # entries to search
+    test    %rdi, %rdi
+    jle     .vsh_new                    # no entries in frame → append
+
+    # Reverse search from LAST entry to frame_start
+    lea     -1(%rcx), %rdx
+    imul    $24, %rdx
+    lea     8(%rbx, %rdx), %rdi        # last entry ptr
+    mov     %rcx, %rdx
+    sub     %r10, %rdx                  # loop count = entries in frame
+
 .vsh_search:
-    cmp     (%rdi), %rax               # compare hash
+    cmp     (%rdi), %rax
     jne     .vsh_next
-    # Found — update
+    # Found in current frame — update
     mov     %r8, 8(%rdi)
     mov     %r9, 16(%rdi)
     pop     %rbx
     ret
 .vsh_next:
-    add     $24, %rdi
-    dec     %rcx
+    sub     $24, %rdi
+    dec     %rdx
     jnz     .vsh_search
+    # Not found in frame → append as shadow
 
 .vsh_new:
-    # New entry: append at table end
+    # Append new entry at end
     lea     var_table_base(%rip), %rbx
     mov     (%rbx), %rbx
-    mov     (%rbx), %rcx              # current count
-    lea     8(%rbx), %rdi
-    imul    $24, %rcx, %rcx
-    add     %rcx, %rdi                 # ptr to new entry
-    mov     %rax, (%rdi)               # hash
-    mov     %r8, 8(%rdi)              # val_ptr
-    mov     %r9, 16(%rdi)             # val_len
-    lea     var_table_base(%rip), %rbx
-    mov     (%rbx), %rbx
+    mov     (%rbx), %rcx
+    imul    $24, %rcx, %rdx
+    lea     8(%rbx, %rdx), %rdi
+    mov     %rax, (%rdi)
+    mov     %r8, 8(%rdi)
+    mov     %r9, 16(%rdi)
     incq    (%rbx)                     # count++
     pop     %rbx
     ret
 
 # var_load_hash: rax=hash → rax=val_ptr, rdx=val_len
+# REVERSE search: start from LAST entry (locals found first, O(1) for recent vars)
 var_load_hash:
     push    %rbx
     lea     var_table_base(%rip), %rbx
@@ -5287,17 +5281,20 @@ var_load_hash:
     test    %rcx, %rcx
     jz      .vlh_not_found
 
-    lea     8(%rbx), %rdi
+    # Start from last entry
+    lea     -1(%rcx), %rdx
+    imul    $24, %rdx
+    lea     8(%rbx, %rdx), %rdi
+
 .vlh_search:
     cmp     (%rdi), %rax
     jne     .vlh_next
-    # Found
     mov     8(%rdi), %rax
     mov     16(%rdi), %rdx
     pop     %rbx
     ret
 .vlh_next:
-    add     $24, %rdi
+    sub     $24, %rdi
     dec     %rcx
     jnz     .vlh_search
 
