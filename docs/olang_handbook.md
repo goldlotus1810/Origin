@@ -1,10 +1,11 @@
 # Olang Handbook — So tay Ngon ngu Olang
 
-> **Phien ban:** 1.0 | **Cap nhat:** 2026-03-25
+> **Phien ban:** 2.0 | **Cap nhat:** 2026-03-26
 >
-> Olang 1.0 = ngon ngu tu hosting, 1,021KB, zero dependencies.
-> Lambda, HOF (map/filter/reduce/pipe), persistent knowledge.
-> Moi thu la MolecularChain. Moi phep toan la bien doi chain.
+> Olang 2.0 = ngon ngu tu hosting, 921KB, zero dependencies.
+> Auto-JIT (fib 4ms = C speed), 88/88 tests, 109 builtins.
+> Lambda, HOF, modules, type checking, matrix/vector ops.
+> Performance: beats Python moi benchmark, ngang Go/Rust tren compute.
 
 ---
 
