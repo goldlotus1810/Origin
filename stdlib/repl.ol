@@ -58,6 +58,71 @@ fn _boot_embedded_kt() {
 
 // _boot_embedded and _learn_text REMOVED — KnowTree only (Sprint 5)
 
+// ── Module expansion: replace `use "path";` with file contents ──
+// Find position of `use "` after a `;` or at start. Returns -1 if not found.
+fn _find_use_pos(_fup_src) {
+    let _fup_len = len(_fup_src);
+    if _fup_len < 6 { return 0 - 1; };
+    // Check at position 0
+    if __substr(_fup_src, 0, 5) == "use \"" { return 0; };
+    // Scan for "; use " or ";use " after semicolons
+    let _fup_i = 0;
+    let _fup_result = 0 - 1;
+    while _fup_i < _fup_len {
+        if char_at(_fup_src, _fup_i) == ";" {
+            let _fup_j = _fup_i + 1;
+            // Skip spaces after ;
+            while _fup_j < _fup_len {
+                if char_at(_fup_src, _fup_j) != " " {
+                    _fup_j = _fup_j + _fup_len;
+                };
+                _fup_j = _fup_j + 1;
+            };
+            _fup_j = _fup_j - _fup_len - 1;
+            if _fup_j + 5 <= _fup_len {
+                if __substr(_fup_src, _fup_j, _fup_j + 5) == "use \"" {
+                    _fup_result = _fup_j;
+                    _fup_i = _fup_i + _fup_len;
+                };
+            };
+        };
+        _fup_i = _fup_i + 1;
+    };
+    return _fup_result;
+}
+
+fn _expand_use(_eu_src) {
+    let _eu_pos = _find_use_pos(_eu_src);
+    if _eu_pos < 0 { return _eu_src; };
+    // Find closing quote
+    let _eu_qstart = _eu_pos + 5;
+    let _eu_i = _eu_qstart;
+    let _eu_found = 0;
+    while _eu_i < len(_eu_src) {
+        if char_at(_eu_src, _eu_i) == "\"" {
+            _eu_found = 1;
+            _eu_i = _eu_i + len(_eu_src);
+        };
+        _eu_i = _eu_i + 1;
+    };
+    if _eu_found == 0 { return _eu_src; };
+    let _eu_qend = _eu_i - len(_eu_src) - 1;
+    let _eu_path = __substr(_eu_src, _eu_qstart, _eu_qend);
+    // Skip "; after closing quote
+    let _eu_after = _eu_qend + 1;
+    if _eu_after < len(_eu_src) {
+        if char_at(_eu_src, _eu_after) == ";" { _eu_after = _eu_after + 1; };
+    };
+    if _eu_after < len(_eu_src) {
+        if char_at(_eu_src, _eu_after) == " " { _eu_after = _eu_after + 1; };
+    };
+    // Read file and replace
+    let _eu_content = __file_read(_eu_path);
+    let _eu_prefix = __substr(_eu_src, 0, _eu_pos);
+    let _eu_rest = __substr(_eu_src, _eu_after, len(_eu_src));
+    return _eu_prefix + _eu_content + " " + _eu_rest;
+}
+
 pub fn repl_eval(input) {
   // Auto-learn on first call
   _boot_learn();
@@ -281,6 +346,7 @@ pub fn repl_eval(input) {
     if _re_2 == "pu" { _re_is_code = 1; };
     if _re_2 == "re" { _re_is_code = 1; };
     if _re_2 == "__" { _re_is_code = 1; };
+    if _re_2 == "us" { _re_is_code = 1; };  // use "module.ol"
   };
 
   // Not code → classify: greeting / question / chat
@@ -308,6 +374,9 @@ pub fn repl_eval(input) {
     };
   };
   if len(_re_code) == 0 { return ""; };
+
+  // Phase 0.5: Expand `use "path";` directives by inlining file contents
+  let _re_code = _expand_use(_re_code);
 
   // Phase 1: Tokenize
   let tokens = tokenize(_re_code);

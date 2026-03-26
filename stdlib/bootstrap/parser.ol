@@ -166,6 +166,17 @@ fn is_keyword_tok(tok, kw) {
     };
 }
 
+fn is_string_tok(tok) {
+    match tok.kind {
+        TokenKind::StringLit { value } => {
+            return value;
+        },
+        _ => {
+            return false;
+        },
+    };
+}
+
 fn is_symbol_tok(tok, sym) {
     match tok.kind {
         TokenKind::Symbol { ch } => {
@@ -761,9 +772,18 @@ fn parse_block(p) {
 pub fn parse_stmt(p) {
     let tok = peek(p);
 
-    // use path;
+    // use path;  OR  use "file.ol";
     if is_keyword_tok(tok, "use") {
         advance(p);
+        let _us_next = peek(p);
+        let _us_str_val = is_string_tok(_us_next);
+        if _us_str_val {
+            // use "file.ol" — string literal path
+            advance(p);
+            let path = _us_str_val;
+            if is_symbol_tok(peek(p), ";") { advance(p); };
+            return Stmt::UseStmt { path: path };
+        };
         let path = expect_ident(p);
         // Consume dotted path: use a.b.c
         while is_symbol_tok(peek(p), ".") {

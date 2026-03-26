@@ -1761,7 +1761,9 @@ fn compile_stmt(state, stmt) {
             // Union metadata — no opcodes needed for bootstrap
         },
         Stmt::UseStmt { path } => {
-            // Module import — no opcodes needed for bootstrap
+            // Module import: UseStmt is handled at REPL level by inlining file contents
+            // before compilation. By the time we reach semantic, `use` has been expanded.
+            // If we somehow get here, it means use wasn't expanded → skip silently.
         },
         Stmt::FieldAssign { object, field, value } => {
             // obj.field = value → load obj, set field, store back

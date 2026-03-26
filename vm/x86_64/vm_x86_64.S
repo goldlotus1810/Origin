@@ -1287,6 +1287,10 @@ op_call:
     movabs  $0x456FFD736FB437FF, %rdx   # __call_native(ptr, arg) → result
     cmp     %rdx, %rax
     je      .call_native
+    # ── Module loading ──
+    movabs  $0x0D8DE844314D45A6, %rdx   # __skip_scope_restore
+    cmp     %rdx, %rax
+    je      .call_skip_scope_restore
     # ── Eval bytecode ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
     cmp     %rdx, %rax
@@ -3364,6 +3368,23 @@ op_call:
     mov     %rax, 8(%r14)
     jmp     vm_loop
 
+# __skip_scope_restore(n) → set flag to skip next N scope restores
+.call_skip_scope_restore:
+    add     %rcx, %r13
+    # Pop n from stack
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax
+    add     $16, %r14
+    # ADD to the flag (not set — allows nested calls to accumulate)
+    lea     skip_scope_restore(%rip), %rdx
+    add     %rax, (%rdx)
+    # Push 0 as return value
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
 # ═══════════════════════════════════════════════════════════════════════════
 # NEW BUILTINS — Rebuilt from REBUILD_NOTES.md
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5081,6 +5102,13 @@ op_ret:
     cmpq    $0, (%rsi)
     je      vm_loop
     decq    (%rsi)                      # depth--
+    # Check skip_scope_restore flag (module loading)
+    lea     skip_scope_restore(%rip), %rax
+    cmpq    $0, (%rax)
+    je      .do_scope_restore
+    decq    (%rax)                      # skip-- (don't truncate)
+    jmp     vm_loop
+.do_scope_restore:
     mov     (%rsi), %rcx               # new depth
     # Restore count from depth_stack[depth]
     lea     scope_frame_ptrs(%rip), %rax
@@ -7868,6 +7896,8 @@ var_shadow_top:
     .space 8                            # current top of shadow stack
 closure_depth:
     .space 8                            # nesting depth (0 = not in closure)
+skip_scope_restore:
+    .space 8                            # >0 → skip N scope restores (for module loading)
 _save_rbx:
     .space 8                            # temp save for rbx
 scope_frame_ptrs:
