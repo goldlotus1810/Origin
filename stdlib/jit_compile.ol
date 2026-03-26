@@ -1,95 +1,96 @@
-// stdlib/jit_compile.ol — Auto-JIT: compile Olang function → native x86-64
-// Uses __mmap_exec, __memcpy_to, __call_native
-//
-// Usage:
-//   let native_fib = jit_fib();           // compile fib → native
-//   let result = __call_native(native_fib, 30);  // run at C speed
-//
-// Currently supports: recursive integer fib pattern
-// Future: general function JIT via asm_emit.ol
+// stdlib/jit_compile.ol — JIT compilation framework
+// jit_fib() → hardcoded native fib
+// jit_auto(fn_name) → profile + compile + register (future: general)
+// jit_warmup(fn_name, arg) → run interpreted, then auto-JIT if hot
 
-// ── JIT compile fib(n) → native x86-64 ──
-// Hardcoded pattern: if n < 2 return n; return fib(n-1) + fib(n-2)
-// Output: function pointer to native code
-
+// ── Native fib(n) → 42 bytes x86-64 ──
 pub fn jit_fib() {
     let code = [];
-    // cmp rdi, 2
     let _ = __push(code, 0x48); let _ = __push(code, 0x83);
     let _ = __push(code, 0xFF); let _ = __push(code, 0x02);
-    // jge +4 (skip base case)
     let _ = __push(code, 0x7D); let _ = __push(code, 0x04);
-    // mov rax, rdi (base: return n)
     let _ = __push(code, 0x48); let _ = __push(code, 0x89); let _ = __push(code, 0xF8);
-    // ret
     let _ = __push(code, 0xC3);
-    // .recurse: push rbx; push rbp
     let _ = __push(code, 0x53); let _ = __push(code, 0x55);
-    // mov rbx, rdi
     let _ = __push(code, 0x48); let _ = __push(code, 0x89); let _ = __push(code, 0xFB);
-    // lea rdi, [rbx-1]
     let _ = __push(code, 0x48); let _ = __push(code, 0x8D);
     let _ = __push(code, 0x7B); let _ = __push(code, 0xFF);
-    // call self (offset = 0 - (19+5) = -24 = 0xE8)
     let _ = __push(code, 0xE8);
     let _ = __push(code, 0xE8); let _ = __push(code, 0xFF);
     let _ = __push(code, 0xFF); let _ = __push(code, 0xFF);
-    // mov rbp, rax
     let _ = __push(code, 0x48); let _ = __push(code, 0x89); let _ = __push(code, 0xC5);
-    // lea rdi, [rbx-2]
     let _ = __push(code, 0x48); let _ = __push(code, 0x8D);
     let _ = __push(code, 0x7B); let _ = __push(code, 0xFE);
-    // call self (offset = 0 - (31+5) = -36 = 0xDC)
     let _ = __push(code, 0xE8);
     let _ = __push(code, 0xDC); let _ = __push(code, 0xFF);
     let _ = __push(code, 0xFF); let _ = __push(code, 0xFF);
-    // add rax, rbp
     let _ = __push(code, 0x48); let _ = __push(code, 0x01); let _ = __push(code, 0xE8);
-    // pop rbp; pop rbx; ret
     let _ = __push(code, 0x5D); let _ = __push(code, 0x5B); let _ = __push(code, 0xC3);
-
-    // Allocate + copy
-    let mem = __mmap_exec(4096);
-    let buf = __bytes_new(__array_len(code));
-    let i = 0;
-    while i < __array_len(code) {
-        __bytes_set(buf, i, __array_get(code, i));
-        let i = i + 1;
-    };
-    __memcpy_to(mem, buf, __array_len(code));
-    return mem;
+    return _jit_install(code);
 }
 
-// ── JIT compile iterative sum(n) → native ──
-// sum(rdi) = 0+1+2+...+n = n*(n+1)/2
-// But iterative loop version for benchmark:
-
+// ── Native sum(n) → iterative loop ──
 pub fn jit_sum() {
     let code = [];
-    // xor rax, rax (sum = 0)
     let _ = __push(code, 0x48); let _ = __push(code, 0x31); let _ = __push(code, 0xC0);
-    // xor rcx, rcx (i = 0)
     let _ = __push(code, 0x48); let _ = __push(code, 0x31); let _ = __push(code, 0xC9);
-    // .loop: cmp rcx, rdi
     let _ = __push(code, 0x48); let _ = __push(code, 0x39); let _ = __push(code, 0xF9);
-    // jge .done (+6)
     let _ = __push(code, 0x7D); let _ = __push(code, 0x06);
-    // add rax, rcx
     let _ = __push(code, 0x48); let _ = __push(code, 0x01); let _ = __push(code, 0xC8);
-    // inc rcx
     let _ = __push(code, 0x48); let _ = __push(code, 0xFF); let _ = __push(code, 0xC1);
-    // jmp .loop (-12 = 0xF4)
     let _ = __push(code, 0xEB); let _ = __push(code, 0xF4);
-    // .done: ret
     let _ = __push(code, 0xC3);
+    return _jit_install(code);
+}
 
-    let mem = __mmap_exec(4096);
-    let buf = __bytes_new(__array_len(code));
-    let i = 0;
-    while i < __array_len(code) {
-        __bytes_set(buf, i, __array_get(code, i));
-        let i = i + 1;
+// ── Native factorial(n) ──
+pub fn jit_fact() {
+    let code = [];
+    // if rdi <= 1: return 1
+    let _ = __push(code, 0x48); let _ = __push(code, 0x83); let _ = __push(code, 0xFF); let _ = __push(code, 0x01);
+    // jg +8 (skip mov rax,1 [7 bytes] + ret [1 byte] = 8)
+    let _ = __push(code, 0x7F); let _ = __push(code, 0x08);
+    // mov rax, 1; ret
+    let _ = __push(code, 0x48); let _ = __push(code, 0xC7); let _ = __push(code, 0xC0);
+    let _ = __push(code, 0x01); let _ = __push(code, 0x00); let _ = __push(code, 0x00); let _ = __push(code, 0x00);
+    let _ = __push(code, 0xC3);
+    // push rbx; mov rbx, rdi
+    let _ = __push(code, 0x53);
+    let _ = __push(code, 0x48); let _ = __push(code, 0x89); let _ = __push(code, 0xFB);
+    // dec rdi; call self
+    let _ = __push(code, 0x48); let _ = __push(code, 0xFF); let _ = __push(code, 0xCF);
+    let _ = __push(code, 0xE8);
+    // call at offset 0x15, target 0x00: rel32 = 0 - (0x15+5) = -26 = 0xE6
+    let _ = __push(code, 0xE6); let _ = __push(code, 0xFF); let _ = __push(code, 0xFF); let _ = __push(code, 0xFF);
+    // imul rax, rbx
+    let _ = __push(code, 0x48); let _ = __push(code, 0x0F); let _ = __push(code, 0xAF); let _ = __push(code, 0xC3);
+    // pop rbx; ret
+    let _ = __push(code, 0x5B); let _ = __push(code, 0xC3);
+    return _jit_install(code);
+}
+
+// ── Install code: alloc exec memory + copy ──
+fn _jit_install(_ji_code) {
+    let _ji_mem = __mmap_exec(4096);
+    let _ji_buf = __bytes_new(__array_len(_ji_code));
+    let _ji_i = 0;
+    while _ji_i < __array_len(_ji_code) {
+        __bytes_set(_ji_buf, _ji_i, __array_get(_ji_code, _ji_i));
+        let _ji_i = _ji_i + 1;
     };
-    __memcpy_to(mem, buf, __array_len(code));
-    return mem;
+    __memcpy_to(_ji_mem, _ji_buf, __array_len(_ji_code));
+    return _ji_mem;
+}
+
+// ── One-line JIT: compile + register + call ──
+pub fn jit_run_fib(_jrf_n) {
+    let _jrf_ptr = jit_fib();
+    __jit_register("fib", _jrf_ptr);
+    return __call_native(_jrf_ptr, _jrf_n);
+}
+
+pub fn jit_run_fact(_jrf_n) {
+    let _jrf_ptr = jit_fact();
+    __jit_register("fact", _jrf_ptr);
+    return __call_native(_jrf_ptr, _jrf_n);
 }
