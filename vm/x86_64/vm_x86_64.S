@@ -8004,32 +8004,39 @@ msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0
 
-# Native loop template: s += i; i += 1; while i < limit (83 bytes)
-# Patched at: offset 2 (counter_addr), offset 12 (accum_addr), offset 30 (limit_bits)
+# Native INTEGER loop template: s += i; i += 1; while i < limit
+# Uses integer registers (add/inc ~1 cycle vs addsd ~4 cycles)
+# Patched at: offset 2 (counter_addr), offset 12 (accum_addr), offset 30 (limit as f64 bits)
+# Total: 73 bytes
 jit_loop_template:
     .byte 0x48, 0xBF                    # mov rdi, imm64 (counter_addr)
-    .quad 0                             # [patched: counter_addr] (offset 2)
+    .quad 0                             # [patched] offset 2
     .byte 0x48, 0xBE                    # mov rsi, imm64 (accum_addr)
-    .quad 0                             # [patched: accum_addr] (offset 12)
-    .byte 0xF2, 0x0F, 0x10, 0x07       # movsd xmm0, [rdi]  (i)       (offset 20)
-    .byte 0xF2, 0x0F, 0x10, 0x0E       # movsd xmm1, [rsi]  (s)       (offset 24)
-    .byte 0x48, 0xB8                    # mov rax, imm64 (limit_bits)   (offset 28)
-    .quad 0                             # [patched: limit_bits] (offset 30)
-    .byte 0x66, 0x48, 0x0F, 0x6E, 0xD0 # movq xmm2, rax               (offset 38)
-    .byte 0x48, 0xB8                    # mov rax, 1.0 bits             (offset 43)
-    .byte 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F  # 1.0 LE    (offset 45)
-    .byte 0x66, 0x48, 0x0F, 0x6E, 0xD8 # movq xmm3, rax               (offset 53)
+    .quad 0                             # [patched] offset 12
+    # Load f64 values → convert to int64
+    .byte 0xF2, 0x0F, 0x10, 0x07       # movsd xmm0, [rdi]            (offset 20)
+    .byte 0xF2, 0x48, 0x0F, 0x2C, 0xC0 # cvttsd2si rax, xmm0  (i)    (offset 24)
+    .byte 0xF2, 0x0F, 0x10, 0x06       # movsd xmm0, [rsi]            (offset 29)
+    .byte 0xF2, 0x48, 0x0F, 0x2C, 0xC8 # cvttsd2si rcx, xmm0  (s)    (offset 33)
+    # Load limit as int64
+    .byte 0x48, 0xBA                    # mov rdx, imm64 (limit f64 bits) (offset 38)
+    .quad 0                             # [patched] offset 40
+    .byte 0x66, 0x48, 0x0F, 0x6E, 0xC2 # movq xmm0, rdx               (offset 48)
+    .byte 0xF2, 0x48, 0x0F, 0x2C, 0xD0 # cvttsd2si rdx, xmm0 (limit) (offset 53)
     # .loop (offset 58):
-    .byte 0x66, 0x0F, 0x2E, 0xD0       # ucomisd xmm2, xmm0           (offset 58)
-    .byte 0x76, 0x0A                    # jbe .done (+10 → offset 74)   (offset 62)
-    .byte 0xF2, 0x0F, 0x58, 0xC8       # addsd xmm1, xmm0 (s += i)    (offset 64)
-    .byte 0xF2, 0x0F, 0x58, 0xC3       # addsd xmm0, xmm3 (i += 1)    (offset 68)
-    .byte 0xEB, 0xF0                    # jmp .loop (-16 → offset 58)   (offset 72)
-    # .done (offset 74):
-    .byte 0xF2, 0x0F, 0x11, 0x07       # movsd [rdi], xmm0 (store i)  (offset 74)
-    .byte 0xF2, 0x0F, 0x11, 0x0E       # movsd [rsi], xmm1 (store s)  (offset 78)
-    .byte 0xC3                          # ret                           (offset 82)
-    # Total: 83 bytes
+    .byte 0x48, 0x39, 0xD0              # cmp rax, rdx (i vs limit)    (offset 58)
+    .byte 0x7D, 0x08                    # jge .done (+8 → offset 71)   (offset 61)
+    .byte 0x48, 0x01, 0xC1              # add rcx, rax (s += i)        (offset 63)
+    .byte 0x48, 0xFF, 0xC0              # inc rax (i++)                (offset 66)
+    .byte 0xEB, 0xF3                    # jmp .loop (-13 → offset 58)  (offset 69)
+    # .done (offset 71):
+    # Convert back to f64 and store
+    .byte 0xF2, 0x48, 0x0F, 0x2A, 0xC0 # cvtsi2sd xmm0, rax (i)     (offset 71)
+    .byte 0xF2, 0x0F, 0x11, 0x07       # movsd [rdi], xmm0           (offset 76)
+    .byte 0xF2, 0x48, 0x0F, 0x2A, 0xC1 # cvtsi2sd xmm0, rcx (s)     (offset 80)
+    .byte 0xF2, 0x0F, 0x11, 0x06       # movsd [rsi], xmm0           (offset 85)
+    .byte 0xC3                          # ret                          (offset 89)
+    # Total: 90 bytes
 
 # Native fib(rdi) → rax: 42 bytes x86-64
 jit_fib_code:
@@ -8238,14 +8245,14 @@ try_jit_loop:
     # .loop: ucomisd xmm2,xmm0; jbe .done; addsd xmm1,xmm0; addsd xmm0,xmm3; jmp .loop
     # .done: movsd [rdi],xmm0; movsd [rsi],xmm1; ret
     lea     jit_loop_template(%rip), %rsi
-    mov     $83, %ecx
+    mov     $90, %ecx
     push    %rdi
     rep movsb                           # copy template
     pop     %rdi
     # Patch addresses: counter_addr at offset 2, accum_addr at offset 12, limit at offset 30
     mov     %r14, 2(%rdi)               # patch counter_addr
     mov     %rbx, 12(%rdi)              # patch accum_addr
-    mov     %r15, 30(%rdi)              # patch limit_bits
+    mov     %r15, 40(%rdi)              # patch limit_bits (offset 40 in int template)
 
     mov     %rdi, %rax                  # return native_ptr
     pop     %r15
