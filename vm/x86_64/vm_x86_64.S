@@ -906,7 +906,7 @@ op_call:
     mov     %rax, (%rdx, %rsi, 8)     # record hash
     # Auto-JIT: if counter == 64, check if this hash has a known JIT template
     lea     profile_counters(%rip), %rdx
-    cmpl    $64, (%rdx, %rsi, 4)
+    cmpl    $8, (%rdx, %rsi, 4)
     jne     .no_auto_jit
     # Check JIT cache first — if already JIT'd, skip
     push    %rax
