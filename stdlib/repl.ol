@@ -116,7 +116,7 @@ fn _expand_use(_eu_src) {
     if _eu_after < len(_eu_src) {
         if char_at(_eu_src, _eu_after) == " " { _eu_after = _eu_after + 1; };
     };
-    // Read file and replace
+    // Read file (modules should be single-line, no // comments)
     let _eu_content = __file_read(_eu_path);
     let _eu_prefix = __substr(_eu_src, 0, _eu_pos);
     let _eu_rest = __substr(_eu_src, _eu_after, len(_eu_src));
