@@ -4,3 +4,13 @@
 /tmp/
 *.bak
 *.swp
+*.epub
+*.pdf
+*.mobi
+origin_new1.olang
+data/test_*.txt
+data/book_*.txt
+data/ml_coban.txt
+data/test_mmap.bin
+json/udc_p_table_old.bin
+json/udc_p_table_full.bin
