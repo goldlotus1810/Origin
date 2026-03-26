@@ -1248,6 +1248,16 @@ op_call:
     movabs  $0x05F32B674266E367, %rdx   # __simd_compose4(a,b,c,d)
     cmp     %rdx, %rax
     je      .call_simd_compose4
+    # ── JIT ──
+    movabs  $0x641F898B1A9D68F6, %rdx   # __memcpy_to(dest_ptr, bytes_buf, len)
+    cmp     %rdx, %rax
+    je      .call_memcpy_to
+    movabs  $0x5CA205D82D643918, %rdx   # __mmap_exec(size) → ptr to RWX memory
+    cmp     %rdx, %rax
+    je      .call_mmap_exec
+    movabs  $0x456FFD736FB437FF, %rdx   # __call_native(ptr, arg) → result
+    cmp     %rdx, %rax
+    je      .call_native
     # ── Eval bytecode ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
     cmp     %rdx, %rax
@@ -3291,6 +3301,86 @@ op_call:
 # ═══════════════════════════════════════════════════════════════════════════
 # NEW BUILTINS — Rebuilt from REBUILD_NOTES.md
 # ═══════════════════════════════════════════════════════════════════════════
+
+# __memcpy_to(dest_ptr, bytes_buf, len) → copy bytes buffer to raw address
+.call_memcpy_to:
+    add     %rcx, %r13
+    # Pop len
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %ecx              # len
+    add     $16, %r14
+    # Pop bytes_buf
+    mov     (%r14), %rsi               # bytes buffer base [size:8][data:N]
+    add     $16, %r14
+    # Pop dest_ptr
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi              # dest address
+    add     $16, %r14
+    # Copy from bytes data (skip 8-byte size header) to dest
+    lea     8(%rsi), %rsi              # skip size header
+    rep     movsb
+    # Push 0 (success)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __mmap_exec(size) → ptr to RWX memory (for JIT)
+.call_mmap_exec:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rsi              # size
+    add     $16, %r14
+    # mmap(NULL, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi                  # addr = NULL
+    mov     $7, %edx                    # PROT_READ|PROT_WRITE|PROT_EXEC
+    mov     $0x22, %r10d               # MAP_PRIVATE|MAP_ANONYMOUS
+    mov     $-1, %r8d                  # fd = -1
+    xor     %r9d, %r9d                  # offset = 0
+    syscall
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __call_native(fn_ptr, arg_f64) → result_f64
+# Calls native function at fn_ptr with arg in xmm0, returns result from xmm0
+.call_native:
+    add     %rcx, %r13
+    push    %rbx
+    # Pop arg
+    movsd   (%r14), %xmm0              # arg as f64
+    add     $16, %r14
+    # Pop fn_ptr
+    movsd   (%r14), %xmm1
+    cvttsd2si %xmm1, %rax              # fn_ptr as integer
+    add     $16, %r14
+    # Save VM registers
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    # arg in rdi (as integer) for the native function
+    cvttsd2si %xmm0, %rdi
+    # Call native function
+    call    *%rax
+    # Restore VM registers
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    # Result: rax contains return value (integer)
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
 
 # __isqrt(x) → sqrt(x) via hardware sqrtsd
 .call_isqrt:
