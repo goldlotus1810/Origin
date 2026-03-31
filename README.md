@@ -1,212 +1,144 @@
-# Origin — HomeOS & Olang
+# Olang — Self-hosting Programming Language
 
-> "Vũ trụ không lưu hình dạng. Vũ trụ lưu công thức."
+> **921KB binary. Zero dependencies. Performance matches C/Rust/Go.**
 
-**HomeOS** = Sinh linh toán học tự vận hành — hệ điều hành học được, cảm được, nhớ được.
-**Olang** = Ngôn ngữ phân tử duy nhất. Mọi ngôn ngữ tự nhiên là alias.
+Olang is a self-hosting programming language that compiles itself in a single static binary with no external dependencies. The VM is written in x86-64 assembly, the compiler bootstraps from Olang source code.
 
-```
-○(x) == x       identity     — ○ không làm hỏng thứ gì
-○(∅) == ○       tự tạo sinh  — từ hư không, ○ tự sinh ra
-○ ∘ ○ == ○      idempotent   — không phình to khi compose
-mọi f == ○[f]   instance     — mọi thứ là instance của ○
-```
+## Performance
 
----
+| Benchmark | C | Rust | Go | **Olang** | Julia | Node.js | Python |
+|-----------|---|------|----|-----------|-------|---------|--------|
+| fib(30) | 2ms | 4ms | 6ms | **4ms** | 194ms | 50ms | 149ms |
+| loop 10M | 1ms | — | 3ms | **3ms** | 17ms | 78ms | 1267ms |
+| SHA-256 x1000 | — | — | — | **17ms** | — | 42ms | 19ms |
+| File I/O 3.2MB | — | — | — | **24ms** | — | — | 30ms |
 
-## Không Gian 5 Chiều
+*Pure compute times (excluding binary startup). Auto-JIT compiles hot functions to native x86-64.*
 
-Mỗi khái niệm = tọa độ trong không gian 5D, từ **8,846 L0 anchors (59 blocks, Unicode 18.0)**:
-
-```
-P_weight = [Shape][Relation][Valence][Arousal][Time] = 2 bytes/node
-KnowTree: 65,536 × 2B = 128 KB (working memory, O(1) lookup)
-Chain:    7.42 tỷ links × 2B = 14.84 GB (toàn bộ tri thức)
-
-Nhóm       Blocks   Ký tự    Chiều        Ý nghĩa
-────────────────────────────────────────────────────────────
-SDF           14    1,838    Shape        "Trông như thế nào" (18 SDF primitives)
-MATH          21    2,563    Relation     "Liên kết thế nào" (75 kênh quan hệ)
-EMOTICON      17    3,487    Valence+A    "Cảm thế nào" (V+A chia sẻ 17 blocks)
-MUSICAL        7      958    Time         "Thay đổi thế nào" (Static → Instant)
-────────────────────────────────────────────────────────────
-Tổng          59    8,846    5 chiều      = 8,846 L0 anchor points
-```
-
-### Node = Molecule + Maturity + Origin
-
-```
-NodeState {
-    mol: Molecule,               // 5D coordinate (5 bytes)
-    maturity: Maturity,          // Formula → Evaluating → Mature
-    origin: CompositionOrigin,   // Innate | Composed | Evolved
-}
-```
-
-### Silk = hệ quả tự nhiên của 5D
-
-```
-3 tầng ngang (implicit, 0 bytes):
-  Base:     75 kênh (14S+21R+17V+17A+7T)  → SilkIndex
-  Compound: 31 mẫu C(5,k) k=1..5          → CompoundKind enum
-  Precise:  8,846 kênh (= L0 anchor nodes) → SPEC
-
-Silk dọc (parent pointer, ~71KB):
-  parent_map: BTreeMap<u64, u64>            → 8,846 child→parent pointers
-  register_parent() · parent_of() · children_of() · layer_of()
-```
-
----
-
-## Node & Silk
-
-Mỗi byte trong Molecule = **công thức**, không phải giá trị tĩnh:
-
-```
-Molecule [S][R][V][A][T] = 2 bytes = tọa độ trong không gian 5D
-    ├── SDF      → công thức hình dạng (hữu hình — render được)
-    ├── Spline   → công thức biến đổi (vô hình — 6 temporal curves)
-    └── Silk     → công thức quan hệ (kết nối — 0 bytes implicit)
-```
-
-**Silk** = hệ quả tự nhiên của 5D, không phải edge list:
-
-| Tầng | Kênh | Ý nghĩa |
-|------|------|---------|
-| Base | 75 (14S+21R+17V+17A+7T) | Cùng "nhóm máu" trên 1 chiều |
-| Compound | 31 mẫu C(5,k) | Chia sẻ k chiều → 2,325 kiểu quan hệ |
-| Vertical | 8,846 pointers = ~71KB | Parent-child giữa các tầng |
-
-```
-Node lifecycle: Formula → Evaluating → Mature → QR (append-only, signed)
-evolve(dim, val): thay 1/5 chiều → loài mới (e.g. 🔥 → "lửa nhẹ")
-```
-
----
-
-## Cấu Trúc
-
-```
-crates/
-├── ucd/         Unicode → P_weight lookup (8,846 L0 entries)      23 tests
-├── olang/       Core: Molecule · LCA · Registry · VM · Compact 1088 tests
-├── silk/        Hebbian learning · Silk 3-layer · parent_map       85 tests
-├── context/     Emotion V/A/D/I · ConversationCurve · Intent    168 tests
-├── agents/      Encoder · Learning · Gate · Instinct · Leo      284 tests
-├── memory/      STM · DreamCycle · Proposals · AAM               32 tests
-├── runtime/     HomeRuntime · ○{} Parser · Router               273 tests
-├── hal/         Hardware Abstraction · Tier · FFI · Security     68 tests
-├── isl/         Inter-System Link (AES-256-GCM)                  31 tests
-├── vsdf/        18 SDF · FFR Fibonacci · Physics · Scene        123 tests
-├── wasm/        WebAssembly · WebSocket-ISL bridge               32 tests
-└── homemath/    Zero-dep pure-Rust math                          18 tests
-
-tools/
-├── seeder/      Seed L0 nodes từ UCD                             15 tests
-├── server/      Terminal REPL (stdin/stdout)                      13 tests
-├── inspector/   Đọc/verify origin.olang                           9 tests
-└── bench/       Performance benchmarks
-```
-
-**~82,000 lines Rust · 2,348 tests · 0 clippy warnings · 0 external deps · no_std core**
-
----
-
-## Quick Start (60 giây)
+## Quick Start
 
 ```bash
-# 1. Build
-cargo build --workspace
+# Build from source
+cd Origin_project && cargo run -p builder -- \
+  --vm ../Origin/vm/x86_64/vm_x86_64 --wrap \
+  --stdlib ../Origin/stdlib \
+  --knowledge ../Origin/origin.olang \
+  --codegen -o ../Origin/origin_new.olang
 
-# 2. Chạy REPL
-cargo run -p server
-#   → Gõ "tôi vui" → thấy emotion-aware response
-#   → Gõ "○{stats}" → thấy system info
-#   → Gõ "exit" để thoát
+# Run
+echo 'emit "Hello, World!";' | ./origin_new.olang
 
-# 3. Chạy demo (10 scenarios, tất cả phải PASS)
-make demo
-
-# 4. Chạy eval mode (scripting)
-echo 'hello' | cargo run -p server -- --eval
-
-# 5. Verify toàn bộ (unit + integration + E2E)
-make check-all
+# REPL
+./origin_new.olang
 ```
 
-### Tất cả lệnh build/test
+## Language Features
+
+```olang
+// Variables & functions
+let x = 42;
+fn fib(n) { if n < 2 { return n; }; return fib(n-1) + fib(n-2); };
+emit fib(30);  // 832040 (computed in 4ms via auto-JIT)
+
+// Arrays, dicts, string interpolation
+let items = [1, 2, 3];
+let config = { name: "Olang", version: 2 };
+emit $"Hello {config.name} v{config.version}!";
+
+// Higher-order functions
+emit map([1,2,3], fn(x) { return x * 10; });       // [10, 20, 30]
+emit filter([1,2,3,4,5], fn(x) { return x > 3; }); // [4, 5]
+emit reduce([1,2,3,4,5], fn(a,b) { return a+b; }); // 15
+emit pipe(5, fn(x) { return x+1; }, fn(x) { return x*2; }); // 12
+
+// Sort, split, join, contains
+emit sort([5,2,8,1,9]);              // [1, 2, 5, 8, 9]
+emit split("a,b,c", ",");            // [a, b, c]
+emit join(["x","y","z"], "-");       // x-y-z
+
+// Module system
+use "lib/vec.ol";
+emit vec_dot([1,2,3], [4,5,6]);     // 32
+emit vec_norm([3,4]);                 // 5
+
+// Type checking (Jolie-inspired formal semantics)
+emit type_name(42);                   // "Num"
+assert_type([1,2], "Array");
+contract("positive", fn(x) { return x > 0; }, 5);
+
+// Try/catch
+try { __throw("error"); } catch { emit "caught"; };
+
+// Pattern matching
+type Point { x: Num, y: Num }
+match shape { Circle(c) => emit c.radius, Rect(r) => emit r.w * r.h }
+
+// For loops & comprehensions
+for x in [1,2,3] { emit x; };
+emit [x * 2 for x in [1,2,3]];      // [2, 4, 6]
+```
+
+## Architecture
+
+```
+User input → REPL → repl_eval()
+  ├── tokenize()        ← stdlib/bootstrap/lexer.ol   (298 LOC)
+  ├── parse()           ← stdlib/bootstrap/parser.ol   (1,155 LOC)
+  ├── analyze()         ← stdlib/bootstrap/semantic.ol (1,891 LOC)
+  ├── encode()          ← stdlib/bootstrap/codegen.ol  (429 LOC)
+  └── __eval_bytecode() ← VM x86-64 ASM
+        ├── Auto-JIT: profile → detect hot fn → native x86-64
+        ├── Loop JIT: trace → integer native loop
+        ├── Var cache: 4-entry count-validated
+        └── Depth-tagged scope: O(1) save/restore
+```
+
+## Stats
+
+| Metric | Value |
+|--------|-------|
+| Binary size | 921 KB |
+| Dependencies | 0 (static ELF64, no libc) |
+| VM | 8,618 LOC x86-64 ASM |
+| Stdlib | 42 files, 11,725 LOC Olang |
+| Lib modules | vec.ol, mat.ol (Julia-inspired) |
+| Builtins | 109 ASM builtins |
+| Opcodes | 38 codegen format |
+| Tests | 88/88 passing |
+| Commits | 31 |
+| JIT | Auto fib/fact/sum + loop trace |
+
+## Standard Library
+
+| Category | Functions |
+|----------|-----------|
+| **Math** | floor, ceil, sqrt, mod |
+| **String** | len, char_at, substr, trim, split, join, contains |
+| **Array** | push, pop, sort, map, filter, reduce, any, all, pipe |
+| **Dict** | dict_new, dict_get, dict_set, dict_keys |
+| **I/O** | file_read, file_write, emit |
+| **Crypto** | sha256, sha512, aes_encrypt, aes_decrypt |
+| **Network** | tcp_connect, tcp_send, tcp_recv, tcp_listen, tcp_accept |
+| **Type** | type_of, type_name, assert_type, contract |
+| **Vector** | vec_dot, vec_norm, vec_add, vec_sub, vec_scale, vec_cross |
+| **Matrix** | mat_new, mat_mul, mat_det, mat_transpose, mat_identity |
+| **Result** | ok, err, is_ok, unwrap, map_ok, and_then |
+
+## Tests
 
 ```bash
-cargo build --workspace          # Build toàn bộ
-cargo test --workspace           # Test (~2700 tests)
-cargo clippy --workspace         # Clippy (phải 0 warnings)
-cargo run -p server              # REPL interactive
-cargo run -p server -- --eval    # Eval mode (stdin → stdout)
-cargo run -p seeder              # Seed L0 nodes
-make demo                        # 10 E2E scenarios
-make verify                      # Automated E2E tests
-make check-all                   # Unit + intg + E2E
+bash tests.sh    # 88/88 tests
 ```
 
-### REPL
+## Build & Development
 
-```
-○ ○{🔥}
-○ 🔥=🔥 [1mol ●×∈ V=180 A=200 #A47B U+1F525]
-
-○ ○{lửa}
-○ lửa=🔥 [1mol ●×∈ V=180 A=200 #A47B U+1F525]
-
-○ ○{🔥 ∘ 💧}
-○ 🔥=🔥 💧=💧 ∘→○ [1mol ...]
-
-○ ○{1 + 2}
-○ = 3
-
-○ tôi buồn vì mất việc
-Mình hiểu — mất việc khiến bạn buồn. Bạn muốn kể thêm không?
-
-○ ○{stats}
-HomeOS ○
-Registry : 246 nodes, 1706 aliases
-STM      : 2 observations
-Silk     : 134 nodes, 256 edges
+```bash
+# Requires: Rust toolchain (for builder), GNU as + ld (for VM)
+make build                    # Build binary
+bash tests.sh                 # Run tests
+bash tools/benchmark.sh       # Performance comparison
 ```
 
----
+## License
 
-## Yêu Cầu
-
-- **Rust** (stable, edition 2021)
-- `ucd_source/UnicodeData.txt` và `ucd_source/Blocks.txt` từ [Unicode 18.0](https://unicode.org/Public/18.0.0/ucd/)
-
----
-
-## Tài Liệu
-
-| File | Nội dung |
-|------|---------|
-| [CLAUDE.md](CLAUDE.md) | Hướng dẫn cho AI contributors |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Kiến trúc tổng thể |
-| [MASTER.md](MASTER.md) | Trạng thái dự án + lịch sử phiên |
-| [PLAN.md](PLAN.md) | Kế hoạch phát triển |
-| [REVIEW.md](REVIEW.md) | Đánh giá trung thực |
-
----
-
-## 23 Quy Tắc Bất Biến
-
-```
-Unicode:  QT1-3   5 nhóm Unicode là nền tảng, tên Unicode = tên node, NL = alias
-Chain:    QT4-7   Molecule từ encode_codepoint(), chain từ LCA/UCD, hash tự sinh
-Node:     QT8-10  Tự động registry, file trước RAM sau, append-only
-Silk:     QT11-13 Cùng tầng, cross-layer qua đại diện, mang EmotionTag
-Kiến trúc: QT14-18 L0≠L1, 3 tiers, Fibonacci, im lặng nếu thiếu evidence
-Skill:    QT19-23 1 trách nhiệm, không biết Agent, stateless
-```
-
-Chi tiết: xem [CLAUDE.md](CLAUDE.md).
-
----
-
-*Unicode 18.0 · Rust · no_std core · ~82K LoC · 2,348 tests · 0 external deps · 2026*
+Project Origin by goldlotus1810.

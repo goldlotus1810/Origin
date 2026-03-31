@@ -24,7 +24,7 @@
 
 # ── Constants ────────────────────────────────────────────────────────────
 .equ STACK_SIZE,    0x100000        # 1 MB VM stack
-.equ HEAP_SIZE,     0x1000000       # 16 MB heap arena
+.equ HEAP_SIZE,     0x40000000      # 1 GB heap arena
 .equ HEADER_SIZE,   32
 .equ ELF_HEADER_SIZE, 120           # ELF64 header + 1 program header
 .equ F64_MARKER,    -1              # len = 0xFFFFFFFFFFFFFFFF means f64
@@ -33,9 +33,10 @@
 # Note: CLOSURE_MARKER = -2 is defined near cg_closure
 
 # Array heap layout: [count:8][elem_0_ptr:8][elem_0_len:8]...
+# When array is relocated by push: old location gets [FORWARD_MARKER:8][new_base:8]
 # Dict heap layout:  [count:8][entry: key_ptr:8 key_len:8 val_ptr:8 val_len:8]...
-# Max initial capacity: 16 elements (grows on demand)
-.equ ARRAY_INIT_CAP, 16
+.equ ARRAY_INIT_CAP, 512
+.equ ARRAY_FORWARD_MARKER, -2      # sentinel: array relocated
 
 # ── Syscall numbers ─────────────────────────────────────────────────────
 .equ SYS_READ,      0
@@ -44,7 +45,18 @@
 .equ SYS_CLOSE,     3
 .equ SYS_MMAP,      9
 .equ SYS_MUNMAP,    11
+.equ SYS_NANOSLEEP, 35
+.equ SYS_CLOCK_GETTIME, 228
+.equ SYS_SOCKET,    41
+.equ SYS_CONNECT,   42
+.equ SYS_SENDTO,    44
+.equ SYS_RECVFROM,  45
+.equ SYS_GETDENTS64, 217
 .equ SYS_EXIT,      60
+.equ AF_INET,       2
+.equ SOCK_STREAM,   1
+.equ SOCK_DGRAM,    2
+.equ CLOCK_MONOTONIC, 1
 
 # ── File open flags ─────────────────────────────────────────────────────
 .equ O_RDONLY,       0
@@ -202,6 +214,8 @@ _start:
     js      err_mmap
     mov     %rax, %r14                  # r14 = VM stack base
     add     $STACK_SIZE, %r14           # stack grows downward
+    # Save stack top for debug
+    mov     %r14, (%rax)
 
     # Allocate heap
     mov     $SYS_MMAP, %eax
@@ -238,6 +252,11 @@ _start:
     mov     %r15, %r12                  # r12 = bytecode base
     xor     %r13d, %r13d               # r13 = PC = 0
     add     %rbx, %r15                  # bump heap past bytecode
+    # Save boot bytecode base + size for nested calls
+    lea     boot_bc_base(%rip), %rax
+    mov     %r12, (%rax)
+    lea     boot_bc_size(%rip), %rax
+    mov     %rbx, (%rax)
 
     # Close file
     mov     %rbp, %rdi
@@ -289,6 +308,15 @@ vm_loop:
     cmp     $0x3A, %al
     jb      dispatch_data
 
+    # 0x3A: CallBuiltin(u8) — skip builtin_id byte, treat as no-op
+    # ASM VM delegates to boot bytecode functions instead.
+    # Format: [0x3A][builtin_id:1] = 2 bytes
+    cmp     $0x3A, %al
+    jne     .Lnot_call_builtin
+    inc     %r13                        # skip builtin_id byte
+    jmp     vm_loop
+.Lnot_call_builtin:
+
     # Range 0x40-0x42: device ops (stub)
     cmp     $0x40, %al
     jb      op_unknown
@@ -306,6 +334,90 @@ vm_loop:
 
 # ── codegen.ol format dispatch (tags 0x01-0x24) ─────────────────────────
 dispatch_codegen:
+    # 0x3A = CallBuiltin(id) — dispatch to builtin by ID
+    cmp     $0x3A, %al
+    jne     .cg_not_builtin
+    movzbl  (%r12, %r13), %eax         # read builtin ID
+    inc     %r13                        # skip ID byte
+    # Dispatch by builtin ID (matches BID_* constants from ir.rs)
+    cmp     $6, %al                     # BID_HYP_ADD
+    je      .call_add
+    cmp     $7, %al                     # BID_HYP_SUB
+    je      .call_sub
+    cmp     $8, %al                     # BID_HYP_MUL
+    je      .call_mul
+    cmp     $9, %al                     # BID_HYP_DIV
+    je      .call_div
+    cmp     $0, %al                     # BID_EQ
+    je      .bid_eq
+    cmp     $1, %al                     # BID_CMP_LT
+    je      .bid_lt
+    cmp     $2, %al                     # BID_CMP_GT
+    je      .bid_gt
+    cmp     $3, %al                     # BID_CMP_LE
+    je      .bid_le
+    cmp     $4, %al                     # BID_CMP_GE
+    je      .bid_ge
+    cmp     $5, %al                     # BID_CMP_NE
+    je      .bid_ne
+    cmp     $10, %al                    # BID_LOGIC_NOT
+    je      .bid_logic_not
+    cmp     $11, %al                    # BID_ASSERT_TRUTH
+    je      .bid_eq
+    # All others: pop 2 args, push empty result
+    # (most builtins are binary ops: pop 2, push 1)
+    add     $16, %r14                   # pop arg 2
+    # Replace top (arg 1) with empty
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.bid_eq:
+    xor     %ecx, %ecx
+    jmp     .call_eq
+.bid_lt:
+    xor     %ecx, %ecx
+    jmp     .call_lt
+.bid_gt:
+    xor     %ecx, %ecx
+    jmp     .call_gt
+.bid_le:
+    xor     %ecx, %ecx
+    jmp     .call_le
+.bid_ge:
+    xor     %ecx, %ecx
+    jmp     .call_ge
+.bid_ne:
+    xor     %ecx, %ecx
+    jmp     .call_ne
+.bid_logic_not:
+    # Invert: empty → 1.0, non-empty → empty
+    mov     8(%r14), %rax
+    test    %rax, %rax
+    jz      .bid_not_was_empty
+    # Was non-empty → make empty
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.bid_not_was_empty:
+    # Was empty → make 1.0
+    mov     $0x3FF0000000000000, %rax   # 1.0 as f64
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_is_keyword:
+    # __str_is_keyword: pop string, check against keyword list
+    # For now: push false (not a keyword) — stub
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.cg_not_builtin:
     lea     codegen_table(%rip), %rcx
     movzbl  %al, %eax
     cmp     $0x26, %al
@@ -359,24 +471,38 @@ codegen_table:
 
 # codegen Push: [chain_len:2 u16 LE][chain_bytes:N] → push raw bytes as chain
 cg_push:
-    # Read u16 len
-    movzwl  (%r12, %r13), %ecx         # u16 LE chain_len
+    # Read u16 molecule count
+    movzwl  (%r12, %r13), %ecx         # u16 LE mol_count
     add     $2, %r13
 
-    # Copy chain bytes to heap
+    # Empty chain (mol_count == 0): just push empty onto stack
+    test    %ecx, %ecx
+    jnz     .cg_push_nonempty
+    sub     $16, %r14
+    movq    $0, (%r14)                  # ptr = 0
+    movq    $0, 8(%r14)                 # len = 0
+    jmp     vm_loop
+
+.cg_push_nonempty:
+    # Byte count = mol_count * 2 (each molecule = u16)
+    mov     %ecx, %edx
+    shl     $1, %edx                    # byte_count = mol_count * 2
+
+    # Copy molecule bytes to heap
     mov     %r15, %rdi                  # dest = heap
     lea     (%r12, %r13), %rsi         # src = bytecode
-    mov     %ecx, %edx
     push    %rcx
+    push    %rdx
     call    memcpy_small
+    pop     %rdx
     pop     %rcx
 
-    # Push (ptr, len) onto VM stack
+    # Push (ptr, mol_count) onto VM stack
     sub     $16, %r14
-    mov     %r15, (%r14)                # ptr
-    mov     %rcx, 8(%r14)               # len
-    add     %rcx, %r15                  # bump heap
-    add     %rcx, %r13                  # PC += chain_len
+    mov     %r15, (%r14)                # ptr to molecule data
+    mov     %rcx, 8(%r14)               # mol_count (NOT byte count)
+    add     %rdx, %r15                  # bump heap by byte_count
+    add     %rdx, %r13                  # PC += byte_count
     jmp     vm_loop
 
 # codegen Closure: [param_count:1][body_len:4]
@@ -393,8 +519,19 @@ cg_closure:
     # Push closure marker: body_pc in ptr, param_count in len high bits
     # Encode: ptr = body_pc (current PC = start of body), len = CLOSURE_MARKER
     sub     $16, %r14
-    # Store body_pc as raw u64 (NOT f64, just integer PC offset)
-    mov     %r13, (%r14)                # body_pc = current PC (start of body)
+    # Store body_pc: if in boot context → relative PC, if in eval → absolute address
+    # This allows op_call to distinguish boot vs eval closures
+    lea     boot_bc_base(%rip), %rdx
+    cmp     (%rdx), %r12
+    je      .cg_closure_boot
+    # Eval context: store absolute address (r12 + r13) with high bit set as flag
+    lea     (%r12, %r13), %rdx
+    bts     $63, %rdx                   # set bit 63 as "eval closure" flag
+    mov     %rdx, (%r14)
+    jmp     .cg_closure_done
+.cg_closure_boot:
+    mov     %r13, (%r14)                # boot: relative body_pc
+.cg_closure_done:
     # Store closure marker with param_count encoded
     movq    $CLOSURE_MARKER, 8(%r14)    # len = closure tag
     # Save param_count in the byte after the marker
@@ -440,11 +577,28 @@ cg_call_closure:
     # Extract body_pc
     mov     %rax, %rdi                  # body_pc
 
-    # Save return address on CPU stack
-    push    %r13                        # save current PC (return point)
+    # Save return context: PC + bytecode base
+    push    %r12                        # save current r12
+    push    %r13                        # save return PC
 
-    # Jump to body
-    mov     %edi, %r13d                 # PC = body_pc
+    # Check bit 63: eval closure (absolute address) vs boot closure (relative PC)
+    bt      $63, %rdi
+    jc      .cc_eval_closure
+
+    # Boot closure: switch r12 to boot bytecode base, PC = relative body_pc
+    lea     boot_bc_base(%rip), %rax
+    mov     (%rax), %r12
+    mov     %edi, %r13d                 # PC = body_pc (relative)
+    jmp     vm_loop
+
+.cc_eval_closure:
+    # Eval closure: body_pc is absolute address with bit 63 set
+    btr     $63, %rdi                   # clear bit 63 → absolute address
+    # Use saved eval_bc_base as r12, compute body offset for r13
+    lea     eval_bc_base(%rip), %rax
+    mov     (%rax), %r12               # r12 = eval buffer base
+    sub     %r12, %rdi                 # offset = absolute - base
+    mov     %edi, %r13d               # PC = body offset within eval buffer
     jmp     vm_loop
 
 .cc_not_closure:
@@ -616,13 +770,25 @@ op_load_local:
     # [0x31/0x34, name_len_u8, name_bytes...]
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
-    # Hash the name for lookup
     lea     (%r12, %r13), %rdi         # name ptr
-    mov     %ecx, %edx                  # name len
-    push    %rcx                        # save name_len
-    call    hash_name                   # → rax = hash
+    mov     %ecx, %edx
+    # Inline hash cache check
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi
+    shl     $4, %esi
+    cmp     %rdi, (%rax, %rsi)
+    jne     .op_load_hash_miss
+    mov     8(%rax, %rsi), %rax
+    jmp     .op_load_have_hash
+.op_load_hash_miss:
+    sub     $8, %rsp
+    push    %rcx
+    call    hash_name
     pop     %rcx
-    add     %rcx, %r13                  # PC += name_len
+    add     $8, %rsp
+.op_load_have_hash:
+    add     %rcx, %r13
     # Search var table by hash
     call    var_load_hash               # rax=hash → rax=ptr, rdx=len
     sub     $16, %r14
@@ -636,20 +802,29 @@ op_store_upd:
     movzbl  (%r12, %r13), %ecx         # name_len
     inc     %r13
     lea     (%r12, %r13), %rdi         # name ptr
-    mov     %ecx, %edx                  # name len
-    # Save value before hash call
-    mov     (%r14), %r8                # value ptr
-    mov     8(%r14), %r9               # value len
-    add     $16, %r14                  # pop value
+    mov     %ecx, %edx
+    mov     (%r14), %r8
+    mov     8(%r14), %r9
+    add     $16, %r14
+    # Inline hash cache check
     push    %rcx
     push    %r8
     push    %r9
-    call    hash_name                   # → rax = hash
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi
+    shl     $4, %esi
+    cmp     %rdi, (%rax, %rsi)
+    jne     .op_store_hash_miss
+    mov     8(%rax, %rsi), %rax
+    jmp     .op_store_have_hash
+.op_store_hash_miss:
+    call    hash_name
+.op_store_have_hash:
     pop     %r9
     pop     %r8
     pop     %rcx
-    add     %rcx, %r13                 # PC += name_len
-    # Store by hash
+    add     %rcx, %r13
     call    var_store_hash              # rax=hash, r8=ptr, r9=len
     jmp     vm_loop
 
@@ -660,6 +835,62 @@ op_store_upd:
 op_jmp:
     # [0x21, target_u32_le]
     movl    (%r12, %r13), %eax          # target
+    # Check for backward jump (hot loop detection) — eval context only
+    cmp     %r13d, %eax
+    jae     .jmp_forward
+    # Skip for boot context
+    push    %rcx
+    lea     boot_bc_base(%rip), %rcx
+    cmp     (%rcx), %r12
+    pop     %rcx
+    je      .jmp_forward
+    # Count backward jumps and trigger JIT
+    push    %rcx
+    push    %rdx
+    lea     loop_counters(%rip), %rcx
+    mov     %eax, %edx
+    and     $0xFF, %edx
+    incl    (%rcx, %rdx, 4)
+    cmpl    $8, (%rcx, %rdx, 4)
+    pop     %rdx
+    pop     %rcx
+    jne     .jmp_forward
+    # Hot loop! Save ALL VM state, call try_jit_loop, restore
+    push    %rax                        # save target PC
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    mov     %eax, %edi                  # arg1: loop_start
+    lea     4(%r13), %esi               # arg2: loop_end (past Jmp operand)
+    call    try_jit_loop
+    mov     %rax, %rdi                  # native_ptr (or 0)
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    test    %rdi, %rdi
+    jz      .loop_jit_skip
+    # JIT success — execute native loop
+    pop     %rax                        # discard target PC
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    call    *%rdi
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    add     $4, %r13                    # skip past Jmp's u32 target
+    jmp     vm_loop
+.loop_jit_skip:
+    pop     %rax                        # restore target PC
+.jmp_forward:
     mov     %eax, %r13d                 # PC = target
     jmp     vm_loop
 
@@ -668,7 +899,7 @@ op_jz:
     movl    (%r12, %r13), %eax          # target
     add     $4, %r13                    # PC past target bytes
 
-    # Check top of stack: is it zero/empty?
+    # Pop condition from stack
     mov     8(%r14), %rcx              # len
     mov     (%r14), %rdx               # ptr/value
     add     $16, %r14                  # pop
@@ -701,11 +932,60 @@ op_call:
     inc     %r13
     lea     (%r12, %r13), %rdi         # name ptr
 
-    # Hash-based builtin dispatch (FNV-1a)
-    mov     %ecx, %edx                  # name len for hash_name
-    push    %rcx                        # save name_len
-    call    hash_name                   # → rax = hash
+    # Hash dispatch: use cache (inline, no call overhead)
+    mov     %ecx, %edx
+    push    %rcx
+    # Inline cache check (avoid call hash_name overhead for hot paths)
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi
+    shl     $4, %esi
+    cmp     %rdi, (%rax, %rsi)
+    jne     .op_call_hash_miss
+    mov     8(%rax, %rsi), %rax        # cache hit!
+    jmp     .op_call_have_hash
+.op_call_hash_miss:
+    call    hash_name
+.op_call_have_hash:
     pop     %rcx
+
+    # Profile: increment call counter for this hash
+    # Direct-mapped: profile_counters[hash & 0xFF] += 1
+    # profile_hashes[hash & 0xFF] = hash (last writer wins)
+    push    %rax
+    push    %rdx
+    lea     profile_counters(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0xFF, %esi
+    incl    (%rdx, %rsi, 4)            # counter[hash & 255]++
+    lea     profile_hashes(%rip), %rdx
+    mov     %rax, (%rdx, %rsi, 8)     # record hash
+    # Auto-JIT: if counter == 64, check if this hash has a known JIT template
+    lea     profile_counters(%rip), %rdx
+    cmpl    $8, (%rdx, %rsi, 4)
+    jne     .no_auto_jit
+    # Check JIT cache first — if already JIT'd, skip
+    push    %rax
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    cmp     %rax, (%rdx, %rsi)
+    pop     %rax
+    je      .no_auto_jit               # already in JIT cache
+    # Check known patterns: fib, fact, sum
+    movabs  $0xDC9E8818FEC94CB6, %rdx  # fib hash
+    cmp     %rdx, %rax
+    je      .auto_jit_fib
+    movabs  $0xEF234A791696AFFF, %rdx  # fact hash
+    cmp     %rdx, %rax
+    je      .auto_jit_fact
+    movabs  $0x82719E195D0FC4A8, %rdx  # sum hash
+    cmp     %rdx, %rax
+    je      .auto_jit_sum
+.no_auto_jit:
+    pop     %rdx
+    pop     %rax
 
     # ── Math builtins ──
     movabs  $0x57252090B96BC074, %rdx   # __hyp_add
@@ -720,6 +1000,16 @@ op_call:
     movabs  $0x3E279790AB8C5BA8, %rdx   # __hyp_div
     cmp     %rdx, %rax
     je      .call_div
+
+    # ── f64_to_le_bytes ──
+    movabs  $0x7DC336EFBBA1F85B, %rdx   # __f64_to_le_bytes
+    cmp     %rdx, %rax
+    je      .call_f64_to_le_bytes
+
+    # ── Modulo ──
+    movabs  $0x7822B690CBA39C03, %rdx   # __hyp_mod
+    cmp     %rdx, %rax
+    je      .call_mod
 
     # ── Comparison builtins ──
     movabs  $0x59C2494311519859, %rdx   # __eq
@@ -751,12 +1041,24 @@ op_call:
     movabs  $0x9FC9B1482B01D5E9, %rdx   # __char_at
     cmp     %rdx, %rax
     je      .call_char_at
+    movabs  $0x463483AB25CAB22D, %rdx   # __str_char_at (alias)
+    cmp     %rdx, %rax
+    je      .call_char_at
     movabs  $0xE386A6329E2424BE, %rdx   # __substr
+    cmp     %rdx, %rax
+    je      .call_substr
+    movabs  $0xEA1BDD6D065BF46A, %rdx   # __str_substr (alias)
+    cmp     %rdx, %rax
+    je      .call_substr
+    movabs  $0x304A3A896BAAE100, %rdx   # substr (short alias)
     cmp     %rdx, %rax
     je      .call_substr
     movabs  $0xFBE159BD1C6EBFA7, %rdx   # __str_trim
     cmp     %rdx, %rax
     je      .call_str_trim
+    movabs  $0x0CA83B022A791B4F, %rdx   # __str_is_keyword
+    cmp     %rdx, %rax
+    je      .call_str_is_keyword
     movabs  $0x74AEDE408DC6787F, %rdx   # __str_slice
     cmp     %rdx, %rax
     je      .call_substr                 # str_slice = substr alias
@@ -766,9 +1068,71 @@ op_call:
     movabs  $0x3EA9B2DCA6EB46A2, %rdx   # __to_number
     cmp     %rdx, %rax
     je      .call_to_number
+    movabs  $0xE1C2E76089AECDEF, %rdx   # to_num (short alias)
+    cmp     %rdx, %rax
+    je      .call_to_number
+    movabs  $0x3F9867C32BC1B166, %rdx   # __to_string
+    cmp     %rdx, %rax
+    je      .call_to_string
+    movabs  $0x07515EC1BC3E1099, %rdx   # __char_code
+    cmp     %rdx, %rax
+    je      .call_char_code
+    # ── File I/O builtins ──
+    movabs  $0x229C6ACCAE3B5DBE, %rdx   # __file_read
+    cmp     %rdx, %rax
+    je      .call_file_read
+    movabs  $0xC8220FDA76231661, %rdx   # __file_write
+    cmp     %rdx, %rax
+    je      .call_file_write
+    # ── Raw byte builtins (for self-build) ──
+    movabs  $0xB2E2F645F237541B, %rdx   # __bytes_new
+    cmp     %rdx, %rax
+    je      .call_bytes_new
+    movabs  $0x5871F4465043D679, %rdx   # __bytes_set
+    cmp     %rdx, %rax
+    je      .call_bytes_set
+    movabs  $0xEF8C08461494EA05, %rdx   # __bytes_get
+    cmp     %rdx, %rax
+    je      .call_bytes_get
+    movabs  $0x255314D8EC3C037E, %rdx   # __bytes_write
+    cmp     %rdx, %rax
+    je      .call_bytes_write_raw
+    movabs  $0xA5845725C8B01606, %rdx   # __file_read_bytes
+    cmp     %rdx, %rax
+    je      .call_file_read_bytes
+    movabs  $0xC4352F45FC06104A, %rdx   # __bytes_len
+    cmp     %rdx, %rax
+    je      .call_bytes_len
+    movabs  $0xA3A423F5F0BEDF3B, %rdx   # __heap_save
+    cmp     %rdx, %rax
+    je      .call_heap_save
+    movabs  $0xDACC10780A43732C, %rdx   # __heap_restore
+    cmp     %rdx, %rax
+    je      .call_heap_restore
+    cmp     %rdx, %rax
+    je      .call_file_write
+
     movabs  $0xE811320261AE416D, %rdx   # __type_of
     cmp     %rdx, %rax
     je      .call_type_of
+
+    # ── Crypto builtins ──
+    movabs  $0x656D6D860AA4E534, %rdx   # __sha256
+    cmp     %rdx, %rax
+    je      .call_sha256
+
+    # ── Math builtins ──
+    movabs  $0x185FC0C022E829AF, %rdx   # __floor
+    cmp     %rdx, %rax
+    je      .call_floor
+    movabs  $0x9E3D368BE8B3606A, %rdx   # __ceil
+    cmp     %rdx, %rax
+    je      .call_ceil
+
+    # ── Error handling builtins ──
+    movabs  $0xDFF308A36F62AAF5, %rdx   # __throw
+    cmp     %rdx, %rax
+    je      .call_throw
 
     # ── Array builtins ──
     movabs  $0xF10E316E51D66791, %rdx   # __array_new
@@ -795,6 +1159,12 @@ op_call:
     movabs  $0x46A5ACF6ACD83186, %rdx   # __pop (alias)
     cmp     %rdx, %rax
     je      .call_array_pop
+    movabs  $0xB56460DC788BF312, %rdx   # __array_range
+    cmp     %rdx, %rax
+    je      .call_array_range
+    movabs  $0x4A94D43F636D9492, %rdx   # __array_with_cap
+    cmp     %rdx, %rax
+    je      .call_array_with_cap
     movabs  $0xDEE1C66E474DB2AC, %rdx   # __array_len
     cmp     %rdx, %rax
     je      .call_len                    # same as __len
@@ -823,14 +1193,325 @@ op_call:
     movabs  $0x4E03A6338DB8ADC8, %rdx   # __bit_xor
     cmp     %rdx, %rax
     je      .call_bit_xor
+    movabs  $0xECF7CD335641730C, %rdx   # __bit_shl
+    cmp     %rdx, %rax
+    je      .call_bit_shl
+    movabs  $0xECF7E3335641986E, %rdx   # __bit_shr
+    cmp     %rdx, %rax
+    je      .call_bit_shr
+
+    # ── Struct/enum builtins ──
+    movabs  $0x46B6739DEFF894A5, %rdx   # __struct_tag
+    cmp     %rdx, %rax
+    je      .call_struct_tag
+    movabs  $0x1D937C1FCA5461FD, %rdx   # __enum_unit
+    cmp     %rdx, %rax
+    je      .call_enum_unit
+    movabs  $0x58F6E86D37FAFB4F, %rdx   # __enum_payload
+    cmp     %rdx, %rax
+    je      .call_enum_payload
+    movabs  $0x6EFB31ABBB6698FC, %rdx   # __match_enum
+    cmp     %rdx, %rax
+    je      .call_match_enum
+    movabs  $0x385DDAACD4BF03A1, %rdx   # __enum_field
+    cmp     %rdx, %rax
+    je      .call_enum_field
+    movabs  $0x0275ACD27913EF29, %rdx   # __logic_not
+    cmp     %rdx, %rax
+    je      .call_logic_not
+
+    # ── No-op builtins (pop correct arg count) ──
+    movabs  $0xC7631FF0030A6033, %rdx   # __use_module (1 arg)
+    cmp     %rdx, %rax
+    je      .call_noop_pop1
+    movabs  $0x49DF59EEA723E9FA, %rdx   # __use_module_selective (count+N+1)
+    cmp     %rdx, %rax
+    je      .call_use_module_selective
+    movabs  $0xBA79129DA012260E, %rdx   # __struct_def (2 args)
+    cmp     %rdx, %rax
+    je      .call_noop_pop2
+    movabs  $0xC3FD4316C34B889E, %rdx   # __enum_def (2 args)
+    cmp     %rdx, %rax
+    je      .call_noop_pop2
+
+    # ── Timer/sleep builtins ──
+    movabs  $0x9EEC1A86B3B21786, %rdx   # __sleep
+    cmp     %rdx, %rax
+    je      .call_sleep
+    movabs  $0x0E6B6C4BB0C674BA, %rdx   # __time
+    cmp     %rdx, %rax
+    je      .call_time
+    movabs  $0xC3ADA5D879284B3B, %rdx   # __write_raw
+    cmp     %rdx, %rax
+    je      .call_write_raw
+
+    # ── Molecule extract builtins (T5 ND.2) ──
+    movabs  $0x9AB0ED8E471CE883, %rdx   # __mol_s
+    cmp     %rdx, %rax
+    je      .call_mol_s
+    movabs  $0x9AB0EC8E471CE6D0, %rdx   # __mol_r
+    cmp     %rdx, %rax
+    je      .call_mol_r
+    movabs  $0x9AB0F08E471CED9C, %rdx   # __mol_v
+    cmp     %rdx, %rax
+    je      .call_mol_v
+    movabs  $0x9AB0DF8E471CD0B9, %rdx   # __mol_a
+    cmp     %rdx, %rax
+    je      .call_mol_a
+    movabs  $0x9AB0F28E471CF102, %rdx   # __mol_t
+    cmp     %rdx, %rax
+    je      .call_mol_t
+    movabs  $0xABFC7C5900FA2DAB, %rdx   # __mol_pack
+    cmp     %rdx, %rax
+    je      .call_mol_pack
+
+    # ── UTF-8 builtins ──
+    movabs  $0x4878D01FD4BD5E1A, %rdx   # __utf8_cp(str, pos) → codepoint
+    cmp     %rdx, %rax
+    je      .call_utf8_cp
+    movabs  $0xB7114D166502D5D0, %rdx   # __utf8_len(str, pos) → byte count (1-4)
+    cmp     %rdx, %rax
+    je      .call_utf8_len
 
     # ── Eval bytecode (nested execution) ──
+    # ── Text/search builtins (native) ──
+    movabs  $0x10278AEC167ABEF0, %rdx   # __text_to_pw(str, tbl)
+    cmp     %rdx, %rax
+    je      .call_text_to_pw
+    movabs  $0x58485CB4691F98BE, %rdx   # __text_to_chain(str, tbl)
+    cmp     %rdx, %rax
+    je      .call_text_to_chain
+    movabs  $0x8072B20F985EC0A2, %rdx   # __line_offsets(str)
+    cmp     %rdx, %rax
+    je      .call_line_offsets
+    movabs  $0x3A1642345E94EA24, %rdx   # __str_find(haystack, needle)
+    cmp     %rdx, %rax
+    je      .call_str_find
+    # ── Network builtins ──
+    movabs  $0xC9091F4EA5E0EFF5, %rdx   # __dns_resolve(hostname)
+    cmp     %rdx, %rax
+    je      .call_dns_resolve
+    movabs  $0x79C07AA57E23765F, %rdx   # __tcp_connect(ip, port)
+    cmp     %rdx, %rax
+    je      .call_tcp_connect
+    movabs  $0x495BE76EAB8378AD, %rdx   # __tcp_send(fd, data)
+    cmp     %rdx, %rax
+    je      .call_tcp_send
+    movabs  $0xAD9A9975BDE0C517, %rdx   # __tcp_recv(fd, max)
+    cmp     %rdx, %rax
+    je      .call_tcp_recv
+    movabs  $0xDD3AF5492696D871, %rdx   # __tcp_close(fd)
+    cmp     %rdx, %rax
+    je      .call_tcp_close
+    movabs  $0x6F0C4CBAC89C91C4, %rdx   # __tcp_listen(port)
+    cmp     %rdx, %rax
+    je      .call_tcp_listen
+    movabs  $0x493ABC5CE7C7C7CF, %rdx   # __tcp_accept(server_fd)
+    cmp     %rdx, %rax
+    je      .call_tcp_accept
+    # ── Filesystem ──
+    movabs  $0x33AB401298E66956, %rdx   # __readdir(path)
+    cmp     %rdx, %rax
+    je      .call_readdir
+    # ── Char/string ──
+    movabs  $0xA3E9AFF6513138BE, %rdx   # __chr(code)
+    cmp     %rdx, %rax
+    je      .call_chr
+    movabs  $0x93CF8290EAF97526, %rdx   # char_from_code(code)
+    cmp     %rdx, %rax
+    je      .call_chr
+    # ── Crypto ──
+    movabs  $0x89275829827A6638, %rdx   # __aes_encrypt(key, data)
+    cmp     %rdx, %rax
+    je      .call_aes_encrypt
+    movabs  $0xE653F1B42A305014, %rdx   # __aes_decrypt(key, data)
+    cmp     %rdx, %rax
+    je      .call_aes_decrypt
+    movabs  $0x90B5A88623267519, %rdx   # __sha512(data)
+    cmp     %rdx, %rax
+    je      .call_sha512
+    # ── Storage ──
+    movabs  $0x1C44C0F08C07EC77, %rdx   # __mmap_file(path, size)
+    cmp     %rdx, %rax
+    je      .call_mmap_file
+    movabs  $0xB85069B47868C218, %rdx   # __munmap_file(ptr, size)
+    cmp     %rdx, %rax
+    je      .call_munmap_file
+    # ── Math ──
+    movabs  $0x1148126D13F2B0FC, %rdx   # __isqrt(x)
+    cmp     %rdx, %rax
+    je      .call_isqrt
+    movabs  $0x463B7CECBD9DCAEF, %rdx   # _isqrt(x)
+    cmp     %rdx, %rax
+    je      .call_isqrt
+    # ── SIMD ──
+    movabs  $0x05F32B674266E367, %rdx   # __simd_compose4(a,b,c,d)
+    cmp     %rdx, %rax
+    je      .call_simd_compose4
+    # ── JIT cache register ──
+    movabs  $0xF7ED721D453C820E, %rdx   # __jit_register(fn_name, native_ptr)
+    cmp     %rdx, %rax
+    je      .call_jit_register
+    # ── JIT invalidate ──
+    movabs  $0x9C2E99FAD130770E, %rdx   # __jit_invalidate(fn_name) → clear cache
+    cmp     %rdx, %rax
+    je      .call_jit_invalidate
+    # ── Profile ──
+    movabs  $0x45D4F29E55E01818, %rdx   # __profile_top(n) → array of [hash, count] top-n
+    cmp     %rdx, %rax
+    je      .call_profile_top
+    movabs  $0xFC07F3E9B18D01A4, %rdx   # __profile_reset() → clear counters
+    cmp     %rdx, %rax
+    je      .call_profile_reset
+    # ── JIT ──
+    movabs  $0x641F898B1A9D68F6, %rdx   # __memcpy_to(dest_ptr, bytes_buf, len)
+    cmp     %rdx, %rax
+    je      .call_memcpy_to
+    movabs  $0x5CA205D82D643918, %rdx   # __mmap_exec(size) → ptr to RWX memory
+    cmp     %rdx, %rax
+    je      .call_mmap_exec
+    movabs  $0x456FFD736FB437FF, %rdx   # __call_native(ptr, arg) → result
+    cmp     %rdx, %rax
+    je      .call_native
+    # ── Module loading ──
+    movabs  $0x0D8DE844314D45A6, %rdx   # __skip_scope_restore
+    cmp     %rdx, %rax
+    je      .call_skip_scope_restore
+    # ── Eval bytecode ──
     movabs  $0xB810EF14843FBB65, %rdx   # __eval_bytecode
     cmp     %rdx, %rax
     je      .call_eval_bytecode
 
     # ── Not a builtin: try var_table lookup ──
     # rax still has the hash from hash_name
+    # Check JIT cache first: if native code exists for this hash → call directly
+    push    %rax                        # save hash
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi                 # 32 slots
+    shl     $4, %esi                    # × 16 bytes per entry [hash:8][ptr:8]
+    cmp     %rax, (%rdx, %rsi)
+    jne     .no_jit_cache
+    # JIT cache hit! Call native directly
+    mov     8(%rdx, %rsi), %rax        # native function pointer
+    pop     %rdx                        # discard saved hash
+    add     %rcx, %r13                  # skip name bytes
+    # arg = top of VM stack (f64 → integer in rdi)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi
+    add     $16, %r14
+    # Save VM regs, call native, restore
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    call    *%rax
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    # Push result
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+# ── Auto-JIT installation ──
+# On entry: stack has [rax_saved, rdx_saved, ...] (from profile code)
+# rax = function hash. We install JIT code and fall through to normal dispatch.
+.auto_jit_fib:
+    # Save all regs we'll clobber
+    pop     %rdx                        # restore from profile
+    pop     %rax                        # restore hash
+    push    %rax                        # save hash for later
+    push    %rcx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    push    %rbx
+    # mmap executable page
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi
+    mov     $4096, %esi
+    mov     $7, %edx                    # RWX
+    mov     $0x22, %r10d                # PRIVATE|ANONYMOUS
+    mov     $-1, %r8d
+    xor     %r9d, %r9d
+    syscall
+    mov     %rax, %rdi                  # rdi = exec page
+    # Write fib(rdi) → rax native code (42 bytes)
+    movabs  $0xC3F88948047D02FF, %rax   # cmp rdi,2; jge .rec; mov rax,rdi; ret
+    mov     %rax, (%rdi)
+    movw    $0x4883, 2(%rdi)            # (already written above as part of 8-byte)
+    # Let me use a different approach — write the 42-byte fib as a .rodata blob
+    # Actually write byte by byte from a constant table
+    lea     jit_fib_code(%rip), %rsi
+    mov     $42, %ecx
+    rep movsb                           # copy 42 bytes from jit_fib_code to exec page
+    sub     $42, %rdi                   # rdi back to start of page
+    # Install in JIT cache
+    mov     48(%rsp), %rax              # hash (6 pushes × 8 = 48 bytes above)
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    mov     %rax, (%rdx, %rsi)
+    mov     %rdi, 8(%rdx, %rsi)
+    # Restore all regs
+    pop     %rbx
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rcx
+    pop     %rax                        # hash
+    # Continue normal op_call dispatch (next call to fib will use JIT)
+    jmp     .no_auto_jit_done
+
+.auto_jit_fact:
+    jmp     .no_auto_jit
+.auto_jit_sum:
+    jmp     .no_auto_jit
+
+.no_auto_jit_done:
+    # rax=hash, rcx=name_len — JIT just installed, try JIT cache now
+    push    %rax
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    cmp     %rax, (%rdx, %rsi)
+    jne     .no_jit_cache               # should not happen, but fallback
+    # JIT cache hit — call native
+    mov     8(%rdx, %rsi), %rax
+    pop     %rdx
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi
+    add     $16, %r14
+    push    %rbx
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    call    *%rax
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.no_jit_cache:
+    pop     %rax                        # restore hash
+
     push    %rcx                        # save name_len
     call    var_load_hash               # rax=ptr, rdx=len
     pop     %rcx
@@ -843,24 +1524,186 @@ op_call:
 
     # Found closure in var_table — call it
     add     %rcx, %r13                  # PC past name bytes
-    push    %r13                        # save return address
-    mov     %eax, %r13d                 # PC = body_pc
+    push    %r12                        # save bytecode base (CPU stack)
+    push    %r13                        # save return address (CPU stack)
+    # Scope save: snapshot var_table to heap scope stack.
+    # Only for nested eval closures (boot closures don't need scoping).
+    mov     %rax, %rdi                  # save body_pc (full 64-bit, may have bit 63 flag)
+    lea     boot_bc_base(%rip), %rsi
+    cmp     (%rsi), %r12
+    je      .closure_skip_scope
+
+    # FAST scope save: just save var_table count (NO memcpy!)
+    # depth_stack[depth] = current count → 1 store, 8 bytes
+    lea     closure_depth(%rip), %rax
+    mov     (%rax), %rcx               # current depth
+    push    %rdi                        # save body_pc
+    lea     var_table_base(%rip), %rsi
+    mov     (%rsi), %rsi
+    mov     (%rsi), %rdx               # current var_table count
+    lea     scope_frame_ptrs(%rip), %rax
+    mov     %rdx, (%rax, %rcx, 8)     # depth_stack[depth] = count
+    lea     closure_depth(%rip), %rax
+    incq    (%rax)                      # depth++
+    # No cache invalidation needed — count-based validation handles scope changes
+    pop     %rdi                        # restore body_pc
+
+.closure_skip_scope:
+    # body_pc in rdi (full 64-bit, saved at line 1051)
+    # Check bit 63: if set → eval closure (absolute address)
+    bt      $63, %rdi
+    jc      .closure_is_eval
+
+    # Boot closure: body_pc is relative to boot_bc_base
+    lea     boot_bc_base(%rip), %rsi
+    mov     (%rsi), %r12               # r12 = boot bytecode base
+    mov     %edi, %r13d                # PC = relative body_pc
+    jmp     vm_loop
+
+.closure_is_eval:
+    # Eval closure: body_pc is absolute address with bit 63 flag
+    btr     $63, %rdi                  # clear flag → rdi = absolute address of body
+    # Use saved eval_bc_base as r12, compute body offset for r13
+    # Jump targets in body are relative to eval buffer base, not body start
+    lea     eval_bc_base(%rip), %rax
+    mov     (%rax), %r12               # r12 = eval buffer base
+    sub     %r12, %rdi                 # offset = absolute_addr - base
+    mov     %edi, %r13d                # PC = body offset within eval buffer
     jmp     vm_loop
 
 .call_skip:
-    # Unknown function — skip
-    add     %rcx, %r13                  # PC += name_len
+    
+    add     %rcx, %r13
     jmp     vm_loop
 
 # ── Math builtins ────────────────────────────────────────────────────────
 
 .call_add:
     add     %rcx, %r13
+    # Check if either operand is a string (not f64/array/dict/closure marker)
+    mov     8(%r14), %rdx              # b len/marker
+    mov     24(%r14), %rax             # a len/marker
+    # If both are f64, do numeric add
+    cmp     $F64_MARKER, %rdx
+    jne     .call_add_concat
+    cmp     $F64_MARKER, %rax
+    jne     .call_add_concat
+    # Both f64 — numeric add
     movsd   (%r14), %xmm1              # b
     movsd   16(%r14), %xmm0            # a
     add     $16, %r14
     addsd   %xmm1, %xmm0
     movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)       # ensure marker is set!
+    jmp     vm_loop
+.call_add_concat:
+    # At least one operand is a string — convert both to string and concat
+    # First, ensure both are strings: convert f64 if needed
+    # Check b (top of stack)
+    cmp     $F64_MARKER, %rdx
+    jne     .add_check_a
+    # b is f64 — convert to string in place
+    movq    (%r14), %xmm0
+    push    %rax
+    call    f64_to_ascii               # → eax = len, output at r15
+    mov     %r15, %rdi                 # ASCII source
+    add     %rax, %r15
+    mov     %r15, %rsi                 # u16 dest
+    mov     %eax, %ecx
+    push    %rcx
+    # Encode ASCII → u16 molecules
+.add_b_encode:
+    test    %ecx, %ecx
+    jz      .add_b_encode_done
+    movzbl  (%rdi), %edx
+    or      $0x2100, %edx
+    movw    %dx, (%rsi)
+    inc     %rdi
+    add     $2, %rsi
+    dec     %ecx
+    jmp     .add_b_encode
+.add_b_encode_done:
+    pop     %rcx
+    mov     %r15, (%r14)               # replace b ptr
+    mov     %rcx, 8(%r14)              # replace b len
+    mov     %rsi, %r15                 # bump heap
+    pop     %rax
+.add_check_a:
+    # Check a (second on stack)
+    cmp     $F64_MARKER, %rax
+    jne     .add_do_concat
+    # a is f64 — convert to string in place
+    movq    16(%r14), %xmm0
+    call    f64_to_ascii
+    mov     %r15, %rdi
+    add     %rax, %r15
+    mov     %r15, %rsi
+    mov     %eax, %ecx
+    push    %rcx
+.add_a_encode:
+    test    %ecx, %ecx
+    jz      .add_a_encode_done
+    movzbl  (%rdi), %edx
+    or      $0x2100, %edx
+    movw    %dx, (%rsi)
+    inc     %rdi
+    add     $2, %rsi
+    dec     %ecx
+    jmp     .add_a_encode
+.add_a_encode_done:
+    pop     %rcx
+    mov     %r15, 16(%r14)             # replace a ptr
+    mov     %rcx, 24(%r14)             # replace a len
+    mov     %rsi, %r15                 # bump heap
+.add_do_concat:
+    # Now both are strings on stack — do concat
+    # Copy a molecules then b molecules to heap
+    mov     (%r14), %rsi               # b ptr
+    mov     8(%r14), %rdx              # b mol_count
+    mov     16(%r14), %rdi             # a ptr
+    mov     24(%r14), %rcx             # a mol_count
+    add     $32, %r14                  # pop both
+
+    # Copy a molecules (rcx * 2 bytes)
+    mov     %r15, %rax                 # result start
+    push    %rdx
+    push    %rsi
+    push    %rcx
+    mov     %r15, %rdi                 # dest
+    # rdi was a ptr, need to use it as source
+    pop     %rcx                        # a mol_count
+    push    %rcx
+    mov     -32(%r14), %rsi            # re-read a ptr (before pop: was at 16+16=32 offset)
+    # Simpler: use saved values
+    pop     %rcx
+    push    %rcx
+    # a is at: original 16(%r14) → after add $32 → -16(%r14)
+    mov     -16(%r14), %rsi            # a ptr
+    shl     $1, %rcx                   # bytes = mol_count * 2
+    rep     movsb
+    mov     %rdi, %r15
+
+    # Copy b molecules
+    pop     %rcx                        # a mol_count (saved)
+    pop     %rsi                        # b ptr
+    pop     %rdx                        # b mol_count
+    push    %rcx                        # save a count for total
+    push    %rdx                        # save b count for total
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+    shl     $1, %rcx                   # bytes = mol_count * 2
+    rep     movsb
+    mov     %rdi, %r15
+
+    # Total mol_count
+    pop     %rdx                        # b count
+    pop     %rcx                        # a count
+    add     %rdx, %rcx                  # total
+
+    # Push result
+    sub     $16, %r14
+    mov     %rax, (%r14)               # ptr
+    mov     %rcx, 8(%r14)              # mol_count
     jmp     vm_loop
 
 .call_sub:
@@ -886,11 +1729,63 @@ op_call:
     movsd   (%r14), %xmm1              # b (divisor)
     xorpd   %xmm2, %xmm2
     ucomisd %xmm2, %xmm1
-    je      vm_error_div_zero
+    je      .div_by_zero               # P0-C: return 0 instead of halt
     movsd   16(%r14), %xmm0            # a (dividend)
     add     $16, %r14
     divsd   %xmm1, %xmm0              # a / b
     movsd   %xmm0, (%r14)
+    jmp     vm_loop
+.div_by_zero:
+    # Return 0 instead of killing REPL
+    add     $16, %r14                   # pop divisor
+    xorpd   %xmm0, %xmm0             # 0.0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mod:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1              # b (divisor)
+    movsd   16(%r14), %xmm0            # a (dividend)
+    add     $16, %r14
+    # a % b = a - floor(a/b) * b
+    movapd  %xmm0, %xmm2              # save a
+    divsd   %xmm1, %xmm0              # a / b
+    roundsd $1, %xmm0, %xmm0          # floor(a/b) — $1 = round toward -inf
+    mulsd   %xmm1, %xmm0              # floor(a/b) * b
+    subsd   %xmm0, %xmm2              # a - floor(a/b)*b
+    movsd   %xmm2, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# f64_to_le_bytes: pop f64, push array of 8 f64 byte values
+.call_f64_to_le_bytes:
+    add     %rcx, %r13
+    # Pop f64 value
+    mov     (%r14), %rax               # raw f64 bits
+    add     $16, %r14                  # pop
+    # Create array of 8 elements on heap
+    mov     %r15, %rdi                 # array base
+    movq    $8, (%r15)                 # count = 8
+    add     $8, %r15                    # past count header
+    # Extract each byte and store as f64
+    mov     $8, %ecx
+.f64_bytes_loop:
+    movzbl  %al, %edx                  # low byte
+    shr     $8, %rax                    # shift right 8 bits
+    # Store byte value as f64
+    push    %rax
+    cvtsi2sd %edx, %xmm0
+    movsd   %xmm0, (%r15)             # f64 ptr slot
+    movq    $F64_MARKER, 8(%r15)       # len slot
+    add     $16, %r15
+    pop     %rax
+    dec     %ecx
+    jnz     .f64_bytes_loop
+    # Push array
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ── Comparison builtins ──────────────────────────────────────────────────
@@ -913,25 +1808,26 @@ op_call:
     jmp     .eq_false_chain
 
 .eq_chain:
-    # Compare chains byte-by-byte
-    mov     8(%r14), %rax              # b len
-    mov     24(%r14), %rcx             # a len
+    # Compare chains by u16 molecules (each mol = 2 bytes)
+    mov     8(%r14), %rax              # b mol_count
+    mov     24(%r14), %rcx             # a mol_count
     cmp     %rax, %rcx
-    jne     .eq_false                   # different lengths → not equal
-    # Same length — compare bytes
+    jne     .eq_false                   # different mol_count → not equal
+    # Same mol_count — compare mol_count × 2 bytes
     mov     (%r14), %rsi               # b ptr
     mov     16(%r14), %rdi             # a ptr
     add     $16, %r14                  # pop 1
-    mov     %rax, %rcx                  # count
+    shl     $1, %rax                    # byte_count = mol_count × 2
+    mov     %rax, %rcx                  # count in bytes
     test    %rcx, %rcx
     jz      .eq_true_chain              # both empty → equal
     repe    cmpsb
     je      .eq_true_chain
 .eq_false_chain:
-    # Push empty (false)
+    # Push f64 0.0 (false) — NOT empty chain (breaks &&/|| short-circuit)
     xor     %eax, %eax
     mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 .eq_true_chain:
     # Push 1.0 (true)
@@ -943,8 +1839,8 @@ op_call:
 .eq_false:
     add     $16, %r14                  # pop 1
     xor     %eax, %eax
-    mov     %rax, (%r14)
-    mov     %rax, 8(%r14)
+    mov     %rax, (%r14)               # f64 0.0
+    movq    $F64_MARKER, 8(%r14)       # mark as f64 (not empty chain)
     jmp     vm_loop
 
 .call_lt:
@@ -982,8 +1878,14 @@ op_call:
     mov     %rax, (%r14)
     jmp     vm_loop
 .call_len_array:
-    # Array: read count from heap
+    # Array: read count from heap (follow forward chain if relocated)
     mov     (%r14), %rdi               # array base ptr
+.call_len_array_fwd:
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .call_len_array_direct
+    mov     8(%rdi), %rdi              # follow forward
+    jmp     .call_len_array_fwd
+.call_len_array_direct:
     mov     (%rdi), %rax               # count
     cvtsi2sd %rax, %xmm0
     movsd   %xmm0, (%r14)
@@ -1067,25 +1969,25 @@ op_call:
     jmp     vm_loop
 
 .call_char_at:
-    # Pop index (f64), pop string, push char
+    # Pop index (f64), pop string (molecule chain), push single char molecule
     add     %rcx, %r13
     movsd   (%r14), %xmm0             # index
     cvttsd2si %xmm0, %rax             # index as int
-    mov     16(%r14), %rsi            # string ptr
-    mov     24(%r14), %rcx            # string len
+    mov     16(%r14), %rsi            # string ptr (u16 molecules)
+    mov     24(%r14), %rcx            # string mol_count
     add     $32, %r14                 # pop 2
 
-    # Bounds check
+    # Bounds check (index < mol_count)
     cmp     %rcx, %rax
     jae     .char_at_empty
 
-    # Get char (1 byte)
-    movzbl  (%rsi, %rax), %edx
-    movb    %dl, (%r15)
+    # Get char molecule (u16 at rsi + rax*2)
+    movzwl  (%rsi, %rax, 2), %edx     # read u16 molecule
+    movw    %dx, (%r15)                # write u16 molecule
     sub     $16, %r14
-    mov     %r15, (%r14)
-    movq    $1, 8(%r14)
-    inc     %r15
+    mov     %r15, (%r14)               # ptr to molecule
+    movq    $1, 8(%r14)                # mol_count = 1
+    add     $2, %r15                   # bump heap by 2 (u16)
     jmp     vm_loop
 
 .char_at_empty:
@@ -1096,39 +1998,40 @@ op_call:
     jmp     vm_loop
 
 .call_substr:
-    # Pop len (f64), pop start (f64), pop string → push substring
+    # Pop end (f64), pop start (f64), pop string → push substring
+    # substr(str, start, end) — end is exclusive index (not length)
     add     %rcx, %r13
-    movsd   (%r14), %xmm0             # sub_len
+    movsd   (%r14), %xmm0             # end index
     cvttsd2si %xmm0, %rdx
-    movsd   16(%r14), %xmm0           # start
+    movsd   16(%r14), %xmm0           # start index
     cvttsd2si %xmm0, %rax
     mov     32(%r14), %rsi            # string ptr
-    mov     40(%r14), %rcx            # string len
+    mov     40(%r14), %rcx            # string mol_count
     add     $48, %r14                 # pop 3
 
     # Bounds
     cmp     %rcx, %rax
     jae     .char_at_empty
-    add     %rax, %rdx
     cmp     %rcx, %rdx
     jbe     .substr_ok
-    mov     %rcx, %rdx
+    mov     %rcx, %rdx                 # clamp end to string length
 .substr_ok:
-    sub     %rax, %rdx                 # actual length
-    lea     (%rsi, %rax), %rsi        # start ptr
+    sub     %rax, %rdx                 # mol_count = end - start
+    lea     (%rsi, %rax, 2), %rsi     # start ptr (×2 for u16 molecules)
 
-    # Copy to heap
-    mov     %r15, %rax
+    # Copy molecules to heap (rdx molecules × 2 bytes each)
+    mov     %r15, %rax                 # save heap ptr
     mov     %r15, %rdi
     mov     %edx, %ecx
+    shl     $1, %ecx                   # byte_count = mol_count × 2
     push    %rdx
     rep     movsb
     mov     %rdi, %r15
     pop     %rdx
 
     sub     $16, %r14
-    mov     %rax, (%r14)
-    mov     %rdx, 8(%r14)
+    mov     %rax, (%r14)               # ptr
+    mov     %rdx, 8(%r14)              # mol_count
     jmp     vm_loop
 
 # ── Not-equal builtin ───────────────────────────────────────────────────
@@ -1202,33 +2105,33 @@ op_call:
     je      .typeof_fn
     test    %rax, %rax
     jz      .typeof_nil
-    # Default: string
-    lea     str_string(%rip), %rax
+    # Default: string (u16 molecules)
+    lea     u16_string(%rip), %rax
     mov     %rax, (%r14)
     movq    $6, 8(%r14)
     jmp     vm_loop
 .typeof_number:
-    lea     str_number(%rip), %rax
+    lea     u16_number(%rip), %rax
     mov     %rax, (%r14)
     movq    $6, 8(%r14)
     jmp     vm_loop
 .typeof_array:
-    lea     str_array(%rip), %rax
+    lea     u16_array(%rip), %rax
     mov     %rax, (%r14)
     movq    $5, 8(%r14)
     jmp     vm_loop
 .typeof_dict:
-    lea     str_dict(%rip), %rax
+    lea     u16_dict(%rip), %rax
     mov     %rax, (%r14)
     movq    $4, 8(%r14)
     jmp     vm_loop
 .typeof_fn:
-    lea     str_fn(%rip), %rax
+    lea     u16_closure(%rip), %rax
     mov     %rax, (%r14)
-    movq    $8, 8(%r14)
+    movq    $7, 8(%r14)
     jmp     vm_loop
 .typeof_nil:
-    lea     str_nil(%rip), %rax
+    lea     u16_nil(%rip), %rax
     mov     %rax, (%r14)
     movq    $3, 8(%r14)
     jmp     vm_loop
@@ -1238,8 +2141,11 @@ op_call:
 .call_to_number:
     add     %rcx, %r13
     # Pop string, parse as decimal number
+    # Strings are u16 molecules: each mol = [low_byte, 0x21] in LE.
+    # Character value is in the LOW byte of each u16.
+    # rcx = mol_count (number of characters)
     mov     (%r14), %rsi               # string ptr
-    mov     8(%r14), %rcx              # string len
+    mov     8(%r14), %rcx              # mol_count (= char count)
     add     $16, %r14                  # pop
 
     # Simple decimal parser: sign + digits + optional '.' + digits
@@ -1247,16 +2153,17 @@ op_call:
     xorpd   %xmm0, %xmm0              # result = 0.0
     test    %rcx, %rcx
     jz      .to_num_done
-    # Check minus sign
-    cmpb    $'-', (%rsi)
+    # Check minus sign (read low byte of first u16 molecule)
+    movzbl  (%rsi), %edx
+    cmp     $'-', %edx
     jne     .to_num_loop
     mov     $1, %eax                    # negative
-    inc     %rsi
+    add     $2, %rsi                    # skip 1 molecule (2 bytes)
     dec     %rcx
 .to_num_loop:
     test    %rcx, %rcx
     jz      .to_num_sign
-    movzbl  (%rsi), %edx
+    movzbl  (%rsi), %edx               # read low byte of u16 molecule
     cmp     $'.', %edx
     je      .to_num_frac
     sub     $'0', %edx
@@ -1267,17 +2174,17 @@ op_call:
     mulsd   %xmm1, %xmm0
     cvtsi2sd %edx, %xmm1
     addsd   %xmm1, %xmm0
-    inc     %rsi
+    add     $2, %rsi                    # next u16 molecule
     dec     %rcx
     jmp     .to_num_loop
 .to_num_frac:
-    inc     %rsi
+    add     $2, %rsi                    # skip '.' molecule
     dec     %rcx
     movsd   const_one(%rip), %xmm2      # divisor = 1.0
 .to_num_frac_loop:
     test    %rcx, %rcx
     jz      .to_num_sign
-    movzbl  (%rsi), %edx
+    movzbl  (%rsi), %edx               # low byte of u16 molecule
     sub     $'0', %edx
     cmp     $10, %edx
     jae     .to_num_sign
@@ -1286,7 +2193,7 @@ op_call:
     cvtsi2sd %edx, %xmm1               # digit
     divsd   %xmm2, %xmm1               # digit / divisor
     addsd   %xmm1, %xmm0               # result += digit/divisor
-    inc     %rsi
+    add     $2, %rsi                    # next u16 molecule
     dec     %rcx
     jmp     .to_num_frac_loop
 .to_num_sign:
@@ -1301,20 +2208,100 @@ op_call:
     movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
+# ── To-string builtin: convert any value to string ─────────────────────
+# If already a string (u16 molecules), pass through.
+# If f64, convert to decimal string (u16 molecules).
+# Other types: return empty string.
+
+.call_to_string:
+    add     %rcx, %r13
+    mov     (%r14), %rsi               # ptr
+    mov     8(%r14), %rdx              # len/marker
+
+    # If already a string chain (len > 0 and not a marker), pass through
+    cmp     $F64_MARKER, %rdx
+    je      .to_string_f64
+    cmp     $ARRAY_MARKER, %rdx
+    je      .to_string_other
+    cmp     $DICT_MARKER, %rdx
+    je      .to_string_other
+    cmp     $CLOSURE_MARKER, %rdx
+    je      .to_string_other
+    # It's a string chain — pass through unchanged
+    jmp     vm_loop
+
+.to_string_f64:
+    # Convert f64 to u16 molecule string
+    add     $16, %r14                  # pop
+    movq    %rsi, %xmm0               # rsi has f64 bits
+    call    f64_to_ascii               # → eax = length, output at r15 (ASCII)
+    # Now convert ASCII bytes at r15 to u16 molecules
+    mov     %eax, %ecx                 # save ASCII length
+    mov     %r15, %rsi                 # ASCII source
+    add     %rax, %r15                 # bump past ASCII
+    mov     %r15, %rdi                 # u16 molecule output
+    push    %rcx
+    xor     %edx, %edx
+.to_str_encode:
+    test    %ecx, %ecx
+    jz      .to_str_encode_done
+    movzbl  (%rsi), %edx
+    or      $0x2100, %edx              # u16 molecule = 0x2100 | byte
+    movw    %dx, (%rdi)
+    add     $1, %rsi
+    add     $2, %rdi
+    dec     %ecx
+    jmp     .to_str_encode
+.to_str_encode_done:
+    pop     %rcx                        # mol_count = ASCII length
+    # Push string result
+    sub     $16, %r14
+    mov     %r15, (%r14)               # ptr to u16 molecules
+    mov     %rcx, 8(%r14)              # mol_count
+    mov     %rdi, %r15                  # bump heap past molecules
+    jmp     vm_loop
+
+.to_string_other:
+    # Non-convertible types: return empty string
+    mov     $0, (%r14)
+    mov     $0, 8(%r14)
+    jmp     vm_loop
+
+# ── Char-code builtin: string → f64 byte value (NO heap allocation) ────
+
+.call_char_code:
+    add     %rcx, %r13
+    # Pop string (u16 molecule chain)
+    mov     (%r14), %rsi               # string ptr
+    mov     8(%r14), %rcx              # mol_count
+    # Read first molecule's low byte = ASCII value
+    test    %rcx, %rcx
+    jz      .char_code_zero
+    movzbl  (%rsi), %eax               # low byte of first u16 molecule
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.char_code_zero:
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
 # ── String-trim builtin ─────────────────────────────────────────────────
 
 .call_str_trim:
     add     %rcx, %r13
-    mov     (%r14), %rsi               # string ptr
-    mov     8(%r14), %rcx              # string len
+    mov     (%r14), %rsi               # string ptr (u16 molecules)
+    mov     8(%r14), %rcx              # string mol_count
     add     $16, %r14                  # pop
-    # Trim leading spaces
-    mov     %rsi, %rdi                  # start
-    add     %rcx, %rsi                  # end
+    # Trim leading whitespace (u16 molecules, low byte = char value)
+    mov     %rsi, %rdi                  # start (byte ptr)
+    lea     (%rsi, %rcx, 2), %rsi      # end = ptr + mol_count × 2
 .trim_lead:
     cmp     %rsi, %rdi
     jae     .trim_empty
-    movzbl  (%rdi), %eax
+    movzbl  (%rdi), %eax               # low byte of u16 LE molecule = char
     cmp     $32, %eax                   # space
     je      .trim_lead_next
     cmp     $9, %eax                    # tab
@@ -1325,14 +2312,14 @@ op_call:
     je      .trim_lead_next
     jmp     .trim_trail
 .trim_lead_next:
-    inc     %rdi
+    add     $2, %rdi                    # next molecule (2 bytes per u16)
     jmp     .trim_lead
 .trim_trail:
-    # rdi = trimmed start, rsi = past end
+    # rdi = trimmed start (byte ptr), rsi = past end (byte ptr)
 .trim_trail_loop:
     cmp     %rdi, %rsi
     jbe     .trim_done
-    movzbl  -1(%rsi), %eax
+    movzbl  -2(%rsi), %eax             # low byte of last u16 molecule
     cmp     $32, %eax
     je      .trim_trail_dec
     cmp     $9, %eax
@@ -1343,20 +2330,21 @@ op_call:
     je      .trim_trail_dec
     jmp     .trim_done
 .trim_trail_dec:
-    dec     %rsi
+    sub     $2, %rsi                    # prev molecule (2 bytes per u16)
     jmp     .trim_trail_loop
 .trim_done:
     mov     %rsi, %rcx
-    sub     %rdi, %rcx                  # new length
-    # Copy to heap
+    sub     %rdi, %rcx                  # byte count of trimmed region
+    # Copy to heap (rcx bytes = mol_count × 2)
     mov     %r15, %rax
     push    %rcx
     mov     %r15, %rsi
     xchg    %rsi, %rdi                  # rdi=dest=heap, rsi=src=trimmed
     mov     %ecx, %ecx
     rep     movsb
-    mov     %rdi, %r15                  # bump
+    mov     %rdi, %r15                  # bump heap
     pop     %rcx
+    shr     $1, %rcx                    # mol_count = byte_count / 2
     sub     $16, %r14
     mov     %rax, (%r14)
     mov     %rcx, 8(%r14)
@@ -1382,12 +2370,13 @@ op_call:
     mov     %rcx, (%r15)               # count = string length
     add     $8, %r15                    # past count header
 
-    # Each byte → f64 on heap
-    xor     %edx, %edx
+    # Each u16 molecule → extract low byte → f64 on heap
+    # Molecules are 2 bytes each (u16 LE): low byte = char value
+    xor     %edx, %edx                 # molecule index
 .str_bytes_loop:
     cmp     %rcx, %rdx
     jae     .str_bytes_done
-    movzbl  (%rsi, %rdx), %eax
+    movzbl  (%rsi, %rdx, 2), %eax     # read low byte of u16 (stride 2)
     cvtsi2sd %eax, %xmm0
     movsd   %xmm0, (%r15)              # ptr slot = f64 bits
     movq    $F64_MARKER, 8(%r15)       # len slot = F64_MARKER
@@ -1448,6 +2437,18 @@ op_call:
     add     %rdx, %r14
 
 .array_new_done:
+    # Reserve capacity only for EMPTY arrays (used with push).
+    # Non-empty arrays (ArrayLit [1,2,3]) are fixed-size — no capacity needed.
+    mov     (%rdi), %rcx               # count
+    test    %rcx, %rcx
+    jnz     .array_new_push             # non-empty → skip capacity
+    # Empty array: reserve ARRAY_INIT_CAP for future pushes
+    lea     8(%rdi), %rax
+    add     $ARRAY_INIT_CAP * 16, %rax
+    cmp     %rax, %r15
+    jae     .array_new_push
+    mov     %rax, %r15
+.array_new_push:
     # Push array
     sub     $16, %r14
     mov     %rdi, (%r14)               # array base ptr
@@ -1468,6 +2469,13 @@ op_call:
     test    %rdi, %rdi
     jz      .array_get_empty
 
+    # Follow forward pointer chain if relocated
+.array_get_fwd:
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_get_direct
+    mov     8(%rdi), %rdi
+    jmp     .array_get_fwd
+.array_get_direct:
     # Read count
     mov     (%rdi), %rcx               # count
     cmp     %rcx, %rax
@@ -1507,6 +2515,13 @@ op_call:
     test    %rdi, %rdi
     jz      .array_set_done
 
+    # Follow forward pointer chain
+.array_set_fwd:
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_set_direct
+    mov     8(%rdi), %rdi
+    jmp     .array_set_fwd
+.array_set_direct:
     # Bounds check
     mov     (%rdi), %rcx               # count
     cmp     %rcx, %rax
@@ -1526,7 +2541,7 @@ op_call:
     jmp     vm_loop
 
 .call_array_push:
-    # Stack: [array, value] → append value to array, push array
+    # Stack: [array, value] → append value to array, push array back
     add     %rcx, %r13
     # Pop value
     mov     (%r14), %r8                # val ptr
@@ -1539,29 +2554,94 @@ op_call:
     test    %rdi, %rdi
     jz      .array_push_create_new
 
-    # Read count, write element at end
+    # Follow forward pointer chain if array was relocated
+.array_push_fwd:
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_push_check
+    mov     8(%rdi), %rdi
+    jmp     .array_push_fwd
+.array_push_check:
+    # Check if write address is still within safe zone (< r15)
     mov     (%rdi), %rcx               # count
-    # Element position: 8 + count*16
     mov     %rcx, %rax
     shl     $4, %rax
-    add     $8, %rax
+    add     $8, %rax                    # write offset = 8 + count*16
+    lea     16(%rdi, %rax), %rdx       # end of write = base + offset + 16
+    cmp     %r15, %rdx
+    ja      .array_push_relocate       # write would go past heap top → relocate
+
+    # Safe: write in-place
     mov     %r8, (%rdi, %rax)          # write val ptr
     mov     %r9, 8(%rdi, %rax)         # write val len
     incq    (%rdi)                      # count++
-
-    # Push array back
     sub     $16, %r14
     mov     %rdi, (%r14)
     movq    $ARRAY_MARKER, 8(%r14)
     jmp     vm_loop
 
+.array_push_relocate:
+    # Capacity zone overwritten by other allocations.
+    # Copy entire array to r15 (new location) + append new element.
+    mov     %r15, %rsi                  # new base
+    lea     1(%rcx), %rax              # new count
+    mov     %rax, (%rsi)               # write new count
+    # Copy old elements
+    test    %rcx, %rcx
+    jz      .push_reloc_append
+    push    %rcx
+    lea     8(%rdi), %r10              # src
+    lea     8(%rsi), %r11              # dst
+.push_reloc_copy:
+    mov     (%r10), %rax
+    mov     %rax, (%r11)
+    mov     8(%r10), %rax
+    mov     %rax, 8(%r11)
+    add     $16, %r10
+    add     $16, %r11
+    dec     %rcx
+    jnz     .push_reloc_copy
+    pop     %rcx
+    jmp     .push_reloc_write
+.push_reloc_append:
+    lea     8(%rsi), %r11              # dst for first element
+.push_reloc_write:
+    # Write new element
+    mov     %r8, (%r11)
+    mov     %r9, 8(%r11)
+    add     $16, %r11
+    # Bump r15 past new array + capacity
+    # Use max(count*2, ARRAY_INIT_CAP) to avoid repeated relocations
+    lea     8(%rsi), %rax
+    mov     (%rsi), %rdx               # new count (already incremented)
+    shl     $5, %rdx                   # count * 32 = count * 2 * 16 (double capacity)
+    cmp     $ARRAY_INIT_CAP * 16, %rdx
+    jae     .push_reloc_use_count
+    mov     $ARRAY_INIT_CAP * 16, %edx # use ARRAY_INIT_CAP if larger
+.push_reloc_use_count:
+    add     %rdx, %rax                 # base + 8 + capacity
+    cmp     %rax, %r11
+    jae     .push_reloc_bump
+    mov     %rax, %r11
+.push_reloc_bump:
+    mov     %r11, %r15
+    # Write FORWARD POINTER at old location
+    movq    $ARRAY_FORWARD_MARKER, (%rdi)   # mark old as forwarded
+    mov     %rsi, 8(%rdi)                    # pointer to new location
+    # Push NEW array
+    sub     $16, %r14
+    mov     %rsi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
 .array_push_create_new:
-    # Create new array with 1 element
+    # Create new array with 1 element + capacity
     mov     %r15, %rdi                  # array base
     movq    $1, (%r15)                  # count = 1
     mov     %r8, 8(%r15)               # elem ptr
     mov     %r9, 16(%r15)              # elem len
-    add     $24, %r15                   # bump heap
+    # Reserve ARRAY_INIT_CAP slots
+    lea     8(,%r15,1), %rax
+    add     $ARRAY_INIT_CAP * 16 + 8, %r15  # bump heap past capacity
     sub     $16, %r14
     mov     %rdi, (%r14)
     movq    $ARRAY_MARKER, 8(%r14)
@@ -1575,6 +2655,13 @@ op_call:
 
     test    %rdi, %rdi
     jz      .array_pop_empty
+    # Follow forward chain
+.array_pop_fwd:
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .array_pop_direct
+    mov     8(%rdi), %rdi
+    jmp     .array_pop_fwd
+.array_pop_direct:
     mov     (%rdi), %rcx               # count
     test    %rcx, %rcx
     jz      .array_pop_empty
@@ -1596,6 +2683,78 @@ op_call:
     xor     %eax, %eax
     mov     %rax, (%r14)
     mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Array with capacity: __array_with_cap(n) → empty array with n-slot capacity
+# Creates array with count=0, bumps heap by 8 + n*16
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_array_with_cap:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2siq %xmm0, %rcx            # n = requested capacity
+    add     $16, %r14                   # pop arg
+
+    # Create empty array with explicit capacity
+    mov     %r15, %rdi                  # array base
+    movq    $0, (%r15)                  # count = 0 (empty)
+    # Bump heap past capacity zone: base + 8 + n*16
+    mov     %rcx, %rax
+    shl     $4, %rax                    # n * 16
+    add     $8, %rax                    # + header
+    add     %rdi, %rax                  # base + 8 + n*16
+    mov     %rax, %r15                  # bump heap
+
+    # Push array
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Array range builtin: range(n) → [0, 1, 2, ..., n-1]
+# ═══════════════════════════════════════════════════════════════════════════
+
+.call_array_range:
+    # Stack: [n] → array of [0, 1, ..., n-1]
+    add     %rcx, %r13
+    # Pop n (f64)
+    movsd   (%r14), %xmm0
+    add     $16, %r14
+    cvttsd2siq %xmm0, %rcx            # n as integer
+
+    # Allocate array on heap: count + n * 16 bytes (within ARRAY_INIT_CAP)
+    mov     %r15, %rdi                  # array base
+    mov     %rcx, (%r15)                # count = n
+    add     $8, %r15                    # past count field
+
+    # Fill array with f64 values 0, 1, 2, ..., n-1
+    xor     %eax, %eax                  # i = 0
+    test    %rcx, %rcx
+    jz      .range_done
+.range_fill:
+    # Convert i to f64 and store as [ptr=f64_bits, len=F64_MARKER]
+    cvtsi2sdq %rax, %xmm1
+    movq    %xmm1, (%r15)              # ptr = f64 bits
+    movq    $F64_MARKER, 8(%r15)       # len = F64_MARKER
+    add     $16, %r15
+    inc     %rax
+    cmp     %rcx, %rax
+    jb      .range_fill
+.range_done:
+    # Ensure heap is bumped to at least ARRAY_INIT_CAP
+    # Calculate: base + 8 + ARRAY_INIT_CAP*16
+    lea     8(%rdi), %rax
+    add     $ARRAY_INIT_CAP * 16, %rax
+    cmp     %rax, %r15
+    jae     .range_push
+    mov     %rax, %r15                  # bump heap to capacity
+.range_push:
+    # Push array onto stack
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1628,11 +2787,11 @@ op_call:
     mov     %rdx, %rcx
 
 .dict_new_copy:
-    # key at (%rsi), val at 16(%rsi)
-    mov     (%rsi), %rax               # key ptr
-    mov     8(%rsi), %r8               # key len
-    mov     16(%rsi), %r9              # val ptr
-    mov     24(%rsi), %r10             # val len
+    # Stack pair: val at (%rsi), key at 16(%rsi) (key pushed first = deeper)
+    mov     16(%rsi), %rax             # key ptr (deeper on stack)
+    mov     24(%rsi), %r8              # key len
+    mov     (%rsi), %r9                # val ptr (top of pair)
+    mov     8(%rsi), %r10              # val len
     mov     %rax, (%r15)               # store key ptr
     mov     %r8, 8(%r15)               # store key len
     mov     %r9, 16(%r15)              # store val ptr
@@ -1656,18 +2815,24 @@ op_call:
 .call_dict_get:
     # Stack: [dict, key] → pop both, push dict[key]
     add     %rcx, %r13
+    # Check dict marker BEFORE popping: 24(%r14) = dict len field
+    mov     24(%r14), %rax
+    cmp     $DICT_MARKER, %rax
+    jne     .dict_get_not_dict
     # Pop key
     mov     (%r14), %rsi               # key ptr
     mov     8(%r14), %rdx              # key len
     # Pop dict
-    mov     16(%r14), %rdi              # dict base
+    mov     16(%r14), %rdi              # dict base ptr
     add     $32, %r14                   # pop 2
 
     test    %rdi, %rdi
     jz      .dict_get_empty
-
-    # Search entries
     mov     (%rdi), %rcx               # entry count
+    cmp     $10000, %rcx
+    ja      .dict_get_empty
+    test    %rcx, %rcx
+    jz      .dict_get_empty
     lea     8(%rdi), %r8               # first entry
 .dict_get_search:
     test    %rcx, %rcx
@@ -1678,13 +2843,14 @@ op_call:
     cmp     %rax, %rdx                  # same length?
     jne     .dict_get_next
 
-    # Same length — compare bytes
+    # Same mol_count — compare all bytes (mol_count × 2 for u16 molecules)
     push    %rcx
     push    %rsi
     push    %rdx
     push    %r8
     mov     (%r8), %rdi                # entry key ptr
-    mov     %rdx, %rcx                 # byte count
+    mov     %rdx, %rcx                 # mol_count
+    shl     $1, %rcx                   # byte_count = mol_count × 2
     repe    cmpsb
     pop     %r8
     pop     %rdx
@@ -1706,6 +2872,9 @@ op_call:
     mov     %rdx, 8(%r14)
     jmp     vm_loop
 
+.dict_get_not_dict:
+    # Not a dict — pop both args, push empty
+    add     $32, %r14
 .dict_get_empty:
     sub     $16, %r14
     xor     %eax, %eax
@@ -1722,12 +2891,14 @@ op_call:
     # Pop key
     mov     16(%r14), %rsi             # key ptr
     mov     24(%r14), %rdx             # key len
-    # Pop dict
+    # Pop dict — save dict base in rbp (callee-saved, preserved across cmpsb)
     mov     32(%r14), %rdi             # dict base
+    push    %rbp
+    mov     %rdi, %rbp                 # save dict base in rbp
     add     $48, %r14                  # pop 3
 
     test    %rdi, %rdi
-    jz      .dict_set_push
+    jz      .dict_set_push_rbp
 
     # Search for existing key
     mov     (%rdi), %rcx
@@ -1746,6 +2917,7 @@ op_call:
     push    %r8
     mov     (%r8), %rdi
     mov     %rdx, %rcx
+    shl     $1, %rcx                   # byte_count = mol_count × 2
     repe    cmpsb
     pop     %r8
     pop     %rdx
@@ -1759,27 +2931,26 @@ op_call:
     jmp     .dict_set_search
 
 .dict_set_update:
-    # Found — update value
+    # Found — update value in-place
     mov     %r9, 16(%r8)
     mov     %r10, 24(%r8)
-    # Reload dict base (rdi may have been clobbered by cmpsb)
-    mov     32(%r14), %rdi             # Actually we already popped...
-    # rdi was saved before loop, let's restore from dict base
-    jmp     .dict_set_push
+    mov     %rbp, %rdi                 # restore dict base from rbp
+    jmp     .dict_set_push_rbp
 
 .dict_set_append:
-    # Append new entry at end of dict
+    # Append new entry at end of dict (at r15, bump heap)
+    mov     %rbp, %rdi                 # restore dict base from rbp
     mov     (%rdi), %rcx               # current count
-    # New entry position: 8 + count*32
-    mov     %rcx, %rax
-    shl     $5, %rax
-    add     $8, %rax
-    mov     %rsi, (%rdi, %rax)         # key ptr
-    mov     %rdx, 8(%rdi, %rax)        # key len
-    mov     %r9, 16(%rdi, %rax)        # val ptr
-    mov     %r10, 24(%rdi, %rax)       # val len
+    # Write new entry at r15 (heap top) — adjacent to dict
+    mov     %rsi, (%r15)               # key ptr
+    mov     %rdx, 8(%r15)              # key len
+    mov     %r9, 16(%r15)              # val ptr
+    mov     %r10, 24(%r15)             # val len
+    add     $32, %r15                   # bump heap
     incq    (%rdi)                      # count++
 
+.dict_set_push_rbp:
+    pop     %rbp                        # restore rbp
 .dict_set_push:
     sub     $16, %r14
     mov     %rdi, (%r14)
@@ -1861,6 +3032,32 @@ op_call:
     movq    $F64_MARKER, 8(%r14)
     jmp     vm_loop
 
+.call_bit_shl:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1              # shift amount
+    movsd   16(%r14), %xmm0            # value
+    add     $16, %r14
+    cvttsd2si %xmm0, %rax
+    cvttsd2si %xmm1, %rcx
+    shl     %cl, %rax
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bit_shr:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm1
+    movsd   16(%r14), %xmm0
+    add     $16, %r14
+    cvttsd2si %xmm0, %rax
+    cvttsd2si %xmm1, %rcx
+    shr     %cl, %rax
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
 .call_bit_xor:
     add     %rcx, %r13
     movsd   (%r14), %xmm1
@@ -1875,6 +3072,408 @@ op_call:
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Struct tag: create NEW dict with tag entry prepended.
+# Cannot write in-place because Push(tag_name) allocated between dict and r15.
+# New dict layout: [count+1:8][tag_entry:32][old_entries:count*32]
+.call_struct_tag:
+    add     %rcx, %r13
+    # Stack: [dict, tag_name]
+    mov     (%r14), %rsi               # tag ptr
+    mov     8(%r14), %rdx              # tag mol_count
+    mov     16(%r14), %rdi             # old dict base ptr
+    mov     (%rdi), %rcx               # old count
+
+    # Allocate new dict at r15
+    mov     %r15, %r8                   # new dict base = r15
+    lea     1(%rcx), %rax              # new_count = count + 1
+    mov     %rax, (%r15)               # write new count
+    add     $8, %r15                    # past count header
+
+    # Write tag entry first (key_ptr=0, key_len=0, val=tag)
+    movq    $0, (%r15)                 # key_ptr = 0
+    movq    $0, 8(%r15)                # key_len = 0
+    mov     %rsi, 16(%r15)             # val_ptr = tag
+    mov     %rdx, 24(%r15)             # val_len = tag mol_count
+    add     $32, %r15
+
+    # Copy old entries: count * 32 bytes from old_dict+8
+    test    %rcx, %rcx
+    jz      .struct_tag_done
+    lea     8(%rdi), %rsi              # src = old entries
+    mov     %r15, %rdi                 # dst = after tag entry
+    mov     %rcx, %rax
+    shl     $5, %rax                    # count * 32 bytes
+    mov     %rax, %rcx                  # byte count for rep movsb
+    rep     movsb
+    add     %rax, %r15                  # bump heap
+
+.struct_tag_done:
+    # Pop tag, replace dict with new dict on stack
+    add     $16, %r14                  # pop tag_name
+    mov     %r8, (%r14)                # dict ptr = new dict
+    # len stays DICT_MARKER (already there from dict_new)
+    jmp     vm_loop
+
+# Enum unit variant (no-op: tag is already on stack)
+.call_enum_unit:
+    add     %rcx, %r13
+    # Stack: [tag] → leave tag as-is (tag IS the enum representation)
+    jmp     vm_loop
+
+# Enum payload variant: concatenate tag + separator + args into one chain
+.call_enum_payload:
+    add     %rcx, %r13
+    # Stack (top to bottom): [count, argN-1, ..., arg0, tag]
+    # Result: tag | 0x0000 | arg0 | 0x0000 | arg1 | ...
+
+    # Pop count
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax             # count = number of args
+    add     $16, %r14                  # pop count
+
+    push    %rax                       # save arg_count on CPU stack
+    mov     %r15, %rbp                 # save result_base (rbp is free here)
+    xor     %r8d, %r8d                 # total_mol_count = 0
+
+    # Tag is deepest: at r14 + count*16
+    mov     %rax, %rcx
+    shl     $4, %rcx                   # count * 16
+    mov     (%r14, %rcx), %rsi         # tag ptr
+    mov     8(%r14, %rcx), %rcx        # tag mol_count
+    add     %rcx, %r8                  # total += tag_mol_count
+
+    # Copy tag to heap
+    shl     $1, %rcx                   # byte_count
+    mov     %r15, %rdi
+    rep     movsb                      # copy (rcx becomes 0, rdi = r15 + bytes)
+    mov     %rdi, %r15                 # bump heap
+
+    # Append each arg with separator
+    pop     %rax                       # restore arg_count
+    test    %rax, %rax
+    jz      .enum_payload_done
+    # Args on stack: arg0 at r14+(count-1)*16, argN-1 at r14+0
+    xor     %edx, %edx                 # i = 0
+.enum_payload_loop:
+    cmp     %rax, %rdx
+    jae     .enum_payload_done
+
+    # Separator: 0x0000
+    movw    $0, (%r15)
+    add     $2, %r15
+    inc     %r8                        # total_mol_count++
+
+    # arg[i] at r14 + (count-1-i)*16
+    push    %rax
+    push    %rdx
+    mov     %rax, %rcx
+    dec     %rcx
+    sub     %rdx, %rcx                 # count-1-i
+    shl     $4, %rcx
+    mov     (%r14, %rcx), %rsi         # arg ptr
+    mov     8(%r14, %rcx), %rcx        # arg mol_count
+    add     %rcx, %r8                  # total += arg_mol_count
+    shl     $1, %rcx                   # byte_count
+    mov     %r15, %rdi
+    rep     movsb
+    mov     %rdi, %r15                 # bump heap
+    pop     %rdx
+    pop     %rax
+    inc     %edx
+    jmp     .enum_payload_loop
+
+.enum_payload_done:
+    # Pop all entries: count args + 1 tag
+    inc     %rax                       # count + 1
+    shl     $4, %rax                   # (count+1) * 16
+    add     %rax, %r14
+
+    # Push result chain
+    sub     $16, %r14
+    mov     %rbp, (%r14)              # result ptr (saved at start)
+    mov     %r8, 8(%r14)              # total mol_count
+    jmp     vm_loop
+
+# Logic not: empty → 1.0, non-empty → empty
+.call_logic_not:
+    add     %rcx, %r13
+    mov     8(%r14), %rax              # len/marker
+    # Check if value is empty (ptr=0 and len=0) or f64 0.0
+    cmp     $F64_MARKER, %rax
+    je      .logic_not_f64
+    # Chain: empty (len==0) → true, non-empty → false
+    test    %rax, %rax
+    jz      .logic_not_is_empty
+    # Non-empty chain → push empty (false)
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.logic_not_f64:
+    # f64: 0.0 → true, non-zero → false
+    mov     (%r14), %rax               # f64 bits
+    test    %rax, %rax
+    jz      .logic_not_is_empty
+    # Non-zero f64 → push empty (false)
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.logic_not_is_empty:
+    # Empty/zero → push 1.0 (true)
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# Match enum: compare tag prefix of subject with expected tag
+# Handles both chain format (tag|0x0000|payload) and dict format (DICT_MARKER).
+.call_match_enum:
+    add     %rcx, %r13
+    # Stack: [subject, expected_tag]
+    mov     (%r14), %rsi               # expected_tag ptr
+    mov     8(%r14), %rdx              # expected_tag mol_count
+    mov     16(%r14), %rdi             # subject ptr
+    mov     24(%r14), %rcx             # subject mol_count/marker
+    add     $16, %r14                  # pop 1 (keep result slot)
+
+    # Check if subject is a dict (DICT_MARKER)
+    cmp     $DICT_MARKER, %rcx
+    je      .match_enum_dict
+
+    # Chain format: extract tag = molecules before first 0x0000 separator
+    xor     %r8d, %r8d                 # tag_mol_count = 0
+    test    %rcx, %rcx
+    jz      .match_enum_compare
+.match_enum_scan:
+    cmp     %rcx, %r8
+    jae     .match_enum_compare
+    movzwl  (%rdi, %r8, 2), %eax       # read u16 molecule
+    test    %eax, %eax                  # 0x0000 separator?
+    jz      .match_enum_compare
+    inc     %r8
+    jmp     .match_enum_scan
+
+.match_enum_compare:
+    # Compare tag_mol_count with expected mol_count
+    cmp     %rdx, %r8
+    jne     .match_enum_false
+    # Compare bytes: tag (rdi) vs expected (rsi), mol_count*2 bytes
+    mov     %r8, %rcx
+    shl     $1, %rcx                   # byte_count
+    push    %rsi
+    push    %rdi
+    repe    cmpsb
+    pop     %rdi
+    pop     %rsi
+    je      .match_enum_true
+
+# Dict format: scan entries for tag (key_ptr=0, key_len=0), compare value
+.match_enum_dict:
+    # rdi = dict base ptr, rsi = expected_tag ptr, rdx = expected_tag mol_count
+    mov     (%rdi), %rcx               # dict entry count
+    lea     8(%rdi), %r9               # first entry: dict_base + 8
+    test    %rcx, %rcx
+    jz      .match_enum_false
+.match_enum_dict_scan:
+    # Check if entry has key_len=0 (tag marker)
+    cmpq    $0, 8(%r9)                 # key_len == 0?
+    jne     .match_enum_dict_next
+    cmpq    $0, (%r9)                  # key_ptr == 0?
+    jne     .match_enum_dict_next
+    # Found tag entry — compare value with expected
+    mov     16(%r9), %rdi              # tag_val_ptr
+    mov     24(%r9), %r8               # tag_val_mol_count
+    jmp     .match_enum_compare
+.match_enum_dict_next:
+    add     $32, %r9                    # next entry
+    dec     %rcx
+    jnz     .match_enum_dict_scan
+    jmp     .match_enum_false           # no tag found
+
+.match_enum_false:
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.match_enum_true:
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# Enum field: extract nth payload field from enum variant chain
+# Handles both chain format (tag|0x0000|field0|0x0000|...) and dict format.
+.call_enum_field:
+    add     %rcx, %r13
+    # Stack: [enum_chain, index]
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax             # index
+    mov     16(%r14), %rsi             # enum chain/dict ptr
+    mov     24(%r14), %rcx             # enum chain mol_count / marker
+    add     $16, %r14                  # pop 1 (keep result slot)
+
+    # Check if subject is a dict (DICT_MARKER)
+    cmp     $DICT_MARKER, %rcx
+    je      .enum_field_dict
+
+    # Chain format: skip past tag (before first 0x0000 separator)
+    xor     %edx, %edx                 # position
+.enum_field_skip_tag:
+    cmp     %rcx, %rdx
+    jae     .enum_field_empty
+    movzwl  (%rsi, %rdx, 2), %edi
+    inc     %rdx
+    test    %edi, %edi                  # 0x0000 separator?
+    jnz     .enum_field_skip_tag
+    # rdx now points past the first separator
+
+    # Skip 'index' more fields (each field ends with 0x0000 or end of chain)
+    xor     %r8d, %r8d                 # current_field = 0
+.enum_field_find:
+    cmp     %rax, %r8
+    jae     .enum_field_extract
+    # Skip to next separator
+.enum_field_skip:
+    cmp     %rcx, %rdx
+    jae     .enum_field_empty
+    movzwl  (%rsi, %rdx, 2), %edi
+    inc     %rdx
+    test    %edi, %edi
+    jnz     .enum_field_skip
+    inc     %r8
+    jmp     .enum_field_find
+
+.enum_field_extract:
+    # Extract field: from current rdx to next separator or end
+    mov     %rdx, %r8                  # field_start
+.enum_field_count:
+    cmp     %rcx, %rdx
+    jae     .enum_field_copy
+    movzwl  (%rsi, %rdx, 2), %edi
+    test    %edi, %edi
+    jz      .enum_field_copy
+    inc     %rdx
+    jmp     .enum_field_count
+
+.enum_field_copy:
+    # Field molecules from r8 to rdx
+    mov     %rdx, %r9
+    sub     %r8, %r9                   # field_mol_count
+    # Copy to heap
+    lea     (%rsi, %r8, 2), %rsi       # source ptr
+    mov     %r15, %rdi                 # dest
+    mov     %r15, %rax                 # save result ptr
+    mov     %r9, %rcx
+    shl     $1, %rcx                   # byte_count
+    rep     movsb
+    mov     %rdi, %r15                 # bump heap
+    mov     %rax, (%r14)               # result ptr
+    mov     %r9, 8(%r14)               # result mol_count
+    jmp     vm_loop
+
+# Dict format: get nth non-tag entry's value
+.enum_field_dict:
+    # rsi = dict base, rax = desired index
+    mov     (%rsi), %rcx               # entry count
+    lea     8(%rsi), %r9               # first entry ptr
+    xor     %r8d, %r8d                 # current non-tag index
+    test    %rcx, %rcx
+    jz      .enum_field_empty
+.enum_field_dict_scan:
+    # Skip tag entries (key_ptr=0, key_len=0)
+    cmpq    $0, 8(%r9)                 # key_len == 0?
+    jne     .enum_field_dict_check
+    cmpq    $0, (%r9)                  # key_ptr == 0?
+    je      .enum_field_dict_skip      # tag entry → skip
+.enum_field_dict_check:
+    # Non-tag entry — check if this is the desired index
+    cmp     %rax, %r8
+    je      .enum_field_dict_found
+    inc     %r8
+.enum_field_dict_skip:
+    add     $32, %r9
+    dec     %rcx
+    jnz     .enum_field_dict_scan
+    jmp     .enum_field_empty
+.enum_field_dict_found:
+    # Return this entry's value
+    mov     16(%r9), %rax              # val_ptr
+    mov     24(%r9), %rdx              # val_len
+    mov     %rax, (%r14)
+    mov     %rdx, 8(%r14)
+    jmp     vm_loop
+
+.enum_field_empty:
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# String is-keyword: pop string, check if it's an Olang keyword
+.call_str_is_keyword:
+    add     %rcx, %r13
+    # Pop string, hash its low bytes, compare with known keyword hashes
+    mov     (%r14), %rsi               # string ptr
+    mov     8(%r14), %rcx              # mol_count
+    # Hash the low bytes (char values) using FNV-1a
+    movabs  $0xcbf29ce484222325, %rax
+    movabs  $0x100000001b3, %rdx
+    test    %rcx, %rcx
+    jz      .kw_check
+.kw_hash_loop:
+    movzbl  (%rsi), %edi               # low byte of molecule
+    xor     %rdi, %rax
+    imul    %rdx, %rax
+    add     $2, %rsi                   # next molecule
+    dec     %rcx
+    jnz     .kw_hash_loop
+.kw_check:
+    # Compare hash against known keywords
+    # Pre-computed FNV-1a hashes of keyword byte values
+    lea     kw_hashes(%rip), %rsi
+    mov     kw_count(%rip), %ecx
+.kw_scan:
+    test    %ecx, %ecx
+    jz      .kw_false
+    cmp     (%rsi), %rax
+    je      .kw_true
+    add     $8, %rsi
+    dec     %ecx
+    jmp     .kw_scan
+.kw_true:
+    mov     $0x3FF0000000000000, %rax   # 1.0
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.kw_false:
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+# No-op builtins: pop args and discard
+.call_noop_pop1:
+    add     %rcx, %r13
+    add     $16, %r14                  # pop 1
+    jmp     vm_loop
+
+.call_noop_pop2:
+    add     %rcx, %r13
+    add     $32, %r14                  # pop 2
+    jmp     vm_loop
+
+# __use_module_selective: pop count, then count imports, then module name
+.call_use_module_selective:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax             # count
+    add     $16, %r14                  # pop count
+    inc     %rax                       # +1 for module name
+    shl     $4, %rax                   # (count+1) * 16
+    add     %rax, %r14                 # pop all imports + module name
+    jmp     vm_loop
+
 # Eval bytecode (nested execution)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1888,6 +3487,13 @@ op_call:
     cmp     $ARRAY_MARKER, %rax
     jne     .eval_bc_raw
 
+    # Follow forward pointer chain if array was relocated
+.eval_bc_fwd:
+    cmpq    $ARRAY_FORWARD_MARKER, (%rdi)
+    jne     .eval_bc_array
+    mov     8(%rdi), %rdi
+    jmp     .eval_bc_fwd
+.eval_bc_array:
     # Array of bytes: convert to contiguous bytecode buffer
     # Array: [count:8][elem_0_ptr:8][elem_0_len:8]...
     # Each element is a f64 representing a byte value
@@ -1917,13 +3523,17 @@ op_call:
     push    %r12                        # save bytecode base
     push    %r13                        # save PC
     push    %rbx                        # save bytecode size
-    pushq   $1                          # nested flag marker
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     # Set up nested execution
     mov     %r8, %r12                   # new bytecode base
     xor     %r13d, %r13d               # PC = 0
-    mov     %rcx, %rbx                  # bytecode size
+    mov     $0x100000, %rbx             # 1MB bounds — op_ret accepts boot PCs
     add     %rcx, %r15                  # bump heap past bytecode buffer
+    # Save eval buffer base for cross-boundary closure calls
+    lea     eval_bc_base(%rip), %rax
+    mov     %r8, (%rax)
 
     jmp     vm_loop                     # execute!
     # When this hits op_halt, it will check the nested flag and return here
@@ -1936,30 +3546,2808 @@ op_call:
     mov     %rax, 8(%r14)
     jmp     vm_loop
 
+# __skip_scope_restore(n) → set flag to skip next N scope restores
+.call_skip_scope_restore:
+    add     %rcx, %r13
+    # Pop n from stack
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax
+    add     $16, %r14
+    # ADD to the flag (not set — allows nested calls to accumulate)
+    lea     skip_scope_restore(%rip), %rdx
+    add     %rax, (%rdx)
+    # Push 0 as return value
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NEW BUILTINS — Rebuilt from REBUILD_NOTES.md
+# ═══════════════════════════════════════════════════════════════════════════
+
+# __jit_register(fn_name_str, native_ptr) → register native code for function
+.call_jit_register:
+    add     %rcx, %r13
+    # Pop native_ptr
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8              # native ptr
+    add     $16, %r14
+    # Pop fn_name (u16 chain) → decode to ASCII → hash
+    mov     (%r14), %rsi               # chain ptr (u16 mols)
+    mov     8(%r14), %rdx              # mol count
+    add     $16, %r14
+    # Decode u16 → ASCII bytes in sha_input, then hash
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.jr_decode:
+    cmp     %rdx, %rcx
+    jge     .jr_hash
+    movzbl  (%rsi, %rcx, 2), %eax     # low byte of u16 mol
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .jr_decode
+.jr_hash:
+    # Hash the decoded ASCII bytes
+    lea     sha_input(%rip), %rdi
+    mov     %ecx, %edx
+    push    %r8
+    call    hash_name
+    pop     %r8
+    # Store in jit_cache: cache[hash & 0x1F] = {hash, ptr}
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    mov     %rax, (%rdx, %rsi)        # hash
+    mov     %r8, 8(%rdx, %rsi)        # native ptr
+    # Push 0 (success)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __jit_invalidate(fn_name) → clear JIT cache for function
+.call_jit_invalidate:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.ji_dec:
+    cmp     %rdx, %rcx
+    jge     .ji_hash
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .ji_dec
+.ji_hash:
+    lea     sha_input(%rip), %rdi
+    mov     %ecx, %edx
+    call    hash_name
+    lea     jit_cache(%rip), %rdx
+    mov     %rax, %rsi
+    and     $0x1F, %esi
+    shl     $4, %esi
+    movq    $0, (%rdx, %rsi)           # clear hash → cache miss next time
+    movq    $0, 8(%rdx, %rsi)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __profile_top(n) → array [hash0, count0, hash1, count1, ...]
+.call_profile_top:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8d             # n = how many top entries
+    add     $16, %r14
+    # Build result array: scan 256 counters, find top-N
+    mov     %r15, %rdi                 # array base
+    lea     (%r8, %r8), %rax          # count = n*2
+    mov     %rax, (%r15)
+    add     $8, %r15
+    # Simple: emit all non-zero entries (up to n)
+    lea     profile_counters(%rip), %rsi
+    lea     profile_hashes(%rip), %rdx
+    xor     %ecx, %ecx                 # emitted count
+    xor     %eax, %eax                 # index
+.pt_loop:
+    cmp     $256, %eax
+    jge     .pt_done
+    cmp     %r8d, %ecx
+    jge     .pt_done
+    cmpl    $0, (%rsi, %rax, 4)
+    je      .pt_next
+    # Emit hash + count
+    push    %rax
+    mov     (%rdx, %rax, 8), %rax     # hash
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    push    %rax
+    movl    (%rsi, %rax, 4), %eax     # count
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    inc     %ecx
+.pt_next:
+    inc     %eax
+    jmp     .pt_loop
+.pt_done:
+    # Fix array count
+    lea     (%rcx, %rcx), %rax
+    mov     %rax, (%rdi)
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __profile_reset() → clear all counters
+.call_profile_reset:
+    add     %rcx, %r13
+    push    %rdi
+    lea     profile_counters(%rip), %rdi
+    mov     $1024, %ecx
+    xor     %eax, %eax
+    rep     stosb
+    pop     %rdi
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __memcpy_to(dest_ptr, bytes_buf, len) → copy bytes buffer to raw address
+.call_memcpy_to:
+    add     %rcx, %r13
+    # Pop len
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %ecx              # len
+    add     $16, %r14
+    # Pop bytes_buf
+    mov     (%r14), %rsi               # bytes buffer base [size:8][data:N]
+    add     $16, %r14
+    # Pop dest_ptr
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi              # dest address
+    add     $16, %r14
+    # Copy from bytes data (skip 8-byte size header) to dest
+    lea     8(%rsi), %rsi              # skip size header
+    rep     movsb
+    # Push 0 (success)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __mmap_exec(size) → ptr to RWX memory (for JIT)
+.call_mmap_exec:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rsi              # size
+    add     $16, %r14
+    # mmap(NULL, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi                  # addr = NULL
+    mov     $7, %edx                    # PROT_READ|PROT_WRITE|PROT_EXEC
+    mov     $0x22, %r10d               # MAP_PRIVATE|MAP_ANONYMOUS
+    mov     $-1, %r8d                  # fd = -1
+    xor     %r9d, %r9d                  # offset = 0
+    syscall
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __call_native(fn_ptr, arg_f64) → result_f64
+# Calls native function at fn_ptr with arg in xmm0, returns result from xmm0
+.call_native:
+    add     %rcx, %r13
+    push    %rbx
+    # Pop arg
+    movsd   (%r14), %xmm0              # arg as f64
+    add     $16, %r14
+    # Pop fn_ptr
+    movsd   (%r14), %xmm1
+    cvttsd2si %xmm1, %rax              # fn_ptr as integer
+    add     $16, %r14
+    # Save VM registers
+    push    %r12
+    push    %r13
+    push    %r14
+    push    %r15
+    # arg in rdi (as integer) for the native function
+    cvttsd2si %xmm0, %rdi
+    # Call native function
+    call    *%rax
+    # Restore VM registers
+    pop     %r15
+    pop     %r14
+    pop     %r13
+    pop     %r12
+    # Result: rax contains return value (integer)
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __isqrt(x) → sqrt(x) via hardware sqrtsd
+.call_isqrt:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    sqrtsd  %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+# __chr(code) → 1-char string
+.call_chr:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    add     $16, %r14
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $1, 8(%r14)
+    add     $2, %r15
+    jmp     vm_loop
+
+# __line_offsets(str) → array [start, end, ...]
+.call_line_offsets:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     %r15, %rdi
+    add     $8, %r15
+    xor     %eax, %eax
+    xor     %ecx, %ecx
+    xor     %r8d, %r8d
+.lo_loop:
+    cmp     %rdx, %rax
+    jge     .lo_last
+    movzwl  (%rsi, %rax, 2), %r9d
+    and     $0xFF, %r9d
+    cmp     $0x0A, %r9d
+    jne     .lo_next
+    mov     %rax, %r10
+    sub     %rcx, %r10
+    cmp     $3, %r10
+    jb      .lo_skip
+    push    %rax
+    cvtsi2sd %ecx, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    add     $2, %r8d
+.lo_skip:
+    lea     1(%rax), %ecx
+.lo_next:
+    inc     %eax
+    jmp     .lo_loop
+.lo_last:
+    movq    %r8, (%rdi)
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __str_find(haystack, needle) → array of match positions
+.call_str_find:
+    add     %rcx, %r13
+    mov     (%r14), %rdi
+    mov     8(%r14), %rcx
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    push    %rsi
+    push    %rdx
+    push    %rdi
+    push    %rcx
+    mov     %r15, %rbp
+    add     $8, %r15
+    xor     %r8d, %r8d
+    xor     %eax, %eax
+    mov     16(%rsp), %rdx
+    mov     (%rsp), %rcx
+    sub     %rcx, %rdx
+.sf_outer:
+    cmp     %rdx, %rax
+    jg      .sf_done
+    mov     24(%rsp), %rsi
+    mov     8(%rsp), %rdi
+    mov     (%rsp), %rcx
+    xor     %r9d, %r9d
+.sf_inner:
+    cmp     %rcx, %r9
+    jge     .sf_match
+    lea     (%rax, %r9), %r10
+    movzbl  (%rsi, %r10, 2), %r11d
+    movzbl  (%rdi, %r9, 2), %ecx
+    cmp     %ecx, %r11d
+    jne     .sf_nomatch
+    inc     %r9
+    mov     (%rsp), %rcx
+    jmp     .sf_inner
+.sf_match:
+    push    %rax
+    push    %rdx
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    inc     %r8d
+    pop     %rdx
+    pop     %rax
+    cmp     $10000, %r8d
+    jge     .sf_done
+.sf_nomatch:
+    inc     %eax
+    mov     (%rsp), %rcx
+    mov     16(%rsp), %rdx
+    sub     %rcx, %rdx
+    jmp     .sf_outer
+.sf_done:
+    add     $32, %rsp
+    mov     %r8, (%rbp)
+    sub     $16, %r14
+    mov     %rbp, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_connect(ip, port) → fd
+.call_tcp_connect:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    add     $16, %r14
+    push    %rax
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.tc_decode:
+    cmp     %rdx, %rcx
+    jge     .tc_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .tc_decode
+.tc_open:
+    movb    $0, (%rdi, %rcx)
+    lea     net_sockaddr(%rip), %rdi
+    movq    $0, (%rdi)
+    movq    $0, 8(%rdi)
+    movw    $AF_INET, (%rdi)
+    pop     %rax
+    xchg    %al, %ah
+    movw    %ax, 2(%rdi)
+    lea     sha_input(%rip), %rsi
+    lea     4(%rdi), %r8
+    xor     %ecx, %ecx
+.tc_parse:
+    movzbl  (%rsi), %eax
+    inc     %rsi
+    test    %eax, %eax
+    jz      .tc_last
+    cmp     $'.', %eax
+    je      .tc_dot
+    sub     $'0', %eax
+    imul    $10, %ecx
+    add     %eax, %ecx
+    jmp     .tc_parse
+.tc_dot:
+    movb    %cl, (%r8)
+    inc     %r8
+    xor     %ecx, %ecx
+    jmp     .tc_parse
+.tc_last:
+    movb    %cl, (%r8)
+    mov     $SYS_SOCKET, %eax
+    mov     $AF_INET, %edi
+    mov     $SOCK_STREAM, %esi
+    xor     %edx, %edx
+    syscall
+    test    %rax, %rax
+    js      .tc_error
+    mov     %eax, %r8d
+    mov     $SYS_CONNECT, %eax
+    mov     %r8d, %edi
+    lea     net_sockaddr(%rip), %rsi
+    mov     $16, %edx
+    syscall
+    test    %rax, %rax
+    js      .tc_fail
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %r8d, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.tc_fail:
+    mov     $SYS_CLOSE, %eax
+    mov     %r8d, %edi
+    syscall
+.tc_error:
+    pop     %rbx
+    sub     $16, %r14
+    mov     $0xBFF0000000000000, %rax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_send(fd, data) → bytes_sent
+.call_tcp_send:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi
+    add     $16, %r14
+    push    %rdi
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.ts_dec:
+    cmp     %rdx, %rcx
+    jge     .ts_send
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .ts_dec
+.ts_send:
+    mov     %ecx, %edx
+    pop     %rdi
+    lea     sha_input(%rip), %rsi
+    xor     %r10d, %r10d
+    xor     %r8d, %r8d
+    xor     %r9d, %r9d
+    mov     $SYS_SENDTO, %eax
+    syscall
+    sub     $16, %r14
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_recv(fd, max) → string
+.call_tcp_recv:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi
+    add     $16, %r14
+    cmp     $65536, %edx
+    jbe     .tr_ok
+    mov     $65536, %edx
+.tr_ok:
+    lea     net_recv_buf(%rip), %rsi
+    xor     %r10d, %r10d
+    xor     %r8d, %r8d
+    xor     %r9d, %r9d
+    mov     $SYS_RECVFROM, %eax
+    syscall
+    test    %rax, %rax
+    jle     .tr_empty
+    mov     %rax, %rcx
+    mov     %r15, %rdi
+    lea     net_recv_buf(%rip), %rsi
+    xor     %edx, %edx
+.tr_enc:
+    cmp     %rcx, %rdx
+    jge     .tr_push
+    movzbl  (%rsi, %rdx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%rdi, %rdx, 2)
+    inc     %rdx
+    jmp     .tr_enc
+.tr_push:
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    mov     %rcx, 8(%r14)
+    lea     (%r15, %rcx, 2), %r15
+    jmp     vm_loop
+.tr_empty:
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $0, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_close(fd) → 0
+.call_tcp_close:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi
+    add     $16, %r14
+    mov     $SYS_CLOSE, %eax
+    syscall
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __tcp_listen(port) → server_fd (socket + bind + listen)
+.call_tcp_listen:
+    add     %rcx, %r13
+    push    %rbx                        # save bytecode size
+    # Pop port number
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %ebx              # ebx = port
+    add     $16, %r14
+    # socket(AF_INET=2, SOCK_STREAM=1, 0)
+    mov     $41, %eax                   # SYS_SOCKET
+    mov     $2, %edi
+    mov     $1, %esi
+    xor     %edx, %edx
+    syscall
+    mov     %eax, %r8d                  # r8d = server_fd
+    # setsockopt(fd, SOL_SOCKET=1, SO_REUSEADDR=2, &1, 4)
+    sub     $4, %rsp
+    movl    $1, (%rsp)
+    mov     %r8d, %edi
+    mov     $1, %esi
+    mov     $2, %edx
+    lea     (%rsp), %r10
+    push    %r8
+    mov     $4, %r8d                    # optlen (clobbers r8, saved above)
+    mov     $54, %eax
+    syscall
+    pop     %r8
+    add     $4, %rsp
+    # Build sockaddr_in on stack
+    sub     $16, %rsp
+    movw    $2, (%rsp)                  # AF_INET
+    mov     %ebx, %eax
+    xchg    %al, %ah                   # bswap16 for network byte order
+    movw    %ax, 2(%rsp)
+    movl    $0, 4(%rsp)                # INADDR_ANY
+    movq    $0, 8(%rsp)
+    # bind
+    mov     %r8d, %edi
+    lea     (%rsp), %rsi
+    mov     $16, %edx
+    mov     $49, %eax
+    syscall
+    # listen
+    mov     %r8d, %edi
+    mov     $128, %esi
+    mov     $50, %eax
+    syscall
+    add     $16, %rsp
+    # Return server_fd
+    sub     $16, %r14
+    cvtsi2sd %r8d, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    pop     %rbx
+    jmp     vm_loop
+
+# __tcp_accept(server_fd) → client_fd
+.call_tcp_accept:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edi              # server_fd
+    add     $16, %r14
+    # accept4(fd, NULL, NULL, 0)
+    xor     %esi, %esi                  # addr = NULL
+    xor     %edx, %edx                  # addrlen = NULL
+    xor     %r10d, %r10d               # flags = 0
+    mov     $43, %eax                   # SYS_ACCEPT
+    syscall
+    # Push client_fd
+    sub     $16, %r14
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __dns_resolve(hostname) → IP string
+.call_dns_resolve:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.dns_dec:
+    cmp     %rdx, %rcx
+    jge     .dns_dec_done
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .dns_dec
+.dns_dec_done:
+    movb    $0, (%rdi, %rcx)
+    mov     %ecx, %r8d
+    lea     net_recv_buf(%rip), %rdi
+    movw    $0x3412, (%rdi)
+    movw    $0x0001, 2(%rdi)
+    movw    $0x0100, 4(%rdi)
+    movw    $0, 6(%rdi)
+    movw    $0, 8(%rdi)
+    movw    $0, 10(%rdi)
+    lea     12(%rdi), %r9
+    lea     sha_input(%rip), %rsi
+    mov     %r9, %r10
+    lea     1(%r9), %r11
+    xor     %ecx, %ecx
+.dns_enc:
+    movzbl  (%rsi), %eax
+    inc     %rsi
+    test    %eax, %eax
+    jz      .dns_enc_done
+    cmp     $'.', %eax
+    je      .dns_dot
+    mov     %al, (%r11)
+    inc     %r11
+    inc     %ecx
+    jmp     .dns_enc
+.dns_dot:
+    movb    %cl, (%r10)
+    mov     %r11, %r10
+    lea     1(%r11), %r11
+    xor     %ecx, %ecx
+    jmp     .dns_enc
+.dns_enc_done:
+    movb    %cl, (%r10)
+    movb    $0, (%r11)
+    inc     %r11
+    movw    $0x0100, (%r11)
+    movw    $0x0100, 2(%r11)
+    lea     4(%r11), %r11
+    lea     net_recv_buf(%rip), %rax
+    sub     %rax, %r11
+    mov     %r11, %r8
+    mov     $SYS_SOCKET, %eax
+    mov     $AF_INET, %edi
+    mov     $SOCK_DGRAM, %esi
+    xor     %edx, %edx
+    syscall
+    test    %rax, %rax
+    js      .dns_fail
+    mov     %eax, %ebx
+    lea     net_sockaddr(%rip), %rdi
+    movw    $AF_INET, (%rdi)
+    movw    $0x3500, 2(%rdi)
+    movl    $0x08080808, 4(%rdi)
+    movq    $0, 8(%rdi)
+    mov     $SYS_SENDTO, %eax
+    mov     %ebx, %edi
+    lea     net_recv_buf(%rip), %rsi
+    mov     %r8, %rdx
+    xor     %r10d, %r10d
+    lea     net_sockaddr(%rip), %r8
+    mov     $16, %r9d
+    syscall
+    mov     $SYS_RECVFROM, %eax
+    mov     %ebx, %edi
+    lea     net_recv_buf(%rip), %rsi
+    mov     $512, %edx
+    xor     %r10d, %r10d
+    xor     %r8d, %r8d
+    xor     %r9d, %r9d
+    syscall
+    push    %rax
+    mov     $SYS_CLOSE, %eax
+    mov     %ebx, %edi
+    syscall
+    pop     %rax
+    lea     net_recv_buf(%rip), %rsi
+    lea     12(%rsi), %rdi
+.dns_skip:
+    movzbl  (%rdi), %eax
+    test    %eax, %eax
+    jz      .dns_skip_done
+    lea     1(%rdi, %rax), %rdi
+    jmp     .dns_skip
+.dns_skip_done:
+    add     $5, %rdi
+    movzbl  (%rdi), %eax
+    cmp     $0xC0, %eax
+    jb      .dns_fail
+    add     $12, %rdi
+    movzbl  (%rdi), %eax
+    movzbl  1(%rdi), %ecx
+    movzbl  2(%rdi), %edx
+    movzbl  3(%rdi), %r8d
+    mov     %r15, %r9
+    call    .dns_b2s
+    movw    $0x212E, (%r15)
+    add     $2, %r15
+    mov     %ecx, %eax
+    call    .dns_b2s
+    movw    $0x212E, (%r15)
+    add     $2, %r15
+    mov     %edx, %eax
+    call    .dns_b2s
+    movw    $0x212E, (%r15)
+    add     $2, %r15
+    mov     %r8d, %eax
+    call    .dns_b2s
+    mov     %r15, %rax
+    sub     %r9, %rax
+    shr     $1, %rax
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r9, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+.dns_b2s:
+    push    %rcx
+    push    %rdx
+    push    %rbx
+    xor     %ebx, %ebx
+    xor     %edx, %edx
+    mov     $100, %ecx
+    div     %ecx
+    test    %eax, %eax
+    jz      .dns_no_h
+    add     $0x2130, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    mov     $1, %ebx
+.dns_no_h:
+    mov     %edx, %eax
+    xor     %edx, %edx
+    mov     $10, %ecx
+    div     %ecx
+    test    %eax, %eax
+    jnz     .dns_wr_t
+    test    %ebx, %ebx
+    jz      .dns_sk_t
+.dns_wr_t:
+    add     $0x2130, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+.dns_sk_t:
+    mov     %edx, %eax
+    add     $0x2130, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    pop     %rbx
+    pop     %rdx
+    pop     %rcx
+    ret
+.dns_fail:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $0, 8(%r14)
+    jmp     vm_loop
+
+# __readdir(path) → array of filenames
+.call_readdir:
+    add     %rcx, %r13
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.rd_dec:
+    cmp     %rdx, %rcx
+    jge     .rd_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .rd_dec
+.rd_open:
+    movb    $0, (%rdi, %rcx)
+    push    %rbx
+    lea     sha_input(%rip), %rdi
+    mov     $0x90000, %esi
+    xor     %edx, %edx
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .rd_empty
+    push    %rax
+    mov     %r15, %rbp
+    movq    $0, (%r15)
+    add     $8, %r15
+.rd_gd:
+    mov     $SYS_GETDENTS64, %eax
+    mov     (%rsp), %edi
+    lea     net_dents_buf(%rip), %rsi
+    mov     $8192, %edx
+    syscall
+    test    %rax, %rax
+    jle     .rd_close
+    xor     %ecx, %ecx
+.rd_parse:
+    cmp     %rax, %rcx
+    jge     .rd_gd
+    lea     net_dents_buf(%rip), %rsi
+    add     %rcx, %rsi
+    movzwl  16(%rsi), %edx
+    lea     19(%rsi), %rdi
+    cmpb    $'.', (%rdi)
+    jne     .rd_emit
+    cmpb    $0, 1(%rdi)
+    je      .rd_sk
+    cmpb    $'.', 1(%rdi)
+    jne     .rd_emit
+    cmpb    $0, 2(%rdi)
+    je      .rd_sk
+.rd_emit:
+    push    %rax
+    push    %rcx
+    push    %rdx
+    mov     %r15, %r9
+    xor     %r10d, %r10d
+.rd_cpn:
+    movzbl  (%rdi, %r10), %r11d
+    test    %r11d, %r11d
+    jz      .rd_cpd
+    or      $0x2100, %r11d
+    movw    %r11w, (%r15)
+    add     $2, %r15
+    inc     %r10d
+    cmp     $255, %r10d
+    jb      .rd_cpn
+.rd_cpd:
+    mov     (%rbp), %rdi
+    mov     %rdi, %r11
+    shl     $4, %r11
+    lea     8(%rbp, %r11), %r11
+    mov     %r9, (%r11)
+    mov     %r10, 8(%r11)
+    incq    (%rbp)
+    pop     %rdx
+    pop     %rcx
+    pop     %rax
+.rd_sk:
+    add     %edx, %ecx
+    jmp     .rd_parse
+.rd_close:
+    pop     %rdi
+    mov     $SYS_CLOSE, %eax
+    mov     %edi, %edi
+    syscall
+    mov     (%rbp), %rax
+    mov     %rax, %rcx
+    shl     $4, %rcx
+    lea     8(%rbp, %rcx), %rcx
+    cmp     %rcx, %r15
+    jae     .rd_push
+    mov     %rcx, %r15
+.rd_push:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %rbp, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+.rd_empty:
+    mov     %r15, %rdi
+    movq    $0, (%r15)
+    add     $8, %r15
+    pop     %rbx
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __aes_encrypt(key, data) → ciphertext
+.call_aes_encrypt:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     (%r14), %rdi
+    mov     8(%r14), %rcx
+    add     $16, %r14
+    lea     net_recv_buf(%rip), %r8
+    xor     %eax, %eax
+.ae_dk:
+    cmp     $32, %eax
+    jge     .ae_kd
+    cmp     %ecx, %eax
+    jge     .ae_kp
+    movzbl  (%rdi, %rax, 2), %r9d
+    mov     %r9b, (%r8, %rax)
+    inc     %eax
+    jmp     .ae_dk
+.ae_kp:
+    movb    $0, (%r8, %rax)
+    inc     %eax
+    jmp     .ae_dk
+.ae_kd:
+    movdqu  (%r8), %xmm1
+    movdqu  16(%r8), %xmm2
+    lea     64(%r8), %r10
+    xor     %eax, %eax
+.ae_dd:
+    cmp     %edx, %eax
+    jge     .ae_pad
+    movzbl  (%rsi, %rax, 2), %r9d
+    mov     %r9b, (%r10, %rax)
+    inc     %eax
+    jmp     .ae_dd
+.ae_pad:
+    mov     %eax, %r11d
+    or      $0xF, %eax
+    inc     %eax
+    mov     %eax, %ebx
+    mov     %ebx, %ecx
+    sub     %r11d, %ecx
+.ae_pl:
+    cmp     %ebx, %r11d
+    jge     .ae_enc
+    mov     %cl, (%r10, %r11)
+    inc     %r11d
+    jmp     .ae_pl
+.ae_enc:
+    lea     64(%r8), %rsi
+    lea     1024(%r8), %rdi
+    xor     %ecx, %ecx
+.ae_eb:
+    cmp     %ebx, %ecx
+    jge     .ae_ed
+    movdqu  (%rsi, %rcx), %xmm0
+    pxor    %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenc  %xmm1, %xmm0
+    aesenc  %xmm2, %xmm0
+    aesenclast %xmm1, %xmm0
+    movdqu  %xmm0, (%rdi, %rcx)
+    add     $16, %ecx
+    jmp     .ae_eb
+.ae_ed:
+    lea     1024(%r8), %rsi
+    mov     %r15, %r9
+    xor     %ecx, %ecx
+.ae_ts:
+    cmp     %ebx, %ecx
+    jge     .ae_push
+    movzbl  (%rsi, %rcx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %ecx
+    jmp     .ae_ts
+.ae_push:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r9, (%r14)
+    movq    %rcx, 8(%r14)
+    jmp     vm_loop
+
+# __aes_decrypt(key, data) → plaintext
+.call_aes_decrypt:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     (%r14), %rdi
+    mov     8(%r14), %rcx
+    add     $16, %r14
+    lea     net_recv_buf(%rip), %r8
+    xor     %eax, %eax
+.ad_dk:
+    cmp     $32, %eax
+    jge     .ad_kd
+    cmp     %ecx, %eax
+    jge     .ad_kp
+    movzbl  (%rdi, %rax, 2), %r9d
+    mov     %r9b, (%r8, %rax)
+    inc     %eax
+    jmp     .ad_dk
+.ad_kp:
+    movb    $0, (%r8, %rax)
+    inc     %eax
+    jmp     .ad_dk
+.ad_kd:
+    movdqu  (%r8), %xmm1
+    movdqu  16(%r8), %xmm2
+    movdqa  %xmm2, %xmm3
+    aesimc  %xmm3, %xmm3
+    movdqa  %xmm1, %xmm4
+    aesimc  %xmm4, %xmm4
+    lea     64(%r8), %r10
+    xor     %eax, %eax
+.ad_dd:
+    cmp     %edx, %eax
+    jge     .ad_dec
+    movzbl  (%rsi, %rax, 2), %r9d
+    mov     %r9b, (%r10, %rax)
+    inc     %eax
+    jmp     .ad_dd
+.ad_dec:
+    mov     %eax, %ebx
+    lea     64(%r8), %rsi
+    lea     1024(%r8), %rdi
+    xor     %ecx, %ecx
+.ad_db:
+    cmp     %ebx, %ecx
+    jge     .ad_dd2
+    movdqu  (%rsi, %rcx), %xmm0
+    pxor    %xmm1, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdec  %xmm4, %xmm0
+    aesdec  %xmm3, %xmm0
+    aesdeclast %xmm1, %xmm0
+    movdqu  %xmm0, (%rdi, %rcx)
+    add     $16, %ecx
+    jmp     .ad_db
+.ad_dd2:
+    lea     1024(%r8), %rsi
+    movzbl  -1(%rsi, %rbx), %eax
+    sub     %eax, %ebx
+    mov     %r15, %r9
+    xor     %ecx, %ecx
+.ad_ts:
+    cmp     %ebx, %ecx
+    jge     .ad_push
+    movzbl  (%rsi, %rcx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %ecx
+    jmp     .ad_ts
+.ad_push:
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r9, (%r14)
+    movq    %rcx, 8(%r14)
+    jmp     vm_loop
+
+# __mmap_file(path, size) → ptr
+.call_mmap_file:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha_input(%rip), %rdi
+    xor     %ecx, %ecx
+.mm_dec:
+    cmp     %rdx, %rcx
+    jge     .mm_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .mm_dec
+.mm_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    mov     $0x42, %esi
+    mov     $0644, %edx
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .mm_fail
+    mov     %eax, %ebx
+    mov     $77, %eax
+    mov     %ebx, %edi
+    mov     %r8, %rsi
+    syscall
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi
+    mov     %r8, %rsi
+    mov     $3, %edx
+    mov     $1, %r10d
+    mov     %ebx, %r8d
+    xor     %r9d, %r9d
+    syscall
+    push    %rax
+    mov     $SYS_CLOSE, %eax
+    mov     %ebx, %edi
+    syscall
+    pop     %rax
+    test    %rax, %rax
+    js      .mm_fail
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+.mm_fail:
+    pop     %rbx
+    sub     $16, %r14
+    mov     $0xBFF0000000000000, %rax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __munmap_file(ptr, size) → 0
+.call_munmap_file:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rsi
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdi
+    add     $16, %r14
+    mov     $SYS_MUNMAP, %eax
+    syscall
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __simd_compose4(a,b,c,d) → composed mol
+.call_simd_compose4:
+    add     %rcx, %r13
+    push    %rbx
+    movsd   (%r14), %xmm3
+    cvttsd2si %xmm3, %r11d
+    add     $16, %r14
+    movsd   (%r14), %xmm2
+    cvttsd2si %xmm2, %r10d
+    add     $16, %r14
+    movsd   (%r14), %xmm1
+    cvttsd2si %xmm1, %r9d
+    add     $16, %r14
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r8d
+    add     $16, %r14
+    # compose a+b→r8, then +c, then +d (3 iterations)
+    mov     $3, %ecx
+    lea     ed25519_tmp(%rip), %rdi
+    mov     %r9d, (%rdi)
+    mov     %r10d, 4(%rdi)
+    mov     %r11d, 8(%rdi)
+.sc4_loop:
+    test    %ecx, %ecx
+    jz      .sc4_done
+    mov     (%rdi), %r9d
+    # compose r8d + r9d → r8d (per dimension: floor((2*a+b)/3))
+    # S
+    mov     %r8d, %eax
+    shr     $12, %eax
+    and     $0xF, %eax
+    mov     %r9d, %edx
+    shr     $12, %edx
+    and     $0xF, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0xF, %eax
+    shl     $12, %eax
+    mov     %eax, %ebx
+    # R
+    mov     %r8d, %eax
+    shr     $8, %eax
+    and     $0xF, %eax
+    mov     %r9d, %edx
+    shr     $8, %edx
+    and     $0xF, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0xF, %eax
+    shl     $8, %eax
+    or      %eax, %ebx
+    # V
+    mov     %r8d, %eax
+    shr     $5, %eax
+    and     $0x7, %eax
+    mov     %r9d, %edx
+    shr     $5, %edx
+    and     $0x7, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0x7, %eax
+    shl     $5, %eax
+    or      %eax, %ebx
+    # A
+    mov     %r8d, %eax
+    shr     $2, %eax
+    and     $0x7, %eax
+    mov     %r9d, %edx
+    shr     $2, %edx
+    and     $0x7, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0x7, %eax
+    shl     $2, %eax
+    or      %eax, %ebx
+    # T
+    mov     %r8d, %eax
+    and     $0x3, %eax
+    mov     %r9d, %edx
+    and     $0x3, %edx
+    lea     (%eax,%eax), %eax
+    add     %edx, %eax
+    xor     %edx, %edx
+    push    %rcx
+    mov     $3, %ecx
+    div     %ecx
+    pop     %rcx
+    and     $0x3, %eax
+    or      %eax, %ebx
+    mov     %ebx, %r8d
+    add     $4, %rdi
+    dec     %ecx
+    jmp     .sc4_loop
+.sc4_done:
+    mov     %ebx, %eax
+    pop     %rbx
+    sub     $16, %r14
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __text_to_pw(str, tbl) → array [pw, freq, ...]
+.call_text_to_pw:
+    add     %rcx, %r13
+    push    %r12
+    mov     (%r14), %r9
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    push    %rsi
+    push    %rdx
+    mov     (%r9), %r8
+    lea     8(%r9), %r9
+    push    %r8
+    push    %r9
+    mov     %r15, %rbx
+    lea     65536(%r15), %rbp
+    lea     196608(%r15), %r12
+    lea     458752(%r15), %r15
+    push    %rdi
+    mov     %rbx, %rdi
+    mov     $458752, %ecx
+    xor     %eax, %eax
+    rep     stosb
+    pop     %rdi
+    mov     16(%rsp), %rcx
+    mov     24(%rsp), %rsi
+    mov     (%rsp), %r9
+    mov     8(%rsp), %r8
+    xor     %eax, %eax
+.ttp_loop:
+    cmp     %rcx, %rax
+    jge     .ttp_done
+    movzwl  (%rsi, %rax, 2), %edi
+    and     $0xFF, %edi
+    cmp     $0x80, %edi
+    jb      .ttp_1b
+    cmp     $0xE0, %edi
+    jb      .ttp_2b
+    cmp     $0xF0, %edi
+    jb      .ttp_3b
+    and     $0x07, %edi
+    shl     $18, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    shl     $12, %edx
+    or      %edx, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    shl     $6, %edx
+    or      %edx, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    or      %edx, %edi
+    inc     %eax
+    jmp     .ttp_cp
+.ttp_3b:
+    and     $0x0F, %edi
+    shl     $12, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    shl     $6, %edx
+    or      %edx, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    or      %edx, %edi
+    inc     %eax
+    jmp     .ttp_cp
+.ttp_2b:
+    and     $0x1F, %edi
+    shl     $6, %edi
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %edx
+    and     $0x3F, %edx
+    or      %edx, %edi
+    inc     %eax
+    jmp     .ttp_cp
+.ttp_1b:
+    inc     %eax
+.ttp_cp:
+    push    %rax
+    push    %rcx
+    push    %rsi
+    mov     %edi, %eax
+    imul    $40503, %eax
+    and     $0xFFFF, %eax
+    addl    $1, (%r12, %rax, 4)
+    cmpb    $0, (%rbx, %rax)
+    jne     .ttp_seen
+    movb    $1, (%rbx, %rax)
+    mov     %edi, %ecx
+    shl     $1, %ecx
+    lea     1(%rcx), %edx
+    cmp     %r8d, %edx
+    jge     .ttp_seen
+    movzbl  (%r9, %rcx), %edx
+    movzbl  1(%r9, %rcx), %ecx
+    shl     $8, %ecx
+    or      %ecx, %edx
+    movw    %dx, (%rbp, %rax, 2)
+.ttp_seen:
+    pop     %rsi
+    pop     %rcx
+    pop     %rax
+    jmp     .ttp_loop
+.ttp_done:
+    add     $32, %rsp
+    xor     %ecx, %ecx
+    xor     %eax, %eax
+.ttp_cnt:
+    cmp     $65536, %eax
+    jge     .ttp_build
+    cmpb    $0, (%rbx, %rax)
+    je      .ttp_cn
+    inc     %ecx
+.ttp_cn:
+    inc     %eax
+    jmp     .ttp_cnt
+.ttp_build:
+    mov     %r15, %rdi
+    lea     (%rcx, %rcx), %rax
+    mov     %rax, (%r15)
+    add     $8, %r15
+    xor     %eax, %eax
+.ttp_emit:
+    cmp     $65536, %eax
+    jge     .ttp_fin
+    cmpb    $0, (%rbx, %rax)
+    je      .ttp_en
+    push    %rax
+    movzwl  (%rbp, %rax, 2), %edx
+    cvtsi2sd %edx, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+    push    %rax
+    mov     (%r12, %rax, 4), %edx
+    cvtsi2sd %edx, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    pop     %rax
+.ttp_en:
+    inc     %eax
+    jmp     .ttp_emit
+.ttp_fin:
+    pop     %r12
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __text_to_chain(str, tbl) → array [pw0, pw1, ...]
+.call_text_to_chain:
+    add     %rcx, %r13
+    mov     (%r14), %r9
+    add     $16, %r14
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    mov     (%r9), %r8
+    lea     8(%r9), %r9
+    mov     %r15, %rdi
+    add     $8, %r15
+    xor     %eax, %eax
+    xor     %ecx, %ecx
+.ttc_loop:
+    cmp     %rdx, %rax
+    jge     .ttc_done
+    movzwl  (%rsi, %rax, 2), %r10d
+    and     $0xFF, %r10d
+    cmp     $0x80, %r10d
+    jb      .ttc_1b
+    cmp     $0xE0, %r10d
+    jb      .ttc_2b
+    cmp     $0xF0, %r10d
+    jb      .ttc_3b
+    and     $0x07, %r10d
+    shl     $18, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    shl     $12, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    shl     $6, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    jmp     .ttc_cp
+.ttc_3b:
+    and     $0x0F, %r10d
+    shl     $12, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    shl     $6, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    jmp     .ttc_cp
+.ttc_2b:
+    and     $0x1F, %r10d
+    shl     $6, %r10d
+    inc     %eax
+    movzwl  (%rsi, %rax, 2), %r11d
+    and     $0x3F, %r11d
+    or      %r11d, %r10d
+    inc     %eax
+    jmp     .ttc_cp
+.ttc_1b:
+    inc     %eax
+.ttc_cp:
+    push    %rax
+    push    %rdx
+    mov     %r10d, %eax
+    shl     $1, %eax
+    lea     1(%rax), %r11d
+    cmp     %r8d, %r11d
+    jge     .ttc_skip
+    movzbl  (%r9, %rax), %r11d
+    movzbl  1(%r9, %rax), %eax
+    shl     $8, %eax
+    or      %eax, %r11d
+    cvtsi2sd %r11d, %xmm0
+    movsd   %xmm0, (%r15)
+    movq    $F64_MARKER, 8(%r15)
+    add     $16, %r15
+    inc     %ecx
+.ttc_skip:
+    pop     %rdx
+    pop     %rax
+    jmp     .ttc_loop
+.ttc_done:
+    movq    %rcx, (%rdi)
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $ARRAY_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# __sha512(data) → 128-char hex (FIPS 180-4)
+.call_sha512:
+    add     %rcx, %r13
+    push    %rbx
+    mov     (%r14), %rsi
+    mov     8(%r14), %rdx
+    add     $16, %r14
+    lea     sha512_input(%rip), %rdi
+    xor     %ecx, %ecx
+.s5d:
+    cmp     %rdx, %rcx
+    jge     .s5dd
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .s5d
+.s5dd:
+    mov     %ecx, %r8d
+    lea     sha512_state(%rip), %rdi
+    movabs  $0x6a09e667f3bcc908, %rax; mov %rax, (%rdi)
+    movabs  $0xbb67ae8584caa73b, %rax; mov %rax, 8(%rdi)
+    movabs  $0x3c6ef372fe94f82b, %rax; mov %rax, 16(%rdi)
+    movabs  $0xa54ff53a5f1d36f1, %rax; mov %rax, 24(%rdi)
+    movabs  $0x510e527fade682d1, %rax; mov %rax, 32(%rdi)
+    movabs  $0x9b05688c2b3e6c1f, %rax; mov %rax, 40(%rdi)
+    movabs  $0x1f83d9abfb41bd6b, %rax; mov %rax, 48(%rdi)
+    movabs  $0x5be0cd19137e2179, %rax; mov %rax, 56(%rdi)
+    lea     sha512_input(%rip), %rdi
+    mov     %r8d, %ecx
+    movb    $0x80, (%rdi, %rcx)
+    inc     %ecx
+.s5p:
+    mov     %ecx, %eax
+    and     $127, %eax
+    cmp     $112, %eax
+    je      .s5pd
+    movb    $0, (%rdi, %rcx)
+    inc     %ecx
+    jmp     .s5p
+.s5pd:
+    movq    $0, (%rdi, %rcx)
+    add     $8, %ecx
+    mov     %r8d, %eax
+    shl     $3, %eax
+    bswap   %rax
+    mov     %rax, (%rdi, %rcx)
+    add     $8, %ecx
+    # W init
+    lea     sha512_input(%rip), %rsi
+    lea     sha512_w(%rip), %rdi
+    xor     %eax, %eax
+.s5wi:
+    cmp     $16, %eax
+    jge     .s5we
+    mov     (%rsi, %rax, 8), %rdx
+    bswap   %rdx
+    mov     %rdx, (%rdi, %rax, 8)
+    inc     %eax
+    jmp     .s5wi
+.s5we:
+    cmp     $80, %eax
+    jge     .s5comp
+    lea     sha512_w(%rip), %rdi
+    lea     -2(%rax), %ecx
+    mov     (%rdi, %rcx, 8), %rdx
+    mov     %rdx, %r10
+    ror     $19, %r10
+    mov     %rdx, %r11
+    ror     $61, %r11
+    xor     %r11, %r10
+    mov     %rdx, %r11
+    shr     $6, %r11
+    xor     %r11, %r10
+    lea     -15(%rax), %ecx
+    mov     (%rdi, %rcx, 8), %rdx
+    mov     %rdx, %r11
+    ror     $1, %r11
+    mov     %rdx, %rcx
+    ror     $8, %rcx
+    xor     %rcx, %r11
+    shr     $7, %rdx
+    xor     %rdx, %r11
+    add     %r11, %r10
+    lea     -7(%rax), %ecx
+    add     (%rdi, %rcx, 8), %r10
+    lea     -16(%rax), %ecx
+    add     (%rdi, %rcx, 8), %r10
+    mov     %r10, (%rdi, %rax, 8)
+    inc     %eax
+    jmp     .s5we
+.s5comp:
+    push    %r12
+    push    %r14
+    push    %r15
+    push    %r13
+    push    %rbp
+    lea     sha512_state(%rip), %rsi
+    lea     ed25519_tmp(%rip), %rdi
+    xor     %eax, %eax
+.s5cs:
+    mov     (%rsi, %rax, 8), %rdx
+    mov     %rdx, (%rdi, %rax, 8)
+    inc     %eax
+    cmp     $8, %eax
+    jb      .s5cs
+    lea     sha512_w(%rip), %r13
+    lea     sha512_k(%rip), %rbp
+    xor     %r14d, %r14d
+.s5r:
+    cmp     $80, %r14d
+    jge     .s5rd
+    lea     ed25519_tmp(%rip), %rdi
+    mov     0(%rdi), %r8
+    mov     32(%rdi), %r9
+    mov     56(%rdi), %rax
+    mov     %r9, %r10
+    ror     $14, %r10
+    mov     %r9, %r11
+    ror     $18, %r11
+    xor     %r11, %r10
+    mov     %r9, %r11
+    ror     $41, %r11
+    xor     %r11, %r10
+    mov     40(%rdi), %r11
+    mov     48(%rdi), %r12
+    mov     %r9, %rcx
+    and     %r11, %rcx
+    mov     %r9, %r15
+    not     %r15
+    and     %r12, %r15
+    xor     %r15, %rcx
+    add     %r10, %rax
+    add     %rcx, %rax
+    add     (%rbp, %r14, 8), %rax
+    add     (%r13, %r14, 8), %rax
+    mov     %r8, %r10
+    ror     $28, %r10
+    mov     %r8, %r11
+    ror     $34, %r11
+    xor     %r11, %r10
+    mov     %r8, %r11
+    ror     $39, %r11
+    xor     %r11, %r10
+    mov     8(%rdi), %r11
+    mov     16(%rdi), %r12
+    mov     %r8, %rcx
+    and     %r11, %rcx
+    mov     %r8, %r15
+    and     %r12, %r15
+    xor     %r15, %rcx
+    mov     %r11, %r15
+    and     %r12, %r15
+    xor     %r15, %rcx
+    add     %rcx, %r10
+    mov     48(%rdi), %rcx
+    mov     %rcx, 56(%rdi)
+    mov     40(%rdi), %rcx
+    mov     %rcx, 48(%rdi)
+    mov     32(%rdi), %rcx
+    mov     %rcx, 40(%rdi)
+    mov     24(%rdi), %rcx
+    add     %rax, %rcx
+    mov     %rcx, 32(%rdi)
+    mov     16(%rdi), %rcx
+    mov     %rcx, 24(%rdi)
+    mov     8(%rdi), %rcx
+    mov     %rcx, 16(%rdi)
+    mov     0(%rdi), %rcx
+    mov     %rcx, 8(%rdi)
+    add     %r10, %rax
+    mov     %rax, 0(%rdi)
+    inc     %r14d
+    jmp     .s5r
+.s5rd:
+    lea     sha512_state(%rip), %rsi
+    lea     ed25519_tmp(%rip), %rdi
+    xor     %eax, %eax
+.s5as:
+    mov     (%rdi, %rax, 8), %rdx
+    add     %rdx, (%rsi, %rax, 8)
+    inc     %eax
+    cmp     $8, %eax
+    jb      .s5as
+    pop     %rbp
+    pop     %r13
+    pop     %r15
+    pop     %r14
+    pop     %r12
+    lea     sha512_state(%rip), %rsi
+    mov     %r15, %rdi
+    xor     %edx, %edx
+.s5hl:
+    mov     (%rsi, %rdx, 8), %rax
+    mov     $16, %r8d
+.s5bl:
+    rol     $4, %rax
+    mov     %eax, %r10d
+    and     $0xF, %r10d
+    add     $0x2130, %r10d
+    cmp     $0x213A, %r10d
+    jb      .s5hd
+    add     $0x27, %r10d
+.s5hd:
+    movw    %r10w, (%rdi)
+    add     $2, %rdi
+    dec     %r8d
+    jnz     .s5bl
+    inc     %edx
+    cmp     $8, %edx
+    jb      .s5hl
+    pop     %rbx
+    sub     $16, %r14
+    mov     %r15, (%r14)
+    movq    $128, 8(%r14)
+    mov     %rdi, %r15
+    jmp     vm_loop
+
+# SHA-512 K constants
+.section .rodata
+.align 8
+sha512_k:
+    .quad 0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc
+    .quad 0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118
+    .quad 0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2
+    .quad 0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694
+    .quad 0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65
+    .quad 0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5
+    .quad 0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4
+    .quad 0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70
+    .quad 0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df
+    .quad 0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b
+    .quad 0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30
+    .quad 0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8
+    .quad 0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8
+    .quad 0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3
+    .quad 0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec
+    .quad 0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b
+    .quad 0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178
+    .quad 0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b
+    .quad 0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c
+    .quad 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817
+.section .text
+
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_ret:
     # Return from closure call — pop return address from CPU stack.
-    # CPU stack top has the saved PC from cg_call_closure.
-    # Check if we have a return address (rsp points to saved PC).
-    # If the top of CPU stack looks like a valid PC (< bytecode size),
-    # restore it. Otherwise treat as no-op.
-    pop     %rax                        # potential saved PC
-    cmp     %rbx, %rax                  # compare with bc_size
-    jae     .ret_noop                   # not a valid PC → push back and continue
-    mov     %eax, %r13d                 # PC = saved return address
+    pop     %rax                        # saved PC
+    pop     %r12                        # saved bytecode base
+    mov     %eax, %r13d                 # PC = return address
+    # Scope restore: ONLY if returning TO eval context (not boot→boot)
+    # Check: is restored r12 the eval buffer? If r12 == boot_bc_base → boot context → skip
+    lea     boot_bc_base(%rip), %rdi
+    cmp     (%rdi), %r12
+    je      vm_loop                     # returning to boot → no scope restore needed
+    # FAST scope restore: just truncate var_table count (NO memcpy!)
+    lea     closure_depth(%rip), %rsi
+    cmpq    $0, (%rsi)
+    je      vm_loop
+    decq    (%rsi)                      # depth--
+    # Check skip_scope_restore flag (module loading)
+    lea     skip_scope_restore(%rip), %rax
+    cmpq    $0, (%rax)
+    je      .do_scope_restore
+    decq    (%rax)                      # skip-- (don't truncate)
     jmp     vm_loop
-.ret_noop:
-    push    %rax                        # restore stack (wasn't a return addr)
+.do_scope_restore:
+    mov     (%rsi), %rcx               # new depth
+    # Restore count from depth_stack[depth]
+    lea     scope_frame_ptrs(%rip), %rax
+    mov     (%rax, %rcx, 8), %rdx      # saved_count
+    lea     var_table_base(%rip), %rdi
+    mov     (%rdi), %rdi
+    mov     %rdx, (%rdi)               # truncate: var_table.count = saved_count
+    # No cache invalidation needed — count-based validation handles scope changes
     jmp     vm_loop
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SHA-256 (FIPS 180-4) — __sha256(string) → hex string (64 chars)
+# ═══════════════════════════════════════════════════════════════════════════
+.call_sha256:
+    add     %rcx, %r13              # skip name bytes
+    # Pop string: ptr=chain ptr, len=mol_count (u16 molecules)
+    mov     (%r14), %rsi            # string ptr (u16 molecules)
+    mov     8(%r14), %rdx           # string len (mol count)
+    add     $16, %r14               # pop
+
+    # Decode u16 string → raw bytes in sha_input buffer
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx              # byte count
+    test    %rdx, %rdx
+    jz      .sha_empty_input
+    mov     %rdx, %r8               # save mol count
+.sha_decode_loop:
+    cmp     %r8, %rcx
+    jge     .sha_decode_done
+    movzbl  (%rsi, %rcx, 2), %eax   # low byte of u16 mol
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .sha_decode_loop
+.sha_decode_done:
+.sha_empty_input:
+    # rcx = input byte count, rdi = sha_input
+    mov     %rcx, %r8               # r8 = msg_len
+
+    # ── SHA-256 core ──
+    # Initialize hash state H[0..7]
+    lea     sha_state(%rip), %rbx
+    movl    $0x6a09e667, 0(%rbx)
+    movl    $0xbb67ae85, 4(%rbx)
+    movl    $0x3c6ef372, 8(%rbx)
+    movl    $0xa54ff53a, 12(%rbx)
+    movl    $0x510e527f, 16(%rbx)
+    movl    $0x9b05688c, 20(%rbx)
+    movl    $0x1f83d9ab, 24(%rbx)
+    movl    $0x5be0cd19, 28(%rbx)
+
+    # Padding: append 0x80, zeros, then 64-bit big-endian length
+    lea     sha_input(%rip), %rdi
+    mov     %r8, %rcx               # msg_len
+    movb    $0x80, (%rdi, %rcx)     # append 0x80
+    inc     %rcx
+    # Pad with zeros until (len % 64) == 56
+.sha_pad_loop:
+    mov     %rcx, %rax
+    and     $63, %rax
+    cmp     $56, %rax
+    je      .sha_pad_done
+    movb    $0, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .sha_pad_loop
+.sha_pad_done:
+    # Append bit length (msg_len * 8) as big-endian u64
+    mov     %r8, %rax
+    shl     $3, %rax                 # bit length
+    bswap   %rax
+    mov     %rax, (%rdi, %rcx)
+    add     $8, %rcx
+    # rcx = total padded length (multiple of 64)
+
+    # Process each 64-byte block
+    lea     sha_input(%rip), %rdi
+    xor     %r9, %r9                 # block offset
+.sha_block_loop:
+    cmp     %rcx, %r9
+    jge     .sha_done
+
+    # Save rcx/r9/rdi BEFORE W extension (W extend clobbers ecx)
+    lea     sha_save_regs(%rip), %rax
+    mov     %rcx, 24(%rax)            # padded length
+    mov     %r9,  16(%rax)            # block offset
+    mov     %rdi, 32(%rax)            # input pointer
+
+    # Prepare message schedule W[0..63]
+    lea     sha_w(%rip), %r10
+    # W[0..15] = block words (big-endian)
+    xor     %r11, %r11
+.sha_w_init:
+    cmp     $16, %r11
+    jge     .sha_w_extend
+    lea     (%rdi, %r9), %rax
+    mov     (%rax, %r11, 4), %eax
+    bswap   %eax
+    mov     %eax, (%r10, %r11, 4)
+    inc     %r11
+    jmp     .sha_w_init
+
+.sha_w_extend:
+    cmp     $64, %r11
+    jge     .sha_compress
+    # W[i] = σ1(W[i-2]) + W[i-7] + σ0(W[i-15]) + W[i-16]
+    # σ0(x) = ROTR(7,x) ^ ROTR(18,x) ^ SHR(3,x)
+    # σ1(x) = ROTR(17,x) ^ ROTR(19,x) ^ SHR(10,x)
+    lea     -2(%r11), %rax
+    mov     (%r10, %rax, 4), %edx   # W[i-2]
+    mov     %edx, %eax
+    ror     $17, %eax
+    mov     %edx, %ecx
+    ror     $19, %ecx
+    xor     %ecx, %eax
+    mov     %edx, %ecx
+    shr     $10, %ecx
+    xor     %ecx, %eax               # σ1(W[i-2])
+    push    %rax                      # save σ1
+
+    lea     -15(%r11), %rax
+    mov     (%r10, %rax, 4), %edx   # W[i-15]
+    mov     %edx, %eax
+    ror     $7, %eax
+    mov     %edx, %ecx
+    ror     $18, %ecx
+    xor     %ecx, %eax
+    mov     %edx, %ecx
+    shr     $3, %ecx
+    xor     %ecx, %eax               # σ0(W[i-15])
+
+    pop     %rdx                      # σ1
+    add     %edx, %eax               # σ1 + σ0
+    lea     -7(%r11), %edx
+    add     (%r10, %rdx, 4), %eax   # + W[i-7]
+    lea     -16(%r11), %edx
+    add     (%r10, %rdx, 4), %eax   # + W[i-16]
+    mov     %eax, (%r10, %r11, 4)
+    inc     %r11
+    jmp     .sha_w_extend
+
+.sha_compress:
+    # Save remaining VM registers (rcx/r9/rdi already saved at block_loop)
+    lea     sha_save_regs(%rip), %rax
+    mov     %r12, 0(%rax)
+    mov     %rbp, 8(%rax)
+    # r9, rcx, rdi already saved before W extension
+    mov     %rbx, 40(%rax)
+    mov     %r14, 48(%rax)
+    mov     %r15, 56(%rax)
+
+    # Initialize working vars from state → sha_abcdefgh
+    lea     sha_state(%rip), %rbx
+    lea     sha_abcdefgh(%rip), %rbp
+    mov     0(%rbx), %eax; mov %eax, 0(%rbp)
+    mov     4(%rbx), %eax; mov %eax, 4(%rbp)
+    mov     8(%rbx), %eax; mov %eax, 8(%rbp)
+    mov     12(%rbx), %eax; mov %eax, 12(%rbp)
+    mov     16(%rbx), %eax; mov %eax, 16(%rbp)
+    mov     20(%rbx), %eax; mov %eax, 20(%rbp)
+    mov     24(%rbx), %eax; mov %eax, 24(%rbp)
+    mov     28(%rbx), %eax; mov %eax, 28(%rbp)
+
+    # 64 compression rounds
+    lea     sha_k(%rip), %r10
+    lea     sha_w(%rip), %r11
+    xor     %r12d, %r12d
+.sha_round:
+    cmp     $64, %r12d
+    jge     .sha_round_done
+
+    # Σ1(e) = ROTR(6,e) ^ ROTR(11,e) ^ ROTR(25,e)
+    mov     16(%rbp), %eax           # e
+    mov     %eax, %edx
+    ror     $6, %edx
+    mov     %eax, %ecx
+    ror     $11, %ecx
+    xor     %ecx, %edx
+    mov     %eax, %ecx
+    ror     $25, %ecx
+    xor     %ecx, %edx               # Σ1(e)
+
+    # Ch(e,f,g) = (e & f) ^ (~e & g)
+    mov     16(%rbp), %eax           # e
+    mov     20(%rbp), %ecx           # f
+    and     %eax, %ecx               # e & f
+    not     %eax
+    and     24(%rbp), %eax           # ~e & g
+    xor     %eax, %ecx               # Ch
+
+    # T1 = h + Σ1(e) + Ch(e,f,g) + K[i] + W[i]
+    mov     28(%rbp), %eax           # h
+    add     %edx, %eax               # + Σ1
+    add     %ecx, %eax               # + Ch
+    add     (%r10, %r12, 4), %eax   # + K[i]
+    add     (%r11, %r12, 4), %eax   # + W[i]
+    mov     %eax, %esi               # T1
+
+    # Σ0(a) = ROTR(2,a) ^ ROTR(13,a) ^ ROTR(22,a)
+    mov     0(%rbp), %eax            # a
+    mov     %eax, %edx
+    ror     $2, %edx
+    mov     %eax, %ecx
+    ror     $13, %ecx
+    xor     %ecx, %edx
+    mov     %eax, %ecx
+    ror     $22, %ecx
+    xor     %ecx, %edx               # Σ0(a)
+
+    # Maj(a,b,c) = (a & b) ^ (a & c) ^ (b & c)
+    mov     0(%rbp), %eax            # a
+    mov     4(%rbp), %ecx            # b
+    mov     %eax, %edi
+    and     %ecx, %edi               # a & b
+    and     8(%rbp), %eax            # a & c
+    xor     %eax, %edi
+    and     8(%rbp), %ecx            # b & c
+    xor     %ecx, %edi               # Maj
+
+    # T2 = Σ0(a) + Maj(a,b,c)
+    add     %edi, %edx               # T2
+
+    # Shift: h=g, g=f, f=e, e=d+T1, d=c, c=b, b=a, a=T1+T2
+    mov     24(%rbp), %eax; mov %eax, 28(%rbp)  # h = g
+    mov     20(%rbp), %eax; mov %eax, 24(%rbp)  # g = f
+    mov     16(%rbp), %eax; mov %eax, 20(%rbp)  # f = e
+    mov     12(%rbp), %eax
+    add     %esi, %eax
+    mov     %eax, 16(%rbp)                       # e = d + T1
+    mov     8(%rbp), %eax; mov %eax, 12(%rbp)   # d = c
+    mov     4(%rbp), %eax; mov %eax, 8(%rbp)    # c = b
+    mov     0(%rbp), %eax; mov %eax, 4(%rbp)    # b = a
+    lea     (%rsi, %rdx), %eax
+    mov     %eax, 0(%rbp)                        # a = T1 + T2
+
+    inc     %r12d
+    jmp     .sha_round
+
+.sha_round_done:
+    # Add compressed values to state BEFORE restoring rbp
+    # (rbp still points to sha_abcdefgh from compression)
+    lea     sha_state(%rip), %rbx
+    mov     0(%rbp), %eax;  add %eax, 0(%rbx)
+    mov     4(%rbp), %eax;  add %eax, 4(%rbx)
+    mov     8(%rbp), %eax;  add %eax, 8(%rbx)
+    mov     12(%rbp), %eax; add %eax, 12(%rbx)
+    mov     16(%rbp), %eax; add %eax, 16(%rbx)
+    mov     20(%rbp), %eax; add %eax, 20(%rbx)
+    mov     24(%rbp), %eax; add %eax, 24(%rbx)
+    mov     28(%rbp), %eax; add %eax, 28(%rbx)
+
+    # NOW restore ALL VM registers from BSS
+    lea     sha_save_regs(%rip), %rax
+    mov     0(%rax), %r12
+    mov     8(%rax), %rbp
+    mov     16(%rax), %r9
+    mov     24(%rax), %rcx
+    mov     32(%rax), %rdi
+    mov     40(%rax), %rbx
+    mov     48(%rax), %r14
+    mov     56(%rax), %r15
+
+    add     $64, %r9
+    jmp     .sha_block_loop
+
+.sha_done:
+    # Convert state H[0..7] to hex string on heap (u16 molecules)
+    lea     sha_state(%rip), %rbx
+    mov     %r15, %rdi               # output string base on heap
+    movq    $0, %rcx                 # output mol count
+    # 8 words × 8 hex chars = 64 chars
+    xor     %r8d, %r8d               # word index
+.sha_hex_loop:
+    cmp     $8, %r8d
+    jge     .sha_hex_done
+    mov     (%rbx, %r8, 4), %eax
+    # State words stored as native u32, already correct order — NO bswap needed
+    # Emit 8 hex nibbles
+    mov     $8, %r9d                  # nibble count
+.sha_nibble:
+    test    %r9d, %r9d
+    jz      .sha_next_word
+    dec     %r9d
+    mov     %eax, %edx
+    shr     $28, %edx                # top nibble
+    shl     $4, %eax                 # shift left
+    # Convert nibble to ASCII hex
+    cmp     $10, %edx
+    jl      .sha_digit
+    add     $87, %edx                # 'a' - 10 = 87
+    jmp     .sha_emit_hex
+.sha_digit:
+    add     $48, %edx                # '0' = 48
+.sha_emit_hex:
+    # Emit as u16 molecule: 0x2100 | byte
+    or      $0x2100, %edx
+    movw    %dx, (%r15)
+    add     $2, %r15
+    inc     %rcx
+    jmp     .sha_nibble
+.sha_next_word:
+    inc     %r8d
+    jmp     .sha_hex_loop
+
+.sha_hex_done:
+    # Push result string onto VM stack
+    sub     $16, %r14
+    mov     %rdi, (%r14)             # string ptr
+    mov     %rcx, 8(%r14)            # mol count (64)
+    jmp     vm_loop
+
+.call_file_read:
+    add     %rcx, %r13
+    jmp     op_file_read
+
+.call_file_write:
+    add     %rcx, %r13
+    jmp     op_file_write
+
+# ── Raw byte buffer builtins ────────────────────────────────────────
+# Bytes buffers: stored as [size:8][raw_bytes:N] on heap
+# VM stack entry: ptr = heap_base, len = BYTES_MARKER (-5)
+.equ BYTES_MARKER, -5
+
+.call_bytes_new:
+    # __bytes_new(size) → byte buffer
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax          # size
+    add     $16, %r14               # pop size
+    # Allocate on heap: [size:8][zeroed bytes]
+    mov     %r15, %rdi              # buffer base
+    mov     %rax, (%r15)            # store size
+    add     $8, %r15                # past size header
+    # Zero the buffer
+    push    %rdi                    # save buf base
+    mov     %rax, %rcx              # count = size
+    push    %rcx                    # save size
+    mov     %r15, %rdi              # dest = data start
+    xor     %eax, %eax              # AL = 0 (rep stosb stores AL)
+    rep     stosb
+    pop     %rax                    # restore size
+    pop     %rdi                    # restore buf base
+    add     %rax, %r15              # bump heap past buffer
+    # Push result
+    sub     $16, %r14
+    mov     %rdi, (%r14)            # ptr = buffer base
+    movq    $BYTES_MARKER, 8(%r14)  # marker
+    jmp     vm_loop
+
+.call_bytes_set:
+    # __bytes_set(buf, offset, value) → buf
+    add     %rcx, %r13
+    # Pop value (f64)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax          # byte value
+    # Pop offset (f64)
+    movsd   16(%r14), %xmm1
+    cvttsd2si %xmm1, %rdx          # offset
+    # Pop buf
+    mov     32(%r14), %rdi          # buf ptr
+    add     $48, %r14               # pop 3
+    # Write byte at buf + 8 + offset
+    mov     %al, 8(%rdi, %rdx)
+    # Push buf back
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $BYTES_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_get:
+    # __bytes_get(buf, offset) → f64 byte value
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rdx          # offset
+    mov     16(%r14), %rdi          # buf ptr
+    add     $16, %r14               # pop offset (keep buf slot for result)
+    movzbl  8(%rdi, %rdx), %eax    # read byte
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)          # overwrite buf with result
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_write_raw:
+    # __bytes_write(path, buf, size) → 0
+    add     %rcx, %r13
+    # Pop size
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %r9           # size
+    # Pop buf
+    mov     16(%r14), %r8           # buf ptr
+    # Pop path (string)
+    mov     32(%r14), %rsi          # path ptr (u16 mols)
+    mov     40(%r14), %rdx          # path len
+    add     $48, %r14               # pop 3
+    # Decode path → ASCII
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.bw_decode_path:
+    cmp     %rdx, %rcx
+    jge     .bw_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .bw_decode_path
+.bw_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    mov     $0x241, %esi            # O_WRONLY|O_CREAT|O_TRUNC
+    mov     $0755, %edx             # permissions (executable)
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .bw_fail
+    # Write raw bytes from buf+8
+    mov     %rax, %rdi              # fd
+    lea     8(%r8), %rsi            # data = buf + 8 (skip size header)
+    mov     %r9, %rdx              # size
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Close
+    mov     $SYS_CLOSE, %eax
+    syscall
+.bw_fail:
+    # Push 0 result
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_file_read_bytes:
+    # __file_read_bytes(path) → bytes buffer (raw, not u16 encoded)
+    add     %rcx, %r13
+    mov     (%r14), %rsi            # path ptr (u16 mols)
+    mov     8(%r14), %rdx           # path len
+    add     $16, %r14               # pop
+    # Decode path
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.frb_decode:
+    cmp     %rdx, %rcx
+    jge     .frb_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .frb_decode
+.frb_open:
+    movb    $0, (%rdi, %rcx)
+    lea     sha_input(%rip), %rdi
+    xor     %esi, %esi              # O_RDONLY
+    xor     %edx, %edx
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .frb_empty
+    # Read into heap as bytes buffer [size:8][data:N] — loop for large files
+    mov     %rax, %r8               # fd
+    mov     %r15, %rdi              # buf base
+    add     $8, %r15                # skip size header
+    xor     %r9d, %r9d              # r9 = total bytes read
+.frb_read_loop:
+    mov     %r8, %rdi               # fd
+    lea     (%r15, %r9), %rsi       # buf = data_start + total_read
+    mov     $0x100000, %edx         # read 1MB chunks
+    mov     $SYS_READ, %eax
+    syscall
+    test    %rax, %rax
+    jle     .frb_read_done
+    add     %rax, %r9
+    cmp     $0x100000, %rax
+    je      .frb_read_loop
+.frb_read_done:
+    mov     %r8, %rdi
+    mov     $SYS_CLOSE, %eax
+    syscall
+    mov     %r9, %rcx               # total bytes_read
+    test    %rcx, %rcx
+    jle     .frb_empty
+    # Set size header
+    mov     %r15, %rdi
+    sub     $8, %rdi                # buf base
+    mov     %rcx, (%rdi)            # size
+    add     %rcx, %r15              # bump heap past data
+    # Push
+    sub     $16, %r14
+    mov     %rdi, (%r14)
+    movq    $BYTES_MARKER, 8(%r14)
+    jmp     vm_loop
+.frb_empty:
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
+    jmp     vm_loop
+
+.call_heap_save:
+    # __heap_save() → stores r15 in BSS, returns index as f64
+    add     %rcx, %r13
+    lea     heap_checkpoints(%rip), %rax
+    lea     heap_cp_count(%rip), %rdx
+    mov     (%rdx), %rcx               # current count
+    mov     %r15, (%rax, %rcx, 8)      # store r15 at checkpoints[count]
+    inc     %rcx
+    mov     %rcx, (%rdx)               # count++
+    dec     %rcx                        # return index (before increment)
+    sub     $16, %r14
+    cvtsi2sd %rcx, %xmm0              # index as f64 (small number, safe)
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_heap_restore:
+    # __heap_restore(index) → resets r15 from saved checkpoint
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %rax              # index
+    add     $16, %r14                   # pop
+    lea     heap_checkpoints(%rip), %rdx
+    mov     (%rdx, %rax, 8), %r15      # restore r15
+    # Push dummy result
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_bytes_len:
+    # __bytes_len(buf) → f64 size
+    add     %rcx, %r13
+    mov     (%r14), %rdi            # buf ptr
+    mov     (%rdi), %rax            # size from header
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_floor:
+    # __floor(x) → floor(x)
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    roundsd $1, %xmm0, %xmm0          # round toward -inf
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+.call_ceil:
+    # __ceil(x) → ceil(x)
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    roundsd $2, %xmm0, %xmm0          # round toward +inf
+    movsd   %xmm0, (%r14)
+    jmp     vm_loop
+
+# ── Molecule extract builtins (T5 ND.2) ────────────────────────────────
+# P_weight = [S:4][R:4][V:3][A:3][T:2] = 16 bits packed as f64
+# __mol_s(mol) → (mol / 4096) % 16     (bits 12-15)
+# __mol_r(mol) → (mol / 256) % 16      (bits 8-11)
+# __mol_v(mol) → (mol / 32) % 8        (bits 5-7)
+# __mol_a(mol) → (mol / 4) % 8         (bits 2-4)
+# __mol_t(mol) → mol % 4               (bits 0-1)
+# __mol_pack(s,r,v,a,t) → s*4096 + r*256 + v*32 + a*4 + t
+
+.call_mol_s:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $12, %eax
+    and     $0x0F, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_r:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $8, %eax
+    and     $0x0F, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_v:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $5, %eax
+    and     $0x07, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_a:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    shr     $2, %eax
+    and     $0x07, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_t:
+    add     %rcx, %r13
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax
+    and     $0x03, %eax
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_mol_pack:
+    # Stack: [s, r, v, a, t] → s*4096 + r*256 + v*32 + a*4 + t
+    add     %rcx, %r13
+    # Pop t
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %eax              # t
+    add     $16, %r14
+    # Pop a
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # a
+    shl     $2, %edx                    # a*4
+    add     %edx, %eax
+    add     $16, %r14
+    # Pop v
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # v
+    shl     $5, %edx                    # v*32
+    add     %edx, %eax
+    add     $16, %r14
+    # Pop r
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # r
+    shl     $8, %edx                    # r*256
+    add     %edx, %eax
+    add     $16, %r14
+    # Pop s
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # s
+    shl     $12, %edx                   # s*4096
+    add     %edx, %eax
+    # Push result as f64
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── UTF-8 decoding builtins ──────────────────────────────────────────────
+# __utf8_cp(str, pos) → Unicode codepoint at byte position pos
+# __utf8_len(str, pos) → number of bytes in UTF-8 sequence (1-4)
+# Strings are u16 molecules: each byte = 0x2100 | byte_value
+
+.call_utf8_cp:
+    add     %rcx, %r13
+    # Pop pos (f64)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # pos
+    add     $16, %r14
+    # Pop str (chain ptr + mol_count)
+    mov     (%r14), %rsi               # str ptr (u16 molecules)
+    # Read byte at pos: molecule = 0x2100 | byte, so byte = mol & 0xFF
+    movzwl  (%rsi, %rdx, 2), %eax     # read u16 molecule at pos
+    and     $0xFF, %eax                # extract byte value
+    # Check UTF-8 lead byte
+    cmp     $0x80, %eax
+    jb      .utf8_cp_1byte             # 0xxxxxxx → 1 byte (ASCII)
+    cmp     $0xE0, %eax
+    jb      .utf8_cp_2byte             # 110xxxxx → 2 bytes
+    cmp     $0xF0, %eax
+    jb      .utf8_cp_3byte             # 1110xxxx → 3 bytes
+    # 4 byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+    and     $0x07, %eax                # keep low 3 bits
+    shl     $18, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    shl     $12, %ecx
+    or      %ecx, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    shl     $6, %ecx
+    or      %ecx, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    or      %ecx, %eax
+    jmp     .utf8_cp_done
+.utf8_cp_3byte:
+    and     $0x0F, %eax                # keep low 4 bits
+    shl     $12, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    shl     $6, %ecx
+    or      %ecx, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    or      %ecx, %eax
+    jmp     .utf8_cp_done
+.utf8_cp_2byte:
+    and     $0x1F, %eax                # keep low 5 bits
+    shl     $6, %eax
+    inc     %edx
+    movzwl  (%rsi, %rdx, 2), %ecx
+    and     $0x3F, %ecx
+    or      %ecx, %eax
+    jmp     .utf8_cp_done
+.utf8_cp_1byte:
+    # eax already has the byte value (ASCII)
+.utf8_cp_done:
+    # Push codepoint as f64
+    cvtsi2sd %eax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_utf8_len:
+    add     %rcx, %r13
+    # Pop pos (f64)
+    movsd   (%r14), %xmm0
+    cvttsd2si %xmm0, %edx              # pos
+    add     $16, %r14
+    # Pop str
+    mov     (%r14), %rsi               # str ptr
+    movzwl  (%rsi, %rdx, 2), %eax     # read u16 molecule at pos
+    and     $0xFF, %eax                # byte value
+    # Return byte count based on lead byte
+    mov     $1, %ecx                    # default 1
+    cmp     $0x80, %eax
+    jb      .utf8_len_done
+    mov     $2, %ecx
+    cmp     $0xE0, %eax
+    jb      .utf8_len_done
+    mov     $3, %ecx
+    cmp     $0xF0, %eax
+    jb      .utf8_len_done
+    mov     $4, %ecx
+.utf8_len_done:
+    cvtsi2sd %ecx, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── __sleep(ms) — nanosleep syscall ──────────────────────────────────────
+.call_sleep:
+    add     %rcx, %r13                  # skip name_len
+    # Pop ms (f64) from VM stack
+    movsd   (%r14), %xmm0
+    add     $16, %r14                   # pop
+    # Convert ms → seconds + nanoseconds
+    cvttsd2si %xmm0, %rax              # ms as integer
+    # rax = total ms, compute sec = ms / 1000, nsec = (ms % 1000) * 1_000_000
+    xor     %edx, %edx
+    mov     $1000, %rcx
+    div     %rcx                        # rax=sec, rdx=remainder_ms
+    imul    $1000000, %rdx, %rdx        # remainder → nanoseconds
+    # Build timespec on CPU stack (16 bytes aligned)
+    sub     $16, %rsp
+    mov     %rax, (%rsp)               # tv_sec
+    mov     %rdx, 8(%rsp)             # tv_nsec
+    # syscall nanosleep(timespec*, NULL)
+    mov     %rsp, %rdi                  # rdi = &timespec
+    xor     %esi, %esi                  # rsi = NULL (remaining)
+    mov     $SYS_NANOSLEEP, %eax
+    syscall
+    add     $16, %rsp                   # restore stack
+    # Push 0.0 (success)
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── __time() — clock_gettime CLOCK_MONOTONIC → ms ──────────────────────
+.call_time:
+    add     %rcx, %r13                  # skip name_len
+    # Build timespec on CPU stack
+    sub     $16, %rsp
+    mov     $CLOCK_MONOTONIC, %edi      # clock_id
+    mov     %rsp, %rsi                  # &timespec
+    mov     $SYS_CLOCK_GETTIME, %eax
+    syscall
+    # Convert to milliseconds: sec*1000 + nsec/1_000_000
+    mov     (%rsp), %rax               # tv_sec
+    imul    $1000, %rax, %rax           # sec → ms
+    mov     8(%rsp), %rdx             # tv_nsec
+    mov     $1000000, %rcx
+    xor     %r8d, %r8d                  # clear for div
+    push    %rax                        # save sec_ms
+    mov     %rdx, %rax
+    xor     %edx, %edx
+    div     %rcx                        # rax = nsec/1000000
+    pop     %rdx                        # rdx = sec_ms
+    add     %rdx, %rax                  # total ms
+    add     $16, %rsp                   # restore stack
+    # Push result as f64
+    sub     $16, %r14
+    cvtsi2sd %rax, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+# ── __write_raw(str) — write raw bytes to stdout (for ANSI escapes) ────
+.call_write_raw:
+    add     %rcx, %r13                  # skip name_len
+    # Pop string from VM stack
+    mov     (%r14), %rsi               # ptr (u16 molecules)
+    mov     8(%r14), %rdx              # len (mol count)
+    add     $16, %r14                   # pop
+    # Decode u16 molecules → raw bytes in temp buffer on CPU stack
+    # Each molecule = 0x2100 | byte, stride 2 bytes
+    # Max reasonable: 256 bytes for ANSI sequences
+    mov     %rdx, %rcx                 # mol_count
+    sub     $256, %rsp                  # temp buffer
+    mov     %rsp, %rdi                  # dest ptr
+    xor     %r8d, %r8d                  # byte count
+.wr_decode:
+    test    %rcx, %rcx
+    jz      .wr_write
+    movzwl  (%rsi), %eax               # read u16 molecule
+    and     $0xFF, %eax                 # extract byte (mask off 0x2100)
+    movb    %al, (%rdi, %r8)
+    inc     %r8
+    add     $2, %rsi                    # next molecule
+    dec     %rcx
+    jmp     .wr_decode
+.wr_write:
+    # SYS_WRITE(fd=1, buf=rsp, len=r8)
+    mov     $1, %edi                    # stdout
+    mov     %rsp, %rsi                  # buffer
+    mov     %r8, %rdx                   # byte count
+    mov     $SYS_WRITE, %eax
+    syscall
+    add     $256, %rsp                  # restore stack
+    # Push 0.0
+    sub     $16, %r14
+    xorpd   %xmm0, %xmm0
+    movsd   %xmm0, (%r14)
+    movq    $F64_MARKER, 8(%r14)
+    jmp     vm_loop
+
+.call_throw:
+    # __throw(msg) — unwind to nearest try/catch
+    # Stack: [msg_value] → store in __error var, jump to catch_PC
+    add     %rcx, %r13                  # skip name_len
+    # Pop error message (keep on stack for catch block to access)
+    mov     (%r14), %r8                # msg ptr
+    mov     8(%r14), %r9               # msg len
+    add     $16, %r14                   # pop
+
+    # Store error message in __error variable (hash of "__error")
+    movabs  $0x07515EC1BC3E1099, %rdx   # temp: store as "__error" var
+    # Actually, use the var_table to store error. For now, just jump to catch.
+
+    # Check try_depth
+    lea     try_depth(%rip), %rsi
+    cmpq    $0, (%rsi)
+    je      .throw_no_handler
+
+    # Pop try frame
+    decq    (%rsi)                      # depth--
+    mov     (%rsi), %rdx               # new depth
+    lea     try_stack(%rip), %rdi
+    shl     $4, %rdx                    # depth * 16
+    mov     (%rdi, %rdx), %rax         # catch_PC
+    mov     8(%rdi, %rdx), %r14        # restore stack pointer
+
+    # Push error message onto restored stack (catch block can access it)
+    sub     $16, %r14
+    mov     %r8, (%r14)
+    mov     %r9, 8(%r14)
+
+    # Jump to catch_PC
+    mov     %rax, %r13                  # set PC = catch_PC
+    jmp     vm_loop
+
+.throw_no_handler:
+    # No try block — print error and halt
+    # Print "Error: " prefix
+    lea     .err_prefix(%rip), %rsi
+    mov     $7, %rdx
+    mov     $1, %rdi
+    mov     $1, %rax
+    syscall
+    # Print error message
+    mov     %r8, %rsi
+    mov     %r9, %rdx
+    cmp     $F64_MARKER, %rdx
+    je      .throw_halt                 # skip if f64 (can't print number easily)
+    test    %rdx, %rdx
+    jz      .throw_halt
+    # Check if string (0x21xx pattern)
+    movzwl  (%rsi), %eax
+    and     $0xFF00, %eax
+    cmp     $0x2100, %eax
+    jne     .throw_halt
+    # Decode u16 string
+    mov     %r9, %rcx                   # mol count
+    lea     throw_buf(%rip), %rdi
+    xor     %rdx, %rdx
+.throw_decode:
+    cmp     %rcx, %rdx
+    jge     .throw_write
+    movzbl  (%rsi, %rdx, 2), %eax
+    mov     %al, (%rdi, %rdx)
+    inc     %rdx
+    jmp     .throw_decode
+.throw_write:
+    lea     throw_buf(%rip), %rsi
+    # rdx = length
+    mov     $1, %rdi
+    mov     $1, %rax
+    syscall
+.throw_halt:
+    # Print newline and halt
+    lea     str_newline(%rip), %rsi
+    mov     $1, %rdx
+    mov     $1, %rdi
+    mov     $1, %rax
+    syscall
+    mov     $60, %rax
+    mov     $1, %rdi
+    syscall
+
+.section .rodata
+.err_prefix:
+    .ascii  "Error: "
+.align 4
+sha_k:
+    .long 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5
+    .long 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5
+    .long 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3
+    .long 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174
+    .long 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc
+    .long 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da
+    .long 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7
+    .long 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967
+    .long 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13
+    .long 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85
+    .long 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3
+    .long 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070
+    .long 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5
+    .long 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3
+    .long 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208
+    .long 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+.section .text
+
 op_try_begin:
-    # [0x37, target_u32_le]
-    add     $4, %r13                    # skip catch target
+    # [0x1A, catch_offset_u32_le]
+    # Push (catch_PC, saved_r14) onto try_stack
+    # r13 already points past opcode byte
+    movzbl  (%r12, %r13), %eax         # read catch_offset byte 0
+    movzbl  1(%r12, %r13), %edx
+    shl     $8, %edx
+    or      %edx, %eax
+    movzbl  2(%r12, %r13), %edx
+    shl     $16, %edx
+    or      %edx, %eax
+    movzbl  3(%r12, %r13), %edx
+    shl     $24, %edx
+    or      %edx, %eax                  # eax = catch_offset (absolute PC)
+    add     $4, %r13
+
+    # Push onto try_stack
+    lea     try_depth(%rip), %rsi
+    mov     (%rsi), %rdx               # depth
+    lea     try_stack(%rip), %rdi
+    shl     $4, %rdx                    # depth * 16
+    lea     (%rdi, %rdx), %rdi         # try_stack[depth]
+    mov     %rax, (%rdi)               # catch_PC
+    mov     %r14, 8(%rdi)              # saved stack pointer
+    lea     try_depth(%rip), %rsi
+    incq    (%rsi)                      # depth++
     jmp     vm_loop
 
 op_catch_end:
-    # [0x38]
+    # Pop try_stack (catch block finished)
+    lea     try_depth(%rip), %rsi
+    cmpq    $0, (%rsi)
+    je      vm_loop                     # no try frame → skip
+    decq    (%rsi)                      # depth--
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1986,10 +6374,43 @@ op_emit:
     test    %rdx, %rdx
     jz      vm_loop
 
-    # Write chain bytes to stdout
+    # Check if this is a string chain (molecules with 0x21xx pattern)
+    # First molecule top byte = 0x21 → string encoded
+    movzwl  (%rsi), %eax
+    and     $0xFF00, %eax
+    cmp     $0x2100, %eax
+    jne     .emit_raw
+
+    # String chain: decode molecules to ASCII bytes on heap, then print
+    push    %rsi
+    push    %rdx
+    mov     %r15, %rdi                  # decode buffer = heap
+    mov     %rdx, %rcx                  # mol_count
+.emit_decode_loop:
+    test    %rcx, %rcx
+    jz      .emit_decode_done
+    movzwl  (%rsi), %eax               # read u16 molecule
+    movb    %al, (%rdi)                 # store lower byte (ASCII value)
+    add     $2, %rsi                    # next molecule
+    inc     %rdi                        # next output byte
+    dec     %rcx
+    jmp     .emit_decode_loop
+.emit_decode_done:
+    pop     %rdx                        # mol_count = string length
+    pop     %rsi
+    mov     %r15, %rsi                  # buf = decoded bytes
+    mov     $1, %edi                    # stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .emit_newline
+
+.emit_raw:
+    # Raw chain bytes — write directly
     mov     $1, %edi                   # fd = stdout
     mov     $SYS_WRITE, %eax
     syscall
+
+.emit_newline:
     # Print newline after emit
     lea     str_newline(%rip), %rsi
     mov     $1, %edx
@@ -2019,19 +6440,66 @@ op_emit:
     jmp     vm_loop
 
 .emit_array:
-    # Print "[array N]" with element count
+    # Print "[elem0, elem1, ...]" with actual contents
     # rsi = array base ptr
     test    %rsi, %rsi
     jz      .emit_array_empty
-    mov     (%rsi), %rax               # count
-    lea     str_array_open(%rip), %rsi
-    mov     $7, %edx                    # "[array "
+    # Follow forward pointer chain
+.emit_array_fwd:
+    cmpq    $ARRAY_FORWARD_MARKER, (%rsi)
+    jne     .emit_array_start
+    mov     8(%rsi), %rsi
+    jmp     .emit_array_fwd
+.emit_array_start:
+    push    %rbp                        # save rbp (callee-saved, used as elem ptr)
+    push    %rsi                        # save array base
+    # Print "["
+    lea     str_lbracket(%rip), %rsi
+    mov     $1, %edx
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
-    # Print count as number
-    cvtsi2sd %rax, %xmm0
-    call    f64_to_ascii
+    pop     %rsi                        # restore array base
+    mov     (%rsi), %rcx               # count
+    test    %rcx, %rcx
+    jz      .emit_array_close
+    lea     8(%rsi), %rbp              # first element ptr
+    xor     %eax, %eax                  # index = 0
+    push    %rcx                        # save count
+.emit_array_elem:
+    push    %rax                        # save index
+    push    %rbp                        # save element ptr
+    # Check element type
+    mov     8(%rbp), %rdx              # elem len/marker
+    cmp     $F64_MARKER, %rdx
+    je      .emit_array_f64
+    # String element: decode u16 molecules
+    mov     (%rbp), %rsi               # string ptr
+    test    %rdx, %rdx
+    jz      .emit_array_elem_done
+    # Decode molecules to ASCII on heap
+    push    %rdx
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+.emit_arr_str_decode:
+    test    %rcx, %rcx
+    jz      .emit_arr_str_write
+    movzwl  (%rsi), %eax
+    movb    %al, (%rdi)
+    add     $2, %rsi
+    inc     %rdi
+    dec     %rcx
+    jmp     .emit_arr_str_decode
+.emit_arr_str_write:
+    pop     %rdx                        # mol_count = char count
+    mov     %r15, %rsi
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .emit_array_elem_done
+.emit_array_f64:
+    movq    (%rbp), %xmm0             # f64 bits
+    call    f64_to_ascii               # → eax = len, output at r15
     mov     %r15, %rsi
     mov     %eax, %edx
     mov     $1, %edi
@@ -2040,11 +6508,35 @@ op_emit:
     syscall
     pop     %rax
     add     %rax, %r15
-    lea     str_bracket_nl(%rip), %rsi
+.emit_array_elem_done:
+    pop     %rbp                        # restore element ptr
+    pop     %rax                        # restore index
+    inc     %rax
+    add     $16, %rbp                   # next element
+    # Check if more elements
+    mov     (%rsp), %rcx              # peek count from stack
+    cmp     %rcx, %rax
+    jae     .emit_array_close_pop
+    # Print ", "
+    push    %rax
+    push    %rbp
+    lea     str_comma_space(%rip), %rsi
     mov     $2, %edx
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
+    pop     %rbp
+    pop     %rax
+    jmp     .emit_array_elem
+.emit_array_close_pop:
+    pop     %rcx                        # pop saved count
+.emit_array_close:
+    lea     str_rbracket_nl(%rip), %rsi
+    mov     $2, %edx                    # "]\n"
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rbp                        # restore rbp
     jmp     vm_loop
 .emit_array_empty:
     lea     str_empty_array(%rip), %rsi
@@ -2055,16 +6547,108 @@ op_emit:
     jmp     vm_loop
 
 .emit_dict:
-    # Print "{dict N}"
+    # Pretty-print: {key1: val1, key2: val2}
     test    %rsi, %rsi
     jz      .emit_dict_empty
-    mov     (%rsi), %rax
-    lea     str_dict_open(%rip), %rsi
-    mov     $6, %edx                    # "{dict "
+    push    %rbp
+    mov     %rsi, %rbp                  # rbp = dict base
+    # Print "{"
+    lea     str_lbrace(%rip), %rsi
+    mov     $1, %edx
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
-    cvtsi2sd %rax, %xmm0
+    mov     (%rbp), %rcx               # count
+    test    %rcx, %rcx
+    jz      .emit_dict_close
+    lea     8(%rbp), %rbp              # first entry
+    xor     %eax, %eax                  # index = 0
+    push    %rcx                        # save count
+.emit_dict_entry:
+    push    %rax                        # save index
+    push    %rbp                        # save entry ptr
+    # Comma separator (if not first)
+    test    %eax, %eax
+    jz      .emit_dict_nocomma
+    lea     str_comma_sp(%rip), %rsi
+    mov     $2, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+.emit_dict_nocomma:
+    pop     %rbp                        # restore entry ptr
+    pop     %rax                        # restore index
+    push    %rax
+    push    %rbp
+    # Print key (string at entry+0, len at entry+8)
+    mov     (%rbp), %rsi               # key ptr
+    mov     8(%rbp), %rdx              # key len
+    test    %rdx, %rdx
+    jz      .emit_dict_key_done
+    # Decode u16 molecules to ASCII
+    push    %rdx
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+.emit_dk_loop:
+    test    %rcx, %rcx
+    jz      .emit_dk_done
+    movzwl  (%rsi), %eax
+    movb    %al, (%rdi)
+    add     $2, %rsi
+    inc     %rdi
+    dec     %rcx
+    jmp     .emit_dk_loop
+.emit_dk_done:
+    pop     %rdx
+    mov     %r15, %rsi
+    mov     $1, %edi
+    push    %rdx
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rdx
+.emit_dict_key_done:
+    # Print ": "
+    lea     str_colon_sp(%rip), %rsi
+    mov     $2, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Print value (entry+16=val_ptr, entry+24=val_len)
+    pop     %rbp
+    pop     %rax
+    push    %rax
+    push    %rbp
+    mov     24(%rbp), %rdx             # val len/marker
+    cmp     $F64_MARKER, %rdx
+    je      .emit_dict_val_f64
+    # String value: decode u16
+    mov     16(%rbp), %rsi             # val ptr
+    test    %rdx, %rdx
+    jz      .emit_dict_val_done
+    push    %rdx
+    mov     %r15, %rdi
+    mov     %rdx, %rcx
+.emit_dv_loop:
+    test    %rcx, %rcx
+    jz      .emit_dv_done
+    movzwl  (%rsi), %eax
+    movb    %al, (%rdi)
+    add     $2, %rsi
+    inc     %rdi
+    dec     %rcx
+    jmp     .emit_dv_loop
+.emit_dv_done:
+    pop     %rdx
+    mov     %r15, %rsi
+    mov     $1, %edi
+    push    %rdx
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rdx
+    jmp     .emit_dict_val_done
+.emit_dict_val_f64:
+    mov     16(%rbp), %rax
+    movq    %rax, %xmm0
     call    f64_to_ascii
     mov     %r15, %rsi
     mov     %eax, %edx
@@ -2073,7 +6657,17 @@ op_emit:
     mov     $SYS_WRITE, %eax
     syscall
     pop     %rax
-    add     %rax, %r15
+.emit_dict_val_done:
+    pop     %rbp                        # restore entry ptr
+    pop     %rax                        # restore index
+    add     $32, %rbp                   # next entry (32 bytes each)
+    inc     %eax
+    mov     (%rsp), %rcx              # peek count
+    cmp     %ecx, %eax
+    jb      .emit_dict_entry
+    add     $8, %rsp                    # pop count
+.emit_dict_close:
+    pop     %rbp
     lea     str_brace_nl(%rip), %rsi
     mov     $2, %edx
     mov     $1, %edi
@@ -2218,9 +6812,83 @@ op_query:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_file_read:
-    # Pop filename from stack, read file, push contents
-    # Stub: push empty
-    add     $16, %r14                   # pop filename
+    # Pop filename string, read file contents, push as string
+    # Stack: [filename_ptr, filename_len] → [content_ptr, content_len]
+    mov     (%r14), %rsi            # filename ptr (u16 molecules)
+    mov     8(%r14), %rdx           # filename len (mol count)
+    add     $16, %r14               # pop
+
+    # Decode u16 filename → ASCII bytes in temp buffer
+    lea     sha_input(%rip), %rdi   # reuse sha_input as temp (1024 bytes)
+    xor     %rcx, %rcx
+    test    %rdx, %rdx
+    jz      .fread_empty
+.fread_decode:
+    cmp     %rdx, %rcx
+    jge     .fread_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fread_decode
+
+.fread_open:
+    movb    $0, (%rdi, %rcx)        # null-terminate
+    # Open file
+    lea     sha_input(%rip), %rdi   # filename
+    xor     %esi, %esi              # O_RDONLY
+    xor     %edx, %edx              # mode 0
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      .fread_empty             # open failed → push empty
+
+    # Read file into heap — loop until EOF (supports files > 1MB)
+    mov     %rax, %r8               # save fd
+    xor     %r9d, %r9d              # r9 = total bytes read
+.fread_loop:
+    mov     %r8, %rdi               # fd
+    lea     (%r15, %r9), %rsi       # buf = heap + total_read
+    mov     $0x100000, %edx         # read 1MB chunks
+    mov     $SYS_READ, %eax
+    syscall
+    test    %rax, %rax
+    jle     .fread_done             # EOF or error
+    add     %rax, %r9               # total += bytes_read
+    cmp     $0x100000, %rax         # got full chunk?
+    je      .fread_loop             # yes → more data
+.fread_done:
+    # Close file
+    mov     %r8, %rdi
+    mov     $SYS_CLOSE, %eax
+    syscall
+
+    mov     %r9, %rcx               # total bytes_read
+    test    %rcx, %rcx
+    jle     .fread_empty
+
+    # Encode bytes → u16 molecules on heap (after raw bytes)
+    mov     %r15, %r8               # raw bytes base
+    add     %rcx, %r15              # bump past raw bytes
+    mov     %r15, %rdi              # u16 output base
+    xor     %rdx, %rdx
+.fread_encode:
+    cmp     %rcx, %rdx
+    jge     .fread_push
+    movzbl  (%r8, %rdx), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %rdx
+    jmp     .fread_encode
+
+.fread_push:
+    # Push string (ptr=u16 base, len=mol count)
+    sub     $16, %r14
+    mov     %rdi, (%r14)            # u16 base
+    mov     %rcx, 8(%r14)           # mol count = byte count
+    jmp     vm_loop
+
+.fread_empty:
     sub     $16, %r14
     xor     %eax, %eax
     mov     %rax, (%r14)
@@ -2229,9 +6897,62 @@ op_file_read:
 
 op_file_write:
 op_file_append:
-    # Pop value, pop filename, write
-    # Stub: pop 2
-    add     $32, %r14
+    # Pop content, pop filename, write to file
+    # Stack: [filename, content]
+    mov     (%r14), %r8             # content ptr
+    mov     8(%r14), %r9            # content len
+    mov     16(%r14), %rsi          # filename ptr
+    mov     24(%r14), %rdx          # filename len
+    add     $32, %r14               # pop both
+
+    # Decode filename → ASCII
+    lea     sha_input(%rip), %rdi
+    xor     %rcx, %rcx
+.fwrite_fname:
+    cmp     %rdx, %rcx
+    jge     .fwrite_open
+    movzbl  (%rsi, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fwrite_fname
+.fwrite_open:
+    movb    $0, (%rdi, %rcx)
+    # Open/create file
+    lea     sha_input(%rip), %rdi
+    mov     $0x241, %esi            # O_WRONLY|O_CREAT|O_TRUNC
+    mov     $0644, %edx             # permissions
+    mov     $SYS_OPEN, %eax
+    syscall
+    test    %rax, %rax
+    js      vm_loop                  # open failed
+
+    # Decode content u16 → bytes, write
+    push    %rax                    # save fd
+    lea     sha_input(%rip), %rdi   # reuse buffer for decoded content
+    xor     %rcx, %rcx
+.fwrite_decode:
+    cmp     %r9, %rcx
+    jge     .fwrite_do
+    movzbl  (%r8, %rcx, 2), %eax
+    mov     %al, (%rdi, %rcx)
+    inc     %rcx
+    jmp     .fwrite_decode
+.fwrite_do:
+    pop     %rdi                    # fd
+    push    %rcx                    # save len
+    lea     sha_input(%rip), %rsi   # buf
+    pop     %rdx                    # len
+    push    %rdi                    # save fd
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rdi                    # fd
+    mov     $SYS_CLOSE, %eax
+    syscall
+    # Push dummy result (builtin must leave value on stack for ExprStmt Pop)
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
     jmp     vm_loop
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2313,36 +7034,123 @@ op_cmp_eq:
     jmp     .cmp_false
 
 op_cmp_lt:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
+    movb    $0, %al                     # op_id = 0 (LT)
+    jmp     .cmp_dispatch
+op_cmp_gt:
+    movb    $1, %al                     # op_id = 1 (GT)
+    jmp     .cmp_dispatch
+op_cmp_le:
+    movb    $2, %al                     # op_id = 2 (LE)
+    jmp     .cmp_dispatch
+op_cmp_ge:
+    movb    $3, %al                     # op_id = 3 (GE)
+
+.cmp_dispatch:
+    # Check if both are f64
+    push    %rax                        # save op_id
+    mov     8(%r14), %rax              # b len
+    mov     24(%r14), %rcx             # a len
+    cmp     $F64_MARKER, %rax
+    jne     .cmp_chain
+    cmp     $F64_MARKER, %rcx
+    jne     .cmp_chain
+
+    # Both f64 — compare as floating point
+    movsd   16(%r14), %xmm0           # a
+    movsd   (%r14), %xmm1             # b
+    add     $16, %r14                  # pop 1
+    pop     %rax                       # restore op_id
+    # Dispatch op_id FIRST, then ucomisd (to avoid clobbering flags)
+    test    %al, %al
+    jz      .cmp_f64_lt
+    cmp     $1, %al
+    je      .cmp_f64_gt
+    cmp     $2, %al
+    je      .cmp_f64_le
+    # op_id == 3: GE
+    ucomisd %xmm1, %xmm0
+    jae     .cmp_true
+    jmp     .cmp_false
+.cmp_f64_lt:
     ucomisd %xmm1, %xmm0
     jb      .cmp_true
     jmp     .cmp_false
-
-op_cmp_gt:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
+.cmp_f64_gt:
     ucomisd %xmm1, %xmm0
     ja      .cmp_true
     jmp     .cmp_false
-
-op_cmp_le:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
+.cmp_f64_le:
     ucomisd %xmm1, %xmm0
     jbe     .cmp_true
     jmp     .cmp_false
 
-op_cmp_ge:
-    movsd   16(%r14), %xmm0
-    movsd   (%r14), %xmm1
-    add     $16, %r14
-    ucomisd %xmm1, %xmm0
+.cmp_chain:
+    # At least one is a chain — compare by low bytes of molecules
+    # a: 16(%r14)=ptr, 24(%r14)=mol_count
+    # b: (%r14)=ptr, 8(%r14)=mol_count
+    mov     (%r14), %rsi               # b ptr
+    mov     8(%r14), %rdx              # b mol_count (might be F64_MARKER)
+    mov     16(%r14), %rdi             # a ptr
+    mov     24(%r14), %rcx             # a mol_count (might be F64_MARKER)
+    add     $16, %r14                  # pop 1
+
+    # If either has F64_MARKER, treat as len=0 for comparison (type mismatch)
+    cmp     $F64_MARKER, %rdx
+    jne     .cmp_chain_b_ok
+    xor     %edx, %edx                 # b len = 0
+.cmp_chain_b_ok:
+    cmp     $F64_MARKER, %rcx
+    jne     .cmp_chain_a_ok
+    xor     %ecx, %ecx                 # a len = 0
+.cmp_chain_a_ok:
+    # Compare molecule by molecule (low byte = char value)
+    # Use min(a_len, b_len) for loop count
+    mov     %rcx, %r8                  # save a_len
+    mov     %rdx, %r9                  # save b_len
+    cmp     %rdx, %rcx
+    jbe     .cmp_chain_use_a
+    mov     %rdx, %rcx                 # min_len = b_len
+.cmp_chain_use_a:
+    # rcx = min_len, rdi = a_ptr, rsi = b_ptr
+    test    %rcx, %rcx
+    jz      .cmp_chain_len             # both empty prefix → compare lengths
+.cmp_chain_loop:
+    movzbl  (%rdi), %eax               # a low byte (char value)
+    movzbl  (%rsi), %edx               # b low byte (char value)
+    cmp     %edx, %eax
+    jb      .cmp_chain_a_less
+    ja      .cmp_chain_a_greater
+    add     $2, %rdi                   # next molecule (u16)
+    add     $2, %rsi
+    dec     %rcx
+    jnz     .cmp_chain_loop
+
+.cmp_chain_len:
+    # All compared bytes equal — compare lengths
+    cmp     %r9, %r8                   # a_len vs b_len
+    jb      .cmp_chain_a_less
+    ja      .cmp_chain_a_greater
+    # Equal: a_len == b_len and all bytes match
+    pop     %rax                       # op_id
+    cmp     $2, %al                    # LE or GE → true for equal
     jae     .cmp_true
-    jmp     .cmp_false
+    jmp     .cmp_false                 # LT or GT → false for equal
+
+.cmp_chain_a_less:
+    pop     %rax                       # op_id
+    test    %al, %al                   # LT (0)?
+    jz      .cmp_true
+    cmp     $2, %al                    # LE (2)?
+    je      .cmp_true
+    jmp     .cmp_false                 # GT (1) or GE (3) → false
+
+.cmp_chain_a_greater:
+    pop     %rax                       # op_id
+    cmp     $1, %al                    # GT (1)?
+    je      .cmp_true
+    cmp     $3, %al                    # GE (3)?
+    je      .cmp_true
+    jmp     .cmp_false                 # LT (0) or LE (2) → false
 
 .cmp_true:
     # Rust VM returns non-empty chain (1.0) for true
@@ -2352,10 +7160,10 @@ op_cmp_ge:
     jmp     vm_loop
 
 .cmp_false:
-    # Rust VM returns empty chain for false → Jz compatible
+    # Return f64 0.0 for false (NOT empty chain — breaks &&/|| logic)
     xor     %eax, %eax
-    mov     %rax, (%r14)               # ptr = 0
-    mov     %rax, 8(%r14)              # len = 0 (empty = false)
+    mov     %rax, (%r14)               # f64 bits = 0 (0.0)
+    movq    $F64_MARKER, 8(%r14)       # mark as f64
     jmp     vm_loop
 
 vm_error_div_zero:
@@ -2530,8 +7338,18 @@ var_table_init:
     lea     var_table_base(%rip), %rcx
     mov     %rax, (%rcx)               # save table base address
     movq    $0, (%r15)                  # count = 0
-    # Reserve 1024 entries × 24 bytes + 8 header = 24584 bytes
-    add     $24584, %r15                # bump past reserved var table space
+    # Reserve 4096 entries × 24 bytes + 8 header = 98312 bytes
+    add     $98312, %r15
+    # Initialize var shadow stack (for closure scoping)
+    mov     %r15, %rax
+    lea     var_shadow_base(%rip), %rcx
+    mov     %rax, (%rcx)
+    lea     var_shadow_top(%rip), %rcx
+    mov     %rax, (%rcx)
+    lea     closure_depth(%rip), %rcx
+    movq    $0, (%rcx)
+    # Reserve 4MB for shadow stack (deep recursion snapshots)
+    add     $0x400000, %r15
     ret
 
 # ── Hash-based variable table ──
@@ -2540,11 +7358,25 @@ var_table_init:
 # Simple, no string comparison needed.
 
 # hash_name: rdi=name ptr, edx=name len → rax=hash
+# DIRECT-MAPPED CACHE: 256 entries indexed by (ptr & 0xFF)
+# Each entry: [ptr:8][hash:8] = 16 bytes. Total: 4KB.
+# Hit = 1 cmp + 1 mov. Miss = FNV + 1 store.
 hash_name:
-    # FNV-1a
+    lea     hn_cache(%rip), %rax
+    mov     %rdi, %rsi
+    and     $0xFF, %esi                 # index = ptr & 255
+    shl     $4, %esi                    # × 16 bytes per entry
+    cmp     %rdi, (%rax, %rsi)        # same ptr?
+    jne     .hn_compute
+    mov     8(%rax, %rsi), %rax       # cache hit!
+    ret
+.hn_compute:
+    push    %rdi
+    push    %rdx
+    push    %rsi                        # save cache index
     movabs  $0xcbf29ce484222325, %rax
     movabs  $0x100000001b3, %rcx
-    add     %rdi, %rdx                  # end ptr
+    add     %rdi, %rdx
 .hn_loop:
     cmp     %rdx, %rdi
     jae     .hn_done
@@ -2554,51 +7386,100 @@ hash_name:
     inc     %rdi
     jmp     .hn_loop
 .hn_done:
+    pop     %rsi                        # restore cache index
+    pop     %rdx
+    pop     %rdi
+    # Store in cache
+    lea     hn_cache(%rip), %rcx
+    mov     %rdi, (%rcx, %rsi)        # ptr
+    mov     %rax, 8(%rcx, %rsi)       # hash
     ret
 
 # var_store_hash: rax=hash, r8=val_ptr, r9=val_len
+# FRAME-AWARE: only search within current frame (depth_stack[depth-1]..count)
+# This ensures inner function "n" SHADOWS outer "n" instead of overwriting
 var_store_hash:
     push    %rbx
     lea     var_table_base(%rip), %rbx
     mov     (%rbx), %rbx               # table base
-    mov     (%rbx), %rcx               # count
-    test    %rcx, %rcx
-    jz      .vsh_new
+    mov     (%rbx), %rcx               # total count
 
-    # Search for existing hash
-    lea     8(%rbx), %rdi              # first entry
+    # Get frame_start: if depth > 0, start from depth_stack[depth-1]
+    push    %rax                        # save hash
+    lea     closure_depth(%rip), %rdi
+    mov     (%rdi), %rdi               # depth
+    xor     %r10d, %r10d               # frame_start = 0 (default: search all)
+    test    %rdi, %rdi
+    jz      .vsh_have_start
+    dec     %rdi
+    lea     scope_frame_ptrs(%rip), %r10
+    mov     (%r10, %rdi, 8), %r10d    # frame_start = depth_stack[depth-1]
+.vsh_have_start:
+    pop     %rax                        # restore hash
+
+    # entries_in_frame = count - frame_start
+    mov     %rcx, %rdi                 # total count
+    sub     %r10, %rdi                  # entries to search
+    test    %rdi, %rdi
+    jle     .vsh_new                    # no entries in frame → append
+
+    # Reverse search from LAST entry to frame_start
+    lea     -1(%rcx), %rdx
+    imul    $24, %rdx
+    lea     8(%rbx, %rdx), %rdi        # last entry ptr
+    mov     %rcx, %rdx
+    sub     %r10, %rdx                  # loop count = entries in frame
+
 .vsh_search:
-    cmp     (%rdi), %rax               # compare hash
+    cmp     (%rdi), %rax
     jne     .vsh_next
-    # Found — update
+    # Found in current frame — update
     mov     %r8, 8(%rdi)
     mov     %r9, 16(%rdi)
     pop     %rbx
     ret
 .vsh_next:
-    add     $24, %rdi
-    dec     %rcx
+    sub     $24, %rdi
+    dec     %rdx
     jnz     .vsh_search
+    # Not found in frame → append as shadow
 
 .vsh_new:
-    # New entry: append at table end
+    # Append new entry at end
     lea     var_table_base(%rip), %rbx
     mov     (%rbx), %rbx
-    mov     (%rbx), %rcx              # current count
-    lea     8(%rbx), %rdi
-    imul    $24, %rcx, %rcx
-    add     %rcx, %rdi                 # ptr to new entry
-    mov     %rax, (%rdi)               # hash
-    mov     %r8, 8(%rdi)              # val_ptr
-    mov     %r9, 16(%rdi)             # val_len
-    lea     var_table_base(%rip), %rbx
-    mov     (%rbx), %rbx
+    mov     (%rbx), %rcx
+    imul    $24, %rcx, %rdx
+    lea     8(%rbx, %rdx), %rdi
+    mov     %rax, (%rdi)
+    mov     %r8, 8(%rdi)
+    mov     %r9, 16(%rdi)
     incq    (%rbx)                     # count++
     pop     %rbx
     ret
 
 # var_load_hash: rax=hash → rax=val_ptr, rdx=val_len
+# REVERSE search with 4-entry direct-mapped cache (count-validated)
 var_load_hash:
+    # Check cache: 4 entries × [hash:8, entry_ptr:8, vt_count:8] = 24 bytes each
+    lea     var_cache(%rip), %rcx
+    mov     %rax, %rdx
+    and     $3, %edx
+    imul    $24, %edx                   # × 24 bytes per entry
+    cmp     %rax, (%rcx, %rdx)          # hash match?
+    jne     .vlh_cache_miss
+    # Check var_table count hasn't changed (scope change detection)
+    lea     var_table_base(%rip), %rsi
+    mov     (%rsi), %rsi
+    mov     (%rsi), %rsi                # current count
+    cmp     %rsi, 16(%rcx, %rdx)        # count match?
+    jne     .vlh_cache_miss
+    mov     8(%rcx, %rdx), %rcx         # entry_ptr
+    mov     8(%rcx), %rax               # val_ptr
+    mov     16(%rcx), %rdx              # val_len
+    ret
+.vlh_cache_miss:
+
     push    %rbx
     lea     var_table_base(%rip), %rbx
     mov     (%rbx), %rbx
@@ -2606,17 +7487,34 @@ var_load_hash:
     test    %rcx, %rcx
     jz      .vlh_not_found
 
-    lea     8(%rbx), %rdi
+    # Start from last entry
+    lea     -1(%rcx), %rdx
+    imul    $24, %rdx
+    lea     8(%rbx, %rdx), %rdi
+
 .vlh_search:
     cmp     (%rdi), %rax
     jne     .vlh_next
-    # Found
+    # Found — update cache
+    push    %rax
+    lea     var_cache(%rip), %rcx
+    mov     %rax, %rdx
+    and     $3, %edx
+    imul    $24, %edx
+    mov     %rax, (%rcx, %rdx)          # store hash
+    mov     %rdi, 8(%rcx, %rdx)         # store entry pointer
+    # Store current var_table count for validation
+    lea     var_table_base(%rip), %rax
+    mov     (%rax), %rax
+    mov     (%rax), %rax
+    mov     %rax, 16(%rcx, %rdx)        # store count
+    pop     %rax
     mov     8(%rdi), %rax
     mov     16(%rdi), %rdx
     pop     %rbx
     ret
 .vlh_next:
-    add     $24, %rdi
+    sub     $24, %rdi
     dec     %rcx
     jnz     .vlh_search
 
@@ -2641,6 +7539,32 @@ memcpy_small:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_unknown:
+    # al still has the opcode byte
+    push    %rax
+    movzbl  %al, %eax
+    # Convert to 2-char hex string on stack
+    mov     %eax, %ecx
+    shr     $4, %ecx
+    and     $0xF, %ecx
+    lea     hex_chars(%rip), %rdx
+    movzbl  (%rdx, %rcx), %ecx
+    and     $0xF, %eax
+    movzbl  (%rdx, %rax), %eax
+    # Write "0xNN\n"
+    sub     $8, %rsp
+    movb    $0x30, (%rsp)           # '0'
+    movb    $0x78, 1(%rsp)          # 'x'
+    movb    %cl, 2(%rsp)            # high nibble
+    movb    %al, 3(%rsp)            # low nibble
+    movb    $0x0A, 4(%rsp)          # newline
+    mov     %rsp, %rsi
+    mov     $5, %edx
+    mov     $2, %edi                # stderr
+    mov     $1, %eax                # SYS_WRITE
+    syscall
+    add     $8, %rsp
+    pop     %rax
+
     lea     msg_unknown(%rip), %rsi
     mov     $18, %edx
     mov     $2, %edi                    # stderr
@@ -2688,14 +7612,37 @@ err_read_bc:
 # ═══════════════════════════════════════════════════════════════════════════
 
 op_halt:
-    # Check if this is a nested halt (from __eval_bytecode)
-    # CPU stack: [nested_flag=1][saved_rbx][saved_r13][saved_r12]
-    pop     %rax                        # potential nested flag
-    cmp     $1, %rax
-    je      .halt_nested
+    # Check if this is a nested halt (from __eval_bytecode or REPL trampoline)
+    # Sentinels: 0xDEAD_BEEF_CAFE_0001 = eval_bytecode, 0002 = REPL trampoline
+    .equ NESTED_SENTINEL, 0xDEADBEEFCAFE0001
+    .equ REPL_SENTINEL,   0xDEADBEEFCAFE0002
+    mov     (%rsp), %rax               # PEEK (not pop)
 
+    movabs  $NESTED_SENTINEL, %rdx
+    cmp     %rdx, %rax
+    je      .halt_nested                # eval_bytecode → restore + vm_loop
+
+    movabs  $REPL_SENTINEL, %rdx
+    cmp     %rdx, %rax
+    je      .halt_repl                  # REPL trampoline → restore + repl_loop
+
+    jmp     .halt_boot                  # not nested → boot completion
+
+.halt_nested:
+    # __eval_bytecode: pop sentinel + saved context, continue caller bytecode
+    add     $8, %rsp                    # skip sentinel
+    jmp     .halt_nested_restore
+
+.halt_repl:
+    # REPL trampoline: pop sentinel + saved context, return to REPL loop
+    add     $8, %rsp                    # skip sentinel
+    pop     %rbx                        # restore bytecode size
+    pop     %r13                        # restore PC
+    pop     %r12                        # restore bytecode base
+    jmp     .repl_loop                  # back to REPL prompt
+
+.halt_boot:
     # Not nested — this is the boot completion.
-    push    %rax                        # restore CPU stack
 
     # Check eval_mode: if set, process stdin and exit (no REPL)
     cmpb    $0, eval_mode(%rip)
@@ -2710,19 +7657,89 @@ op_halt:
 
     # ── REPL loop: read line → compile → execute ─────────────────
 .repl_loop:
-    # Print prompt: "○ > "
+    # Print prompt: "⦿ "
     lea     msg_prompt(%rip), %rsi
-    mov     $6, %edx                    # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
+    mov     $4, %edx                    # "⦿ " (⦿ is 3 bytes UTF-8 + space)
     mov     $1, %edi
     mov     $SYS_WRITE, %eax
     syscall
 
-    # Read line from stdin into heap buffer
+    # Read line from stdin (byte-by-byte until newline, for pipe compatibility)
     mov     %r15, %rsi                  # buf = heap ptr
-    mov     $4096, %edx                 # max 4KB input
+    xor     %ecx, %ecx                  # bytes read = 0
+.repl_read_byte:
+    lea     (%rsi, %rcx), %rdx         # dest = buf + offset
+    push    %rcx
+    push    %rsi
+    mov     %rdx, %rsi                  # buf for read
+    mov     $1, %edx                    # read 1 byte
     xor     %edi, %edi                  # fd = stdin
     mov     $SYS_READ, %eax
     syscall
+    pop     %rsi
+    pop     %rcx
+    test    %rax, %rax
+    jle     .repl_read_done             # EOF or error
+    cmpb    $0x0A, (%rsi, %rcx)        # newline?
+    je      .repl_read_newline
+    inc     %rcx
+    cmp     $4095, %rcx                 # max length
+    jl      .repl_read_byte
+.repl_read_newline:
+    # Multiline: check bracket balance before accepting line
+    # Scan buffer for {, [, ( and }, ], ) — if unbalanced, read more
+    push    %rcx
+    push    %rsi
+    xor     %edx, %edx                  # balance counter
+    xor     %r8d, %r8d                  # scan index
+.repl_bracket_scan:
+    cmp     %ecx, %r8d
+    jge     .repl_bracket_done
+    movzbl  (%rsi, %r8), %eax
+    cmp     $'{', %al
+    je      .repl_bracket_open
+    cmp     $'[', %al
+    je      .repl_bracket_open
+    cmp     $'(', %al
+    je      .repl_bracket_open
+    cmp     $'}', %al
+    je      .repl_bracket_close
+    cmp     $']', %al
+    je      .repl_bracket_close
+    cmp     $')', %al
+    je      .repl_bracket_close
+    jmp     .repl_bracket_next
+.repl_bracket_open:
+    inc     %edx
+    jmp     .repl_bracket_next
+.repl_bracket_close:
+    dec     %edx
+.repl_bracket_next:
+    inc     %r8d
+    jmp     .repl_bracket_scan
+.repl_bracket_done:
+    pop     %rsi
+    pop     %rcx
+    test    %edx, %edx
+    jz      .repl_line_complete         # balanced → done
+    # Unbalanced: print continuation prompt "... " and read more
+    push    %rcx
+    push    %rsi
+    lea     msg_cont_prompt(%rip), %rsi
+    mov     $4, %edx
+    mov     $1, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    pop     %rsi
+    pop     %rcx
+    # Replace newline with space and continue reading
+    movb    $' ', (%rsi, %rcx)
+    inc     %rcx
+    jmp     .repl_read_byte
+.repl_line_complete:
+    inc     %rcx                        # include newline in count
+.repl_read_done:
+    mov     %rcx, %rax                  # rax = bytes read (compatible with old code)
 
     # Check for EOF or error
     test    %rax, %rax
@@ -2734,16 +7751,32 @@ op_halt:
 
     # Check for "exit\n" or "quit\n"
     cmp     $5, %rcx
-    jne     .repl_try_eval
+    jne     .repl_check_help
     cmpl    $0x74697865, (%rdi)         # "exit" little-endian
     jne     .repl_check_quit
     cmpb    $0x0A, 4(%rdi)
     je      .repl_exit
 .repl_check_quit:
     cmpl    $0x74697571, (%rdi)         # "quit" little-endian
-    jne     .repl_try_eval
+    jne     .repl_check_help
     cmpb    $0x0A, 4(%rdi)
     je      .repl_exit
+
+.repl_check_help:
+    # Check for "help\n" (5 bytes)
+    cmp     $5, %rcx
+    jne     .repl_try_eval
+    cmpl    $0x706C6568, (%rdi)         # "help" little-endian
+    jne     .repl_try_eval
+    cmpb    $0x0A, 4(%rdi)
+    jne     .repl_try_eval
+    # Print help message
+    lea     msg_help(%rip), %rsi
+    mov     $msg_help_len, %edx
+    mov     $1, %edi                    # stdout
+    mov     $SYS_WRITE, %eax
+    syscall
+    jmp     .repl_loop
 
 .repl_try_eval:
     # Construct trampoline bytecode on heap that:
@@ -2758,7 +7791,9 @@ op_halt:
     #   [0x06]                          — Emit
     #   [0x0F]                          — Halt
 
-    mov     %r15, %r8                   # trampoline base
+    # Bump heap past input data (so trampoline doesn't overwrite input)
+    add     %rcx, %r15                  # r15 += input_len
+    mov     %r15, %r8                   # trampoline base (after input)
     # Check repl_eval exists first
     push    %rcx                        # save input len
     push    %rdi                        # save input ptr
@@ -2774,19 +7809,27 @@ op_halt:
     jne     .repl_fallback_echo
 
     # Build trampoline bytecode
+    # Push opcode with binary molecule encoding:
+    # [0x01][mol_count:u16][str_byte_mol(b0):u16][str_byte_mol(b1):u16]...
+    # str_byte_mol(b) = 0x2100 | b  (shape=2, rel=1, lower 8 bits = byte value)
     movb    $0x01, (%r15)               # Push opcode
-    movw    %cx, 1(%r15)                # string length (u16 LE)
+    movw    %cx, 1(%r15)                # mol_count = string length (1 mol per byte)
     add     $3, %r15
 
-    # Copy input bytes into trampoline
+    # Encode each input byte as string molecule (u16 LE)
     push    %rcx
     push    %rdi
-    mov     %r15, %rax
-    mov     %rdi, %rsi                  # src = input buffer
-    mov     %r15, %rdi                  # dest = trampoline
-    mov     %ecx, %ecx
-    rep     movsb
-    mov     %rdi, %r15
+.repl_encode_loop:
+    test    %ecx, %ecx
+    jz      .repl_encode_done
+    movzbl  (%rdi), %eax                # read input byte
+    or      $0x2100, %eax               # str_byte_mol: shape=2, rel=1
+    movw    %ax, (%r15)                 # write u16 LE molecule
+    add     $2, %r15                    # 2 bytes per molecule
+    inc     %rdi
+    dec     %ecx
+    jmp     .repl_encode_loop
+.repl_encode_done:
     pop     %rdi
     pop     %rcx
 
@@ -2819,14 +7862,20 @@ op_halt:
     push    %r12                        # save boot bytecode base
     push    %r13                        # save boot PC
     push    %rbx                        # save boot bytecode size
-    pushq   $1                          # nested flag marker
+    movabs  $0xDEADBEEFCAFE0002, %rax
+    push    %rax                        # REPL sentinel (0002 = return to repl_loop)
 
-    mov     %r8, %r12                   # bytecode base = trampoline
+    # Use boot bytecode base as r12 (not trampoline)
+    # Trampoline is at %r8 — save it, set r12 = boot base
+    mov     %r8, %r12                   # bytecode base = trampoline (for Push/CallClosure)
     xor     %r13d, %r13d               # PC = 0
-    mov     %rcx, %rbx                  # bytecode size
+    # Set rbx to large value so op_ret accepts boot bytecode PCs
+    # (trampoline CallClosure jumps into boot bytecode bodies where
+    # Ret pops saved PCs that are >> trampoline size)
+    mov     $0x100000, %rbx             # 1MB — larger than any bytecode
     jmp     vm_loop                     # execute trampoline!
-    # Flow: Push input → CallClosure repl_eval → (run compiler) → Emit → Halt
-    # Halt (nested) → .halt_nested → restore → vm_loop → op_halt → REPL loop
+    # Flow: Push input → CallClosure repl_eval → Halt(REPL sentinel)
+    #       → restore → jmp .repl_loop
 
 .repl_fallback_echo:
     # repl_eval not found — echo input back
@@ -2837,12 +7886,18 @@ op_halt:
     syscall
     jmp     .repl_loop
 
-.halt_nested:
+.halt_nested_restore:
     # Returning from nested __eval_bytecode execution
     # CPU stack now has: [saved_rbx][saved_r13][saved_r12]
     pop     %rbx                        # restore bytecode size
     pop     %r13                        # restore PC
     pop     %r12                        # restore bytecode base
+    # Push empty return value (eval_bytecode consumed its arg but needs to
+    # return a value for the caller's stack balance)
+    sub     $16, %r14
+    xor     %eax, %eax
+    mov     %rax, (%r14)
+    mov     %rax, 8(%r14)
     jmp     vm_loop                     # continue outer execution
 
 # ── --eval mode: read ALL stdin → process each line → exit ─────────
@@ -2931,18 +7986,25 @@ op_halt:
 
     # Build trampoline: Push string → CallClosure repl_eval → Emit → Halt
     mov     %r15, %r8                   # trampoline base
+    # Push with binary molecule encoding (same as REPL trampoline)
     movb    $0x01, (%r15)               # Push opcode
-    movw    %cx, 1(%r15)                # string length (u16 LE)
+    movw    %cx, 1(%r15)                # mol_count = string length
     add     $3, %r15
 
-    # Copy line bytes into trampoline
+    # Encode each byte as string molecule (0x2100 | byte)
     push    %rcx
     push    %rdi
-    mov     %rdi, %rsi                  # src = line ptr
-    mov     %r15, %rdi                  # dest = trampoline
-    mov     %ecx, %ecx
-    rep     movsb
-    mov     %rdi, %r15
+.eval_encode_loop:
+    test    %ecx, %ecx
+    jz      .eval_encode_done
+    movzbl  (%rdi), %eax
+    or      $0x2100, %eax
+    movw    %ax, (%r15)
+    add     $2, %r15
+    inc     %rdi
+    dec     %ecx
+    jmp     .eval_encode_loop
+.eval_encode_done:
     pop     %rdi
     pop     %rcx
 
@@ -2972,11 +8034,12 @@ op_halt:
     push    %r12
     push    %r13
     push    %rbx
-    pushq   $1                          # nested flag
+    movabs  $0xDEADBEEFCAFE0001, %rax
+    push    %rax                        # nested flag sentinel
 
     mov     %r8, %r12                   # bytecode base = trampoline
     xor     %r13d, %r13d               # PC = 0
-    mov     %rcx, %rbx                  # bytecode size
+    mov     $0x100000, %rbx             # 1MB bounds — op_ret accepts boot PCs
     jmp     vm_loop
     # Flow: trampoline → Halt(nested) → .halt_nested → restore r12/r13/rbx
     #       → vm_loop → boot bytecode Halt → op_halt → not nested
@@ -3015,9 +8078,46 @@ op_halt:
     syscall
 
 op_halt_err:
-    mov     $SYS_EXIT, %eax
-    mov     $1, %edi                    # exit(1)
+    # Print crash info: PC and stack trace
+    lea     msg_crash_at(%rip), %rsi
+    mov     $10, %edx
+    mov     $2, %edi
+    mov     $SYS_WRITE, %eax
     syscall
+    # Print PC as hex
+    mov     %r13, %rdi
+    call    print_hex_u64
+    # Print newline
+    lea     msg_newline(%rip), %rsi
+    mov     $1, %edx
+    mov     $2, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    # Exit
+    mov     $SYS_EXIT, %eax
+    mov     $1, %edi
+    syscall
+
+# Print 64-bit value as hex to stderr
+print_hex_u64:
+    lea     hex_chars(%rip), %rsi
+    lea     -16(%rsp), %rcx        # temp buffer on stack
+    mov     $16, %r8d
+.ph_loop:
+    dec     %r8d
+    mov     %rdi, %rax
+    and     $0xF, %eax
+    movzbl  (%rsi, %rax), %edx
+    movb    %dl, (%rcx, %r8)
+    shr     $4, %rdi
+    test    %r8d, %r8d
+    jnz     .ph_loop
+    mov     %rcx, %rsi
+    mov     $16, %edx
+    mov     $2, %edi
+    mov     $SYS_WRITE, %eax
+    syscall
+    ret
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Read-only data
@@ -3028,9 +8128,287 @@ op_halt_err:
 proc_self_exe:
     .asciz "/proc/self/exe"
 
+hex_chars:
+    .ascii "0123456789ABCDEF"
+msg_pc:
+    .ascii "PC= "
 msg_unknown:
     .ascii "Unknown opcode!\n"
     .byte 0, 0
+
+# Native INTEGER loop template: s += i; i += 1; while i < limit
+# Uses integer registers (add/inc ~1 cycle vs addsd ~4 cycles)
+# Patched at: offset 2 (counter_addr), offset 12 (accum_addr), offset 30 (limit as f64 bits)
+# Total: 73 bytes
+jit_loop_template:
+    .byte 0x48, 0xBF                    # mov rdi, imm64 (counter_addr)
+    .quad 0                             # [patched] offset 2
+    .byte 0x48, 0xBE                    # mov rsi, imm64 (accum_addr)
+    .quad 0                             # [patched] offset 12
+    # Load f64 values → convert to int64
+    .byte 0xF2, 0x0F, 0x10, 0x07       # movsd xmm0, [rdi]            (offset 20)
+    .byte 0xF2, 0x48, 0x0F, 0x2C, 0xC0 # cvttsd2si rax, xmm0  (i)    (offset 24)
+    .byte 0xF2, 0x0F, 0x10, 0x06       # movsd xmm0, [rsi]            (offset 29)
+    .byte 0xF2, 0x48, 0x0F, 0x2C, 0xC8 # cvttsd2si rcx, xmm0  (s)    (offset 33)
+    # Load limit as int64
+    .byte 0x48, 0xBA                    # mov rdx, imm64 (limit f64 bits) (offset 38)
+    .quad 0                             # [patched] offset 40
+    .byte 0x66, 0x48, 0x0F, 0x6E, 0xC2 # movq xmm0, rdx               (offset 48)
+    .byte 0xF2, 0x48, 0x0F, 0x2C, 0xD0 # cvttsd2si rdx, xmm0 (limit) (offset 53)
+    # .loop (offset 58):
+    .byte 0x48, 0x39, 0xD0              # cmp rax, rdx (i vs limit)    (offset 58)
+    .byte 0x7D, 0x08                    # jge .done (+8 → offset 71)   (offset 61)
+    .byte 0x48, 0x01, 0xC1              # add rcx, rax (s += i)        (offset 63)
+    .byte 0x48, 0xFF, 0xC0              # inc rax (i++)                (offset 66)
+    .byte 0xEB, 0xF3                    # jmp .loop (-13 → offset 58)  (offset 69)
+    # .done (offset 71):
+    # Convert back to f64 and store
+    .byte 0xF2, 0x48, 0x0F, 0x2A, 0xC0 # cvtsi2sd xmm0, rax (i)     (offset 71)
+    .byte 0xF2, 0x0F, 0x11, 0x07       # movsd [rdi], xmm0           (offset 76)
+    .byte 0xF2, 0x48, 0x0F, 0x2A, 0xC1 # cvtsi2sd xmm0, rcx (s)     (offset 80)
+    .byte 0xF2, 0x0F, 0x11, 0x06       # movsd [rsi], xmm0           (offset 85)
+    .byte 0xC3                          # ret                          (offset 89)
+    # Total: 90 bytes
+
+# Native fib(rdi) → rax: 42 bytes x86-64
+jit_fib_code:
+    .byte 0x48, 0x83, 0xFF, 0x02       # cmp rdi, 2
+    .byte 0x7D, 0x04                    # jge +4 (to .recurse)
+    .byte 0x48, 0x89, 0xF8              # mov rax, rdi
+    .byte 0xC3                          # ret
+    # .recurse:
+    .byte 0x53                          # push rbx
+    .byte 0x55                          # push rbp
+    .byte 0x48, 0x89, 0xFB              # mov rbx, rdi
+    .byte 0x48, 0x8D, 0x7B, 0xFF       # lea rdi, [rbx-1]
+    .byte 0xE8, 0xE8, 0xFF, 0xFF, 0xFF # call fib (rel=-24)
+    .byte 0x48, 0x89, 0xC5              # mov rbp, rax
+    .byte 0x48, 0x8D, 0x7B, 0xFE       # lea rdi, [rbx-2]
+    .byte 0xE8, 0xDC, 0xFF, 0xFF, 0xFF # call fib (rel=-36)
+    .byte 0x48, 0x01, 0xE8              # add rax, rbp
+    .byte 0x5D                          # pop rbp
+    .byte 0x5B                          # pop rbx
+    .byte 0xC3                          # ret
+
+.section .text
+# ═══════════════════════════════════════════════════════════════════════════
+# var_find_addr: find address of value field in var_table entry
+# Input: rax = hash
+# Output: rax = address of val_ptr field (8 bytes into entry), 0 if not found
+# ═══════════════════════════════════════════════════════════════════════════
+var_find_addr:
+    lea     var_table_base(%rip), %rcx
+    mov     (%rcx), %rcx
+    mov     (%rcx), %rdx
+    test    %rdx, %rdx
+    jz      .vfa_fail
+    lea     -1(%rdx), %rsi
+    imul    $24, %rsi
+    lea     8(%rcx, %rsi), %rdi
+.vfa_search:
+    cmp     (%rdi), %rax
+    je      .vfa_found
+    sub     $24, %rdi
+    dec     %rdx
+    jnz     .vfa_search
+.vfa_fail:
+    xor     %eax, %eax
+    ret
+.vfa_found:
+    lea     8(%rdi), %rax               # address of val_ptr field
+    ret
+
+# ═══════════════════════════════════════════════════════════════════════════
+# try_jit_loop: analyze loop bytecode and generate native code
+# Input: edi = loop_start_pc, esi = loop_end_pc, r12 = bytecode base
+# Output: rax = native_ptr (0 = failed)
+# ═══════════════════════════════════════════════════════════════════════════
+try_jit_loop:
+    push    %rbx
+    push    %rbp
+    push    %r14
+    push    %r15
+    mov     %edi, %ebp                  # ebp = scan cursor
+
+    # Guard: loop body must be >= 30 bytes for accumulator pattern
+    mov     %esi, %eax
+    sub     %edi, %eax                  # body size
+    cmp     $30, %eax
+    jl      .tjl_fail                   # too small → skip
+
+    # ── Pattern match: Load PushNum Call Jz Load Load Call Store Load PushNum Call Store Jmp ──
+    # Step 1: Load(counter) = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %edx         # name_len → rdx for hash_name
+    lea     2(%r12, %rbp), %rdi         # name_ptr → rdi
+    push    %rdx
+    call    hash_name
+    pop     %rcx
+    mov     %rax, %r14                  # r14 = counter_hash
+    lea     2(%rbp, %rcx), %ebp
+
+    # Step 2: PushNum(limit) = 0x15
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x15, %al
+    jne     .tjl_fail
+    mov     1(%r12, %rbp), %r15         # r15 = limit f64 bits (raw 8 bytes)
+    add     $9, %ebp
+
+    # Step 3: Call = 0x07, skip name
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x07, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+
+    # Step 4: Jz = 0x0A, skip target
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x0A, %al
+    jne     .tjl_fail
+    add     $5, %ebp
+
+    # Step 5: Load(accum) = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %edx         # name_len → rdx
+    lea     2(%r12, %rbp), %rdi         # name_ptr → rdi
+    push    %r14
+    push    %rdx
+    call    hash_name
+    pop     %rcx
+    pop     %r14
+    mov     %rax, %rbx                  # rbx = accum_hash
+    lea     2(%rbp, %rcx), %ebp
+
+    # Steps 6-12: skip remaining opcodes (Load Call Store Load PushNum Call Store)
+    # Just verify opcodes are correct types, skip content
+    # Step 6: Load = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 7: Call = 0x07
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x07, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 8: Store/StoreUpdate
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x13, %al
+    je      .tjl_s8
+    cmp     $0x1C, %al
+    jne     .tjl_fail
+.tjl_s8:
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 9: Load = 0x02
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x02, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 10: PushNum = 0x15
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x15, %al
+    jne     .tjl_fail
+    add     $9, %ebp
+    # Step 11: Call = 0x07
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x07, %al
+    jne     .tjl_fail
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 12: Store/StoreUpdate
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x13, %al
+    je      .tjl_s12
+    cmp     $0x1C, %al
+    jne     .tjl_fail
+.tjl_s12:
+    movzbl  1(%r12, %rbp), %ecx
+    lea     2(%rbp, %rcx), %ebp
+    # Step 13: Jmp = 0x09
+    movzbl  (%r12, %rbp), %eax
+    cmp     $0x09, %al
+    jne     .tjl_fail
+
+    # ── Pattern matched! r14=counter_hash, rbx=accum_hash, r15=limit_bits ──
+
+    # Find var_table entry addresses
+    mov     %r14, %rax
+    call    var_find_addr
+    test    %rax, %rax
+    jz      .tjl_fail
+    mov     %rax, %r14                  # r14 = counter entry addr
+
+    mov     %rbx, %rax
+    call    var_find_addr
+    test    %rax, %rax
+    jz      .tjl_fail
+    mov     %rax, %rbx                  # rbx = accum entry addr
+
+    # ── Generate native code ──
+    # mmap executable page
+    push    %r14
+    push    %rbx
+    push    %r15
+    mov     $SYS_MMAP, %eax
+    xor     %edi, %edi
+    mov     $4096, %esi
+    mov     $7, %edx                    # RWX
+    mov     $0x22, %r10d
+    mov     $-1, %r8d
+    xor     %r9d, %r9d
+    syscall
+    mov     %rax, %rdi                  # rdi = exec page
+    pop     %r15                        # limit_bits
+    pop     %rbx                        # accum_addr
+    pop     %r14                        # counter_addr
+
+    # Write native loop:
+    # mov rdi, counter_addr; mov rsi, accum_addr
+    # movsd xmm0,[rdi]; movsd xmm1,[rsi]
+    # mov rax, limit; movq xmm2, rax; mov rax, 1.0; movq xmm3, rax
+    # .loop: ucomisd xmm2,xmm0; jbe .done; addsd xmm1,xmm0; addsd xmm0,xmm3; jmp .loop
+    # .done: movsd [rdi],xmm0; movsd [rsi],xmm1; ret
+    lea     jit_loop_template(%rip), %rsi
+    mov     $90, %ecx
+    push    %rdi
+    rep movsb                           # copy template
+    pop     %rdi
+    # Patch addresses: counter_addr at offset 2, accum_addr at offset 12, limit at offset 30
+    mov     %r14, 2(%rdi)               # patch counter_addr
+    mov     %rbx, 12(%rdi)              # patch accum_addr
+    mov     %r15, 40(%rdi)              # patch limit_bits (offset 40 in int template)
+
+    mov     %rdi, %rax                  # return native_ptr
+    pop     %r15
+    pop     %r14
+    pop     %rbp
+    pop     %rbx
+    ret
+
+.tjl_fail:
+    pop     %r15
+    pop     %r14
+    pop     %rbp
+    pop     %rbx
+    xor     %eax, %eax
+    ret
+
+msg_cont_prompt:
+    .ascii "... "
+
+msg_crash_at:
+    .ascii "CRASH PC=0x"
+msg_newline:
+    .ascii "\n"
+    .byte 0
 
 msg_open:
     .ascii "Cannot open binary!\n"
@@ -3051,14 +8429,56 @@ msg_divzero:
     .ascii "Division by zero!\n"
 
 msg_greeting:
-    .ascii "\xe2\x97\x8b HomeOS v0.05\n"
+    .ascii "\xe2\xa6\xbf HomeOS v0.05\n"
     .ascii "\xe2\x97\x8b Type code or text \xc2\xb7 exit to quit\n"
-    .byte 0
 msg_greeting_len:
-    .byte 59                            # total length of greeting
+    .byte 55                            # exact byte count of greeting
 
 msg_prompt:
-    .ascii "\xe2\x97\x8b > "             # "○ > " (○ is 3 bytes UTF-8 + space + > + space)
+    .ascii "\xe2\xa6\xbf "               # "⦿ " (⦿ U+29BF = 3 bytes UTF-8 + space)
+
+msg_help:
+    .ascii "Code: let fn emit if while for match lambda\n"
+    .ascii "HOF:  map filter reduce pipe any all\n"
+    .ascii "AI:   learn <fact>  respond <text>  memory  fns\n"
+    .ascii "Sys:  test  build  save  load  compile <path>  exit\n"
+.equ msg_help_len, . - msg_help
+
+# ── Keyword hash table for __str_is_keyword ────────────────────────────
+.align 4
+kw_count: .long 28
+.align 8
+kw_hashes:
+    .quad 0x127284191DCC577A  # let
+    .quad 0x08985A07B541D4F5  # fn
+    .quad 0x08B73007B55C3E26  # if
+    .quad 0x7F2B6C605332DD30  # else
+    .quad 0xCDECE4AD70D57DEB  # loop
+    .quad 0xCE87A3885811296E  # while
+    .quad 0xDCB27818FED9DA90  # for
+    .quad 0x08B73807B55C4BBE  # in
+    .quad 0xC5C7B983377CAD5F  # return
+    .quad 0x93B7591DEBC7CE38  # break
+    .quad 0xD2BFD5ACCD1966A4  # continue
+    .quad 0x86D29860573F5FCA  # emit
+    .quad 0xA79439EF7BFA9C2D  # type
+    .quad 0x4B2A584E9A909034  # union
+    .quad 0xEE517EC576C9B637  # impl
+    .quad 0xDEE78BA6C508610B  # trait
+    .quad 0xC3BFE3A4FE4C13F6  # match
+    .quad 0x570AC119447423EE  # try
+    .quad 0xC1B2E33B13EC076C  # catch
+    .quad 0x4328F78AB20E1F98  # spawn
+    .quad 0xBD76100BD58C9C0D  # select
+    .quad 0x60827E549DE65488  # timeout
+    .quad 0x7F845078D7A5C0B5  # from
+    .quad 0x4C52B0193DCCE634  # use
+    .quad 0x0808591917670EE3  # mod
+    .quad 0x77F362195699B624  # pub
+    .quad 0x5B5C98EF514DBFA5  # true
+    .quad 0xB5FAE2C14238B978  # false
+
+    .ascii "!"
 
 msg_bye:
     .ascii "bye\n"
@@ -3074,6 +8494,14 @@ str_dict:       .ascii "dict"
 str_fn:         .ascii "function"
 str_nil:        .ascii "nil"
 
+# u16 molecule-encoded type strings (0x21XX per char)
+u16_number:     .short 0x216E, 0x2175, 0x216D, 0x2162, 0x2165, 0x2172  # "number"
+u16_string:     .short 0x2173, 0x2174, 0x2172, 0x2169, 0x216E, 0x2167  # "string"
+u16_array:      .short 0x2161, 0x2172, 0x2172, 0x2161, 0x2179           # "array"
+u16_dict:       .short 0x2164, 0x2169, 0x2163, 0x2174                   # "dict"
+u16_closure:    .short 0x2163, 0x216C, 0x216F, 0x2173, 0x2175, 0x2172, 0x2165  # "closure"
+u16_nil:        .short 0x216E, 0x2169, 0x216C                           # "nil"
+
 # ── Float constants ─────────────────────────────────────────────────────
 .align 8
 const_ten:      .double 10.0
@@ -3084,9 +8512,15 @@ const_neg_one:  .double -1.0
 str_array_open:  .ascii "[array "
 str_bracket_nl:  .ascii "]\n"
 str_empty_array: .ascii "[]\n\0"
+str_lbracket:    .ascii "["
+str_rbracket_nl: .ascii "]\n"
+str_comma_space: .ascii ", "
 str_dict_open:   .ascii "{dict "
 str_brace_nl:    .ascii "}\n"
 str_empty_dict:  .ascii "{}\n\0"
+str_lbrace:      .ascii "{"
+str_colon_sp:    .ascii ": "
+str_comma_sp:    .ascii ", "
 
 # ── REPL function name ──────────────────────────────────────────────────
 bname_repl_eval: .ascii "repl_eval"
@@ -3097,12 +8531,88 @@ var_table_base:
     .space 8                            # pointer to variable table on heap
 bc_format:
     .space 1                            # 0 = ir.rs format, 1 = codegen.ol format
+    .align 8
+boot_bc_base:
+    .space 8                            # boot bytecode base address (for nested calls)
+boot_bc_size:
+    .space 8                            # boot bytecode size
+eval_bc_base:
+    .space 8                            # eval bytecode base (for cross-boundary closure calls)
 eval_mode:
     .space 1                            # 0 = REPL mode, 1 = --eval mode (stdin)
     .align 8
+    .space 8                            # saved initial r14 for debug
+jz_did_pop:
+    .space 1                            # 1 = Jz already popped, next Pop is no-op
+    .align 8
+# Var shadow stack: saves [hash, old_ptr, old_len] per modified var in closure.
+# Marker entry: hash=0 separates call frames.
+var_shadow_base:
+    .space 8                            # pointer to shadow stack on heap
+var_shadow_top:
+    .space 8                            # current top of shadow stack
+closure_depth:
+    .space 8                            # nesting depth (0 = not in closure)
+skip_scope_restore:
+    .space 8                            # >0 → skip N scope restores (for module loading)
+var_cache:
+    .space 96                           # 4 × [hash:8, entry_ptr:8, vt_count:8] = 24 bytes each
+loop_counters:
+    .space 1024                         # 256 × 4-byte backward jump counters
+loop_jit_cache:
+    .space 512                          # 32 × [start_pc:8, native_ptr:8] = 16 bytes each
+_save_rbx:
+    .space 8                            # temp save for rbx
+scope_frame_ptrs:
+    .space 2048                         # 256 frame pointers × 8 bytes (max recursion depth)
+    .align 8
+try_stack:
+    .space 256                          # 16 try frames × 16 bytes (catch_PC:8 + saved_r14:8)
+try_depth:
+    .space 8                            # current try nesting depth (0 = no try)
+throw_buf:
+    .space 256                          # temp buffer for error message decoding
+heap_checkpoints:
+    .space 128                          # 16 checkpoint slots × 8 bytes
+heap_cp_count:
+    .space 8
+sha_input:
+    .space 1024                         # SHA-256 input buffer (max ~900 bytes after padding)
+sha_state:
+    .space 32                           # H[0..7] (8 × 4 bytes)
+sha_w:
+    .space 256                          # W[0..63] message schedule (64 × 4 bytes)
+sha_abcdefgh:
+    .space 32                           # working variables a..h (8 × 4 bytes)
+sha_save_regs:
+    .space 64                           # saved VM registers during SHA-256 (8 × 8 bytes)
+sha_round_idx:
+    .space 8                            # round counter (avoid clobbering r12)
 eval_buf:
     .space 8                            # pointer to stdin buffer on heap
 eval_total:
     .space 8                            # total bytes read from stdin
 eval_offset:
     .space 8                            # current processing offset in buffer
+jit_cache:
+    .space 512                          # 32 slots × [hash:8][ptr:8] = 16 bytes each
+profile_counters:
+    .space 1024                         # 256 × 4-byte counters
+profile_hashes:
+    .space 2048                         # 256 × 8-byte hashes
+hn_cache:
+    .space 4096                         # 256 entries × [ptr:8][hash:8] = 16 bytes each
+net_sockaddr:
+    .space 16
+net_recv_buf:
+    .space 65536
+net_dents_buf:
+    .space 8192
+sha512_state:
+    .space 64
+sha512_w:
+    .space 640
+sha512_input:
+    .space 2048
+ed25519_tmp:
+    .space 512

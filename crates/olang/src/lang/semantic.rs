@@ -1077,62 +1077,52 @@ pub fn lower(stmts: &[Stmt]) -> OlangProgram {
         }
     }
 
-    // Phase 1.5: Pre-compile function bodies if there are potentially recursive functions
-    // Detect if any function calls another function that could create cycles
-    let has_complex_fns = ctx.fns.len() > 10; // heuristic: many functions = likely recursion
-    if has_complex_fns {
-        // Emit a Jmp to skip all compiled function bodies
-        let skip_all = ctx.prog.ops.len();
-        ctx.prog.push_op(Op::Jmp(0)); // placeholder
-
-        // Pass 1: allocate slots for all functions (reserve space for param stores + placeholder)
-        // We record the body_start PC for each function so forward references work
-        let fn_count = ctx.fns.len();
-        let mut fn_body_starts: Vec<usize> = Vec::new();
-        let mut fn_body_jmps: Vec<usize> = Vec::new();
-        for fi in 0..fn_count {
-            let fn_def = &ctx.fns[fi];
-            let body_start = ctx.prog.ops.len();
-            fn_body_starts.push(body_start);
-
-            // Reserve space: Store for each param + Jmp(placeholder) to actual body
-            for p in fn_def.params.iter().rev() {
-                ctx.prog.push_op(Op::Store(p.clone()));
-            }
-            fn_body_jmps.push(ctx.prog.ops.len());
-            ctx.prog.push_op(Op::Jmp(0)); // placeholder — will jump to actual body code
-
-            // Register compiled function now (body_start is the entry point)
-            ctx.compiled_fns.push((fn_def.name.clone(), body_start, fn_def.params.clone()));
-        }
-
-        // Pass 2: compile function bodies (all functions are now registered, so CallClosure works)
+    // Phase 1.5: Pre-compile function bodies as Closure+Store.
+    // Each function becomes: Closure(params, body_len) [body] Ret → Store(fn_name).
+    // Closure opcode pushes marker + jumps over body; Store registers in var table.
+    // Call sites use Call(fn_name) — ASM VM finds closure in var table via op_call.
+    // This avoids CallClosure's stack-based marker which ASM VM can't handle.
+    if ctx.fns.len() >= 2 {
         ctx.use_call_closure = true;
+        let fn_count = ctx.fns.len();
+
         for fi in 0..fn_count {
             let fn_def = ctx.fns[fi].clone();
-            let actual_body = ctx.prog.ops.len();
+            let fn_name = fn_def.name.clone();
 
-            // Patch the Jmp from pass 1 to point to actual body code
-            ctx.prog.ops[fn_body_jmps[fi]] = Op::Jmp(actual_body);
+            // Emit Closure(param_count, body_len_placeholder) — jumps over body
+            let closure_pos = ctx.current_pos();
+            ctx.emit(Op::Closure(fn_def.params.len() as u8, 0)); // placeholder
 
-            // Lower body
+            // Body: Store params in reverse order (stack is LIFO)
+            for p in fn_def.params.iter().rev() {
+                ctx.emit(Op::Store(p.clone()));
+            }
             ctx.locals = fn_def.params.clone();
+
+            // Lower body statements
             for s in &fn_def.body {
                 lower_stmt(s, &mut ctx);
             }
 
-            // Default return
-            ctx.prog.push_op(Op::Push(crate::molecular::MolecularChain::empty()));
-            ctx.prog.push_op(Op::Ret);
-            ctx.locals.clear();
-        }
-        // Keep use_call_closure = true for the main pass too,
-        // so all function calls use CallClosure instead of inlining.
-        // ctx.use_call_closure = false;
+            // Default return: empty chain + Ret
+            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+            ctx.emit(Op::Ret);
 
-        // Patch the skip jump
-        let after_fns = ctx.prog.ops.len();
-        ctx.prog.ops[skip_all] = Op::Jmp(after_fns);
+            // Patch Closure body_len (op count from closure_pos+1 to here)
+            let body_len = ctx.current_pos() - closure_pos - 1;
+            ctx.ops_mut()[closure_pos] = Op::Closure(fn_def.params.len() as u8, body_len);
+
+            ctx.locals.clear();
+
+            // Store closure marker in var table (runs immediately since Closure skips body)
+            ctx.emit(Op::Store(fn_name.clone()));
+            ctx.locals.push(fn_name.clone());
+
+            // Record as compiled (so FnDef in main pass is skipped)
+            ctx.compiled_fns.push((fn_name, 0, Vec::new()));
+        }
+        // use_call_closure stays true for the main pass
     }
 
     // Second pass: lower statements
@@ -1350,10 +1340,9 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
         } => {
             // lower cond
             lower_expr(cond, ctx);
-            // JZ → else (or end)
+            // JZ → else (or end) — Jz pops the condition
             let jz_pos = ctx.current_pos();
             ctx.emit(Op::Jz(0)); // placeholder
-            ctx.emit(Op::Pop); // pop cond from stack
 
             // then block
             let saved = ctx.locals.len();
@@ -1370,7 +1359,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 // else target
                 let else_target = ctx.current_pos();
                 ctx.patch_jump(jz_pos, else_target);
-                ctx.emit(Op::Pop); // pop cond
 
                 let saved2 = ctx.locals.len();
                 for s in else_stmts {
@@ -1382,16 +1370,9 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                 let end_target = ctx.current_pos();
                 ctx.patch_jump(jmp_pos, end_target);
             } else {
-                // no else: JZ jumps to pop_cond, then block falls to end
-                let jmp_pos = ctx.current_pos();
-                ctx.emit(Op::Jmp(0)); // skip the Pop (then-block completed)
-
-                let pop_target = ctx.current_pos();
-                ctx.patch_jump(jz_pos, pop_target);
-                ctx.emit(Op::Pop); // pop cond (only reached via Jz)
-
+                // no else: Jz pops cond and jumps to end
                 let end_target = ctx.current_pos();
-                ctx.patch_jump(jmp_pos, end_target);
+                ctx.patch_jump(jz_pos, end_target);
             }
         }
 
@@ -1408,15 +1389,15 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
         Stmt::While { cond, body } => {
             // while cond { body }
-            // Layout: [start:] ScopeBegin [cond] Jz(end) Pop [body] ScopeEnd Jmp(start) [end:] Pop
+            // Layout: [start:] ScopeBegin [cond] Jz(end) [body] ScopeEnd Jmp(start) [end:]
             // No Loop opcode — uses explicit Jmp for back-jump to avoid
             // loop_stack corruption with nested while loops.
+            // Jz pops the condition value.
             let start = ctx.current_pos();
             ctx.emit(Op::ScopeBegin);
             lower_expr(cond, ctx);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // placeholder — patched to end
-            ctx.emit(Op::Pop); // pop cond result (true path continues)
+            ctx.emit(Op::Jz(0)); // placeholder — patched to end (Jz pops cond)
             // Set up break/continue context (forward jump placeholders)
             ctx.break_jumps.push(Vec::new());
             ctx.continue_jumps.push(Vec::new());
@@ -1436,12 +1417,10 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::Jmp(start)); // explicit back-jump
             let end = ctx.current_pos();
             ctx.patch_jump(jz_pos, end);
-            ctx.emit(Op::Pop); // pop cond result (false path, Jz jumped here)
-            let after_pop = ctx.current_pos();
-            // Patch break → after the Pop (break happens after cond was already popped)
+            // Patch break → end (Jz already popped cond)
             if let Some(breaks) = ctx.break_jumps.pop() {
                 for bp in breaks {
-                    ctx.patch_jump(bp, after_pop);
+                    ctx.patch_jump(bp, end);
                 }
             }
         }
@@ -1515,14 +1494,12 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             ctx.emit(Op::LoadLocal("__foreach_len".into()));
             ctx.emit_call("__cmp_ge"); // idx >= len → truthy
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0));                 // if falsy (idx < len) → continue
-            ctx.emit(Op::Pop);                   // pop cmp result (truthy)
+            ctx.emit(Op::Jz(0));                 // if falsy (idx < len) → continue (Jz pops cmp result)
             let break_jmp = ctx.current_pos();
             ctx.emit(Op::Jmp(0));                // break out
 
             let cont_target = ctx.current_pos();
             ctx.patch_jump(jz_pos, cont_target);
-            ctx.emit(Op::Pop);                   // pop cmp result (falsy)
 
             // Get element: arr[idx] → store as var
             ctx.emit(Op::Dup);                   // [..., idx, idx]
@@ -1710,8 +1687,36 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
             }
         }
 
-        Stmt::FnDef { .. } => {
-            // Function definitions are collected in first pass, not emitted inline
+        Stmt::FnDef { name, params, body, .. } => {
+            if ctx.use_call_closure {
+                // Phase 1.5: function already compiled as Closure+Store.
+                // Skip entirely — no trampoline needed.
+                if ctx.compiled_fns.iter().any(|(n, _, _)| n == name) {
+                    return;
+                }
+            }
+            // Small files: emit Closure + body + Store inline.
+            let body_start_placeholder = ctx.current_pos();
+            ctx.emit(Op::Closure(params.len() as u8, 0));
+
+            let body_start = ctx.current_pos();
+            for p in params.iter().rev() {
+                ctx.emit(Op::Store(p.clone()));
+            }
+            let saved_locals = ctx.locals.clone();
+            ctx.locals = params.clone();
+            for s in body {
+                lower_stmt(s, ctx);
+            }
+            ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
+            ctx.emit(Op::Ret);
+            ctx.locals = saved_locals;
+
+            let body_len = ctx.current_pos() - body_start;
+            ctx.ops_mut()[body_start_placeholder] = Op::Closure(params.len() as u8, body_len);
+
+            ctx.emit(Op::Store(name.clone()));
+            ctx.locals.push(name.clone());
         }
 
         Stmt::Expr(expr) => {
@@ -1814,8 +1819,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::Load(name.clone()));
                         ctx.emit_call("__match_type");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0)); // skip body if no match
-                        ctx.emit(Op::Pop); // pop match result
+                        ctx.emit(Op::Jz(0)); // skip body if no match (Jz pops match result)
 
                         // Execute body
                         let saved = ctx.locals.len();
@@ -1831,7 +1835,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         // Patch Jz → next arm
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop); // pop match result on no-match path
                     }
                     crate::syntax::MatchPattern::EnumPattern { enum_name, variant, bindings } => {
                         // Match enum variant: compare tag string
@@ -1840,8 +1843,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::Push(crate::vm::string_to_chain(&tag)));
                         ctx.emit_call("__match_enum");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0));
-                        ctx.emit(Op::Pop);
+                        ctx.emit(Op::Jz(0)); // Jz pops match result
 
                         let saved = ctx.locals.len();
 
@@ -1864,7 +1866,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop);
                     }
                     crate::syntax::MatchPattern::MolLiteral { shape, relation, valence, arousal, time } => {
                         // Load subject, push expected mol, compare
@@ -1878,8 +1879,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::PushMol(packed));
                         ctx.emit_call("__match_mol");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0));
-                        ctx.emit(Op::Pop);
+                        ctx.emit(Op::Jz(0)); // Jz pops match result
 
                         let saved = ctx.locals.len();
                         for s_stmt in &arm.body {
@@ -1892,7 +1892,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop);
                     }
                     crate::syntax::MatchPattern::MolConstraintPattern { constraint } => {
                         // Phase 6: ○{ V>0x80 } constraint pattern matching
@@ -1916,8 +1915,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
                         ctx.emit(Op::PushNum(count as f64));
                         ctx.emit_call("__match_mol_constraint");
                         let jz_pos = ctx.current_pos();
-                        ctx.emit(Op::Jz(0));
-                        ctx.emit(Op::Pop);
+                        ctx.emit(Op::Jz(0)); // Jz pops match result
 
                         let saved = ctx.locals.len();
                         for s_stmt in &arm.body {
@@ -1930,7 +1928,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LowerCtx) {
 
                         let next = ctx.current_pos();
                         ctx.patch_jump(jz_pos, next);
-                        ctx.emit(Op::Pop);
                     }
                 }
             }
@@ -2165,6 +2162,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                 "neg" => Some("__hyp_neg"),
                 "mod" => Some("__hyp_mod"),
                 "array_set" => Some("__array_set"),
+                "set_at" => Some("__array_set"),
                 "slice" => Some("__array_slice"),
                 "is_empty" => Some("__is_empty"),
                 "eq" => Some("__eq"),
@@ -2329,73 +2327,16 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
                     || ctx.inlining_stack.len() > 8;
 
                 if is_recursive {
-                    // Recursive call: use CallClosure mechanism
                     let fn_name = name.to_string();
-                    let param_count = fn_def.params.len();
 
-                    // Check if function body is already compiled
-                    let compiled_pc = ctx.compiled_fns.iter()
-                        .find(|(n, _, _)| n == &fn_name)
-                        .map(|(_, pc, _)| *pc);
-
-                    let body_pc = if let Some(pc) = compiled_pc {
-                        pc
-                    } else {
-                        // Compile function body to a separate block
-                        let fn_params = fn_def.params.clone();
-                        let fn_body = fn_def.body.clone();
-
-                        let saved_locals = ctx.locals.clone();
-                        let saved_inline_depth = ctx.inline_depth;
-
-                        // Skip over the compiled body during normal execution
-                        let skip_jmp = ctx.current_pos();
-                        ctx.emit(Op::Jmp(0));
-
-                        let body_start = ctx.current_pos();
-
-                        // Args are on stack in reverse order for CallClosure
-                        // Store params from stack
-                        for p in fn_params.iter().rev() {
-                            ctx.emit(Op::Store(p.clone()));
-                        }
-                        ctx.locals = fn_params.clone();
-                        ctx.inline_depth = 0;
-
-                        // Lower body statements
-                        let body_len = fn_body.len();
-                        if body_len > 0 {
-                            for s in &fn_body[..] {
-                                lower_stmt(s, ctx);
-                            }
-                        }
-                        // Default return: empty chain
-                        ctx.emit(Op::Push(crate::molecular::MolecularChain::empty()));
-                        ctx.emit(Op::Ret);
-
-                        ctx.locals = saved_locals;
-                        ctx.inline_depth = saved_inline_depth;
-
-                        let after_body = ctx.current_pos();
-                        ctx.patch_jump(skip_jmp, after_body);
-
-                        ctx.compiled_fns.push((fn_name.clone(), body_start, fn_params));
-                        body_start
-                    };
-
-                    // Emit: push closure marker, push args, CallClosure
-                    // Closure marker must match make_closure_marker() format:
-                    // [tag_molecule, pc_low_u16, pc_high_u16] — 3 raw u16 words
-                    // so closure_body_pc() can extract body_pc correctly.
-                    let tag = crate::molecular::Molecule::raw(0xFF, param_count as u8, 0, 0, 1);
-                    let mut marker = crate::molecular::MolecularChain::single(tag);
-                    marker.push_raw(body_pc as u16);
-                    marker.push_raw((body_pc >> 16) as u16);
-                    ctx.emit(Op::Push(marker));
+                    // Phase 1.5 closure call: push args, then Call(fn_name).
+                    // The closure was registered via Closure+Store in Phase 1.5.
+                    // ASM VM: op_call fallback finds closure in var_table.
+                    // Rust VM: Call handler checks scopes for closure.
                     for arg in args {
                         lower_expr(arg, ctx);
                     }
-                    ctx.emit(Op::CallClosure(param_count as u8));
+                    ctx.emit(Op::Call(fn_name.into()));
                 } else {
                 // Non-recursive: inline as before
                 let call_id = ctx.next_call_id();
@@ -2588,10 +2529,14 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::LogicAnd(a, b) => {
             // Short-circuit: if a is empty, result is empty; else result is b
+            // eval a → Dup → Jz(end) → Pop → eval b → end
+            // Jz pops the dup'd copy; if falsy, original a remains on stack.
+            // If truthy, Pop discards original a, then eval b replaces it.
             lower_expr(a, ctx);
+            ctx.emit(Op::Dup);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // if a falsy → jump to end (leave empty on stack)
-            ctx.emit(Op::Pop); // pop a (truthy)
+            ctx.emit(Op::Jz(0)); // if a falsy → jump to end (Jz pops dup, original stays)
+            ctx.emit(Op::Pop); // discard original a (truthy path)
             lower_expr(b, ctx);
             let end = ctx.current_pos();
             ctx.patch_jump(jz_pos, end);
@@ -2599,17 +2544,20 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::LogicOr(a, b) => {
             // Short-circuit: if a is non-empty, result is a; else result is b
+            // eval a → Dup → Jz(false) → Jmp(end) → false: Pop → eval b → end
+            // Jz pops the dup'd copy; if falsy, original a still on stack.
             lower_expr(a, ctx);
-            // Jz: if a empty → eval b
+            ctx.emit(Op::Dup);
+            // Jz: if a empty → false branch (Jz pops dup)
             let jz_pos = ctx.current_pos();
             ctx.emit(Op::Jz(0));
-            // a truthy: jump past b
+            // a truthy: jump past b (original a remains on stack)
             let jmp_pos = ctx.current_pos();
             ctx.emit(Op::Jmp(0));
-            // a falsy: pop empty, eval b
+            // a falsy: pop original empty a, eval b
             let false_branch = ctx.current_pos();
             ctx.patch_jump(jz_pos, false_branch);
-            ctx.emit(Op::Pop);
+            ctx.emit(Op::Pop); // discard original empty a
             lower_expr(b, ctx);
             let end = ctx.current_pos();
             ctx.patch_jump(jmp_pos, end);
@@ -2816,16 +2764,15 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::IfExpr { cond, then_expr, else_expr } => {
             // if cond { then } else { else } as expression
+            // Jz pops the condition
             lower_expr(cond, ctx);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // if falsy → else branch
-            ctx.emit(Op::Pop); // pop cond (truthy)
+            ctx.emit(Op::Jz(0)); // if falsy → else branch (Jz pops cond)
             lower_expr(then_expr, ctx);
             let jmp_pos = ctx.current_pos();
             ctx.emit(Op::Jmp(0)); // skip else
             let else_target = ctx.current_pos();
             ctx.patch_jump(jz_pos, else_target);
-            ctx.emit(Op::Pop); // pop cond (falsy)
             lower_expr(else_expr, ctx);
             let end = ctx.current_pos();
             ctx.patch_jump(jmp_pos, end);
@@ -3121,17 +3068,19 @@ fn lower_expr(expr: &Expr, ctx: &mut LowerCtx) {
 
         Expr::UnwrapOr { value, default } => {
             // value ?? default → if value is non-empty, use value; else use default
-            // This is the Option/Result unwrap-or-default operator
+            // eval value → Dup → Jz(default) → Jmp(end) → default: Pop → eval default → end
+            // Jz pops the dup'd copy; if empty, original value still on stack.
             lower_expr(value, ctx);
+            ctx.emit(Op::Dup);
             let jz_pos = ctx.current_pos();
-            ctx.emit(Op::Jz(0)); // if empty → jump to default
-            // Value is non-empty — it's already on stack, jump to end
+            ctx.emit(Op::Jz(0)); // if empty → jump to default (Jz pops dup)
+            // Value is non-empty — original on stack, jump to end
             let jmp_pos = ctx.current_pos();
             ctx.emit(Op::Jmp(0)); // skip default
             // Default path
             let default_start = ctx.current_pos();
             ctx.patch_jump(jz_pos, default_start);
-            ctx.emit(Op::Pop); // pop the empty value
+            ctx.emit(Op::Pop); // pop the original empty value
             lower_expr(default, ctx);
             // End
             let end = ctx.current_pos();

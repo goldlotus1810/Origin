@@ -185,6 +185,40 @@ impl KnowTree {
             .unwrap_or(0..0)
     }
 
+    /// Sample P_weights by dimension value from L3 (leaf nodes).
+    ///
+    /// VM.7: Lấy mẫu trực tiếp từ KnowTree thay vì file json ngoài.
+    /// Dùng cho formula_adaptive — tính ValenceState/ArousalState từ data thật.
+    ///
+    /// dim: 0=S, 1=R, 2=V, 3=A, 4=T
+    /// value: giá trị dimension cần filter (e.g., V=6)
+    /// max_samples: số mẫu tối đa (Fib-sized)
+    pub fn sample_by_dim(&self, dim: u8, value: u8, max_samples: usize) -> Vec<u16> {
+        let matching: Vec<u16> = self.l3.iter()
+            .filter(|&&pw| {
+                if pw == 0 { return false; }
+                let extracted = match dim {
+                    0 => ((pw >> 12) & 0x0F) as u8, // S
+                    1 => ((pw >> 8) & 0x0F) as u8,  // R
+                    2 => ((pw >> 5) & 0x07) as u8,   // V
+                    3 => ((pw >> 2) & 0x07) as u8,   // A
+                    4 => (pw & 0x03) as u8,           // T
+                    _ => return false,
+                };
+                extracted == value
+            })
+            .copied()
+            .collect();
+
+        let k = max_samples.min(matching.len());
+        matching[..k].to_vec()
+    }
+
+    /// Get all L3 P_weights (for formula_adaptive fallback).
+    pub fn l3_weights(&self) -> &[u16] {
+        &self.l3
+    }
+
     /// RAM usage in bytes.
     #[inline]
     pub fn ram_usage(&self) -> usize {

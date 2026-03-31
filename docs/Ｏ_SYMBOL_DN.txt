@@ -1,0 +1,245 @@
+================================================================================
+1. NHÓM KÝ TỰ TƯƠNG ỨNG VÀ NGUỒN GỐC (ORIGIN)
+================================================================================
+○	WHITE CIRCLE	U+25CB
+Ｏ	FULLWIDTH LATIN CAPITAL LETTER O	U+FF2F
+O	LATIN CAPITAL LETTER O	U+004F
+ORIGIN/Origin/origin	"CONTEXT" 
+Origin: Thường dùng để chỉ điểm gốc (0,0) hoặc bắt đầu trong đồ họa/toán học.
+DÙNG FONT JuliaMono Nerd Font LÀM CHỦ. VÀ THIẾT LẬP Font Fallback THƯ VIỆN Nerd Font HỔ TRỢ THÊM.
+================================================================================
+2. KÝ TỰ KHOANH TRÒN KẾT HỢP (COMBINING ENCLOSING CIRCLE)
+================================================================================
+Ký tự: ◌⃝ (U+20DD)
+Lưu ý: Khả năng hiển thị phụ thuộc vào Font và Trình duyệt (có thể bị lệch).
+
+1. Cách hoạt động:
+- Gõ ký tự gốc trước, sau đó chèn U+20DD để "khoanh tròn" ký tự đó.
+- Ví dụ: A + ⃝ = A⃝ , 8 + ⃝ = 8⃝ , ? + ⃝ = ?⃝ , α + ⃝ = α⃝
+
+2. NHÓM DỰNG SẴN (PRECOMPOSED - CHỮ & SỐ):
+- Số vòng rỗng (0-20): ⓪ ① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ ⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳
+- Số nền đen (1-20):   ❶ ❷ ❸ ❹ ❺ ❻ ❼ ❽ ❾ ❿ ⓫ ⓬ ⓭ ⓮ ⓯ ⓰ ⓱ ⓲ ⓳ ⓴
+- Chữ cái rỗng:        Ⓐ Ⓑ Ⓒ... Ⓩ / ⓐ ⓑ ⓒ... ⓩ
+- Chữ cái nền đen:     🅐 🅑 🅒... 🅩
+- Pháp lý:             © (Copyright), ® (Registered), ℗ (Phonogram)
+- Hán tự khoanh tròn:  ㊙ (Bí mật), 祝 (Chúc mừng), ㊊-㊐ (Thứ trong tuần)
+- Số La Mã (tự tạo):   Ⅰ⃝  Ⅱ⃝  Ⅲ⃝  Ⅳ⃝  Ⅴ⃝  Ⅵ⃝  Ⅶ⃝  Ⅷ⃝  Ⅸ⃝  Ⅹ⃝  Ⅺ⃝  Ⅻ⃝
+(Dùng chữ số La Mã U+2160... kết hợp với Combining Circle U+20DD)
+
+Lưu ý: Với 2 chữ số trở lên (21, 50...) hoặc chữ cái có dấu (Â, Ê), phải dùng mã U+20DD.
+
+================================================================================
+3. NHÓM CHỈ DẪN / TRỢ GIÚP (HELP & INDICATORS)
+================================================================================
+∅  EMPTY SET (U+2205)                  - Không có dữ liệu/Tập hợp rỗng.
+⦽  UP ARROW THROUGH CIRCLE (U+29BD)    - Chỉ hướng lên (Upload/Xuyên qua).
+⧭  BLACK CIRCLE WITH DOWN ARROW (U+29ED) - Tải xuống/Luồng đi xuống (Đặc).
+⧬  WHITE CIRCLE WITH DOWN ARROW (U+29EC) - Tải xuống/Luồng đi xuống (Rỗng).
+⧳  ERROR-BARRED BLACK CIRCLE (U+29F3)  - Cảnh báo lỗi/Sai số (Đặc).
+⧲  ERROR-BARRED WHITE CIRCLE (U+29F2)  - Cảnh báo lỗi/Sai số (Rỗng).
+⧁  CIRCLED GREATER-THAN (U+29C1)       - Tiến tới/Lớn hơn.
+⧀  CIRCLED LESS-THAN (U+29C0)          - Quay lại/Nhỏ hơn.
+⨸  CIRCLED DIVISION SIGN (U+2A38)      - Nút chia/Phân bổ.
+⦹  CIRCLED PERPENDICULAR (U+29B9)      - Điểm vuông góc/Căn chỉnh.
+〶  CIRCLED POSTAL MARK (U+3036)        - Vị trí bưu điện.
+
+TẠI DÁU KÝ HIỆU ○ CHÚNG TA CÓ THỂ  "THỂ  HIỆN" TRẠNG THÁI HOMEOS BẰNG  ANIMATION
+CHỈ CẦN NHÌN TRẠNG THÁI ANIMATION CÓ THỂ ĐOÁN DC NÓ DANG LÀM GÌ.
+================================================================================
+ĐANG LÀM VIỆC - - ANIMATION LOOP: ○ -> 〇 -> ⋅ (TÂM) -> 〇 -> ◌ -> ○
+================================================================================
+
+1. BẮT ĐẦU (Khởi tạo):        [  ○  ] (White Circle - Điểm xuất phát)
+2. PHÁNG TO:                  [  ◯  ] -> [  〇  ] (To nhất)
+3. THU NHỎ VÀO TÂM:           [  ○  ] -> [  ◦  ] -> [  ⋅  ] (Dấu chấm chính giữa tâm)
+4. PHÁT TRIỂN LẠI:            [  ◦  ] -> [  ○  ] -> [  ◯  ] -> [  〇  ] (Trở lại to nhất)
+5. TAN BIẾN (Fade out):       [  ◌  ] (Vòng nét đứt - Mờ dần)
+6. HỘI TỤ & TRẢ LẠI:          [  ⋅  ] -> [  ◦  ] -> [  ○  ] (Kết thúc vòng lặp tại ○)
+
+--------------------------------------------------------------------------------
+CHUỖI CHẠY LIÊN TỤC (COPY DÒNG NÀY):
+○ ◯ 〇 ○ ◦ ⋅ ◦ ○ ◯ 〇 ◌ ⋅ ◦ ○
+================================================================================
+
+================================================================================
+BỘ ANIMATION TRẠNG THÁI HÌNH TRÒN (TUẦN HOÀN ○ -> ○)
+================================================================================
+
+[ ĐANG LÀM VIỆC ] : ○ ◯ 〇 ◯ ○ ◦ ⋅ ◦ ○ ◯ 〇 ◌ ⋅ ◦ ○
+(Nhịp thở: To dần -> Thu vào tâm -> Tan biến -> Trở lại)
+
+[ ĐANG LOADING  ] : ○ ◯ ◔ ◑ ◕ ● ◉ ⬤ ⦿ ◉ ◎ ⊚ ∘ ⊚ ◎ ○
+(Xoay tròn: Khuyết -> Đầy -> Đặc -> Thu nhỏ -> Trở lại)
+
+[ TẢI XUỐNG     ] : ○ ◌ ⧬ ◒ ⧭ ● ⧭ ◒ ⧬ ◌ ○
+(Dòng chảy xuống: Rỗng -> Xuất hiện mũi tên -> Đầy -> Trả rỗng)
+
+[ TẢI LÊN       ] : ○ ◦ ◓ ⦽ 〇 ⦽ ◓ ◦ ○
+(Lực đẩy lên: Từ tâm -> Đẩy xuyên qua -> Cực đại -> Thu hồi)
+
+[ CẢNH BÁO      ] : ○ ◌ ⊘ ☢ ⊘ ☢ ⊘ ◌ ○
+(Nhấp nháy: Cảnh báo nguy hiểm giữa các khoảng nghỉ)
+
+[ ERROR / FAIL  ] : ○ ⧲ ⧳ ⊗ ⨷ ⛔ ⨷ ⊗ ⧳ ⧲ ○
+(Rung lắc: Sai số -> Xung đột -> Chặn -> Trở lại trạng thái chờ)
+
+[ DEBUGGING     ] : ○ ⊚ ⦺ ⦹ ⨸ ⦹ ⦺ ⊚ ○
+(Quét hệ thống: Phân tích các trục tọa độ tròn)
+
+[ SEARCHING     ] : ○ ◜ ◠ ◝ ◞ ◡ ◟ ○
+(Quét radar: Chạy cung tròn quanh viền)
+
+[ SUCCESS/DONE  ] : ○ ◯ ⦿ ❂ ⭕ ❂ ⦿ ◯ ○
+(Hoàn thành: Tỏa sáng -> Kết thúc rực rỡ -> Ổn định)
+
+[ TẠM DỪNG      ] : ○ ⊜ ◌ ◌ ⊜ ○
+(Nghỉ: Hiển thị dấu bằng/tạm dừng rồi mờ dần)
+
+Các lưu ý về ký tự sử dụng:
+⋅ (U+22C5): Dùng làm tâm điểm chính xác.
+◌ (U+25CC): Dùng làm bước đệm "tan biến" hoặc "xuất hiện".
+⧲/⧳ (U+29F2/U+29F3): Tạo hiệu ứng "nhiễu" hoặc "lỗi" rất tốt vì có thanh gạch ngang lệch.
+
+================================================================================
+BỘ ANIMATION DÒNG DỮ LIỆU (DATA STREAM ○ -> ○)
+================================================================================
+
+[ DỮ LIỆU VÀO ] : ○ ⇠ ◌ ⧂ ⦿ ◉ ⧂ ◌ ⇠ ○
+(Dòng chảy từ phải vào tâm: Thu thập dữ liệu vào vòng tròn trung tâm)
+
+[ DỮ LIỆU RA  ] : ○ ⇢ ⧃ ⦿ ◉ ⧃ ⇢ ○
+(Dòng chảy từ tâm ra ngoài: Phát tán dữ liệu từ vòng tròn trung tâm)
+
+[ QUÉT DỮ LIỆU] : ○ ⦺ ⦼ ⨸ ⦼ ⦺ ○
+(Xử lý nội bộ: Các thanh gạch quay và quét bên trong vòng tròn)
+
+[ CHUYỂN TIẾP ] : ○ ⊶ ⦿ ⊷ ○ ⊶ ⦿ ⊷ ○
+(Relay: Dữ liệu đi ngang qua các điểm nút trung gian)
+
+[ KẾT NỐI BỘ  ] : ○ ◌ ⧂ ⧃ ◌ ○
+(Handshake: Hai vòng tròn nhỏ xuất hiện hai bên để bắt tay kết nối)
+
+[ DỮ LIỆU LỖI ] : ○ ⧲ ⧳ ⨷ ⧳ ⧲ ○
+(Corrupted: Dòng chảy bị đứt đoạn và xuất hiện nhiễu gạch ngang)
+
+--------------------------------------------------------------------------------
+DÒNG CHẢY DÀI (SỬ DỤNG CHO BANNER CHỮ CHẠY):
+○ ⇢ ◌ ⇢ ⦿ ⇢ ◌ ⇢ ○ ⇢ ◌ ⇢ ⦿ ⇢ ◌ ⇢ ○
+
+================================================================================
+
+================================================================================
+
+| ◌ ● ◌             HOMEOS             ◌ ● ◌ |
+================================================================================
+
+[ TRẠNG THÁI HỆ THỐNG ]
+--------------------------------------------------------------------------------
+CORE KERNEL   : ○ ◯ 〇 ◯ ○ ◦ ⋅ ◦ ○ ◯ 〇 ◌ ⋅ ◦ ○         [ STABLE ]
+DATA SCANNER  : ○ ◜ ◠ ◝ ◞ ◡ ◟ ○                         [ SEARCHING ]
+ENCRYPTION    : ○ ⊚ ⦺ ⦹ ⨸ ⦹ ⦺ ⊚ ○                         [ DEBUGGING ]
+
+[ DÒNG DỮ LIỆU (DATA STREAMS) ]
+--------------------------------------------------------------------------------
+INBOUND (RX)  : ○ ⇠ ◌ ⧂ ⦿ ◉ ⧂ ◌ ⇠ ○                     [ RECEIVING ]
+OUTBOUND (TX) : ○ ⇢ ⧃ ⦿ ◉ ⧃ ⇢ ○                         [ SENDING ]
+RELAY NODE    : ○ ⊶ ⦿ ⊷ ○ ⊶ ⦿ ⊷ ○                         [ CONNECTED ]
+
+[ TIẾN ĐỘ THI CÔNG (PROGRESS) ]
+--------------------------------------------------------------------------------
+LOADING OS    : ○ ◯ ◔ ◑ ◕ ● ◉ ⬤ ⦿ ◉ ◎ ⊚ ∘ ⊚ ◎ ○         [ 85% ]
+DOWNLOADING   : ○ ◌ ⧬ ◒ ⧭ ● ⧭ ◒ ⧬ ◌ ○                     [ 1.2 MB/s ]
+UPLOADING     : ○ ◦ ◓ ⦽ 〇 ⦽ ◓ ◦ ○                         [ 450 KB/s ]
+
+[ CẢNH BÁO AN NINH (SECURITY) ]
+--------------------------------------------------------------------------------
+FIREWALL      : ○ ◌ ⊘ ☢ ⊘ ☢ ⊘ ◌ ○                         [ ACTIVE ]
+INTRUSION     : ○ ⧲ ⧳ ⊗ ⨷ ⛔ ⨷ ⊗ ⧳ ⧲ ○                     [ BLOCKED ]
+AUTH STATUS   : ○ ◯ ⦿ ❂ ⭕ ❂ ⦿ ◯ ○                         [ VERIFIED ]
+
+================================================================================
+
+| [SYSTEM PAUSE: ○ ⊜ ◌ ◌ ⊜ ○]          [RUNTIME: ♾ ⚭ ⚮ ⚯ ☯ ☮] |
+================================================================================
+
+================================================================================
+4.CHI TIẾT CHỨC NĂNG
+================================================================================
+
+HÌNH HỌC & BIỂU TƯỢNG CƠ BẢN (GEOMETRIC & BASIC SYMBOLS):
+○       WHITE CIRCLE (U+25CB)                 Vòng tròn trắng rỗng.
+●       BLACK CIRCLE (U+25CF)                 Vòng tròn đen đặc (Bullet).
+◯       LARGE CIRCLE (U+25EF)                 Vòng tròn lớn (OK/Đánh dấu).
+⬤       BLACK LARGE CIRCLE (U+2B24)           Vòng tròn đen lớn.
+◌       DOTTED CIRCLE (U+25CC)                Vòng nét đứt (giữ chỗ).
+◎       BULLSEYE (U+25CE)                     Hình bia bắn.
+◉       FISHEYE (U+25C9)                      Mắt cá (Bản đồ).
+❍       SHADOWED WHITE CIRCLE (U+274D)        Vòng tròn có đổ bóng.
+◦       WHITE BULLET (U+25E6)                 Dấu đầu dòng rỗng nhỏ.
+⦿       CIRCLED BULLET (U+29BF)               Toán tử/Dấu đầu dòng đặc.
+⦾       CIRCLED WHITE BULLET (U+29BE)         Vòng tròn có chấm trắng.
+⊙       CIRCLED DOT (U+2299)                  Toán tử chấm tròn.
+◘       INVERSE BULLET (U+25D8)               Vòng tròn rỗng trong hình vuông đen.
+◙       INVERSE WHITE CIRCLE (U+25D9)         Vòng tròn trắng trong hình vuông đen.
+〇 (U+3007)
+⋅ (U+22C5): Bullet Operator
+◦ (U+25E6):White Bullet 
+◌ (U+25CC): Dotted Circle
+⧂ (U+29C2) và ⧃ (U+29C3): Vòng tròn có các vạch hoặc vòng nhỏ bên phải, cực kỳ hợp để mô tả hướng di chuyển của dữ liệu.
+⊶ / ⊷ (U+22B6/U+22B7): Các điểm nút có đuôi nối, tạo cảm giác mạch điện hoặc dây dẫn.
+⇠ / ⇢ (U+21E0/U+21E2): Mũi tên nét đứt, mô phỏng gói tin (packet) đang di chuyển.
+
+
+TOÁN HỌC & LOGIC (MATHEMATICAL & LOGIC OPERATORS):
+∘       RING OPERATOR (U+2218)                Toán tử hợp hàm số.
+⊕       CIRCLED PLUS (U+2295)                 Toán tử cộng tròn.
+⊖       CIRCLED MINUS (U+2296)                Toán tử trừ tròn.
+⊗       CIRCLED TIMES (U+2297)                Toán tử nhân tròn.
+⊘       CIRCLED DIVISION SLASH (U+2298)       Dấu gạch chéo (Cấm).
+⊚       CIRCLED RING OPERATOR (U+229A)        Vòng nhỏ lồng vòng lớn.
+⊛       CIRCLED ASTERISK OPERATOR (U+229B)    Dấu hoa thị tròn.
+⊜       CIRCLED EQUALS (U+229C)               Dấu bằng tròn.
+⊝       CIRCLED DASH (U+229D)                 Gạch ngang tròn.
+⨷       MULTIPLICATION SIGN IN DOUBLE...      Nhân trong vòng tròn kép (U+2A37).
+⦼       CIRCLED ANTICLOCKWISE-ROTATED...      Dấu chia xoay ngược (U+29BC).
+
+PHÂN ĐOẠN, CUNG TRÒN & ĐỒ HỌA (SEGMENTS & ARCS):
+◐ ◑ ◒ ◓ (U+25D0-D3)                           Nửa đen (Trái/Phải/Dưới/Trên).
+◔ ◕ (U+25D4-D5)                               Phần tư đen.
+◖ ◗ (U+25D6-D7)                               Nửa cung tròn đen.
+◜ ◝ ◟ ◞ (U+25DC-DF)                           Bốn góc cung tròn.
+◠ ◡ (U+25E0-E1)                               Vòm trên/Vòm dưới.
+◍       CIRCLE WITH VERTICAL FILL (U+25CD)    Vòng tròn kẻ sọc dọc.
+◚ ◛ (U+25DA-DB)                               Nửa vòng ngược trong khối đen.
+
+MŨI TÊN, KỸ THUẬT & QUY TRÌNH (TECHNICAL & ARROWS):
+⦽ (U+29BD) Up Arrow Through Circle            ⥁ (U+2941) Clockwise Closed Circle
+⥀ (U+2940) Anticlockwise Closed Circle        ⦺ (U+29BA) Circle Divided By Horiz/Vert
+⧃ (U+29C3) Two Horizontal Strokes Right       ⧂ (U+29C2) Small Circle To Right
+
+VĂN HÓA, ĐỜI SỐNG & BIỂU TƯỢNG (CULTURAL & LIFE SYMBOLS):
+☉ (U+2609) Sun / ⊕ (U+2295) Earth              ☮ (U+262E) Peace / ☯ (U+262F) Yin Yang
+☢ (U+2622) Radioactive                        ❂ (U+2742) Sao 8 cánh
+♼ ♽ (U+267C-7D) Recycling                     ♾ (U+267E) Permanent Paper
+⚭ (U+26AD) Marriage / ⚮ (U+26AE) Divorce      ⚯ (U+26AF) Unmarried Partnership
+〶 (U+3036) Postal Mark                        〇 (U+3007) Hán tự số 0
+✆ (U+2706) Telephone Location                 ࿊ (U+0FCA) Tibetan Nor Bu
+⚉ ⚈ ⚇ ⚆ (U+2686-89)                           Vòng tròn có chấm (Đen/Trắng).
+⦶ ⦷ ⦸ (U+29B6-B8)                             Phi / Psi / Omega trong vòng tròn.
+   (U+F190C) Sitelen Pona Ijo                     (U+F195C) Sitelen Pona Sike
+
+EMOJI & GIAO DIỆN:
+🔘 (U+1F518) Radio Button                       ⭕ (U+2B55) Heavy Circle
+🔴 🔵 (U+1F534-35) Large Red/Blue               ⚪ ⚫ (U+26AA-AB) Medium White/Black
+⛔ (U+26D4) No Entry                            🎯 (U+1F3AF) Direct Hit
+⚾ (U+26BE) Baseball                            Ⓜ️ (U+24C2) Metro Symbol
+🔞 (U+1F51E) No Under 18			🟢, 🟡, 🟠, 🟣, 🟤 (U+1F7E2...): Các vòng tròn màu xanh lá, vàng, cam, tím, nâu.
+
+SỐ VÀ KÝ HIỆU CÓ DẤU CHẤM/NGOẶC (PUNCTUATED):
+1. 2. 3. (U+2488...) Số chấm sẵn              (1) (2) (3) (U+2474...) Số trong ngoặc
+㈠ ㈡ ㈢ (U+3220...) Hán tự tròn               
+० (U+0966) Hindi / ๏ (U+0E0F) Thai
+໐ (U+0ED0) Lao / ༠ (U+0F20) Tibetan
+================================================================================
+

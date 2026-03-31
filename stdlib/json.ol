@@ -145,7 +145,7 @@ fn parse_object(state) {
     skip_ws(state);
     state.pos = state.pos + 1;  // skip :
     let val = parse_value(state);
-    // result[key] = val  — depends on dict support
+    __dict_set(result, key, val);
     skip_ws(state);
     if state.pos >= len(state.src) { break; }
     if char_at(state.src, state.pos) == "}" {

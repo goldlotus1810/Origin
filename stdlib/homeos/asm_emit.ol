@@ -22,23 +22,23 @@ pub fn code_new() {
 
 pub fn code_len(code) { return len(code.bytes); }
 
-fn emit_byte(code, b) { push(code.bytes, b); }
+fn asm_asm_emit_byte(code, b) { push(code.bytes, b); }
 
-fn emit_u16_le(code, val) {
-  emit_byte(code, val % 256);
-  emit_byte(code, (val / 256) % 256);
+fn asm_asm_emit_u16_le(code, val) {
+  asm_emit_byte(code, val % 256);
+  asm_emit_byte(code, (val / 256) % 256);
 }
 
-fn emit_u32_le(code, val) {
-  emit_byte(code, val % 256);
-  emit_byte(code, (val / 256) % 256);
-  emit_byte(code, (val / 65536) % 256);
-  emit_byte(code, (val / 16777216) % 256);
+fn asm_asm_emit_u32_le(code, val) {
+  asm_emit_byte(code, val % 256);
+  asm_emit_byte(code, (val / 256) % 256);
+  asm_emit_byte(code, (val / 65536) % 256);
+  asm_emit_byte(code, (val / 16777216) % 256);
 }
 
 fn emit_u64_le(code, val) {
-  emit_u32_le(code, val % 4294967296);
-  emit_u32_le(code, val / 4294967296);
+  asm_emit_u32_le(code, val % 4294967296);
+  asm_emit_u32_le(code, val / 4294967296);
 }
 
 // ── REX prefix ──
@@ -70,57 +70,57 @@ fn modrm(mod_val, reg, rm) {
 
 pub fn emit_mov_reg_imm64(code, reg, imm) {
   // REX.W + B8+rd + imm64
-  emit_byte(code, rex_w(0, reg));
-  emit_byte(code, 0xB8 + (reg % 8));
+  asm_emit_byte(code, rex_w(0, reg));
+  asm_emit_byte(code, 0xB8 + (reg % 8));
   emit_u64_le(code, imm);
 }
 
 pub fn emit_mov_reg_imm32(code, reg, imm) {
   // For 32-bit immediates (zero-extended)
   if reg >= 8 {
-    emit_byte(code, 0x41);  // REX.B
+    asm_emit_byte(code, 0x41);  // REX.B
   }
-  emit_byte(code, 0xB8 + (reg % 8));
-  emit_u32_le(code, imm);
+  asm_emit_byte(code, 0xB8 + (reg % 8));
+  asm_emit_u32_le(code, imm);
 }
 
 pub fn emit_mov_reg_reg(code, dst, src) {
   // REX.W + 89 /r (MOV r/m64, r64)
-  emit_byte(code, rex_w(src, dst));
-  emit_byte(code, 0x89);
-  emit_byte(code, modrm(3, src, dst));
+  asm_emit_byte(code, rex_w(src, dst));
+  asm_emit_byte(code, 0x89);
+  asm_emit_byte(code, modrm(3, src, dst));
 }
 
 pub fn emit_mov_reg_mem(code, dst, base, disp) {
   // REX.W + 8B /r + disp (MOV r64, [base+disp])
-  emit_byte(code, rex_w(dst, base));
-  emit_byte(code, 0x8B);
+  asm_emit_byte(code, rex_w(dst, base));
+  asm_emit_byte(code, 0x8B);
   if disp == 0 && (base % 8) != 5 {
-    emit_byte(code, modrm(0, dst, base));
+    asm_emit_byte(code, modrm(0, dst, base));
   } else {
     if disp >= -128 && disp <= 127 {
-      emit_byte(code, modrm(1, dst, base));
-      emit_byte(code, disp % 256);
+      asm_emit_byte(code, modrm(1, dst, base));
+      asm_emit_byte(code, disp % 256);
     } else {
-      emit_byte(code, modrm(2, dst, base));
-      emit_u32_le(code, disp);
+      asm_emit_byte(code, modrm(2, dst, base));
+      asm_emit_u32_le(code, disp);
     }
   }
 }
 
 pub fn emit_mov_mem_reg(code, base, disp, src) {
   // REX.W + 89 /r + disp (MOV [base+disp], r64)
-  emit_byte(code, rex_w(src, base));
-  emit_byte(code, 0x89);
+  asm_emit_byte(code, rex_w(src, base));
+  asm_emit_byte(code, 0x89);
   if disp == 0 && (base % 8) != 5 {
-    emit_byte(code, modrm(0, src, base));
+    asm_emit_byte(code, modrm(0, src, base));
   } else {
     if disp >= -128 && disp <= 127 {
-      emit_byte(code, modrm(1, src, base));
-      emit_byte(code, disp % 256);
+      asm_emit_byte(code, modrm(1, src, base));
+      asm_emit_byte(code, disp % 256);
     } else {
-      emit_byte(code, modrm(2, src, base));
-      emit_u32_le(code, disp);
+      asm_emit_byte(code, modrm(2, src, base));
+      asm_emit_u32_le(code, disp);
     }
   }
 }
@@ -128,182 +128,182 @@ pub fn emit_mov_mem_reg(code, base, disp, src) {
 // ── PUSH/POP ──
 
 pub fn emit_push(code, reg) {
-  if reg >= 8 { emit_byte(code, 0x41); }
-  emit_byte(code, 0x50 + (reg % 8));
+  if reg >= 8 { asm_emit_byte(code, 0x41); }
+  asm_emit_byte(code, 0x50 + (reg % 8));
 }
 
 pub fn emit_pop(code, reg) {
-  if reg >= 8 { emit_byte(code, 0x41); }
-  emit_byte(code, 0x58 + (reg % 8));
+  if reg >= 8 { asm_emit_byte(code, 0x41); }
+  asm_emit_byte(code, 0x58 + (reg % 8));
 }
 
 // ── ALU ──
 
 pub fn emit_add_reg_reg(code, dst, src) {
-  emit_byte(code, rex_w(src, dst));
-  emit_byte(code, 0x01);
-  emit_byte(code, modrm(3, src, dst));
+  asm_emit_byte(code, rex_w(src, dst));
+  asm_emit_byte(code, 0x01);
+  asm_emit_byte(code, modrm(3, src, dst));
 }
 
 pub fn emit_sub_reg_reg(code, dst, src) {
-  emit_byte(code, rex_w(src, dst));
-  emit_byte(code, 0x29);
-  emit_byte(code, modrm(3, src, dst));
+  asm_emit_byte(code, rex_w(src, dst));
+  asm_emit_byte(code, 0x29);
+  asm_emit_byte(code, modrm(3, src, dst));
 }
 
 pub fn emit_xor_reg_reg(code, dst, src) {
-  emit_byte(code, rex_w(src, dst));
-  emit_byte(code, 0x31);
-  emit_byte(code, modrm(3, src, dst));
+  asm_emit_byte(code, rex_w(src, dst));
+  asm_emit_byte(code, 0x31);
+  asm_emit_byte(code, modrm(3, src, dst));
 }
 
 pub fn emit_cmp_reg_reg(code, a, b) {
-  emit_byte(code, rex_w(b, a));
-  emit_byte(code, 0x39);
-  emit_byte(code, modrm(3, b, a));
+  asm_emit_byte(code, rex_w(b, a));
+  asm_emit_byte(code, 0x39);
+  asm_emit_byte(code, modrm(3, b, a));
 }
 
 pub fn emit_add_reg_imm32(code, reg, imm) {
-  emit_byte(code, rex_w(0, reg));
-  emit_byte(code, 0x81);
-  emit_byte(code, modrm(3, 0, reg));  // /0 = ADD
-  emit_u32_le(code, imm);
+  asm_emit_byte(code, rex_w(0, reg));
+  asm_emit_byte(code, 0x81);
+  asm_emit_byte(code, modrm(3, 0, reg));  // /0 = ADD
+  asm_emit_u32_le(code, imm);
 }
 
 pub fn emit_sub_reg_imm32(code, reg, imm) {
-  emit_byte(code, rex_w(0, reg));
-  emit_byte(code, 0x81);
-  emit_byte(code, modrm(3, 5, reg));  // /5 = SUB
-  emit_u32_le(code, imm);
+  asm_emit_byte(code, rex_w(0, reg));
+  asm_emit_byte(code, 0x81);
+  asm_emit_byte(code, modrm(3, 5, reg));  // /5 = SUB
+  asm_emit_u32_le(code, imm);
 }
 
 pub fn emit_inc(code, reg) {
-  emit_byte(code, rex_w(0, reg));
-  emit_byte(code, 0xFF);
-  emit_byte(code, modrm(3, 0, reg));  // /0 = INC
+  asm_emit_byte(code, rex_w(0, reg));
+  asm_emit_byte(code, 0xFF);
+  asm_emit_byte(code, modrm(3, 0, reg));  // /0 = INC
 }
 
 pub fn emit_dec(code, reg) {
-  emit_byte(code, rex_w(0, reg));
-  emit_byte(code, 0xFF);
-  emit_byte(code, modrm(3, 1, reg));  // /1 = DEC
+  asm_emit_byte(code, rex_w(0, reg));
+  asm_emit_byte(code, 0xFF);
+  asm_emit_byte(code, modrm(3, 1, reg));  // /1 = DEC
 }
 
 // ── JUMPS ──
 
 pub fn emit_jmp_rel32(code, offset) {
-  emit_byte(code, 0xE9);
-  emit_u32_le(code, offset);
+  asm_emit_byte(code, 0xE9);
+  asm_emit_u32_le(code, offset);
 }
 
 pub fn emit_je_rel32(code, offset) {
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x84);
-  emit_u32_le(code, offset);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x84);
+  asm_emit_u32_le(code, offset);
 }
 
 pub fn emit_jne_rel32(code, offset) {
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x85);
-  emit_u32_le(code, offset);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x85);
+  asm_emit_u32_le(code, offset);
 }
 
 pub fn emit_jb_rel32(code, offset) {
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x82);
-  emit_u32_le(code, offset);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x82);
+  asm_emit_u32_le(code, offset);
 }
 
 pub fn emit_jae_rel32(code, offset) {
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x83);
-  emit_u32_le(code, offset);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x83);
+  asm_emit_u32_le(code, offset);
 }
 
 // ── CALL/RET ──
 
 pub fn emit_call_rel32(code, offset) {
-  emit_byte(code, 0xE8);
-  emit_u32_le(code, offset);
+  asm_emit_byte(code, 0xE8);
+  asm_emit_u32_le(code, offset);
 }
 
 pub fn emit_ret(code) {
-  emit_byte(code, 0xC3);
+  asm_emit_byte(code, 0xC3);
 }
 
 // ── SYSCALL ──
 
 pub fn emit_syscall(code) {
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x05);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x05);
 }
 
 // ── NOP ──
 
 pub fn emit_nop(code) {
-  emit_byte(code, 0x90);
+  asm_emit_byte(code, 0x90);
 }
 
 // ── SSE2 (f64) ──
 
 pub fn emit_movsd_load(code, xmm, base, disp) {
   // F2 REX 0F 10 /r — MOVSD xmm, [mem]
-  emit_byte(code, 0xF2);
+  asm_emit_byte(code, 0xF2);
   if base >= 8 || xmm >= 8 {
-    emit_byte(code, rex_w(xmm, base) - 8);  // REX without W
+    asm_emit_byte(code, rex_w(xmm, base) - 8);  // REX without W
   }
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x10);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x10);
   if disp == 0 && (base % 8) != 5 {
-    emit_byte(code, modrm(0, xmm, base));
+    asm_emit_byte(code, modrm(0, xmm, base));
   } else {
-    emit_byte(code, modrm(1, xmm, base));
-    emit_byte(code, disp % 256);
+    asm_emit_byte(code, modrm(1, xmm, base));
+    asm_emit_byte(code, disp % 256);
   }
 }
 
 pub fn emit_movsd_store(code, base, disp, xmm) {
   // F2 REX 0F 11 /r — MOVSD [mem], xmm
-  emit_byte(code, 0xF2);
+  asm_emit_byte(code, 0xF2);
   if base >= 8 || xmm >= 8 {
-    emit_byte(code, rex_w(xmm, base) - 8);
+    asm_emit_byte(code, rex_w(xmm, base) - 8);
   }
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x11);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x11);
   if disp == 0 && (base % 8) != 5 {
-    emit_byte(code, modrm(0, xmm, base));
+    asm_emit_byte(code, modrm(0, xmm, base));
   } else {
-    emit_byte(code, modrm(1, xmm, base));
-    emit_byte(code, disp % 256);
+    asm_emit_byte(code, modrm(1, xmm, base));
+    asm_emit_byte(code, disp % 256);
   }
 }
 
 pub fn emit_addsd(code, dst, src) {
-  emit_byte(code, 0xF2);
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x58);
-  emit_byte(code, modrm(3, dst, src));
+  asm_emit_byte(code, 0xF2);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x58);
+  asm_emit_byte(code, modrm(3, dst, src));
 }
 
 pub fn emit_subsd(code, dst, src) {
-  emit_byte(code, 0xF2);
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x5C);
-  emit_byte(code, modrm(3, dst, src));
+  asm_emit_byte(code, 0xF2);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x5C);
+  asm_emit_byte(code, modrm(3, dst, src));
 }
 
 pub fn emit_mulsd(code, dst, src) {
-  emit_byte(code, 0xF2);
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x59);
-  emit_byte(code, modrm(3, dst, src));
+  asm_emit_byte(code, 0xF2);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x59);
+  asm_emit_byte(code, modrm(3, dst, src));
 }
 
 pub fn emit_divsd(code, dst, src) {
-  emit_byte(code, 0xF2);
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x5E);
-  emit_byte(code, modrm(3, dst, src));
+  asm_emit_byte(code, 0xF2);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x5E);
+  asm_emit_byte(code, modrm(3, dst, src));
 }
 
 // ── Labels & Fixups ──
@@ -314,16 +314,16 @@ pub fn label(code, name) {
 
 pub fn emit_jmp_label(code, name) {
   // Emit jmp with fixup
-  emit_byte(code, 0xE9);
+  asm_emit_byte(code, 0xE9);
   push(code.fixups, { pos: code_len(code), label: name, size: 4 });
-  emit_u32_le(code, 0);  // placeholder
+  asm_emit_u32_le(code, 0);  // placeholder
 }
 
 pub fn emit_je_label(code, name) {
-  emit_byte(code, 0x0F);
-  emit_byte(code, 0x84);
+  asm_emit_byte(code, 0x0F);
+  asm_emit_byte(code, 0x84);
   push(code.fixups, { pos: code_len(code), label: name, size: 4 });
-  emit_u32_le(code, 0);
+  asm_emit_u32_le(code, 0);
 }
 
 pub fn resolve_fixups(code) {

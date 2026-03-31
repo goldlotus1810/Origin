@@ -693,3 +693,47 @@ Branch: `claude/project-audit-review-2pN6F`
 ### Test Results
 - Runtime: 310/310 pass (0 failures) — sau merge main fix 2 pre-existing.
 - Olang: 1044 pass / 169 fail (all pre-existing VM/semantic tests).
+
+---
+
+## Tier 5 — UDC-native Olang (2026-03-25, Nox)
+
+### Phase 5A — Stabilize: ALL DONE
+ST.1 BUG-INDEX/BUG-SORT, ST.2 map/filter/reduce + lambda, ST.2b/c cross-boundary closures,
+ST.3 any/all, ST.4 test suite 20/20.
+
+### Phase 5A+ — Fix Intelligence: ALL DONE
+KN.1-4 (5D mol, all-chars chain, keyword×5), IN.1-2 (honesty, curiosity), UT.1-2 (r_dispatch, temporal_tag).
+
+### Phase 5B — Node-native: CORE DONE
+ND.2 ASM mol builtins (__mol_s/r/v/a/t + __mol_pack). ND.4 fn_node registry.
+ND.1 SKIP, ND.3/5/6 DEFER.
+
+### Phase 5C — Formula dispatch: FOUNDATION DONE
+FE.1 r_dispatch (16 types), FE.3 temporal_tag. FE.2/4/5 DEFER (rendering).
+
+### Phase 5D — Lego composition: ALL DONE
+LG.1 fn auto-register, LG.2 pipe(), LG.3 Silk mol-keyed (256 edges, -52% storage),
+LG.4 Dream fn clustering + skill_promote, LG.5 fn self-describe.
+
+### P0 Sora Blockers: ALL FIXED
+P0-A embedded knowledge (28 facts), P0-B bare expression auto-emit, P0-C div/0 safe.
+
+### P1 Polish: 5/6 DONE
+P1-E direct knowledge response, P1-F reduce 3-arg, P1-I help text, contradiction instinct, fns command.
+Extra: persistent knowledge (save/load), sort, split, join, contains.
+
+### Docs Conflicts: 112 total (DC.1-DC.112), ALL FIXED by Kira (23 inspections).
+
+### Log (full)
+```
+2026-03-25  Nox: BUG-INDEX/BUG-SORT FIXED. Lambda expressions. map/filter/reduce/any/all.
+            Test suite 16→20. Branch cleanup 37→1. Phase 5A COMPLETE.
+2026-03-25  Nox: T5 Layer 1 — BUG-KNOWLEDGE fixed. Instincts. r_dispatch + temporal_tag.
+2026-03-25  Nox: ND.2 mol ASM builtins. ND.4 fn_node registry. Phase 5B core DONE.
+2026-03-25  Nox: LG.1 fn auto-register + LG.2 pipe() + LG.5 fn self-describe.
+2026-03-25  Nox: LG.3 Silk mol-keyed + LG.4 Dream fn clustering. Phase 5D COMPLETE.
+2026-03-25  Nox: P0-A/B/C ALL FIXED. P1-E/F/I fixed. Contradiction. fns command.
+2026-03-25  Nox: Persistent knowledge (save/load). sort/split/join/contains.
+2026-03-25  MILESTONE: OLANG 1.0 — 1,008KB. ~30 commits. ~700 LOC added.
+```

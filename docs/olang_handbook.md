@@ -1,9 +1,11 @@
 # Olang Handbook — So tay Ngon ngu Olang
 
-> **Phien ban:** 0.06 | **Cap nhat:** 2026-03-21
+> **Phien ban:** 2.0 | **Cap nhat:** 2026-03-26
 >
-> Olang = ngon ngu lap trinh + suy luan + sang tao cua HomeOS.
-> Moi thu la MolecularChain. Moi phep toan la bien doi chain.
+> Olang 2.0 = ngon ngu tu hosting, 921KB, zero dependencies.
+> Auto-JIT (fib 4ms = C speed), 88/88 tests, 109 builtins.
+> Lambda, HOF, modules, type checking, matrix/vector ops.
+> Performance: beats Python moi benchmark, ngang Go/Rust tren compute.
 
 ---
 
@@ -613,46 +615,72 @@ emit q.len();                 // 1
 
 ---
 
-## 9. Iterator va Closure
+## 9. Lambda, HOF va Functional Programming
 
-### Closure (ham vo danh)
+### Lambda (ham vo danh) — fn(params) { body }
 
 ```olang
-let double = |x| { x * 2 };
+let double = fn(x) { return x * 2; };
 emit double(21);               // 42
 
-let add = |a, b| { a + b };
+let add = fn(a, b) { return a + b; };
 emit add(3, 4);                // 7
 ```
 
-### Array voi closure
+### Higher-Order Functions (inline compiler builtins)
 
 ```olang
 let scores = [3, 1, 4, 1, 5, 9, 2, 6];
 
 // Map — bien doi moi phan tu
-let doubled = scores.map(|s| { s * 2 });
+emit map(scores, fn(s) { return s * 2; });
 // [6, 2, 8, 2, 10, 18, 4, 12]
 
 // Filter — loc theo dieu kien
-let high = scores.filter(|s| { s > 3 });
+emit filter(scores, fn(s) { return s > 3; });
 // [4, 5, 9, 6]
 
-// Fold — gop thanh 1 gia tri
-let sum = scores.fold(0, |acc, s| { acc + s });
+// Reduce — gop thanh 1 gia tri (2 args: acc = arr[0])
+emit reduce(scores, fn(acc, s) { return acc + s; });
 // 31
 
+// Reduce voi init (3 args)
+emit reduce(scores, fn(acc, s) { return acc + s; }, 100);
+// 131
+
 // Any / All — kiem tra dieu kien
-emit scores.any(|s| { s > 8 });   // true (9 > 8)
-emit scores.all(|s| { s > 0 });   // true
+emit any(scores, fn(s) { return s > 8; });   // 1 (true)
+emit all(scores, fn(s) { return s > 0; });   // 1 (true)
 
-// Find — tim phan tu dau tien thoa man
-let first_big = scores.find(|s| { s > 5 });
-// 9
+// Sort — sap xep (insertion sort, tra array moi)
+emit sort([5, 2, 8, 1, 9]);    // [1, 2, 5, 8, 9]
 
-// Count — dem so phan tu thoa man
-let count = scores.count(|s| { s > 3 });
-// 4
+// Pipe — Lego composition: fn{fn{...}} == fn
+fn double(x) { return x * 2; };
+fn add1(x) { return x + 1; };
+emit pipe(5, double, add1);     // 11
+emit pipe(5, fn(x) { return x + 1; }, fn(x) { return x * 2; }); // 12
+```
+
+### String operations
+
+```olang
+emit split("hello world foo", " ");    // [hello, world, foo]
+emit join(["a", "b", "c"], ", ");      // a, b, c
+emit contains("hello world", "world"); // 1
+emit len("hello");                      // 5
+emit char_at("hello", 1);              // e
+```
+
+### Luu y
+
+```
+- map/filter/reduce/any/all/pipe/sort/split/join/contains la INLINE compiler builtins
+- Chung duoc compile thanh loop bytecode, khong phai function call
+- Nested chaining (map(filter(...))) co the clobber global vars → dung 2 buoc:
+    let filtered = filter(arr, fn(x) { return x > 3; });
+    let mapped = map(filtered, fn(x) { return x * 10; });
+```
 
 // Enumerate — them index
 let indexed = scores.enumerate();
@@ -1430,21 +1458,40 @@ use olang.bootstrap.lexer;
 union Expr {
     Ident { name: Str },
     NumLit { value: Num },
+    StrLit { value: Str },
+    BoolLit { value: Num },
     BinOp { op: Str, lhs: Expr, rhs: Expr },
+    UnaryNot { expr: Expr },
     Call { callee: Expr, args: Vec[Expr] },
     FieldAccess { object: Expr, field: Str },
-    MolLiteral { s: Num, r: Num, v: Num, a: Num, t: Num },
+    Index { object: Expr, index: Expr },
+    ArrayLit { items: Vec[Expr] },
+    PathExpr { base: Str, member: Str },
+    StructLit { path: Str, fields: Vec[FieldInit] },
+    IfExpr { cond: Expr, then_expr: Expr, else_expr: Expr },
+    MolLiteral { packed: Num },
+    MatchExpr { subject: Expr, arms: Vec[MatchArm] },
+    DictLit { fields: Vec[FieldInit] },
+    ArrayComp { var: Str, depth: Num },
 }
 
 union Stmt {
     LetStmt { name: Str, value: Expr },
+    ExprStmt { expr: Expr },
     FnDef { name: Str, params: Vec[Str], body: Vec[Stmt] },
     IfStmt { cond: Expr, then_block: Vec[Stmt], else_block: Vec[Stmt] },
-    WhileStmt { cond: Expr, body: Vec[Stmt] },
+    WhileStmt { cond: Expr, body: Vec[Stmt], cond_start: Num, cond_end: Num, tokens: Vec[Token] },
+    ForStmt { var: Str, iter: Expr, body: Vec[Stmt] },
     ReturnStmt { value: Expr },
     EmitStmt { expr: Expr },
     TypeDef { name: Str, fields: Vec[Field] },
     UnionDef { name: Str, variants: Vec[Variant] },
+    BreakStmt,
+    ContinueStmt,
+    UseStmt { path: Str },
+    MatchStmt { subject: Expr, arms: Vec[MatchArm] },
+    FieldAssign { object: Str, field: Str, value: Expr },
+    TryCatch { try_block: Vec[Stmt], catch_block: Vec[Stmt] },
 }
 
 // Recursive descent parser voi precedence climbing:
@@ -1460,7 +1507,70 @@ pub fn parse(tokens) {
 }
 ```
 
-Day la minh chung Olang du manh de viet compiler cho chinh no.
+### Semantic Analyzer (stdlib/bootstrap/semantic.ol)
+
+```olang
+// Bien AST thanh IR opcodes:
+pub fn analyze(ast) {
+    let state = new_state();
+    collect_fns(state, ast);
+    let _si = 0;
+    while _si < len(ast) {
+        compile_stmt(state, ast[_si]);
+        let _si = _si + 1;
+    };
+    emit_op(state, make_op_simple("Halt"));
+    return state;
+}
+```
+
+### Code Generator (stdlib/bootstrap/codegen.ol)
+
+```olang
+// Bien IR ops thanh bytecode nhi phan:
+pub fn generate(ops) {
+    // Pass 1: do kich thuoc thuc te cua moi op
+    // Pass 2: encode voi jump targets da resolve
+    let _gout = [];
+    // ... encode_op cho moi op ...
+    return _gout;
+}
+```
+
+### REPL Pipeline (stdlib/repl.ol)
+
+```olang
+pub fn repl_eval(input) {
+    let src = __str_trim(input);
+    let tokens = tokenize(src);       // lexer.ol
+    let ast = parse(tokens);          // parser.ol
+    let state = analyze(ast);         // semantic.ol
+    let bc = generate(state.ops);     // codegen.ol
+    return __eval_bytecode(bc);       // ASM VM nested eval
+}
+```
+
+### Native Binary — ~871KB, zero dependencies
+
+Olang chay tren native binary (x86_64, no libc):
+- ASM VM: `vm/x86_64/vm_x86_64.S` (~5,050 LOC assembly)
+- Bootstrap compiler: 4 file Olang tu viet chinh no (2,883 LOC)
+- Full features: arithmetic, strings, variables, if-else, while, for-in, functions
+- Dict literals, array comprehension, try/catch, string interpolation
+- Deep recursion: `fact(10) = 3,628,800`
+- Tree recursion: `fib(20) = 6,765`
+- VM var_table scoping: snapshot/restore per closure call
+- Crypto: `__sha256(str)` — FIPS 180-4 compliant
+- Math: `__floor(x)`, `__ceil(x)` — SSE4.1 roundsd
+- Intelligence: encode, analyze, intent, respond, STM, Silk, Dream, Knowledge
+
+```
+$ echo 'fn fib(n) { if n < 2 { return n; }; return fib(n-1) + fib(n-2); }; emit fib(10)' | ./origin_new.olang
+○ HomeOS v0.05
+○ Type code or text · exit to quit
+○ > 55
+○ > bye
+```
 
 ---
 
@@ -1570,13 +1680,105 @@ loop 100 { ... }
 **Closure:** Closure, CallClosure
 **FFI:** Ffi
 
-### Compile targets
+### Compile targets (hien tai)
 
 ```
-Olang source -> IR (stack-based) -> VM (interpreted)
-                                 -> C (codegen)
-                                 -> Rust (codegen)
-                                 -> WASM/WAT (web)
+Olang source → tokenize → parse → analyze → generate → bytecode
+                lexer.ol   parser.ol  semantic.ol  codegen.ol
+                                                       ↓
+                                                  ASM VM (x86_64)
+                                                  origin_new.olang
+                                                  806KB, no libc
+```
+
+### Bytecode opcodes (codegen format, bc_format=1)
+
+```
+0x01 Push(str)       0x09 Jmp(offset)     0x13 Store(name)
+0x02 Load(name)      0x0A Jz(offset)      0x14 LoadLocal(name)
+0x06 Emit            0x0B Dup             0x15 PushNum(f64)
+0x07 Call(name)      0x0C Pop             0x25 Closure(body_len)
+0x08 Ret             0x0F Halt            0x0D Swap
+
+Strings: u16 molecules (each byte → 0x2100 | byte_value)
+Numbers: f64 little-endian (8 bytes)
+```
+
+---
+
+## 22. HomeOS Stdlib — Code thuc te
+
+### Emotion pipeline (stdlib/homeos/emotion.ol)
+
+```olang
+pub fn emotion_new(v, a, d, i) {
+    return { v: v, a: a, d: d, i: i };
+}
+
+// AMPLIFY — KHONG trung binh, amplify qua Silk weight
+// factor = 1 + w × phi^-1 (Golden Ratio boost)
+pub fn amplify(emo, silk_weight) {
+    let factor = 1.0 + silk_weight * 0.618;
+    return emotion_new(
+        clamp(emo.v * factor, -1.0, 1.0),
+        clamp(emo.a * factor, 0.0, 1.0),
+        emo.d,
+        clamp(emo.i * factor, 0.0, 1.0)
+    );
+}
+
+// Compose 2 emotions — AMPLIFY, NOT average
+pub fn compose(a, b, silk_weight) {
+    let base_v = (a.v + b.v) / 2.0;
+    let boost = abs(a.v - base_v) * silk_weight * 0.5;
+    // ... amplification logic
+}
+```
+
+### 7 Instincts (stdlib/homeos/instinct.ol)
+
+```olang
+pub fn run_instincts(observation, knowledge) {
+    let result = { action: "process", confidence: 0.0 };
+
+    // ① Honesty — confidence < 0.4 → im lang (BlackCurtain)
+    result.confidence = assess_confidence(observation, knowledge);
+    if result.confidence < 0.40 {
+        result.action = "silence";
+        return result;
+    }
+
+    // ② Contradiction detection
+    // ③ Causality — temporal + co-activation
+    // ④ Abstraction — N chains → LCA → categorical
+    // ⑤ Analogy — A:B :: C:? → delta 5D
+    // ⑥ Curiosity — 1 - nearest_similarity
+    // ⑦ Reflection — knowledge quality
+    return result;
+}
+```
+
+### ISL TCP codec (stdlib/homeos/isl_tcp.ol)
+
+```olang
+pub fn isl_connect(host, port) {
+    let socket = __tcp_connect(host, port);
+    return { socket: socket, buffer: [], state: "connected" };
+}
+
+pub fn isl_send(conn, msg) {
+    let frame = encode_isl_frame(msg);
+    __tcp_write(conn.socket, frame);
+}
+
+fn encode_isl_frame(msg) {
+    let out = [];
+    push(out, msg.from);        // ISL address (4 bytes)
+    push(out, msg.to);          // ISL address (4 bytes)
+    push(out, msg.msg_type);    // 1 byte
+    // ... payload encoding
+    return out;
+}
 ```
 
 ---
@@ -1730,4 +1932,68 @@ poem([
 
 ---
 
-*Olang Handbook v0.05 — HomeOS 2026-03-18*
+---
+
+## 23. REPL Commands + KnowTree (Olang 1.0)
+
+### REPL Commands
+
+```
+Code:    let fn emit if while for match lambda
+HOF:     map filter reduce pipe any all sort
+String:  split join contains
+AI:      learn <fact>  respond <text>  read <file>  memory  fns
+Persist: save  load
+System:  test  build  compile <path>  help  exit
+```
+
+### KnowTree — Tri thuc = cay
+
+```olang
+// Hoc 1 fact
+learn Ha Noi la thu do cua Viet Nam
+// → Da hoc. KnowTree: 8 words, 1 facts (F:1 B:0 C:0)
+
+// Doc sach
+read docs/sora/knowledge.md
+// → Read ...: 49 sentences. KnowTree: 410 words, 78 facts (F:29 B:49 C:0)
+
+// Hoi
+respond Ha Noi o dau
+// → (Minh biet: Ha Noi la thu do cua Viet Nam) [fact]
+
+// Luu (persistent across restarts)
+save
+// → Saved 78 facts to homeos.knowledge
+
+// Stats
+memory
+// → STM: 5 turns | Silk: 4 edges | KnowTree: 412 words, 83 facts (F:29 B:49 C:5)
+//   Emo: V=4 A=4 f'=0 f''=0
+```
+
+### Molecule builtins (ASM, 1 cycle)
+
+```olang
+let m = __mol_pack(1, 2, 4, 3, 1);  // pack 5D → u16
+emit __mol_s(m);    // 1 (Shape)
+emit __mol_r(m);    // 2 (Relation)
+emit __mol_v(m);    // 4 (Valence)
+emit __mol_a(m);    // 3 (Arousal)
+emit __mol_t(m);    // 1 (Time)
+
+// UTF-8 decode
+emit __utf8_cp("Việt", 2);  // 7879 (U+1EC7, ệ)
+emit __utf8_len("Việt", 2); // 3 (bytes)
+```
+
+### Dict pretty-print
+
+```olang
+emit { name: "Olang", version: 1, self_hosting: 1 };
+// {name: Olang, version: 1, self_hosting: 1}
+```
+
+---
+
+*Olang Handbook v1.0 — HomeOS 2026-03-25*

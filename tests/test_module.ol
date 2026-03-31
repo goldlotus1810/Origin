@@ -1,0 +1,1 @@
+__file_write("/tmp/test_module_lib.ol", "fn _tm_triple(x) { return x * 3; }; fn _tm_square(x) { return x * x; };"); use "/tmp/test_module_lib.ol"; if _tm_triple(7) == 21 { if _tm_square(5) == 25 { emit "PASS"; } else { emit "FAIL: square"; }; } else { emit "FAIL: triple"; };

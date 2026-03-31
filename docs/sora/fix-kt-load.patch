@@ -1,0 +1,82 @@
+From 5b0a3974c6278b3ef2d3a1e8dddebea3338cf0b1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Sora=20=28=E7=A9=BA=29?= <sora@origin.olang>
+Date: Wed, 25 Mar 2026 09:41:31 +0000
+Subject: [PATCH] =?UTF-8?q?fix:=20kt=5Fload=20prefix=20collision=20=5Fkl?=
+ =?UTF-8?q?=5F=20=E2=86=92=20=5Fkld=5F=20+=20remove=20cap=2030?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BUG 1: kt_load and kt_learn both use _kl_ prefix.
+  Boot mode = global var_table → kt_learn called from kt_load
+  → _kl_i, _kl_ch, _kl_sent CLOBBERED → loop broken
+  → Only 25 words created instead of 200+ → search fails
+  Fix: rename kt_load vars to _kld_ prefix
+
+BUG 2: hardcoded 'if _kl_count < 30' in kt_load
+  → Facts beyond #30 silently dropped on load
+  → User learns 'Nox is builder', saves, restarts → Nox not found
+  Fix: remove cap, load ALL facts
+
+Same root cause as BUG-VI (global var_table collision).
+---
+ stdlib/homeos/knowtree.ol | 38 +++++++++++++++++++-------------------
+ 1 file changed, 19 insertions(+), 19 deletions(-)
+
+diff --git a/stdlib/homeos/knowtree.ol b/stdlib/homeos/knowtree.ol
+index f96865a..515a7b2 100644
+--- a/stdlib/homeos/knowtree.ol
++++ b/stdlib/homeos/knowtree.ol
+@@ -246,30 +246,30 @@ pub fn kt_save(_ks_path) {
+     return "Saved " + __to_string(len(__kt_facts)) + " facts to " + _ks_path;
+ }
+ 
+-pub fn kt_load(_kl_path) {
+-    let _kl_content = __file_read(_kl_path);
+-    if len(_kl_content) == 0 { return 0; };
+-    let _kl_sent = "";
+-    let _kl_count = 0;
+-    let _kl_i = 0;
+-    while _kl_i < len(_kl_content) {
+-        let _kl_ch = __char_code(char_at(_kl_content, _kl_i));
+-        if _kl_ch == 10 {
+-            if len(_kl_sent) > 5 {
+-                if _kl_count < 30 { kt_learn(_kl_sent); };
+-                _kl_count = _kl_count + 1;
++pub fn kt_load(_kld_path) {
++    let _kld_content = __file_read(_kld_path);
++    if len(_kld_content) == 0 { return 0; };
++    let _kld_sent = "";
++    let _kld_count = 0;
++    let _kld_i = 0;
++    while _kld_i < len(_kld_content) {
++        let _kld_ch = __char_code(char_at(_kld_content, _kld_i));
++        if _kld_ch == 10 {
++            if len(_kld_sent) > 5 {
++                kt_learn(_kld_sent);
++                _kld_count = _kld_count + 1;
+             };
+-            _kl_sent = "";
++            _kld_sent = "";
+         } else {
+-            _kl_sent = _kl_sent + char_at(_kl_content, _kl_i);
++            _kld_sent = _kld_sent + char_at(_kld_content, _kld_i);
+         };
+-        let _kl_i = _kl_i + 1;
++        let _kld_i = _kld_i + 1;
+     };
+-    if len(_kl_sent) > 5 {
+-        if _kl_count < 30 { kt_learn(_kl_sent); };
+-        _kl_count = _kl_count + 1;
++    if len(_kld_sent) > 5 {
++        kt_learn(_kld_sent);
++        _kld_count = _kld_count + 1;
+     };
+-    return _kl_count;
++    return _kld_count;
+ }
+ 
+ // ════════════════════════════════════════════════════════════════
+-- 
+2.43.0
+

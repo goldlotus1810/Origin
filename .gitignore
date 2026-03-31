@@ -1,15 +1,16 @@
+*.o
+*.core
 /target/
-# origin.olang runtime files (rebuild-able, not tracked)
-origin.olang.log
-origin.olang.weights
-origin.olang.registry
-Cargo.lock
-# Local-only Claude Code settings (per-session, not shared)
-.claude/settings.local.json
-tools/server/origin.olang
-log.olang
-
-# Build artifacts (rebuild via `make`)
-origin_new.olang
-vm/x86_64/vm_x86_64
-vm/x86_64/vm_x86_64.o
+/tmp/
+*.bak
+*.swp
+*.epub
+*.pdf
+*.mobi
+origin_new1.olang
+data/test_*.txt
+data/book_*.txt
+data/ml_coban.txt
+data/test_mmap.bin
+json/udc_p_table_old.bin
+json/udc_p_table_full.bin

@@ -245,8 +245,14 @@ vm_loop:
     b.eq    op_try_begin
     cmp     w0, #0x1C
     b.eq    op_store                // StoreUpdate = Store
-    // 0x10-0x12, 0x16-0x18, 0x1B = nop
-    cmp     w0, #0x1C
+    cmp     w0, #0x25
+    b.eq    op_closure
+    cmp     w0, #0x08
+    b.eq    op_ret
+    cmp     w0, #0x1B
+    b.eq    vm_loop                 // CatchEnd = nop
+    // 0x10-0x12, 0x16-0x18 = nop
+    cmp     w0, #0x24
     b.ls    vm_loop                 // known range, nop
     b       op_unknown
 
@@ -626,7 +632,32 @@ op_call:
     cmp     x0, x2
     b.eq    .call_pop
 
-    // Unknown builtin — skip (no-op)
+    // Not a builtin — check var_table for closure
+    // x0 = name hash, search var table
+    mov     x2, x26                 // table base
+    mov     w3, w27                 // count
+    cbz     w3, .call_skip          // no vars → skip
+    mov     w4, #0
+.call_var_search:
+    ldr     x5, [x2]               // entry hash
+    cmp     x5, x0
+    b.eq    .call_var_found
+    add     x2, x2, #24
+    add     w4, w4, #1
+    cmp     w4, w3
+    b.lt    .call_var_search
+.call_skip:
+    b       vm_loop
+.call_var_found:
+    ldr     x5, [x2, #8]           // value (body_pc for closure)
+    ldr     x6, [x2, #16]          // marker
+    cmn     x6, #2                  // CLOSURE_MARKER = -2
+    b.ne    .call_skip              // not a closure → skip
+
+    // Call closure: save return PC, jump to body_pc
+    sub     x7, x19, x24           // return_pc = current pc - bc_start (relative)
+    stp     x7, xzr, [sp, #-16]!   // push return PC (16-byte aligned)
+    add     x19, x24, x5           // pc = bc_start + body_pc
     b       vm_loop
 
 // ── Math builtins (f64) ──────────────────────────────────────────────
@@ -1083,6 +1114,78 @@ err_read_bc:
     mov     x8, #SYS_WRITE
     svc     #0
     b       op_halt_err
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Closure + Return
+// ═══════════════════════════════════════════════════════════════════════════
+
+op_closure:
+    // [0x25, param_count:1, body_len:4_LE]
+    // Push function name (already on stack from preceding Push)
+    // Read param count and body length, store closure on stack
+    ldrb    w1, [x19], #1           // param_count
+    ldrb    w2, [x19]               // body_len byte 0
+    ldrb    w3, [x19, #1]           // body_len byte 1
+    ldrb    w4, [x19, #2]           // body_len byte 2
+    ldrb    w5, [x19, #3]           // body_len byte 3
+    add     x19, x19, #4
+    orr     w2, w2, w3, lsl #8
+    orr     w2, w2, w4, lsl #16
+    orr     w2, w2, w5, lsl #24     // w2 = body_len
+
+    // body_pc = current pc (relative to bytecode start)
+    sub     x3, x19, x24            // body_pc = pc - bc_start
+
+    // Skip body bytecode
+    add     x19, x19, x2            // pc += body_len
+
+    // Pop function name from stack
+    sub     x20, x20, #16
+    ldr     x6, [x20]              // name hash
+    // don't need ptr/len
+
+    // Store closure: var_table[name_hash] = (body_pc, CLOSURE_MARKER)
+    // Reuse var_store logic: x0=hash, x9=body_pc, x10=CLOSURE_MARKER(-2)
+    mov     x0, x6                  // hash
+    mov     x9, x3                  // body_pc
+    mov     x10, #-2               // CLOSURE_MARKER
+    // Fall into var store
+    mov     x2, x26                // table base
+    mov     w3, w27                // count
+    cbz     w3, .vc_new
+
+    mov     w4, #0
+.vc_search:
+    ldr     x5, [x2]              // entry hash
+    cmp     x5, x0
+    b.eq    .vc_update
+    add     x2, x2, #24
+    add     w4, w4, #1
+    cmp     w4, w3
+    b.lt    .vc_search
+.vc_new:
+    // Append new entry
+    mov     w5, w27
+    mov     w6, #24
+    madd    x2, x5, x6, x26       // entry addr = base + count*24
+    str     x0, [x2]              // hash
+    str     x9, [x2, #8]          // body_pc
+    str     x10, [x2, #16]        // CLOSURE_MARKER
+    add     w27, w27, #1
+    b       vm_loop
+.vc_update:
+    str     x9, [x2, #8]          // body_pc
+    str     x10, [x2, #16]        // marker
+    b       vm_loop
+
+op_ret:
+    // [0x08] — return from function
+    // Pop return value from stack, restore saved PC, push value back
+    // For boot closures (no scoping): just jump back to saved return PC
+    // Return PC stored in call_ret_pc (set by op_call when calling closure)
+    ldp     x7, xzr, [sp], #16    // pop saved PC (16-byte aligned)
+    add     x19, x7, x24          // make absolute (was relative)
+    b       vm_loop
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Exit

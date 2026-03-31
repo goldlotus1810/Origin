@@ -21,7 +21,7 @@ pub fn make_x86_64_stub(fat_path_bytes) {
 
   // ── Prologue: save stack ──
   // push rbp; mov rbp, rsp
-  emit_byte(code, 0x55);
+  fat_emit_byte(code, 0x55);
   emit_bytes(code, [0x48, 0x89, 0xE5]);
 
   // ── Store fat path on stack ──
@@ -33,14 +33,14 @@ pub fn make_x86_64_stub(fat_path_bytes) {
   while i < len(fat_path_bytes) {
     // mov byte [rsp + i], imm8
     emit_bytes(code, [0xC6, 0x44, 0x24]);
-    emit_byte(code, i);
-    emit_byte(code, fat_path_bytes[i]);
+    fat_emit_byte(code, i);
+    fat_emit_byte(code, fat_path_bytes[i]);
     i = i + 1;
   }
   // null terminator
   emit_bytes(code, [0xC6, 0x44, 0x24]);
-  emit_byte(code, len(fat_path_bytes));
-  emit_byte(code, 0);
+  fat_emit_byte(code, len(fat_path_bytes));
+  fat_emit_byte(code, 0);
 
   // ── syscall: open(path, O_RDONLY) ──
   // rdi = rsp (path), rsi = 0 (O_RDONLY), rax = 2 (SYS_open)
@@ -102,7 +102,7 @@ pub fn make_x86_64_stub(fat_path_bytes) {
   emit_bytes(code, [0x83, 0xE9, 0x01]);       // sub ecx, 1
   // jmp loop_start
   let jmp_off = code_len(code);
-  emit_byte(code, 0xE9);                      // jmp rel32
+  fat_emit_byte(code, 0xE9);                      // jmp rel32
   let rel = loop_start - (code_len(code) + 4);
   emit_i32(code, rel);
 
@@ -144,14 +144,14 @@ pub fn make_arm64_stub(fat_path_bytes) {
   let i = 0;
   while i < len(fat_path_bytes) {
     // mov w8, #byte
-    emit_arm(code, 0x52800008 | (fat_path_bytes[i] * 32));
+    emit_arm(code, __bit_or(0x52800008, fat_path_bytes[i] * 32));
     // strb w8, [sp, #i]
-    emit_arm(code, 0x39000008 | (i * 1024));  // imm12 scaled for byte
+    emit_arm(code, __bit_or(0x39000008, i * 1024));  // imm12 scaled for byte
     i = i + 1;
   }
   // null terminator
   emit_arm(code, 0x52800008);                 // mov w8, #0
-  emit_arm(code, 0x39000008 | (len(fat_path_bytes) * 1024));
+  emit_arm(code, __bit_or(0x39000008, len(fat_path_bytes) * 1024));
 
   // ── openat(AT_FDCWD, path, O_RDONLY) ──
   emit_arm(code, 0x12800020);                 // mov w0, #-100 (AT_FDCWD = 0xFFFFFF9C)
@@ -213,7 +213,7 @@ pub fn make_arm64_stub(fat_path_bytes) {
   emit_arm(code, 0x510006D6);                 // sub w22, w22, #1
   // b loop
   let b_loop_rel = loop_off - code_len(code);
-  emit_arm(code, 0x14000000 | ((b_loop_rel / 4) & 0x3FFFFFF));
+  emit_arm(code, __bit_or(0x14000000, __bit_and((b_loop_rel / 4), 0x3FFFFFF)));
 
   // not_found: exit(1)
   let not_found_off = code_len(code);
@@ -263,7 +263,7 @@ fn code_len(code) {
   return len(code.bytes);
 }
 
-fn emit_byte(code, b) {
+fn fat_fat_emit_byte(code, b) {
   push(code.bytes, b % 256);
 }
 
@@ -309,7 +309,7 @@ fn patch_arm_imm19(code, off, imm19) {
                + code.bytes[off + 3] * 16777216;
   // Clear bits 23:5, set new imm19
   let mask = 0xFFFFFFFF - (0x00FFFFE0);      // clear imm19 field
-  let patched = (existing & mask) | ((imm19 & 0x7FFFF) * 32);
+  let patched = __bit_or(__bit_and(existing, mask), __bit_and(imm19, 0x7FFFF) * 32);
   code.bytes[off]     = patched % 256;
   code.bytes[off + 1] = (patched / 256) % 256;
   code.bytes[off + 2] = (patched / 65536) % 256;

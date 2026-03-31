@@ -37,11 +37,16 @@ pub fn compile_source(source: &str) -> Result<Vec<u8>, CompileError> {
     let stmts = olang::lang::syntax::parse(source)
         .map_err(|e| CompileError::Parse(format!("{:?}", e)))?;
 
+    eprintln!("      parse: {} stmts", stmts.len());
+
     // Lower to IR
     let program = olang::lang::semantic::lower(&stmts);
+    eprintln!("      lower: {} ops", program.ops.len());
 
     // Encode to bytecode
-    Ok(olang::exec::bytecode::encode_bytecode(&program.ops))
+    let bc = olang::exec::bytecode::encode_bytecode(&program.ops);
+    eprintln!("      encode: {} bytes", bc.len());
+    Ok(bc)
 }
 
 /// Compile all .ol files in a directory (and bootstrap/ subdirectory).
@@ -88,6 +93,9 @@ fn compile_dir(dir: &Path, output: &mut Vec<u8>) -> Result<(), CompileError> {
         eprintln!("  Compiling: {}", path.display());
         match compile_file(&path) {
             Ok(mut bytecode) => {
+                if bytecode.len() <= 1 {
+                    eprintln!("    ⚠ {} EMPTY (parse failed?)", path.display());
+                }
                 // B7: Strip trailing Halt (0x0F) from each file's bytecode
                 // so execution continues to the next file. The final Halt
                 // is appended by compile_all() after all files.
@@ -120,10 +128,10 @@ fn relocate_jumps(bytecode: &mut [u8], base: u32) {
         let tag = bytecode[pc];
         pc += 1;
         match tag {
-            0x01 => { // Push [chain_len:2 u16][chain:N]
+            0x01 => { // Push [mol_count:2 u16][molecules: mol_count × 2 bytes]
                 if pc + 2 > bytecode.len() { break; }
-                let len = u16::from_le_bytes([bytecode[pc], bytecode[pc+1]]) as usize;
-                pc += 2 + len;
+                let mol_count = u16::from_le_bytes([bytecode[pc], bytecode[pc+1]]) as usize;
+                pc += 2 + mol_count * 2; // each molecule = 2 bytes
             }
             0x02 | 0x07 | 0x13 | 0x14 | 0x1C => { // Load/Call/Store/LoadLocal/StoreUpdate [len:1][name:N]
                 if pc >= bytecode.len() { break; }
@@ -139,21 +147,22 @@ fn relocate_jumps(bytecode: &mut [u8], base: u32) {
             }
             0x0E => { pc += 4; } // Loop [count:4] — NOT a jump target
             0x15 => { pc += 8; } // PushNum [f64:8]
-            0x19 => { pc += 5; } // PushMol [5 bytes]
+            0x19 => { pc += 2; } // PushMol [u16: 2 bytes]
             0x04 | 0x05 => { pc += 1; } // Edge/Query [rel:1]
             0x25 => { // Closure [param:1][body_len:4] — body_len is byte count, NOT relocated
                 pc += 1 + 4;
             }
-            0x26 => { // CallClosure [name_len:1][name:N][arity:1]
+            0x24 => { // CallClosure [name_len:1][name:N][arity:1]
                 if pc >= bytecode.len() { break; }
                 let len = bytecode[pc] as usize;
                 pc += 1 + len + 1;
             }
-            0x27 => { // Ffi [name_len:1][name:N][arity:1]
+            0x23 => { // Ffi [name_len:1][name:N][arity:1]
                 if pc >= bytecode.len() { break; }
                 let len = bytecode[pc] as usize;
                 pc += 1 + len + 1;
             }
+            0x3A => { pc += 1; } // CallBuiltin [id:1]
             _ => { } // Single-byte ops (0x03, 0x06, 0x08, 0x0B-0x0D, 0x0F-0x12, 0x16-0x18, 0x1B, etc.)
         }
     }

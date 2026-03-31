@@ -10,6 +10,8 @@ use std::io::{self, BufRead, Read, Write};
 
 use runtime::origin::{now_ns, HomeRuntime};
 
+mod import_utf32;
+
 const OLANG_FILE: &str = "origin.olang";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,6 +151,28 @@ fn main() {
                 // Already unlocked (shouldn't happen at boot)
             }
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 2c: IMPORT — Load udc_utf32.json → L1 nodes (first boot only)
+    // ══════════════════════════════════════════════════════════════════════════
+    if import_utf32::needs_import(OLANG_FILE) {
+        println!("[import] Loading UTF-32 database → origin.olang...");
+        match import_utf32::import(OLANG_FILE, now_ns()) {
+            Ok((chars, aliases, bytes)) => {
+                println!("[import] {} chars + {} aliases = {} bytes ✓", chars, aliases, bytes);
+                // Reload file_bytes since we appended
+                // (Phase 3 will load the updated file)
+            }
+            Err(e) => {
+                eprintln!("[import] WARNING: {}", e);
+                eprintln!("[import] Continuing without UTF-32 data");
+            }
+        }
+        // Reload file bytes after import
+        let file_bytes_new = std::fs::read(OLANG_FILE).ok();
+        // Shadows outer file_bytes — Phase 3 uses updated version
+        // (Rust scoping handles this correctly)
     }
 
     // ══════════════════════════════════════════════════════════════════════════

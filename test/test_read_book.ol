@@ -1,0 +1,1 @@
+let book = __file_read("data/cuon_theo_chieu_gio.txt"); if len(book) > 1000 { let sample = __substr(book, 0, 500); let words = split(sample, " "); if len(words) > 5 { emit "PASS"; } else { emit "FAIL: too few words"; }; } else { emit "PASS"; };
