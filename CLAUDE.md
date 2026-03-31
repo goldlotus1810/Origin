@@ -260,6 +260,22 @@ Files:
 
 ## Tài liệu tham khảo
 
+### Specs (LOCKED — từ origin.olang, nguồn chính thức)
+
+| Spec | Nội dung |
+|------|---------|
+| `docs/SPEC_A_FOUNDATION.md` | **SDF, P_weight u16, Encode 42 formulas, Compose, Decode** |
+| `docs/SPEC_B_STRUCTURE.md` | Chain, KnowTree, Silk types |
+| `docs/SPEC_C_NEURON.md` | Lifecycle, physics models |
+| `docs/SPEC_D_PIPELINE.md` | 14 DNA mechanisms, 7 instincts, 5 checkpoints |
+| `docs/SPEC_E_ORGANISM.md` | Full organism: capture, reason, memory, self-model |
+| `docs/SPEC_F_AGENT.md` | Agent hierarchy: AAM → Chiefs → Workers |
+| `docs/SPEC_G_COMPLETE.md` | **27 sections brain spec (MASTER implementation guide)** |
+| `docs/SPEC_G_CODE_AUDIT.md` | Code vs Spec audit (12 correct, 5 wrong, 22 missing) |
+| `docs/SPEC_UNIFIED.md` | Master index + source tier ranking |
+
+### Tài liệu khác
+
 | Tài liệu | Nội dung |
 |---------|---------|
 | `old/HomeOS_SINH_HOC_PHAN_TU_TRI_THUC_v2.md` | **Spec gốc v2.7** — sinh học phân tử, 7 cơ chế DNA, ∫ₛ bootstrap, P_weight |
@@ -267,5 +283,14 @@ Files:
 | `docs/olang_handbook.md` | Olang đầy đủ: lexer · parser · IR · VM · opcodes |
 | `docs/CHECK_TO_PASS_LOGIC_HANDBOOK.md` | 6 bug patterns + 5 checkpoints bắt buộc |
 | `plans/PLAN_UDC_REBUILD.md` | UDC schema (UTF32-SDF-INTEGRATOR) + json/udc.json |
+
+### Sister repo (origin.olang — self-hosting)
+
+| Link | Nội dung |
+|------|---------|
+| `github.com/goldlotus1810/origin.olang` | **Phiên bản tự-host** — 933KB binary, 0 deps, Gen1==Gen2 |
+| Brain: `stdlib/homeos/knowtree.ol` (33KB) | KnowTree + Silk + STM + Pipeline (900 LOC pure math) |
+| Brain: `stdlib/homeos/pipeline.ol` (88 LOC) | G8+G11: SecurityGate → Encode → Search → Silk → Dream |
+| Brain: `stdlib/homeos/instinct.ol` (86 LOC) | G9: 7 instincts on 5D (NO keyword matching) |
 | `PLAN_REWRITE.md` | Lộ trình 7 giai đoạn Rust → Olang |
 | `TASKBOARD.md` | Task hiện tại, ai đang làm gì |
