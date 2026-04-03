@@ -71,14 +71,61 @@ fn intent_followup(intent, emotion) {
 // ── Legacy API ──────────────────────────────────────────────────
 
 pub fn render(tone, content) {
-  if tone == "supportive" { return "Mình hiểu cảm giác đó — " + content; };
-  if tone == "gentle" { return "Từ từ thôi — " + content; };
-  if tone == "celebratory" { return "Tuyệt vời! " + content; };
-  if tone == "reinforcing" { return "Đúng rồi! " + content; };
+  if tone == "supportive" { return "Mình hiểu cảm giác đó — " + content; }
+  if tone == "gentle" { return "Từ từ thôi — " + content; }
+  if tone == "celebratory" { return "Tuyệt vời! " + content; }
+  if tone == "reinforcing" { return "Đúng rồi! " + content; }
   if tone == "pause" {
     return "Mình nhận thấy bạn đang có nhiều cảm xúc. Muốn dừng lại một chút không?";
-  };
+  }
   return content;
+}
+
+// ── English API (from Rust response_template.rs) ──────────────
+
+pub fn render_en(tone, content) {
+  if tone == "supportive" { return "I understand how you feel — " + content; }
+  if tone == "gentle" { return "Take your time — " + content; }
+  if tone == "celebratory" { return "That's great! " + content; }
+  if tone == "reinforcing" { return "Exactly! " + content; }
+  if tone == "pause" {
+    return "I notice you're feeling a lot right now. Want to take a moment?";
+  }
+  return content;
+}
+
+// ── Auto-detect language ──────────────────────────────────────
+
+pub fn render_auto(tone, content, text) {
+  // Detect Vietnamese by diacritics
+  if _has_vietnamese(text) { return render(tone, content); }
+  return render_en(tone, content);
+}
+
+fn _has_vietnamese(text) {
+  // Check for Vietnamese diacritics (ă, â, đ, ê, ô, ơ, ư, common combos)
+  let i = 0;
+  while i < len(text) {
+    let ch = char_at(text, i);
+    if ch == "ă" || ch == "â" || ch == "đ" || ch == "ê" || ch == "ô" || ch == "ơ" || ch == "ư" {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+// ── Crisis response (bilingual) ──────────────────────────────
+
+pub fn crisis_response_auto(text) {
+  if _has_vietnamese(text) {
+    return "Bạn đang trải qua khoảnh khắc rất khó khăn. " +
+           "Xin hãy gọi đường dây nóng: 1800 599 920 (miễn phí, 24/7). " +
+           "Bạn không đơn độc.";
+  }
+  return "I can see you're going through a really difficult moment. " +
+         "Please call: 988 Suicide & Crisis Lifeline (call or text 988). " +
+         "You are not alone.";
 }
 
 pub fn format_stats(stm_count, silk_count, dream_pending, qr_count) {
